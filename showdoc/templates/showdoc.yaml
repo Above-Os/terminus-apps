@@ -1,0 +1,94 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: showdoc-data-pvc
+  namespace: {{ .Release.Namespace }}
+  finalizers:
+    - kubernetes.io/pvc-protection
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeMode: Filesystem
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: showdoc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: showdoc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: showdoc
+  template:
+    metadata:
+      labels:
+        app: showdoc
+    spec:
+      volumes:
+        - name: data
+          hostPath:
+            type: Directory
+            path: {{ .Values.userspace.data }}/showdoc
+      initContainers:
+        - name: init-chmod-data
+          image: 'busybox:latest'
+          command:
+            - sh
+            - '-c'
+            - |
+              chmod  -R 777 /showdoc_data
+          resources: {}
+          volumeMounts:
+            - name: data
+              mountPath: /showdoc_data
+          imagePullPolicy: Always
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: container-96l42k
+          image: star7th/showdoc
+          ports:
+            - name: http-0
+              containerPort: 80
+              protocol: TCP
+            - name: http-1
+              containerPort: 443
+              protocol: TCP
+            - name: http-2
+              containerPort: 9000
+              protocol: TCP
+          resources: {}
+          volumeMounts:
+            - name: data
+              mountPath: /var/www/html
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - {{ .Values.schedule.nodeName }}
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: showdoc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: showdoc
+spec:
+  ports:
+    - name: http-web
+      protocol: TCP
+      port: 80
+      targetPort: 80
+  selector:
+    app: showdoc

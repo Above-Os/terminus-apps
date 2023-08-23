@@ -1,0 +1,89 @@
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: lpnode-sa
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lpnode-sa-rolebinding
+  namespace: {{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: lpnode-sa
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: admin
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: lpnode-admin/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: lpnode-admin-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: lpnode-admin
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      name: lpnode-admin-api
+      port: 18006
+      targetPort: 18006
+---
+# Source: lpnode-admin/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lpnode-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: lpnode-admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lpnode-admin
+  template:
+    metadata:
+      labels:
+        app: lpnode-admin
+    spec:
+      serviceAccountName: lpnode-sa
+      containers:
+      - name: lpnode-admin
+        image: kldtks/edge:otmoic-lpnode-admin-latest
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 18006
+        env:
+          - name: DEPLOY_ENV
+            value: 'dev' # prod/dev
+          - name: RELAY-ACCESS-URL
+            value: 'https://otmoicrelay.saidev.snowinning.com'
+          - name: REDIS_PASS
+            value: {{ .Values.redis.password }}
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+          - name: MONGODBPASS
+            value: {{ .Values.mongodb.password }}
+          - name: REDIS_HOST
+            value: {{ .Values.redis.host }}
+          - name: MONGODB_HOST
+            value: {{ .Values.mongodb.host }}
+          - name: REDIS_PORT
+            value: "{{ .Values.redis.port }}"
+          - name: MONGODB_PORT
+            value: "{{ .Values.mongodb.port }}"
+          - name: OS_API_KEY
+            value: {{ .Values.os.appKey }}
+          - name: OS_API_SECRET
+            value: {{ .Values.os.appSecret }}
+          - name: OS_SYSTEM_SERVER
+            value: system-server.user-system-{{ .Values.bfl.username }}

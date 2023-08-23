@@ -1,0 +1,175 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otmoic-vc-data
+  namespace: {{ .Release.Namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otmoic-vc-config
+  namespace: {{ .Release.Namespace }}
+data:
+  config.yaml: |-
+    title: SSI Service Config
+    version:
+      svn: 0.0.1
+      desc: >-
+        Default configuration to be used while running the service as a single go
+        process.
+    server:
+      api_host: '0.0.0.0:3002'
+      debug_host: '0.0.0.0:4000'
+      read_timeout: 5000000000
+      write_timeout: 5000000000
+      shutdown_timeout: 5000000000
+      log_location: logs
+      log_level: debug
+      enable_schema_caching: true
+      enable_allow_all_cors: true
+    services:
+      service_endpoint: 'http://localhost:8080'
+      keystore:
+        name: keystore
+        password: default-password
+      did:
+        name: did
+        methods:
+          - key
+          - web
+        resolution_methods:
+          - key
+          - web
+          - pkh
+          - peer
+        universal_resolver_url: http://localhost:4010
+        universal_resolver_methods:
+          - key
+      schema:
+        name: schema
+      issuing:
+        name: issuing
+      credential:
+        name: credential
+      manifest:
+        name: manifest
+      presentation:
+        name: presentation
+    twitter_url: http://18.141.101.91:9507/twitter/info?key=
+    private_key: privatekey
+    did_gov: did:key:zQ3shVzEfb643vC9nvg1EXLmY46Qo3AYbdZESeQE3dUAtwi8M
+    
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otmoic-vc-deployment
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: otmoic-vc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otmoic-vc
+  template:
+    metadata:
+      labels:
+        app: otmoic-vc
+    spec:
+      volumes:
+        - name: config
+          configMap: 
+            name: otmoic-vc-config
+            # defaultMode: 0777
+        - name: data
+          persistentVolumeClaim:
+            claimName: otmoic-vc-data
+      initContainers:
+        - name: init-data
+          image: 'busybox:latest'
+          command:
+            - sh
+            - '-c'
+            - |
+              cat /config/config.yaml > /data/config.yaml
+          resources: {}
+          volumeMounts:
+            - name: config
+              mountPath: /config/config.yaml
+              subPath: config.yaml
+            - name: data
+              mountPath: /data
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: vc-gate
+          image: aboveos/verifiable-credential-gate:otmoic-latest
+          ports:
+          - containerPort: 4001
+          env:
+            - name: CLIENT_ID
+              value: Y05OU3hYOHB6RUN3SGVPa2JzeXo6MTpjaQ
+            - name: CLIENT_SECRET
+              value: cs
+            - name: CALL_BACK
+              value: https://vc-gate-api.bttcdn.com/twitter_callback
+            - name: CALL_BACK_RESULT
+              value: https://vc-gate-api.bttcdn.com/twitter_result
+            - name: TWITTER_CLIENT_ID
+              value: Y05OU3hYOHB6RUN3SGVPa2JzeXo6MTpjaQ
+            - name: TWITTER_CLIENT_SECRET
+              value: tcs
+            - name: TWITTER_OAUTH_HOST
+              value: https://vc-gate-api.bttcdn.com
+            - name: TWITTER_CALL_BACK
+              value: /twitter_callback
+            - name: TWITTER_CALL_BACK_RESULT
+              value: /twitter_result
+            - name: GOOGLE_CLIENT_ID
+              value: 279288147664-n7av0jerhiqt58rnjv8flitngbog8nbo.apps.googleusercontent.com
+            - name: GOOGLE_CLIENT_SECRET
+              value: gcs
+            - name: GOOGLE_OAUTH_HOST
+              value: https://vc-gate-api.bttcdn.com
+            - name: GOOGLE_REDIRECT_URL
+              value: /google_callback
+            - name: GOOGLE_CALL_BACK_RESULT
+              value: /google_result
+
+        - name: did-gate
+          image: aboveos/did-gate:latest
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        - name: vc
+          image: aboveos/vc:latest
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            runAsUser: 0
+          command: ["/vc", "-c", "/data/config.yaml"] 
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otmoic-vc-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: otmoic-vc
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      name: otmoic-vc-api
+      port: 4001
+      targetPort: 4001

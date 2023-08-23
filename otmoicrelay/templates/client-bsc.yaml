@@ -1,0 +1,67 @@
+# Source: obridge-chain-client-evm/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: obridge-chain-client-evm-bsc-server-9006
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: obridge-chain-client-evm-bsc-9006
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      name: obridge-chain-client-evm-bsc-api-9006
+      port: 9100
+      targetPort: 9100
+---
+# Source: obridge-chain-client-evm/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obridge-chain-client-evm-bsc-9006
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: obridge-chain-client-evm-bsc-9006
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obridge-chain-client-evm-bsc-9006
+  template:
+    metadata:
+      labels:
+        app: obridge-chain-client-evm-bsc-9006
+    spec:
+      containers:
+      - name: obridge-chain-client-evm-bsc-9006
+        image: kldtks/edge:otmoic-chainclient-evm-3cfca3bb
+        ports:
+          - containerPort: 9100
+        env:
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: obridge-relay-db-redis
+                key: redis-password
+          - name: EVM_CLIENT_PORT
+            value: "9100"
+          - name: REDIS_HOST
+            value: "obridge-relay-db-redis-master"
+          - name: RPC_URL
+            value: "https://blockchain2.byte-trade.com:31267/bsc-testnet"
+          - name: CONTRACT_ADDRESS
+            value: "0x9D18cc6cFC0614e05AF80355aB836E2cF945a91C"
+          - name: SYSTEM_CHAIN_ID
+            value: "9006"
+          - name: CHAIN_ID
+            value: "97"
+          - name: START_BLOCK
+            value: "28808935"
+          - name: SERVER_URL_TRANSFER_OUT
+            value: "http://otmoicrelay-server:9102/relay/chain_client/on_transfer_out"
+          - name: SERVER_URL_TRANSFER_IN
+            value: "http://otmoicrelay-server:9102/relay/chain_client/on_transfer_in"
+          - name: SERVER_URL_CONFIRM
+            value: "http://otmoicrelay-server:9102/relay/chain_client/on_confirm"
+          - name: SERVER_URL_REFUNDED
+            value: "http://otmoicrelay-server:9102/relay/chain_client/on_refunded"

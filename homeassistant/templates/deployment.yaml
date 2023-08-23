@@ -1,0 +1,105 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: homeassistant
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homeassistant
+  template:
+    metadata:
+      labels:
+        app: homeassistant
+    spec:
+      initContainers:
+        - name: init-chmod-data
+          image: 'busybox:latest'
+          command:
+            - sh
+            - '-c'
+            - >
+              cp /config/configuration.yaml
+              /homeassistant-config/configuration.yaml
+          resources: {}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: homeassistant-config
+              mountPath: /homeassistant-config
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+          securityContext:
+            runAsUser: 0
+      containers:
+      - name: homeassistant
+        image: ghcr.io/home-assistant/home-assistant:stable
+        ports:
+        - containerPort: 8123
+        volumeMounts:
+        - mountPath: /config
+          name: homeassistant-config
+        - mountPath: /etc/localtime
+          name: homeassistant-localtime
+      
+      volumes:
+      - name: homeassistant-config
+        hostPath:
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.appdata}}/homeassistant
+      - name: homeassistant-localtime
+        hostPath:
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.appdata}}/homeassistant/localtime
+        
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 8123
+      targetPort: 8123
+      
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+data:
+  configuration.yaml: |-
+    # Loads default set of integrations. Do not remove.
+    default_config:
+
+    # Load frontend themes from the themes folder
+    frontend:
+      themes: !include_dir_merge_named themes
+
+    # Text to speech
+    tts:
+      - platform: google_translate
+
+    automation: !include automations.yaml
+    script: !include scripts.yaml
+    scene: !include scenes.yaml
+
+    http:
+      use_x_forwarded_for: true
+      trusted_proxies:
+        - *
+      ip_ban_enabled: true
+      login_attempts_threshold: 5
+
