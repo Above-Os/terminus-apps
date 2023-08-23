@@ -1,0 +1,51 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: sdwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sdwebui
+  template:
+    metadata:
+      labels:
+        app: sdwebui
+    spec:
+      containers:
+      - name: sdwebui
+        image: goolashe/automatic1111-sd-webui
+        ports:
+        - containerPort: 7860
+        env:
+        - name: CLI_ARGS
+          value: "--allow-code --medvram --xformers --enable-insecure-extension-access --api"
+        volumeMounts:
+        - mountPath: /data
+          name: sdmodel
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+      volumes:
+      - name: sdmodel
+        hostPath:
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.appdata}}/sdwebui
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 7860
+      targetPort: 7860
