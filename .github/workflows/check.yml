@@ -1,0 +1,75 @@
+name: Lint and Test Charts
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.12.1
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          check-latest: true
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.4.0
+
+      - name: Run chart-testing (list-changed)
+        id: list-changed
+        run: |
+          changed=$(ct list-changed --chart-dirs ./ --target-branch ${{ github.event.repository.default_branch }})
+          echo $changed
+          if [[ -n "$changed" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            changed=$(echo $changed | tr ' ' ',')
+            echo CHANGED_FILES=$changed >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build chart-testing (valid)
+        id: chart-testing-valid
+        if: steps.list-changed.outputs.changed == 'true'
+        uses: almondyoung/chart-valid@main
+        with:
+          chart-dirs: ${{ steps.list-changed.outputs.CHANGED_FILES }}
+
+      - name: Run chart-testing (valid)
+        if: steps.list-changed.outputs.changed == 'true'
+        run: |
+          echo "changed:${{ steps.list-changed.outputs.changed }}"
+          echo "changed files:${{ steps.list-changed.outputs.CHANGED_FILES }}"
+          echo "${{ steps.chart-testing-valid.outputs.test-result }}"
+
+      - name: check chart-testing (valid) result
+        id: check-valid
+        run: |
+          echo ${{ steps.chart-testing-valid.outputs.test-result }}
+          if [[ "${{ steps.chart-testing-valid.outputs.test-result }}" == *"successful"* ]]; then
+            echo "success=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "success=false" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+
+      - name: check chart-testing (valid) result
+        run: |
+          echo ${{ steps.chart-testing-valid.outputs.test-result }}
+          if [[ "${{ steps.chart-testing-valid.outputs.test-result }}" == *"successful"* ]]; then
+            echo "successful"
+          else
+            echo "failed"
+            exit 1
+          fi
+        shell: bash
