@@ -1,0 +1,69 @@
+{{- $webDomain := printf "%s.%s" "n8n" .Values.user.zone -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: n8n
+  ports:
+    - protocol: TCP
+      port: 5678
+      targetPort: 5678
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: n8n
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      volumes:
+      - name: n8n-config
+        hostPath:
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.appdata}}/n8n/
+      containers:
+      - name: n8n
+        image: n8nio/n8n:latest
+        ports:
+        - containerPort: 5678
+        env:
+          # - name: N8N_HOST
+          #   value: "0.0.0.0"
+          # - name: WEBHOOK_URL
+          #   value: "https://{{ $webDomain }}/"
+          - name: N8N_PUSH_BACKEND
+            value: websocket
+          - name: N8N_HOST
+            value: {{ $webDomain }}
+          - name: DB_TYPE
+            value: postgresdb
+          - name: DB_POSTGRESDB_DATABASE
+            value: "postgres"
+          - name: DB_POSTGRESDB_HOST
+            value: "n8n-db-postgresql-postgresql-ha-pgpool"
+          - name: DB_POSTGRESDB_PORT
+            value: "5432"
+          - name: DB_POSTGRESDB_USER
+            value: "postgres"
+          - name: DB_POSTGRESDB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: n8n-db-postgresql-postgresql-ha-postgresql
+                key: password
+        volumeMounts:
+        - mountPath: /home/node/
+          name: n8n-config
