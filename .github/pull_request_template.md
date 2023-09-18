@@ -1,6 +1,8 @@
+## App Submission/Update/Suspend/Remove
+
 ### Folder name
 myapp
-> i.e. the folder of the app
+> i.e. the app name in os
 
 ### App Title
 My App
@@ -11,7 +13,7 @@ Hello world
 > Optional
 
 ### Description/ Changelog(for update)
-Brief description about my app here
+Brief description about my app goes here
 
 ### More infomation
 Website：
