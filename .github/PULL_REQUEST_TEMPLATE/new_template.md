@@ -1,4 +1,4 @@
-## App Submission/Update/Suspend/Remove
+## App Submission
 
 ### Folder name
 myapp
