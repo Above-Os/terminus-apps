@@ -267,7 +267,7 @@ metadata:
   name: openllm-stripprefix
   namespace: {{ .Release.Namespace }}
   annotations:
-      app.kubernetes.io/ingress.class: {{ .Release.Namespace }}-sai
+      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
 spec:
   stripPrefix:
     prefixes:
@@ -303,7 +303,7 @@ spec:
     - web
     - websecure
   routes:
-    - match: "PathPrefix(`/api/`)"
+    - match: "HostRegexp(`{subdomain:[a-z~1-9]+}.{{ .Values.user.zone }}`) && PathPrefix(`/api/`)"
       kind: Rule
       middlewares:
         - name: openllm-stripprefix
