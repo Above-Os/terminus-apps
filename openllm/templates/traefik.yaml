@@ -26,11 +26,11 @@ spec:
       storage: "5G"
 ---
 # Source: traefik/templates/rbac/clusterrole.yaml
-kind: ClusterRole
+kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: traefik-{{ .Release.Namespace }}
-  # namespace: {{ .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: traefik
     app.kubernetes.io/instance: traefik-{{ .Release.Namespace }}
@@ -80,17 +80,17 @@ rules:
       - watch
 ---
 # Source: traefik/templates/rbac/clusterrolebinding.yaml
-kind: ClusterRoleBinding
+kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: traefik-{{ .Release.Namespace }}
-  # namespace: {{ .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: traefik
     app.kubernetes.io/instance: traefik-{{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: traefik-{{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
@@ -227,8 +227,9 @@ spec:
           - "--metrics.prometheus=true"
           - "--metrics.prometheus.entrypoint=metrics"
           - "--providers.kubernetescrd"
-          - "--providers.kubernetesingress"
-          - "--providers.kubernetesingress.ingressclass=traefik-{{ .Release.Namespace }}"
+          - "--providers.kubernetesingress=true"
+          - "--providers.kubernetescrd.namespaces={{ .Release.Namespace }}"
+          - "--providers.kubernetesingress.namespaces={{ .Release.Namespace }}"
           - "--entrypoints.websecure.http.tls=true"
           - "--entrypoints.websecure.http.tls.domains[0].main=snowinning.com"
           - "--entrypoints.websecure.http.tls.domains[0].sans=*.snowinning.com"
@@ -249,25 +250,26 @@ spec:
         fsGroup: 65532
 ---
 # Source: traefik/templates/ingressclass.yaml
-apiVersion: networking.k8s.io/v1
-kind: IngressClass
-metadata:
-  annotations:
-    ingressclass.kubernetes.io/is-default-class: "false"
-  labels:
-    app.kubernetes.io/name: traefik
-    app.kubernetes.io/instance: traefik-{{ .Release.Namespace }}
-  name: traefik-{{ .Release.Namespace }}
-spec:
-  controller: traefik.io/ingress-controller
+# apiVersion: networking.k8s.io/v1
+# kind: IngressClass
+# metadata:
+#   annotations:
+#     ingressclass.kubernetes.io/is-default-class: "false"
+#   labels:
+#     app.kubernetes.io/name: traefik
+#     app.kubernetes.io/instance: traefik-{{ .Release.Namespace }}
+#   name: traefik-{{ .Release.Namespace }}
+#   namespace: {{ .Release.Namespace }}
+# spec:
+#   controller: traefik.io/ingress-controller
 ---
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
   name: openllm-stripprefix
   namespace: {{ .Release.Namespace }}
-  annotations:
-      app.kubernetes.io/ingress.class: {{ .Release.Namespace }}-sai
+  # annotations:
+  #     app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
 spec:
   stripPrefix:
     prefixes:
@@ -278,8 +280,8 @@ kind: IngressRoute
 metadata:
   name: ingress-openllm-ui
   namespace: {{ .Release.Namespace }}
-  annotations:
-      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+  # annotations:
+  #     app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
 spec:
   entryPoints:
     - web
@@ -296,14 +298,14 @@ kind: IngressRoute
 metadata:
   name: ingress-openllm
   namespace: {{ .Release.Namespace }}
-  annotations:
-      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+  # annotations:
+  #     app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
 spec:
   entryPoints:
     - web
     - websecure
   routes:
-    - match: "PathPrefix(`/api/`)"
+    - match: "HostRegexp(`{subdomain:[a-z~1-9]+}.{{ .Values.user.zone }}`) && PathPrefix(`/api/`)"
       kind: Rule
       middlewares:
         - name: openllm-stripprefix
