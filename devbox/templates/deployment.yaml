@@ -1,0 +1,143 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 80
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: chartmuseum
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8088
+  selector:
+    app: {{ .Release.Name }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      volumes:
+        - name: chart
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.data }}/Chart
+        - name: data
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.data }}/Data
+        - name: storage-volume
+          hostPath:
+            path: {{ .Values.userspace.data }}/helm-repo-dev
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-chmod-data
+          image: 'busybox:latest'
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - '-c'
+            - |
+              chown -R 1000:1000 /home/coder
+          resources: {}
+          volumeMounts:
+            - name: storage-volume
+              mountPath: /home/coder
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: devbox
+          image: aboveos/devbox
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: port
+              containerPort: 80
+              protocol: TCP
+          volumeMounts:
+            - name: chart
+              mountPath: /chart
+            - name: data
+              mountPath: /data
+          env:
+            - name: BASE_DIR
+              value: /chart
+            - name: OS_API_KEY
+              value: {{ .Values.os.appKey }}
+            - name: OS_API_SECRET
+              value: {{ .Values.os.appSecret }}
+            - name: OS_SYSTEM_SERVER
+              value: system-server.user-system-{{ .Values.bfl.username }}
+            - name: NAME_SPACE
+              value: {{ .Release.Namespace }}
+        - name: chartmuseum
+          image: 'ghcr.io/helm/chartmuseum:v0.15.0'
+          args:
+            - '--port=8088'
+            - '--storage-local-rootdir=/storage'
+          ports:
+            - name: http
+              containerPort: 8088
+              protocol: TCP
+          env:
+            - name: CHART_POST_FORM_FIELD_NAME
+              value: chart
+            - name: DISABLE_API
+              value: 'false'
+            - name: LOG_JSON
+              value: 'true'
+            - name: PROV_POST_FORM_FIELD_NAME
+              value: prov
+            - name: STORAGE
+              value: local
+          resources: {}
+          volumeMounts:
+            - name: storage-volume
+              mountPath: /storage
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
