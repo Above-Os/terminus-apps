@@ -1,36 +1,33 @@
-### PR tiltle formate
-[NEW/UPDATE/REMOVE/SUSPEND][foldername][version]OtherContent
-> e.g
-> [NEW][myapp][0.0.1]for example
-
-### Folder name
-> the folder name of your app
-myapp
-
+### PR Title Format 
+> [NEW][foldername][version]OtherContent
+> 
+> [UPDATE][foldername][version]OtherContent
+> 
+> [REMOVE][foldername][version]OtherContent
+> 
+> [SUSPEND][foldername][version]OtherContent
 
 ### App Title
-> the title of your app appears on AppStore
-My App
+> The title of your app appears on AppStore. Spaces and hyphens can be used.
+> 
+> e.g. "My Hello-World App"
 
-### Description/ Changelog(for update)
-Brief description about my app here
+### Description
+> Brief description about your app here.
+>
+>  For app updates, please describe the changes.
 
-### More infomation
+### More Information
 > Optional
 
-Website：
-
-Developer：
-
-Submitter：
-
-Lisence：
-
-Contact Info：
-- https://example.com
-- mail@example.com
-
-Code：https://github.com/myrepo
+- Website:
+- Developer:
+- Submitter:
+- License:
+- Code: https://github.com/myrepo
+- Contact Info:
+  - https://example.com
+  - mail@example.com
 
 ### Statement
 - [ ] I have tested the app to ensure it is compatible with the Terminus OS version stated in the app.cfg file
