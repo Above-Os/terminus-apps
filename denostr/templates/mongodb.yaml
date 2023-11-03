@@ -1,233 +1,3 @@
-# # Source: mongodb/templates/serviceaccount.yaml
-# apiVersion: v1
-# kind: ServiceAccount
-# metadata:
-#   name: denostr-db-mongodb
-#   namespace: {{ .Release.Namespace }}
-#   labels:
-#     app.kubernetes.io/name: mongodb
-#     helm.sh/chart: mongodb-13.8.1
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/managed-by: Helm
-# secrets:
-#   - name: denostr-db-mongodb
-# automountServiceAccountToken: true
-# ---
-# # Source: mongodb/templates/secrets.yaml
-# apiVersion: v1
-# kind: Secret
-# metadata:
-#   name: denostr-db-mongodb
-#   namespace: {{ .Release.Namespace }}
-#   labels:
-#     app.kubernetes.io/name: mongodb
-#     helm.sh/chart: mongodb-13.8.1
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/managed-by: Helm
-#     app.kubernetes.io/component: mongodb
-# type: Opaque
-# data:
-#   mongodb-root-password: {{ randAlphaNum 16 | b64enc }}
-# ---
-# # Source: mongodb/templates/common-scripts-cm.yaml
-# apiVersion: v1
-# kind: ConfigMap
-# metadata:
-#   name: denostr-db-mongodb-common-scripts
-#   namespace: {{ .Release.Namespace }}
-#   labels:
-#     app.kubernetes.io/name: mongodb
-#     helm.sh/chart: mongodb-13.8.1
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/managed-by: Helm
-#     app.kubernetes.io/component: mongodb
-# data:
-#   startup-probe.sh: |
-#     #!/bin/bash
-#     mongosh  $TLS_OPTIONS --port $MONGODB_PORT_NUMBER --eval 'db.hello().isWritablePrimary || db.hello().secondary' | grep 'true'
-#   readiness-probe.sh: |
-#     #!/bin/bash
-#     # Run the proper check depending on the version
-#     [[ $(mongod -version | grep "db version") =~ ([0-9]+\.[0-9]+\.[0-9]+) ]] && VERSION=${BASH_REMATCH[1]}
-#     . /opt/bitnami/scripts/libversion.sh
-#     VERSION_MAJOR="$(get_sematic_version "$VERSION" 1)"
-#     VERSION_MINOR="$(get_sematic_version "$VERSION" 2)"
-#     VERSION_PATCH="$(get_sematic_version "$VERSION" 3)"
-#     if [[ ( "$VERSION_MAJOR" -ge 5 ) || ( "$VERSION_MAJOR" -ge 4 && "$VERSION_MINOR" -ge 4 && "$VERSION_PATCH" -ge 2 ) ]]; then
-#         mongosh $TLS_OPTIONS --port $MONGODB_PORT_NUMBER --eval 'db.hello().isWritablePrimary || db.hello().secondary' | grep 'true'
-#     else
-#         mongosh  $TLS_OPTIONS --port $MONGODB_PORT_NUMBER --eval 'db.isMaster().ismaster || db.isMaster().secondary' | grep 'true'
-#     fi
-#   ping-mongodb.sh: |
-#     #!/bin/bash
-#     mongosh  $TLS_OPTIONS --port $MONGODB_PORT_NUMBER --eval "db.adminCommand('ping')"
-# ---
-# # Source: mongodb/templates/standalone/pvc.yaml
-# kind: PersistentVolumeClaim
-# apiVersion: v1
-# metadata:
-#   name: denostr-db-mongodb
-#   namespace: {{ .Release.Namespace }}
-#   labels:
-#     app.kubernetes.io/name: mongodb
-#     helm.sh/chart: mongodb-13.8.1
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/managed-by: Helm
-#     app.kubernetes.io/component: mongodb
-# spec:
-#   accessModes:
-#     - "ReadWriteOnce"
-#   resources:
-#     requests:
-#       storage: "8Gi"
-# ---
-# # Source: mongodb/templates/standalone/svc.yaml
-# apiVersion: v1
-# kind: Service
-# metadata:
-#   name: denostr-db-mongodb
-#   namespace: {{ .Release.Namespace }}
-#   labels:
-#     app.kubernetes.io/name: mongodb
-#     helm.sh/chart: mongodb-13.8.1
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/managed-by: Helm
-#     app.kubernetes.io/component: mongodb
-# spec:
-#   type: ClusterIP
-#   sessionAffinity: None
-#   ports:
-#     - name: "mongodb"
-#       port: 27017
-#       targetPort: mongodb
-#       nodePort: null
-#   selector:
-#     app.kubernetes.io/name: mongodb
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/component: mongodb
-# ---
-# # Source: mongodb/templates/standalone/dep-sts.yaml
-# apiVersion: apps/v1
-# kind: Deployment
-# metadata:
-#   name: denostr-db-mongodb
-#   namespace: {{ .Release.Namespace }}
-#   labels:
-#     app.kubernetes.io/name: mongodb
-#     helm.sh/chart: mongodb-13.8.1
-#     app.kubernetes.io/instance: denostr-db-mongodb
-#     app.kubernetes.io/managed-by: Helm
-#     app.kubernetes.io/component: mongodb
-# spec:
-#   replicas: 1
-#   strategy:
-#     type: RollingUpdate
-#   selector:
-#     matchLabels:
-#       app.kubernetes.io/name: mongodb
-#       app.kubernetes.io/instance: denostr-db-mongodb
-#       app.kubernetes.io/component: mongodb
-#   template:
-#     metadata:
-#       labels:
-#         app.kubernetes.io/name: mongodb
-#         helm.sh/chart: mongodb-13.8.1
-#         app.kubernetes.io/instance: denostr-db-mongodb
-#         app.kubernetes.io/managed-by: Helm
-#         app.kubernetes.io/component: mongodb
-#     spec:
-      
-#       serviceAccountName: denostr-db-mongodb
-#       affinity:
-#         podAffinity:
-          
-#         podAntiAffinity:
-#           preferredDuringSchedulingIgnoredDuringExecution:
-#             - podAffinityTerm:
-#                 labelSelector:
-#                   matchLabels:
-#                     app.kubernetes.io/name: mongodb
-#                     app.kubernetes.io/instance: denostr-db-mongodb
-#                     app.kubernetes.io/component: mongodb
-#                 topologyKey: kubernetes.io/hostname
-#               weight: 1
-          
-#       securityContext:
-#         fsGroup: 1001
-#         sysctls: []
-      
-#       containers:
-#         - name: mongodb
-#           image: docker.io/bitnami/mongodb:6.0.4-debian-11-r10
-#           imagePullPolicy: "IfNotPresent"
-#           securityContext:
-#             runAsNonRoot: true
-#             runAsUser: 1001
-#           env:
-#             - name: BITNAMI_DEBUG
-#               value: "false"
-#             - name: MONGODB_ROOT_USER
-#               value: "root"
-#             - name: MONGODB_ROOT_PASSWORD
-#               valueFrom:
-#                 secretKeyRef:
-#                   name: denostr-db-mongodb
-#                   key: mongodb-root-password
-#             - name: ALLOW_EMPTY_PASSWORD
-#               value: "no"
-#             - name: MONGODB_SYSTEM_LOG_VERBOSITY
-#               value: "0"
-#             - name: MONGODB_DISABLE_SYSTEM_LOG
-#               value: "no"
-#             - name: MONGODB_DISABLE_JAVASCRIPT
-#               value: "no"
-#             - name: MONGODB_ENABLE_JOURNAL
-#               value: "yes"
-#             - name: MONGODB_PORT_NUMBER
-#               value: "27017"
-#             - name: MONGODB_ENABLE_IPV6
-#               value: "no"
-#             - name: MONGODB_ENABLE_DIRECTORY_PER_DB
-#               value: "no"
-#           ports:
-#             - name: mongodb
-#               containerPort: 27017
-#           livenessProbe:
-#             failureThreshold: 6
-#             initialDelaySeconds: 30
-#             periodSeconds: 20
-#             successThreshold: 1
-#             timeoutSeconds: 10
-#             exec:
-#               command:
-#                 - /bitnami/scripts/ping-mongodb.sh
-#           readinessProbe:
-#             failureThreshold: 6
-#             initialDelaySeconds: 5
-#             periodSeconds: 10
-#             successThreshold: 1
-#             timeoutSeconds: 5
-#             exec:
-#               command:
-#                 - /bitnami/scripts/readiness-probe.sh
-#           resources:
-#             limits: {}
-#             requests: {}
-#           volumeMounts:
-#             - name: datadir
-#               mountPath: /bitnami/mongodb
-#               subPath: 
-#             - name: common-scripts
-#               mountPath: /bitnami/scripts
-#       volumes:
-#         - name: common-scripts
-#           configMap:
-#             name: denostr-db-mongodb-common-scripts
-#             defaultMode: 0550
-#         - name: datadir
-#           persistentVolumeClaim:
-#             claimName: denostr-db-mongodb
-
 
 # Source: mongodb/templates/serviceaccount.yaml
 apiVersion: v1
@@ -491,6 +261,13 @@ spec:
         - name: mongodb-arbiter
           image: docker.io/bitnami/mongodb:6.0.5-debian-11-r4
           imagePullPolicy: "IfNotPresent"
+          resources:
+            requests:
+              cpu: 20m
+              memory: 100Mi
+            limits:
+              cpu: 200m
+              memory: 500Mi
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001
@@ -552,9 +329,6 @@ spec:
             timeoutSeconds: 10
             tcpSocket:
               port: mongodb
-          resources:
-            limits: {}
-            requests: {}
 ---
 # Source: mongodb/templates/replicaset/statefulset.yaml
 apiVersion: apps/v1
@@ -609,6 +383,13 @@ spec:
         - name: mongodb
           image: docker.io/bitnami/mongodb:6.0.5-debian-11-r4
           imagePullPolicy: "IfNotPresent"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 500m
+              memory: 500Mi
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001
@@ -686,9 +467,6 @@ spec:
             exec:
               command:
                 - /bitnami/scripts/readiness-probe.sh
-          resources:
-            limits: {}
-            requests: {}
           volumeMounts:
             - name: datadir
               mountPath: /bitnami/mongodb
