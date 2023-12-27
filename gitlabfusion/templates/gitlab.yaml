@@ -10023,6 +10023,13 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 10m
+              memory: 20Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
       nodeSelector:
         kubernetes.io/os: linux
 ---
@@ -10113,6 +10120,13 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 10m
+              memory: 50Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
       nodeSelector:
         kubernetes.io/os: linux
 ---
@@ -10204,7 +10218,12 @@ spec:
         - name: configmaps
           mountPath: /configmaps
         resources:
-          {}
+          requests:
+            cpu: 10m
+            memory: 50Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
       volumes:
       - name: runner-secrets
         emptyDir:
@@ -10397,6 +10416,9 @@ spec:
             requests:
               cpu: 75m
               memory: 100M
+            limits:
+              cpu: 500m
+              memory: 256M
       volumes:
       
       
@@ -10487,6 +10509,10 @@ spec:
           resources:
             requests:
               cpu: 50m
+              memory: 10Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
         - name: configure
           command: ['sh', '/config/configure']
           image: "registry.gitlab.com/gitlab-org/build/cng/gitlab-base:v16.6.0"                    
@@ -10693,6 +10719,10 @@ spec:
           resources:
             requests:
               cpu: 50m
+              memory: 10Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       containers:
         
         - name: kas
@@ -10861,6 +10891,10 @@ spec:
           resources:
             requests:
               cpu: 50m
+              memory: 1000Mi
+            limits:
+              cpu: 500m
+              memory: 2000Mi
         - name: configure
           command: ['sh', '/config/configure']
           image: "registry.gitlab.com/gitlab-org/build/cng/gitlab-base:v16.6.0"                    
@@ -11217,7 +11251,11 @@ spec:
             readOnly: false
           resources:
             requests:
-              cpu: 50m      
+              cpu: 50m
+              memory: 10Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi   
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -11677,6 +11715,9 @@ spec:
             requests:
               cpu: 300m
               memory: 2.5G
+            limits:
+              cpu: 1000m
+              memory: 5G
         - name: gitlab-workhorse
           image: "registry.gitlab.com/gitlab-org/build/cng/gitlab-workhorse-ce:v16.6.0"          
           ports:
@@ -11750,7 +11791,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 100M
+              memory: 100Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       volumes:
       
       
@@ -11981,6 +12025,9 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
 ---
 # Source: gitlab/charts/nginx-ingress/templates/controller-deployment.yaml
 apiVersion: apps/v1
@@ -12092,6 +12139,9 @@ spec:
             requests:
               cpu: 100m
               memory: 100Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       serviceAccountName: gitlab-nginx-ingress
       terminationGracePeriodSeconds: 300
 ---
@@ -12136,7 +12186,12 @@ spec:
             - --volume-dir=/etc/config
             - --webhook-url=http://127.0.0.1:9090/-/reload
           resources:
-            {}
+            requests:
+              cpu: 50m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           volumeMounts:
             - name: config-volume
               mountPath: /etc/config
@@ -12175,7 +12230,12 @@ spec:
             failureThreshold: 3
             successThreshold: 1
           resources:
-            {}
+            requests:
+              cpu: 50m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           volumeMounts:
             - name: config-volume
               mountPath: /etc/config
@@ -12329,6 +12389,13 @@ spec:
             preStop:
               exec:
                 command: ["/bin/bash", "-c", "sleep 5"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 20Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       terminationGracePeriodSeconds: 30
       volumes:
       - name: registry-server-config
@@ -12666,6 +12733,9 @@ spec:
             requests:
               cpu: 100m
               memory: 200Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       volumes:
       
       - name: gitaly-config
@@ -12852,7 +12922,9 @@ spec:
                   exec pg_isready -U "gitlab" -d "dbname=gitlabhq_production" -h 127.0.0.1 -p 5432
                   [ -f /opt/bitnami/postgresql/tmp/.initialized ] || [ -f /bitnami/postgresql/.initialized ]
           resources:
-            limits: {}
+            limits:
+              cpu: 500m
+              memory: 512Mi
             requests:
               cpu: 250m
               memory: 256Mi
@@ -12905,8 +12977,12 @@ spec:
               port: http-metrics
           volumeMounts:
           resources:
-            limits: {}
-            requests: {}
+            requests:
+              cpu: 100m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       volumes:
         - name: custom-init-scripts
           configMap:
@@ -13034,8 +13110,12 @@ spec:
                 - -c
                 - /health/ping_readiness_local.sh 1
           resources:
-            limits: {}
-            requests: {}
+            requests:
+              cpu: 100m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           volumeMounts:
             - name: start-scripts
               mountPath: /opt/bitnami/scripts/start-scripts
@@ -13074,8 +13154,12 @@ spec:
             - name: metrics
               containerPort: 9121
           resources:
-            limits: {}
-            requests: {}
+            requests:
+              cpu: 100m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           volumeMounts:
             - name: redis-password
               mountPath: /secrets/
