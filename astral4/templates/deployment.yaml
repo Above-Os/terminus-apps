@@ -1,0 +1,45 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: astral4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: astral4
+  template:
+    metadata:
+      labels:
+        app: astral4
+    spec:
+      containers:
+      - name: astral4
+        image: docker.io/mmchong/astral:latest
+        resources:
+          requests:
+            cpu: 250m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 64Mi
+        ports:
+        - containerPort: 8000
+        
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
