@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: user-embedding-task-en-0
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: '10/30 * * * *'
+  startingDeadlineSeconds: 0
+  concurrencyPolicy: Replace
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  suspend: false
+  ttlStrategy:
+    secondsAfterSuccess: 3600
+    secondsAfterCompletion: 3600
+    secondsAfterFailure: 3600
+  workflowSpec:
+    entrypoint: userEmbeddingFlow
+    volumes:
+      - name: huggingface
+        hostPath:
+          type: DirectoryOrCreate
+          path: >-
+            {{ .Values.userspace.appdata }}/rss/model/huggingface
+    templates:
+      - name: userEmbeddingFlow
+        steps:
+          - - name: user-embedding
+              template: user-embedding-template
+      - name: user-embedding-template
+        container:
+          image: aboveos/bertv2userembedding
+          imagePullPolicy: Always
+          env:
+            - name: KNOWLEDGE_BASE_API_URL
+              value: {{ .Values.apiUrl }}
+            - name: TERMINUS_RECOMMEND_SOURCE_NAME
+              value: bytetrade-bert_v2_en_all
+          volumeMounts:
+            - mountPath: /root/.cache/huggingface
+              name: huggingface
