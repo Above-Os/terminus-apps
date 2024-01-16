@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "recommend-task-en-0.name" -}}
+{{- define "recommendtasken0.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "recommend-task-en-0.fullname" -}}
+{{- define "recommendtasken0.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -26,16 +26,16 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "recommend-task-en-0.chart" -}}
+{{- define "recommendtasken0.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "recommend-task-en-0.labels" -}}
-helm.sh/chart: {{ include "recommend-task-en-0.chart" . }}
-{{ include "recommend-task-en-0.selectorLabels" . }}
+{{- define "recommendtasken0.labels" -}}
+helm.sh/chart: {{ include "recommendtasken0.chart" . }}
+{{ include "recommendtasken0.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -45,17 +45,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "recommend-task-en-0.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "recommend-task-en-0.name" . }}
+{{- define "recommendtasken0.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "recommendtasken0.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "recommend-task-en-0.serviceAccountName" -}}
+{{- define "recommendtasken0.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "recommend-task-en-0.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "recommendtasken0.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
