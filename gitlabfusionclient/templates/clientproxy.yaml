@@ -3,6 +3,15 @@
 
 {{- $clientproxyDomainENV := split  ","  .Values.domain.clientproxy -}}
 {{- $clientproxyDomain := index $clientproxyDomainENV "_0" -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clientproxy-secret
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+data:
+  password: {{ randAlphaNum 16 | b64enc }}
 
 ---
 kind: ConfigMap
@@ -230,7 +239,7 @@ spec:
             runAsNonRoot: false
       containers:
         - name: gitlabfusion-cp
-          image: 'kldtks/edge:gitlab-client-proxy-20f352d2'
+          image: 'kldtks/edge:gitlab-client-proxy-001'
           ports:
             - name: ext-port
               containerPort: 8000
@@ -255,6 +264,11 @@ spec:
               value: {{index .Values.svcs "gitlab-nginx-ingress-controller_host" }}
             - name: ACCOUNT_NAME
               value: {{ .Values.bfl.username }}
+            - name: ACCOUNT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name:  clientproxy-secret
+                  key: password
           resources:
             requests:
               cpu: 100m
