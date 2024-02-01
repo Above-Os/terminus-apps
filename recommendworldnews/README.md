@@ -1,4 +1,5 @@
 **KEY FEATURES**
+
 - **Security and Privacy First**: All recommendation process run on your local Terminus Node, no data send out to any third-party servers.  All your personal behavioral data is encrypted and stored locally.
 
 - **Personalized Content Curation**: The algorithm learns from your interactions, including reads, likes, bookmarks, to build a dynamic user profile.
@@ -12,6 +13,7 @@
 - **Easy Monitoring**: Captures detailed logs for monitoring the status of the workflow and locating problems.
 
 **WORKFLOW SPECIFICATIONS**
+
 This recommendation is developed under the Terminus Recommend Protocol, which is illustrated below. This recommendation workflow does not require an internet connection except for installation and upgrades. All recommendation process are running offline on your local Terminus Node. Therefore, you don’t have to worry about personal data leaking to third parties. It also doesn't store any of your content or behavioral data, all data sync and management works are done by Terminus OS. 
 ![](https://www.cflowapps.com/wp-content/uploads/2023/04/Lucidchart.png)
 
