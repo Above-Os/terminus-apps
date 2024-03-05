@@ -6,6 +6,7 @@
 
 {{- $gitlabDomainENV := split  ","  .Values.domain.gitlab -}}
 {{- $gitlabDomain := index $gitlabDomainENV "_0" -}}
+
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -232,7 +233,7 @@ spec:
             runAsNonRoot: false
       containers:
         - name: gitlabfusion-cp
-          image: 'kldtks/edge:gitlab-client-proxy-72ca7592'
+          image: 'kldtks/edge:gitlab-client-proxy-001'
           ports:
             - name: ext-port
               containerPort: 8000
@@ -253,7 +254,12 @@ spec:
             - name: SERVER_SRC_DOMAIN
               value: {{ $gitlabDomain }}
             - name: ACCOUNT_NAME
-              value: {{ .Values.bfl.username }}
+              value: 'root'
+            - name: ACCOUNT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name:  gitlab-gitlab-initial-root-password
+                  key: password
           resources:
             requests:
               cpu: 100m
