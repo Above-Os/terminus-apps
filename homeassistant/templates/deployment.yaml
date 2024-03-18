@@ -1,3 +1,51 @@
+
+
+apiVersion: v1
+data:
+  nginx.conf: |
+    stream {
+      server {
+          listen  8001;  
+          proxy_pass 127.0.0.1:8123;
+      }
+    }
+
+    events {
+      # Your event-related configurations go here
+    }
+
+    http {
+      # Your HTTP server configurations go here
+    }
+
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: {{ .Release.Namespace }}
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+data:
+  configuration.yaml: |-
+    # Loads default set of integrations. Do not remove.
+    default_config:
+    # Load frontend themes from the themes folder
+    frontend:
+      themes: !include_dir_merge_named themes
+    # Text to speech
+    tts:
+      - platform: google_translate
+    http:
+      use_x_forwarded_for: true
+      use_x_frame_options: false
+      trusted_proxies:
+        - "127.0.0.1"
+      ip_ban_enabled: true
+      login_attempts_threshold: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -53,7 +101,21 @@ spec:
           name: homeassistant-config
         - mountPath: /etc/localtime
           name: homeassistant-localtime
-      
+      - name: nginx
+        image: nginx:latest
+        volumeMounts:
+        - name: nginx-config 
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        ports:
+        - containerPort: 8001
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
       volumes:
       - name: homeassistant-config
         hostPath:
@@ -63,8 +125,20 @@ spec:
         hostPath:
           type: DirectoryOrCreate
           path: {{ .Values.userspace.appdata}}/homeassistant/localtime
-        
-
+      - name: config
+        configMap:
+          name: {{ .Release.Name }}-config
+          items:
+            - key: configuration.yaml
+              path: configuration.yaml
+          defaultMode: 420
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+          defaultMode: 438
+          items:
+          - key: nginx.conf
+            path: nginx.conf
 ---
 apiVersion: v1
 kind: Service
@@ -79,34 +153,10 @@ spec:
     - protocol: TCP
       port: 8123
       targetPort: 8123
-      
----
-kind: ConfigMap
-apiVersion: v1
-metadata:
-  name: {{ .Release.Name }}-config
-  namespace: {{ .Release.Namespace }}
-data:
-  configuration.yaml: |-
-    # Loads default set of integrations. Do not remove.
-    default_config:
+      name: ha-service
+    - protocol: TCP
+      port: 8001
+      targetPort: 8001  
+      name: ha-proxy
 
-    # Load frontend themes from the themes folder
-    frontend:
-      themes: !include_dir_merge_named themes
-
-    # Text to speech
-    tts:
-      - platform: google_translate
-
-    automation: !include automations.yaml
-    script: !include scripts.yaml
-    scene: !include scenes.yaml
-
-    http:
-      use_x_forwarded_for: true
-      trusted_proxies:
-        - *
-      ip_ban_enabled: true
-      login_attempts_threshold: 5
 
