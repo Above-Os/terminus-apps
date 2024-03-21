@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
-  name: rank-train-task-worldnews
+  name: rank-task-worldnews
   namespace: {{ .Release.Namespace }}
 spec:
-  schedule: '30 23 * * *'
+  schedule: '8/10 * * * *'
   startingDeadlineSeconds: 0
   concurrencyPolicy: Replace
   successfulJobsHistoryLimit: 1
@@ -15,7 +15,7 @@ spec:
     secondsAfterCompletion: 3600
     secondsAfterFailure: 3600
   workflowSpec:
-    entrypoint: trainFlow
+    entrypoint: rankFlow
     volumes:
       - name: model
         hostPath:
@@ -23,15 +23,15 @@ spec:
           path: >-
             {{ .Values.userspace.appdata }}/rss/model/en
     templates:
-      - name: trainFlow
+      - name: rankFlow
         steps:
-          - - name: rank-train
-              template: rank-train-template
+          - - name: extractor
+              template: extractor-template
           - - name: rank
               template: rank-template
-      - name: rank-train-template
+      - name: extractor-template
         container:
-          image: 'aboveos/bertv2train:v0.1.2'
+          image: 'aboveos/rss-extractor:v0.1.6'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
@@ -43,7 +43,7 @@ spec:
               name: model
       - name: rank-template
         container:
-          image: 'aboveos/bertv2rank:v0.1.2'
+          image: 'aboveos/bertv2rank:v0.1.5'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
