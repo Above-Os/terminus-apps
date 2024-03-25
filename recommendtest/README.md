@@ -19,6 +19,7 @@ The core element of the recommendation engine is a service called the Knowledge 
 Upon installing this recommendation from the Terminus Market, all processes run completely offline on your local Terminus Edge. The Knowledge Base handles all content retrieval, periodically syncing with the content provider to fetch data packages. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local edge, the content provider remains unaware of your interests.
 
 This recommendation algorithm comprises 2 types of workflows, each with a few steps:
+
 - Recommendation Workflows: 
     - This workflow is executed every 10 minutes to provide the most recent news.
     - The workflow includes recall, pre-rank, and rank programs. The recall program eliminates irrelevant content, leaving approximately 10,000 articles for further sorting. The pre-rank program sorts the recalled content and fetches the full text of top articles. The rank program then fine-tunes the order based on the full-text content, suggesting content that aligns best with your current interests.
