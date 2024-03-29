@@ -1,3 +1,108 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: otmoic-admin-base-data
+  namespace: {{ .Release.Namespace }}
+data:
+  init_data.js: |-
+    var init_data = {
+      data: [
+        {
+          collectionName: "chainList",
+          data: [
+            {
+              chainId: 9006,
+              chainName: "BSC",
+              name: "bsc smart chain",
+              tokenName: "BNB",
+              tokenUsd: 300,
+              chainType: "evm",
+              image: "kldtks/edge:otmoic-chainclient-evm-6ef74826",
+              serviceName: "obridge-chain-client-evm-bsc-server-9006",
+              envList: [
+                {
+                  STATUS_KEY: "obridge-chain-client-status-report-bsc",
+                },
+              ],
+            },
+          ],
+          filter: [
+            {
+              name: "chainId",
+              type: "int",
+            },
+            {
+              name: "chainName",
+              type: "string",
+            },
+          ],
+          set: [
+            {
+              name: "name",
+              type: "string",
+            },
+            {
+              name: "tokenName",
+              type: "string",
+            },
+            {
+              name: "tokenUsd",
+              type: "int",
+            },
+            {
+              name: "chainType",
+              type: "string",
+            },
+            {
+              name: "image",
+              type: "string",
+            },
+            {
+              name: "serviceName",
+              type: "string",
+            },
+            {
+              name: "envList",
+              type: "array",
+            },
+          ],
+        },
+        {
+          collectionName: "monitor_list",
+          data: [
+            {
+              corn: "0,5,10,15,20,25,30,35,40,45,50,55 * * * *",
+              name: "block-timestamp-monit",
+              script_path: "./m_s_block_timestamp.js",
+              task_type: "system",
+              deploy_message: "",
+            },
+          ],
+          filter: [
+            {
+              name: "name",
+              type: "string",
+            },
+          ],
+          set: [
+            {
+              name: "corn",
+              type: "string",
+            },
+            {
+              name: "script_path",
+              type: "string",
+            },
+            {
+              name: "task_type",
+              type: "string",
+            },
+          ],
+        },
+      ],
+    };
+    var json_init_data = JSON.stringify(init_data);
+---
 kind: ServiceAccount
 apiVersion: v1
 metadata:
@@ -53,12 +158,24 @@ spec:
         app: lpnode-admin
     spec:
       serviceAccountName: lpnode-sa
+      volumes:
+        - name: base-data-config
+          configMap:
+            name: otmoic-admin-base-data
+            items:
+              - key: init_data.js
+                path: init_data.js
+            defaultMode: 420
       containers:
       - name: lpnode-admin
-        image: kldtks/edge:otmoic-lpnode-admin-latest
+        image: kldtks/edge:otmoic-lpnode-admin-7f49daa7
         imagePullPolicy: Always
         ports:
           - containerPort: 18006
+        volumeMounts:
+          - name: base-data-config
+            readOnly: true
+            mountPath: /init_data
         env:
           - name: DEPLOY_ENV
             value: 'dev' # prod/dev
@@ -93,3 +210,7 @@ spec:
             value: {{ .Values.os.appSecret }}
           - name: OS_SYSTEM_SERVER
             value: system-server.user-system-{{ .Values.bfl.username }}
+          - name: AMM_APP_DISPLAY_IMAGE
+            value: kldtks/edge:otmoic-lpnode-amm-66aaf09d
+          - name: MARKET_APP_DISPLAY_IMAGE
+            value: kldtks/edge:otmoic-lpnode-exchange-adapter-8139880f
