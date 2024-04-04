@@ -1,9 +1,11 @@
-{{- $webDomain := printf "%s.%s" "n8n" .Values.user.zone -}}
+{{- $n8nDomainENV := split  ","  .Values.domain.n8n -}}
+{{- $n8nDomain := index $n8nDomainENV "_0" -}}
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: n8n-svc
+  name: n8n
   namespace: {{ .Release.Namespace }}
 spec:
   selector:
@@ -48,29 +50,22 @@ spec:
         ports:
         - containerPort: 5678
         env:
-          # - name: N8N_HOST
-          #   value: "0.0.0.0"
-          # - name: WEBHOOK_URL
-          #   value: "https://{{ $webDomain }}/"
           - name: N8N_PUSH_BACKEND
             value: websocket
           - name: N8N_HOST
-            value: {{ $webDomain }}
+            value: {{ $n8nDomain }}
           - name: DB_TYPE
             value: postgresdb
           - name: DB_POSTGRESDB_DATABASE
-            value: "postgres"
+            value: "{{ .Values.postgres.databases.n8n }}"
           - name: DB_POSTGRESDB_HOST
-            value: "n8n-db-postgresql-postgresql-ha-pgpool"
+            value: "{{ .Values.postgres.host }}"
           - name: DB_POSTGRESDB_PORT
-            value: "5432"
+            value: "{{ .Values.postgres.port }}"
           - name: DB_POSTGRESDB_USER
-            value: "postgres"
+            value: "{{ .Values.postgres.username }}"
           - name: DB_POSTGRESDB_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: n8n-db-postgresql-postgresql-ha-postgresql
-                key: password
+            value: "{{ .Values.postgres.password }}"
         securityContext:
           runAsUser: 0
           runAsNonRoot: false
