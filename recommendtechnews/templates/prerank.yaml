@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
-  name: recommend-task-zh-cn-86400
+  name: prerank-technews
   namespace: {{ .Release.Namespace }}
 spec:
-  schedule: '50/10 * * * *'
+  schedule: '5/10 * * * *'
   startingDeadlineSeconds: 0
   concurrencyPolicy: Replace
   successfulJobsHistoryLimit: 1
@@ -27,11 +27,6 @@ spec:
           type: DirectoryOrCreate
           path: >-
             {{ .Values.userspace.application_data }}/rss/data
-      - name: model
-        hostPath:
-          type: DirectoryOrCreate
-          path: >-
-            {{ .Values.userspace.application_data }}/rss/data
     templates:
       - name: algorithm
         steps:
@@ -39,15 +34,9 @@ spec:
               template: recall-template
           - - name: prerank
               template: prerank-template
-          - - name: crawler
-              template: crawler-template
-          - - name: extractor
-              template: extractor-template
-          - - name: rank
-              template: rank-template
       - name: recall-template
         container:
-          image: 'aboveos/rss-recall:v0.1.0'
+          image: 'aboveos/rss-recall:v0.1.8'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
@@ -58,10 +47,18 @@ spec:
               value: /juicefs
             - name: ALGORITHM_FILE_CONFIG_PATH
               value: /usr/config/
+            - name: TERMINUS_RECOMMEND_SOURCE_NAME
+              value: recommendtechnews
             - name: SUPPORT_LANGUAGE
-              value: zh-cn
+              value: en
             - name: SUPPORT_TIMELINESS
-              value: '86400'
+              value: '0'
+            - name: SYNC_PROVIDER
+              value: bytetrade
+            - name: SYNC_FEED_NAME
+              value: tech_news
+            - name: SYNC_MODEL_NAME
+              value: bert_v2
           volumeMounts:
             - mountPath: /nfs
               name: nfs
@@ -69,7 +66,7 @@ spec:
               name: juicefs
       - name: prerank-template
         container:
-          image: 'aboveos/rss-prerank:v0.1.0'
+          image: 'aboveos/rss-prerank:v0.1.8'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
@@ -80,49 +77,15 @@ spec:
               value: /juicefs
             - name: ALGORITHM_FILE_CONFIG_PATH
               value: /usr/config/
+            - name: TERMINUS_RECOMMEND_SOURCE_NAME
+              value: recommendtechnews
             - name: SUPPORT_LANGUAGE
-              value: zh-cn
+              value: en
             - name: SUPPORT_TIMELINESS
-              value: '86400'
+              value: '0'
           volumeMounts:
             - mountPath: /nfs
               name: nfs
             - mountPath: /juicefs
               name: juicefs
-      - name: crawler-template
-        container:
-          image: 'aboveos/rss-crawler:v0.1.0'
-          imagePullPolicy: Always
-          env:
-            - name: KNOWLEDGE_BASE_API_URL
-              value: {{ .Values.apiUrl }}
-            - name: SUPPORT_LANGUAGE
-              value: zh-cn
-            - name: WECHAT_ENTRY_CONTENT_GET_API_URL
-              value: >-
-                https://recommend-wechat-test.bttcdn.com/api/wechat/entry/content
-            - name: SUPPORT_TIMELINESS
-              value: '86400'
-      - name: extractor-template
-        container:
-          image: 'aboveos/rss-extractor:v0.1.0'
-          imagePullPolicy: Always
-          env:
-            - name: KNOWLEDGE_BASE_API_URL
-              value: {{ .Values.apiUrl }}
-            - name: SUPPORT_LANGUAGE
-              value: zh-cn
-            - name: SUPPORT_TIMELINESS
-              value: '86400'
-      - name: rank-template
-        container:
-          image: aboveos/bertv2rank:v0.1.11
-          imagePullPolicy: Always
-          env:
-            - name: KNOWLEDGE_BASE_API_URL
-              value: {{ .Values.apiUrl }}
-            - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: bytetrade-bert_v2_zh-cn_86400
-          volumeMounts:
-            - mountPath: /opt/rank_model
-              name: model
+      
