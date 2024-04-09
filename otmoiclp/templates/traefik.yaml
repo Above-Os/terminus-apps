@@ -372,3 +372,23 @@ spec:
       services:
         - name: lpnode-admin-server
           port: 18006
+# Source: obridge-amm-graphql/templates/ingress.yaml
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ingress-amm-graphql
+  namespace: {{ .Release.Namespace }}
+  annotations:
+      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: "Host(`{{ $webDomain }}`) && PathPrefix(`/graphql/`)"
+      kind: Rule
+      middlewares:
+        - name: cors-header
+      services:
+        - name: obridge-amm-graphql-service
+          port: 14000

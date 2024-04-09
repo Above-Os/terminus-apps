@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: obridge-amm-graphql-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: obridge-amm-graphql
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      name: obridge-amm-graphql-service
+      port: 14000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obridge-amm-graphql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: obridge-amm-graphql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obridge-amm-graphql
+  template:
+    metadata:
+      labels:
+        app: obridge-amm-graphql
+    spec:
+      containers:
+        - name: obridge-amm-graphql
+          image: kldtks/edge:otmoic-lpnode-graphql-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4000
+          env:
+            - name: OBRIDGE_MONGODB_HOST
+              value: {{ .Values.mongodb.host }}
+            - name: MONGODB_PORT
+              value: "{{ .Values.mongodb.port }}"
+            - name: MONGODB_ACCOUNT
+              value: {{ .Values.mongodb.username }}
+            - name: MONGODB_PASSWORD
+              value: {{ .Values.mongodb.password }}
+            - name: MONGODB_DBNAME_LP_STORE
+              value: {{ .Values.mongodb.databases.lp_store }}
+            - name: MONGODB_DBNAME_HISTORY
+              value: {{ .Values.mongodb.databases.businessHistory }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
