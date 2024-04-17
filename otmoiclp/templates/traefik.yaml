@@ -1,4 +1,5 @@
-{{- $webDomain := printf "%s.%s" "otmoiclp" .Values.user.zone -}}
+{{- $traefikDomainENV := split  ","  .Values.domain.traefik -}}
+{{- $webDomain := index $traefikDomainENV "_0" -}}
 # Source: traefik/templates/rbac/serviceaccount.yaml
 kind: ServiceAccount
 apiVersion: v1
@@ -163,29 +164,9 @@ spec:
       hostNetwork: false
       containers:
       - image: traefik:v2.9.7
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         name: traefik
         resources:
-        readinessProbe:
-          httpGet:
-            path: /ping
-            port: 8080
-            scheme: HTTP
-          failureThreshold: 1
-          initialDelaySeconds: 2
-          periodSeconds: 10
-          successThreshold: 1
-          timeoutSeconds: 2
-        livenessProbe:
-          httpGet:
-            path: /ping
-            port: 8080
-            scheme: HTTP
-          failureThreshold: 3
-          initialDelaySeconds: 2
-          periodSeconds: 10
-          successThreshold: 1
-          timeoutSeconds: 2
         lifecycle:
         ports:
         - name: "metrics"
@@ -391,3 +372,24 @@ spec:
       services:
         - name: lpnode-admin-server
           port: 18006
+---
+# Source: obridge-amm-graphql/templates/ingress.yaml
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ingress-amm-graphql
+  namespace: {{ .Release.Namespace }}
+  annotations:
+      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: "Host(`{{ $webDomain }}`) && PathPrefix(`/graphql/`)"
+      kind: Rule
+      middlewares:
+        - name: cors-header
+      services:
+        - name: obridge-amm-graphql-service
+          port: 14000
