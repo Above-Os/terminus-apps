@@ -1,4 +1,6 @@
-{{- $webDomain := printf "%s.%s" "otmoicrelay" .Values.user.zone -}}
+{{- $traefikDomainENV := split  ","  .Values.domain.traefik -}}
+{{- $webDomain := index $traefikDomainENV "_0" -}}
+
 # Source: traefik/templates/rbac/serviceaccount.yaml
 kind: ServiceAccount
 apiVersion: v1
@@ -166,26 +168,26 @@ spec:
         imagePullPolicy: IfNotPresent
         name: traefik
         resources:
-        readinessProbe:
-          httpGet:
-            path: /ping
-            port: 8080
-            scheme: HTTP
-          failureThreshold: 1
-          initialDelaySeconds: 2
-          periodSeconds: 10
-          successThreshold: 1
-          timeoutSeconds: 2
-        livenessProbe:
-          httpGet:
-            path: /ping
-            port: 8080
-            scheme: HTTP
-          failureThreshold: 3
-          initialDelaySeconds: 2
-          periodSeconds: 10
-          successThreshold: 1
-          timeoutSeconds: 2
+        # readinessProbe:
+        #   httpGet:
+        #     path: /ping
+        #     port: 8080
+        #     scheme: HTTP
+        #   failureThreshold: 1
+        #   initialDelaySeconds: 2
+        #   periodSeconds: 10
+        #   successThreshold: 1
+        #   timeoutSeconds: 2
+        # livenessProbe:
+        #   httpGet:
+        #     path: /ping
+        #     port: 8080
+        #     scheme: HTTP
+        #   failureThreshold: 3
+        #   initialDelaySeconds: 2
+        #   periodSeconds: 10
+        #   successThreshold: 1
+        #   timeoutSeconds: 2
         lifecycle:
         ports:
         - name: "metrics"
@@ -532,5 +534,58 @@ spec:
       middlewares:
         - name: cors-header
       services:
-        - name: relay-adminpanel
+        - name: relay-adminpanel-service
           port: 9101
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ingress-ssi
+  namespace: {{ .Release.Namespace }}
+  annotations:
+      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: "Host(`{{ $webDomain }}`) && (PathPrefix(`/get_application_schema/Otmoic Kyc`) ||  PathPrefix(`/get_presentation_definition/Otmoic Kyc`))"
+      kind: Rule
+      middlewares:
+        - name: cors-header
+      services:
+        - name: otmoic-vc-service
+          port: 4001
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: reputation-stripprefix
+  namespace: {{ .Release.Namespace }}
+  annotations:
+      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+spec:
+  stripPrefix:
+    prefixes:
+      - /reputation
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ingress-reputation
+  namespace: {{ .Release.Namespace }}
+  annotations:
+      app.kubernetes.io/ingress.class: traefik-{{ .Release.Namespace }}
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: "Host(`{{ $webDomain }}`) && (PathPrefix(`/reputation/`))"
+      kind: Rule
+      middlewares:
+        - name: cors-header
+        - name: reputation-stripprefix
+      services:
+        - name: point-service
+          port: 1235
