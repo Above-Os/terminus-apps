@@ -11,6 +11,19 @@ spec:
     requests:
       storage: 100Mi
 ---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: otmoic-vc-data2
+  namespace: {{ .Release.Namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+  volumeMode: Filesystem
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -86,12 +99,15 @@ spec:
     spec:
       volumes:
         - name: config
-          configMap: 
+          configMap:
             name: otmoic-vc-config
-            # defaultMode: 0777
+            defaultMode: 420
         - name: data
           persistentVolumeClaim:
             claimName: otmoic-vc-data
+        - name: data2
+          persistentVolumeClaim:
+            claimName: otmoic-vc-data2
       initContainers:
         - name: init-data
           image: 'busybox:latest'
@@ -111,52 +127,146 @@ spec:
             runAsUser: 0
       containers:
         - name: vc-gate
-          image: aboveos/verifiable-credential-gate:otmoic-latest
+          image: 'aboveos/verifiable-credential-gate:otmoic-latest'
+          resources:
+            requests:
+              cpu: 1m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+          command:
+            - node
+            - packages/gate/dist/main.js
           ports:
-          - containerPort: 4001
+            - containerPort: 4001
+              protocol: TCP
           env:
             - name: CLIENT_ID
               value: Y05OU3hYOHB6RUN3SGVPa2JzeXo6MTpjaQ
             - name: CLIENT_SECRET
               value: cs
-            - name: CALL_BACK
-              value: https://vc-gate-api.bttcdn.com/twitter_callback
-            - name: CALL_BACK_RESULT
-              value: https://vc-gate-api.bttcdn.com/twitter_result
             - name: TWITTER_CLIENT_ID
               value: Y05OU3hYOHB6RUN3SGVPa2JzeXo6MTpjaQ
             - name: TWITTER_CLIENT_SECRET
               value: tcs
-            - name: TWITTER_OAUTH_HOST
-              value: https://vc-gate-api.bttcdn.com
             - name: TWITTER_CALL_BACK
               value: /twitter_callback
             - name: TWITTER_CALL_BACK_RESULT
               value: /twitter_result
             - name: GOOGLE_CLIENT_ID
-              value: 279288147664-n7av0jerhiqt58rnjv8flitngbog8nbo.apps.googleusercontent.com
+              value: >-
+                279288147664-n7av0jerhiqt58rnjv8flitngbog8nbo.apps.googleusercontent.com
             - name: GOOGLE_CLIENT_SECRET
               value: gcs
             - name: GOOGLE_OAUTH_HOST
-              value: https://vc-gate-api.bttcdn.com
+              value: 'https://vc-gate-api.bttcdn.com'
             - name: GOOGLE_REDIRECT_URL
               value: /google_callback
             - name: GOOGLE_CALL_BACK_RESULT
               value: /google_result
-
+            - name: SSI_SERVICE_URL
+              value: 'http://127.0.0.1:3000'
+            - name: CLOUD_SERVICE_URL
+            - name: SERVER_DID_GATE
+              value: 'http://127.0.0.1:4010'
+            - name: TWITTER_OAUTH_HOST
+              value: 'https://vc-gate-v3.bttcdn.com'
+            - name: CALL_BACK_RESULT
+              value: 'https://vc-gate-v3.bttcdn.com/twitter_result'
+            - name: CALL_BACK
+              value: 'https://vc-gate-v3.bttcdn.com/twitter_callback'
+        - name: vc-admin
+          image: 'aboveos/verifiable-credential-gate:otmoic-latest'
+          command:
+            - node
+            - packages/admin/dist/main.js
+          env:
+            - name: CLIENT_ID
+              value: Y05OU3hYOHB6RUN3SGVPa2JzeXo6MTpjaQ
+            - name: CLIENT_SECRET
+              value: cs
+            - name: TWITTER_CLIENT_ID
+              value: Y05OU3hYOHB6RUN3SGVPa2JzeXo6MTpjaQ
+            - name: TWITTER_CLIENT_SECRET
+              value: tcs
+            - name: TWITTER_CALL_BACK
+              value: /twitter_callback
+            - name: TWITTER_CALL_BACK_RESULT
+              value: /twitter_result
+            - name: GOOGLE_CLIENT_ID
+              value: >-
+                279288147664-n7av0jerhiqt58rnjv8flitngbog8nbo.apps.googleusercontent.com
+            - name: GOOGLE_CLIENT_SECRET
+              value: gcs
+            - name: GOOGLE_OAUTH_HOST
+              value: 'https://vc-gate-api.bttcdn.com'
+            - name: GOOGLE_REDIRECT_URL
+              value: /google_callback
+            - name: GOOGLE_CALL_BACK_RESULT
+              value: /google_result
+            - name: SSI_SERVICE_URL
+              value: 'http://127.0.0.1:3000'
+            - name: CLOUD_SERVICE_URL
+            - name: SERVER_DID_GATE
+              value: 'http://127.0.0.1:4010'
+            - name: TWITTER_OAUTH_HOST
+              value: 'https://vc-gate-v3.bttcdn.com'
+            - name: CALL_BACK_RESULT
+              value: 'https://vc-gate-v3.bttcdn.com/twitter_result'
+            - name: CALL_BACK
+              value: 'https://vc-gate-v3.bttcdn.com/twitter_callback'
+          resources:
+            requests:
+              cpu: 1m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
         - name: did-gate
-          image: aboveos/did-gate:latest
+          image: 'aboveos/did-gate:v3-latest'
+          command:
+            - node
+            - packages/provider/dist/main.js
+          ports:
+            - containerPort: 4010
+              protocol: TCP
+          env:
+            - name: URI_DID_HTTP
+              value: 'http://did-http-v2d3-svc:12345/'
+            - name: URI_CLOUD_API
+              value: 'https://cloud-api.bttcdn.com/'
+          resources:
+            requests:
+              cpu: 1m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
           volumeMounts:
             - name: data
-              mountPath: /data
-        - name: vc
-          image: aboveos/vc:latest
+              mountPath: /src/data
+        - name: ssi-service
+          image: 'kldtks/edge:ssi-service-005-otmoic'
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 1m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
           volumeMounts:
             - name: data
-              mountPath: /data
-          securityContext:
-            runAsUser: 0
-          command: ["/vc", "-c", "/data/config.yaml"] 
+              mountPath: /app/db
+            - name: data2
+              mountPath: /app/db1
+
 
 ---
 apiVersion: v1
