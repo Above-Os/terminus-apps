@@ -4,24 +4,24 @@ metadata:
   name: otmoic-amm-base-config-data
   namespace: "{{ .Release.Namespace }}"
 data:
-  amm_config.json: '{"chainDataConfig":[{"chainId":9006,"config":{"maxSwapNativeTokenValue":"50000","minSwapNativeTokenValue":"0.5"}}],"bridgeBaseConfig":{"defaultFee":"0.003","enabledHedge":false},"bridgeConfig":[],"orderBookType":"market","hedgeConfig":{"hedgeAccount":"005","hedgeType":"CoinSpotHedge","accountList":[{"enablePrivateStream":false,"apiType":"exchange_adapter","accountId":"001","exchangeName":"binance","spotAccount":{"apiKey":"","apiSecret":""},"usdtFutureAccount":{"apiKey":"","apiSecret":""},"coinFutureAccount":{"apiKey":"","apiSecret":""}}]}}'
+  amm_config.json: '{"chainDataConfig":[{"chainId":9006,"config":{"maxSwapNativeTokenValue":"50000","minSwapNativeTokenValue":"0.5"}}],"bridgeBaseConfig":{"defaultFee":"0.003","enabledHedge":false},"bridgeConfig":[],"orderBookType":"market","exchangeName":"binance","hedgeConfig":{"hedgeAccount":"005","hedgeType":"CoinSpotHedge","accountList":[{"enablePrivateStream":false,"apiType":"exchange_adapter","accountId":"001","exchangeName":"binance","spotAccount":{"apiKey":"","apiSecret":""},"usdtFutureAccount":{"apiKey":"","apiSecret":""},"coinFutureAccount":{"apiKey":"","apiSecret":""}}]}}'
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: obridge-amm-amm-01
+  name: amm-amm-01
   namespace: {{ .Release.Namespace }}
   labels:
-    app: obridge-amm-amm-01
+    app: amm-amm-01
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: obridge-amm-amm-01
+      app: amm-amm-01
   template:
     metadata:
       labels:
-        app: obridge-amm-amm-01
+        app: amm-amm-01
     spec:
       volumes:
         - name: base-data-config
@@ -32,7 +32,7 @@ spec:
                 path: amm_config.json
             defaultMode: 420
       containers:
-        - name: obridge-amm-amm-01
+        - name: amm-amm-01
           image: otmoic/otmoic-lpnode-amm:latest
           imagePullPolicy: Always
           ports:
@@ -43,7 +43,7 @@ spec:
               mountPath: /data/data_config
           env:
             - name: STATUS_KEY
-              value: obridge-amm-status-report-amm-01
+              value: amm-status-report-amm-01
             - name: OS_API_KEY
               value: {{ .Values.os.appKey }}
             - name: OS_API_SECRET
@@ -61,7 +61,7 @@ spec:
             - name: NODE_ENV
               value: production
             - name: LP_MARKET_SERVICE_HOST
-              value: obridge-lpnode-market
+              value: lpnode-market
             - name: LP_ADMIN_PANEL_ACCESS_BASEURL
               value: http://lpnode-admin-server:18006
             - name: MONGODB_PASSWORD
