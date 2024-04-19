@@ -1,12 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
-  name: rank-train-task-worldnews
+  name: rank-r4world
   namespace: {{ .Release.Namespace }}
 spec:
-  schedule: '30 23 * * *'
+  schedule: '*/5 * * * *'
   startingDeadlineSeconds: 0
-  concurrencyPolicy: Replace
+  concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
   suspend: false
@@ -15,7 +15,7 @@ spec:
     secondsAfterCompletion: 3600
     secondsAfterFailure: 3600
   workflowSpec:
-    entrypoint: trainFlow
+    entrypoint: rankFlow
     volumes:
       - name: model
         hostPath:
@@ -23,21 +23,21 @@ spec:
           path: >-
             {{ .Values.userspace.appData }}/rss/model
     templates:
-      - name: trainFlow
+      - name: rankFlow
         steps:
-          - - name: rank-train
-              template: rank-train-template
+          - - name: extractor
+              template: extractor-template
           - - name: rank
               template: rank-template
-      - name: rank-train-template
+      - name: extractor-template
         container:
-          image: 'aboveos/bertv2train:v0.1.11'
+          image: 'beclab/r4extractor:v0.0.5'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: recommendworldnews
+              value: r4world
           volumeMounts:
             - mountPath: /opt/rank_model
               name: model
@@ -49,7 +49,7 @@ spec:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: recommendworldnews
+              value: r4world
           volumeMounts:
             - mountPath: /opt/rank_model
               name: model
