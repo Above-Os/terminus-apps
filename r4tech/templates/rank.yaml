@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
-  name: rank-technews
+  name: rank-r4tech
   namespace: {{ .Release.Namespace }}
 spec:
   schedule: '*/5 * * * *'
@@ -31,25 +31,25 @@ spec:
               template: rank-template
       - name: extractor-template
         container:
-          image: 'aboveos/rss-extractor'
+          image: 'beclab/r4extractor:v0.0.5'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: recommendtechnews
+              value: r4tech
           volumeMounts:
             - mountPath: /opt/rank_model
               name: model
       - name: rank-template
         container:
-          image: 'aboveos/bertv2rank:v0.1.11'
+          image: 'beclab/r4rank'
           imagePullPolicy: Always
           env:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: recommendtechnews
+              value: r4tech
           volumeMounts:
             - mountPath: /opt/rank_model
               name: model
