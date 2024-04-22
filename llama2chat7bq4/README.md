@@ -1,65 +1,11 @@
----
-language:
-- en
-license: llama2
-tags:
-- facebook
-- meta
-- pytorch
-- llama
-- llama-2
-model_name: Llama 2 7B Chat
-arxiv: 2307.09288
-base_model: meta-llama/Llama-2-7b-chat-hf
-inference: false
-model_creator: Meta Llama 2
-model_type: llama
-pipeline_tag: text-generation
-prompt_template: '[INST] <<SYS>>
-
-  You are a helpful, respectful and honest assistant. Always answer as helpfully as
-  possible, while being safe.  Your answers should not include any harmful, unethical,
-  racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses
-  are socially unbiased and positive in nature. If a question does not make any sense,
-  or is not factually coherent, explain why instead of answering something not correct.
-  If you don''t know the answer to a question, please don''t share false information.
-
-  <</SYS>>
-
-  {prompt}[/INST]
-
-  '
-quantized_by: TheBloke
----
-
-<!-- header start -->
-<!-- 200823 -->
-<div style="width: auto; margin-left: auto; margin-right: auto">
-<img src="https://i.imgur.com/EBdldam.jpg" alt="TheBlokeAI" style="width: 100%; min-width: 400px; display: block; margin: auto;">
-</div>
-<div style="display: flex; justify-content: space-between; width: 100%;">
-    <div style="display: flex; flex-direction: column; align-items: flex-start;">
-        <p style="margin-top: 0.5em; margin-bottom: 0em;"><a href="https://discord.gg/theblokeai">Chat & support: TheBloke's Discord server</a></p>
-    </div>
-    <div style="display: flex; flex-direction: column; align-items: flex-end;">
-        <p style="margin-top: 0.5em; margin-bottom: 0em;"><a href="https://www.patreon.com/TheBlokeAI">Want to contribute? TheBloke's Patreon page</a></p>
-    </div>
-</div>
-<div style="text-align:center; margin-top: 0em; margin-bottom: 0em"><p style="margin-top: 0.25em; margin-bottom: 0em;">TheBloke's LLM work is generously supported by a grant from <a href="https://a16z.com">andreessen horowitz (a16z)</a></p></div>
-<hr style="margin-top: 1.0em; margin-bottom: 1.0em;">
-<!-- header end -->
-
 # Llama 2 7B Chat - GGUF
 - Model creator: [Meta Llama 2](https://huggingface.co/meta-llama)
 - Original model: [Llama 2 7B Chat](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)
 
-<!-- description start -->
 ## Description
 
 This repo contains GGUF format model files for [Meta Llama 2's Llama 2 7B Chat](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf).
 
-<!-- description end -->
-<!-- README_GGUF.md-about-gguf start -->
 ### About GGUF
 
 GGUF is a new format introduced by the llama.cpp team on August 21st 2023. It is a replacement for GGML, which is no longer supported by llama.cpp. GGUF offers numerous advantages over GGML, such as better tokenisation, and support for special tokens. It is also supports metadata, and is designed to be extensible.
@@ -76,17 +22,14 @@ Here is an incomplate list of clients and libraries that are known to support GG
 * [llama-cpp-python](https://github.com/abetlen/llama-cpp-python), a Python library with GPU accel, LangChain support, and OpenAI-compatible API server.
 * [candle](https://github.com/huggingface/candle), a Rust ML framework with a focus on performance, including GPU support, and ease of use.
 
-<!-- README_GGUF.md-about-gguf end -->
-<!-- repositories-available start -->
 ## Repositories available
 
 * [AWQ model(s) for GPU inference.](https://huggingface.co/TheBloke/Llama-2-7b-Chat-AWQ)
 * [GPTQ models for GPU inference, with multiple quantisation parameter options.](https://huggingface.co/TheBloke/Llama-2-7b-Chat-GPTQ)
 * [2, 3, 4, 5, 6 and 8-bit GGUF models for CPU+GPU inference](https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF)
 * [Meta Llama 2's original unquantised fp16 model in pytorch format, for GPU inference and for further conversions](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)
-<!-- repositories-available end -->
 
-<!-- prompt-template start -->
+
 ## Prompt template: Llama-2-Chat
 
 ```
@@ -97,10 +40,7 @@ You are a helpful, respectful and honest assistant. Always answer as helpfully a
 
 ```
 
-<!-- prompt-template end -->
 
-
-<!-- compatibility_gguf start -->
 ## Compatibility
 
 These quantised GGUFv2 files are compatible with llama.cpp from August 27th onwards, as of commit [d0cee0d36d5be95a0d9088b674dbb27354107221](https://github.com/ggerganov/llama.cpp/commit/d0cee0d36d5be95a0d9088b674dbb27354107221)
@@ -120,9 +60,7 @@ The new methods available are:
 
 Refer to the Provided Files table below to see what files use which methods, and how.
 </details>
-<!-- compatibility_gguf end -->
 
-<!-- README_GGUF.md-provided-files start -->
 ## Provided files
 
 | Name | Quant method | Bits | Size | Max RAM required | Use case |
@@ -144,9 +82,6 @@ Refer to the Provided Files table below to see what files use which methods, and
 
 
 
-<!-- README_GGUF.md-provided-files end -->
-
-<!-- README_GGUF.md-how-to-download start -->
 ## How to download GGUF files
 
 **Note for manual downloaders:** You almost never want to clone the entire repo! Multiple different quantisation formats are provided, and most users only want to pick and download a single file.
@@ -201,9 +136,7 @@ HUGGINGFACE_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download TheBloke/Llama-2-7
 
 Windows CLI users: Use `set HUGGINGFACE_HUB_ENABLE_HF_TRANSFER=1` before running the download command.
 </details>
-<!-- README_GGUF.md-how-to-download end -->
 
-<!-- README_GGUF.md-how-to-run start -->
 ## Example `llama.cpp` command
 
 Make sure you are using `llama.cpp` from commit [d0cee0d36d5be95a0d9088b674dbb27354107221](https://github.com/ggerganov/llama.cpp/commit/d0cee0d36d5be95a0d9088b674dbb27354107221) or later.
@@ -261,10 +194,7 @@ Here's guides on using llama-cpp-python or ctransformers with LangChain:
 * [LangChain + llama-cpp-python](https://python.langchain.com/docs/integrations/llms/llamacpp)
 * [LangChain + ctransformers](https://python.langchain.com/docs/integrations/providers/ctransformers)
 
-<!-- README_GGUF.md-how-to-run end -->
 
-<!-- footer start -->
-<!-- 200823 -->
 ## Discord
 
 For further support, and discussions on these models and AI in general, join us at:
@@ -295,9 +225,7 @@ Thank you to all my generous patrons and donaters!
 
 And thank you again to a16z for their generous grant.
 
-<!-- footer end -->
 
-<!-- original-model-card start -->
 # Original model card: Meta Llama 2's Llama 2 7B Chat
 
 # **Llama 2**
@@ -415,5 +343,3 @@ Please report any software “bug,” or other problems with the models through 
 |7B| [Link](https://huggingface.co/llamaste/Llama-2-7b) | [Link](https://huggingface.co/llamaste/Llama-2-7b-hf) | [Link](https://huggingface.co/llamaste/Llama-2-7b-chat) | [Link](https://huggingface.co/llamaste/Llama-2-7b-chat-hf)|
 |13B| [Link](https://huggingface.co/llamaste/Llama-2-13b) | [Link](https://huggingface.co/llamaste/Llama-2-13b-hf) | [Link](https://huggingface.co/llamaste/Llama-2-13b-chat) | [Link](https://huggingface.co/llamaste/Llama-2-13b-hf)|
 |70B| [Link](https://huggingface.co/llamaste/Llama-2-70b) | [Link](https://huggingface.co/llamaste/Llama-2-70b-hf) | [Link](https://huggingface.co/llamaste/Llama-2-70b-chat) | [Link](https://huggingface.co/llamaste/Llama-2-70b-hf)|
-
-<!-- original-model-card end -->
