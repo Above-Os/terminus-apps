@@ -5,7 +5,6 @@ Welcome to R4World, Feel free to subscribe!
 This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4World is specializes in international news from the mainstream press, bringing global updates directly to you.
 
 #### KEY FEATURES
-
 - **Security and Privacy First**: This recommendation workflow only requires an internet connection for installation and upgrades. All recommendation processes operate on your local Terminus Edge, ensuring no data is sent to third-party servers. Your personal behavioral data is encrypted and stored locally for added security.
 
 - **Personalized Content Curation**: This recommendation algorithm learns from your interactions, such as reads, likes, and bookmarks, to create a dynamic user profile. It will automatically adjust recommendations based on changes in your behavior and global news trends.
@@ -17,7 +16,6 @@ This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's 
 
 
 #### WORKFLOW OVERVIEW
-
 This recommendation workflow is developed under the Terminus Recommend Protocol, which is designed with privacy protection in mind.
 
 Upon installing this recommendation from the Terminus Market, all processes run in offline sandboxs. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local Terminus edge, the content provider will not be uninformed about your interests. This design ensures the maximum protection of your privacy.
