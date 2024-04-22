@@ -1,5 +1,6 @@
-{{- $webDomain := printf "%s.%s" "otmoiclp" .Values.user.zone -}}
-# Source: obridge-lpnode/templates/service.yaml
+{{- $traefikDomainENV := split  ","  .Values.domain.traefik -}}
+{{- $webDomain := index $traefikDomainENV "_0" -}}
+# Source: lpnode/templates/service.yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -15,7 +16,7 @@ spec:
       port: 9202
       targetPort: 9202
 ---
-# Source: obridge-lpnode/templates/deployment.yaml
+# Source: lpnode/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,8 +36,15 @@ spec:
     spec:
       containers:
       - name: otmoiclp
-        image: kldtks/edge:otmoic-lpnode-latest
+        image: otmoic/otmoic-lpnode:latest
         imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: 20m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
         ports:
           - containerPort: 9202
         env:
@@ -61,4 +69,4 @@ spec:
           - name: LPNODE_URI
             value: "https://{{ $webDomain }}/lpnode"
           - name: RELAY_URI
-            value: "https://otmoicrelay.saidev.snowinning.com/relay"
+            value: "https://5b4522f4.saidevgp01.relay-1-testnet.otmoic.cloud/relay"
