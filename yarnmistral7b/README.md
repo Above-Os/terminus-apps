@@ -1,6 +1,3 @@
-![TheBlokeAI](https://i.imgur.com/EBdldam.jpg)
-
-
 # Yarn Mistral 7B 128K - GGUF
 - Model creator: [NousResearch](https://huggingface.co/NousResearch)
 - Model card: [Yarn-Mistral-7B-128k-GGUF](https://huggingface.co/TheBloke/Yarn-Mistral-7B-128k-GGUF)
@@ -17,7 +14,6 @@ These files were quantised using hardware kindly provided by [Massed Compute](ht
 
 ```
 {prompt}
-
 ```
 
 ## Compatibility

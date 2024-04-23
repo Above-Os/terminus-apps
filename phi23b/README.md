@@ -1,6 +1,3 @@
-![TheBlokeAI](https://i.imgur.com/EBdldam.jpg)
-
-
 # Phi 2 - GGUF
 - Model creator: [Microsoft](https://huggingface.co/microsoft)
 - Model card: [phi-2-GGUF](https://huggingface.co/TheBloke/phi-2-GGUF)
@@ -16,7 +13,6 @@ This repo contains GGUF format model files for [Microsoft's Phi 2](https://huggi
 ```
 Instruct: {prompt}
 Output:
-
 ```
 
 ## Compatibility

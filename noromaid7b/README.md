@@ -1,6 +1,3 @@
-
-![image/png](https://cdn-uploads.huggingface.co/production/uploads/630dfb008df86f1e5becadc3/VKX2Z2yjZX5J8kXzgeCYO.png)
-
 # Disclaimer:
 
 **This is a ***TEST*** version, don't expect everything to work!!!**
@@ -44,7 +41,6 @@ Below is an instruction that describes a task. Write a response that appropriate
 {prompt}
 
 ### Response:
-
 ```
 
 ## Training data used:

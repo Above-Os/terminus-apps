@@ -3,27 +3,25 @@
 Welcome to R4Tech, Feel free to subscribe!
 
 This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4Tech specializes in news from the science and technology fields, providing in-depth coverage of tech industry leaders.
-<br>
-<br>
 
 #### KEY FEATURES
-- **Security and Privacy First** <br> 
+**Security and Privacy First** <br> 
 This workflow requires an internet connection only for installation and upgrades. It operates in offline sandbox on your local Terminus Edge, with no data sent to third-party servers. Your personal data is encrypted and stored locally.
 
-- **Personalized Content Curation**<br>
+**Personalized Content Curation**<br>
 The recommendation algorithm adapts to your interactions, such as reading, liking, and bookmarking, to create a dynamic user profile. It automatically updates recommendations based on changes in your behavior and global news trends.
 
-- **Easy Monitoring**<br>
+**Easy Monitoring**<br>
 This workflow conducts content filtering and sorting in a simple and clear way. By collecting detailed logs, it provides a clear view of all ongoing processes. This understanding of what content is filtered prevents you from being trapped in information cocoons.
 
-- **Lightweight Design**<br>
+**Lightweight Design**<br>
 This workflow employs a classical recommendation process to achieve better results with minimal resources. It includes crucial steps like recall, pre-rank, and rank. It also utilizes the embedding results from content providers to conserve computational resources.
-<br>
-<br>
 
 #### WORKFLOW OVERVIEW
 
-This recommendation workflow is developed under the Terminus Recommend Protocol, which is designed with privacy protection in mind. Upon installing this recommendation from the Terminus Market, all processes run in offline sandboxs. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local Terminus edge, the content provider will not be uninformed about your interests. The recommended results are stored on you loacl Terminus Edge, and can be accessed via Wise or other compatible reading apps. This design ensures the maximum protection of your privacy. This recommendation algorithm comprises 2 types of workflows.
+This recommendation workflow is developed under the Terminus Recommend Protocol, which is designed with privacy protection in mind.
+
+Upon installing this recommendation from the Terminus Market, all processes run in offline sandboxs. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local Terminus edge, the content provider will not be uninformed about your interests. The recommended results are stored on you loacl Terminus Edge, and can be accessed via Wise or other compatible reading apps. This design ensures the maximum protection of your privacy. This recommendation algorithm comprises 2 types of workflows.
 
 **Recommendation Workflows:**
 - Executes every 10 minutes, provides you the most recent news.
@@ -35,5 +33,8 @@ This recommendation workflow is developed under the Terminus Recommend Protocol,
 **Training Workflow:**
 - Executes daily.
 - Uses behavioral data and global news trends to train the model used by in Recommendation Workflow
+
+
+
 
 

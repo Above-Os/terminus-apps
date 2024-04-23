@@ -1,12 +1,10 @@
-![Jan banner](https://github.com/janhq/jan/assets/89722390/35daac7d-b895-487c-a6ac-6663daaad78e)
-
-[Jan](https://jan.ai/) | [Discord](https://discord.gg/AsJ8krTT3N)
-
 # Model Description
 This is a GGUF version of [jan-hq/stealth-v1.3](https://huggingface.co/jan-hq/stealth-v1.3)
 - Model creator: [jan-hq](https://huggingface.co/jan-hq)
 - Original model: [stealth-v1.3](https://huggingface.co/jan-hq/stealth-v1.3)
 - Model description: [Readme](https://huggingface.co/jan-hq/stealth-v1.3/blob/main/README.md)
+
+[Jan](https://jan.ai/) | [Discord](https://discord.gg/AsJ8krTT3N)
 
 # Prompt template
 
@@ -17,11 +15,11 @@ ChatML
 <|im_start|>user
 {prompt}<|im_end|>
 <|im_start|>assistant
-
 ```
 
 
-# [Open LLM Leaderboard Evaluation Results](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard)
+# Open LLM Leaderboard Evaluation Results
+
 Detailed results can be found [here](https://huggingface.co/datasets/open-llm-leaderboard/details_jan-hq__stealth-v1.3)
 
 |             Metric              |Value|
@@ -42,4 +40,4 @@ Jan believes in the need for an open-source AI ecosystem and is building the inf
 Jan's long-term vision is to build a cognitive framework for future robots, who are practical, useful assistants for humans and businesses in everyday life.
 
 # Jan Model Converter
-This is a repository for the [open-source converter](https://github.com/janhq/model-converter. We would be grateful if the community could contribute and strengthen this repository. We are aiming to expand the repo that can convert into various types of format
+This is a repository for the [open-source converter](https://github.com/janhq/model-converter). We would be grateful if the community could contribute and strengthen this repository. We are aiming to expand the repo that can convert into various types of format.
