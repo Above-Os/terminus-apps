@@ -1,5 +1,3 @@
-![DeepSeek Coder](https://cdn-uploads.huggingface.co/production/uploads/64b566ab04fa6584c03b5247/5COagfF6EwrV4utZJ-ClI.png)
-
 # CodeNinja: Your Advanced Coding Assistant
 
 ## Overview

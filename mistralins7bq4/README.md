@@ -1,5 +1,3 @@
-![TheBlokeAI](https://i.imgur.com/EBdldam.jpg)
-
 # Mistral 7B Instruct v0.2 - GGUF
 - Model creator: [Mistral AI_](https://huggingface.co/mistralai)
 - Model card: [Mistral-7B-Instruct-v0.2-GGUF](https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF)
@@ -16,7 +14,6 @@ These files were quantised using hardware kindly provided by [Massed Compute](ht
 
 ```
 <s>[INST] {prompt} [/INST]
-
 ```
 
 ## Compatibility
