@@ -2,27 +2,27 @@
 
 Welcome to R4World, Feel free to subscribe!
 
-This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4World is specializes in international news from the mainstream press, bringing global updates directly to you.
+This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4World is specializes in international news from the mainstream press, bringing global updates directly to you.<br>
+<br>
 
 #### KEY FEATURES
+- **Security and Privacy First** <br> 
+This workflow requires an internet connection only for installation and upgrades. It operates in offline sandbox on your local Terminus Edge, with no data sent to third-party servers. Your personal data is encrypted and stored locally.
 
-- **Security and Privacy First**: This recommendation workflow only requires an internet connection for installation and upgrades. All recommendation processes operate on your local Terminus Edge, ensuring no data is sent to third-party servers. Your personal behavioral data is encrypted and stored locally for added security.
+- **Personalized Content Curation**<br>
+The recommendation algorithm adapts to your interactions, such as reading, liking, and bookmarking, to create a dynamic user profile. It automatically updates recommendations based on changes in your behavior and global news trends.
 
-- **Personalized Content Curation**: This recommendation algorithm learns from your interactions, such as reads, likes, and bookmarks, to create a dynamic user profile. It will automatically adjust recommendations based on changes in your behavior and global news trends.
+- **Easy Monitoring**<br>
+This workflow conducts content filtering and sorting in a simple and clear way. By collecting detailed logs, it provides a clear view of all ongoing processes. This understanding of what content is filtered prevents you from being trapped in information cocoons.
 
-- **Easy Monitoring**: This recommendation workflow utilize a simple and clear workflow to coordinate the entire content filtering and sorting process. Detailed logs are collected, providing a clear and concise view of all ongoing processes. This improves workflow transparency, assisting you in understanding what kind of content is being filtered out, and preventing information cocoons.
-
-- **Lightweight Design**: This recommendation workflow utilizes a classical recommendation process to achieve better results while using minimal resources. It encompasses essential processes like recall, pre-rank, and rank. The workflow also leverages embedding results from content providers to further conserve computational resources.
-
-
+- **Lightweight Design**<br>
+This workflow employs a classical recommendation process to achieve better results with minimal resources. It includes crucial steps like recall, pre-rank, and rank. It also utilizes the embedding results from content providers to conserve computational resources.
+<br>
+<br>
 
 #### WORKFLOW OVERVIEW
 
-This recommendation workflow is developed under the Terminus Recommend Protocol, which is designed with privacy protection in mind.
-
-Upon installing this recommendation from the Terminus Market, all processes run in offline sandboxs. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local Terminus edge, the content provider will not be uninformed about your interests. This design ensures the maximum protection of your privacy.
-
-This recommendation algorithm comprises 2 types of workflows, each with a few steps:
+This recommendation workflow is developed under the Terminus Recommend Protocol, which is designed with privacy protection in mind. Upon installing this recommendation from the Terminus Market, all processes run in offline sandboxs. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local Terminus edge, the content provider will not be uninformed about your interests. The recommended results are stored on you loacl Terminus Edge, and can be accessed via Wise or other compatible reading apps. This design ensures the maximum protection of your privacy. This recommendation algorithm comprises 2 types of workflows.
 
 **Recommendation Workflows:**
 - Executes every 10 minutes, provides you the most recent news.
@@ -35,4 +35,4 @@ This recommendation algorithm comprises 2 types of workflows, each with a few st
 - Executes daily.
 - Uses behavioral data and global news trends to train the model used by in Recommendation Workflow
 
-The recommended results are stored on you loacl Terminus Edge, and can be accessed via Wise or other compatible reading apps.
+
