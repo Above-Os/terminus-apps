@@ -1,20 +1,40 @@
-### KEY FEATURES
-- **Security and Privacy First**: All recommendation process run on your local Terminus Node, no data send out to any third-party servers.  All your personal behavioral data is encrypted and stored locally.
+#### INTRODUCTION
 
-- **Personalized Content Curation**: The algorithm learns from your interactions, including reads, likes, bookmarks, to build a dynamic user profile.
+Welcome to R4Tech, Feel free to subscribe!
 
-- **Adaptive Learning**: Automatically adjusts recommendations based on changes in user behavior and global news trends. 
+This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4Tech specializes in news from the science and technology fields, providing in-depth coverage of tech industry leaders.
 
-- ** Lightweight Design**: Optimized workflow to ensure minimal resource usage. This recommendation workflow leverages the embedding result from the index providers to conserve compute resources.
+#### KEY FEATURES
+**Security and Privacy First** <br> 
+This workflow requires an internet connection only for installation and upgrades. It operates in offline sandbox on your local Terminus Edge, with no data sent to third-party servers. Your personal data is encrypted and stored locally.
 
-- **Zero Maintenance**: This recommendation has a built-in upgrade workflows. It can update the algorithm, data source and workflows by itself.
+**Personalized Content Curation**<br>
+The recommendation algorithm adapts to your interactions, such as reading, liking, and bookmarking, to create a dynamic user profile. It automatically updates recommendations based on changes in your behavior and global news trends.
 
-- **Easy Monitoring**: Captures detailed logs for monitoring the status of the workflow and locating problems.
+**Easy Monitoring**<br>
+This workflow conducts content filtering and sorting in a simple and clear way. By collecting detailed logs, it provides a clear view of all ongoing processes. This understanding of what content is filtered prevents you from being trapped in information cocoons.
 
-### WORKFLOW SPECIFICATIONS
-This recommendation is developed under the Terminus Recommend Protocol, which is illustrated below. This recommendation workflow does not require an internet connection except for installation and upgrades. All recommendation process are running offline on your local Terminus Node. Therefore, you don’t have to worry about personal data leaking to third parties. It also doesn't store any of your content or behavioral data, all data sync and management works are done by Terminus OS. 
-![](https://www.cflowapps.com/wp-content/uploads/2023/04/Lucidchart.png)
+**Lightweight Design**<br>
+This workflow employs a classical recommendation process to achieve better results with minimal resources. It includes crucial steps like recall, pre-rank, and rank. It also utilizes the embedding results from content providers to conserve computational resources.
 
-The recommendation algorithm has 2 workflows, each containing a few steps. 
-1. Recommendation Workflow. This workflow has 3 steps and runs every 10 mins to ensure you get the latest news.
-2. Training Workflow. This workflow runs every day to adjust the content ranking algorithm based on changes in your behavior and global news trends.
+#### WORKFLOW OVERVIEW
+
+This recommendation workflow is developed under the Terminus Recommend Protocol, which is designed with privacy protection in mind.
+
+Upon installing this recommendation from the Terminus Market, all processes run in offline sandboxs. As the data first syncs in an unfiltered package, then gets filtered and sorted on your local Terminus edge, the content provider will not be uninformed about your interests. The recommended results are stored on you loacl Terminus Edge, and can be accessed via Wise or other compatible reading apps. This design ensures the maximum protection of your privacy. This recommendation algorithm comprises 2 types of workflows.
+
+**Recommendation Workflows:**
+- Executes every 10 minutes, provides you the most recent news.
+- Includes recall, pre-rank, and rank processes. 
+    - The recall processe eliminates irrelevant content, leaving approximately 10,000 articles for further sorting.
+    - The pre-rank processe sorts the recalled content and fetches the full text of top articles. 
+    - The rank processe then fine-tunes the order based on the full-text content, suggesting content that aligns best with your current interests.
+
+**Training Workflow:**
+- Executes daily.
+- Uses behavioral data and global news trends to train the model used by in Recommendation Workflow
+
+
+
+
+
