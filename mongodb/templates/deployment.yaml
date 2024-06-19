@@ -86,6 +86,14 @@ spec:
         runAsUser: 1001
       podSecurityContext:
         fsGroup: 1001
+      affinity:
+        advanced:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-role.kubernetes.io/master
+                  operator: Exists
       resources:
         limits:
           cpu: "1"
@@ -124,6 +132,14 @@ spec:
         hostPath:
           type: Directory
           path: {{ $mongo_rootpath }}/mdbdata-config
+      affinity:
+        advanced:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                  - key: node-role.kubernetes.io/master
+                    operator: Exists
       resources:
         limits:
           cpu: "500m"
@@ -226,6 +242,13 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name | quote }}
         helm.sh/chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
     spec:
+      affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/master
+                      operator: Exists
       restartPolicy: Never
       containers:
       - name: post-delete
