@@ -33,19 +33,6 @@ spec:
         app: calendar
     spec:
       containers:
-      - name: redis
-        image: redis:7.0.5-alpine3.16
-        imagePullPolicy: IfNotPresent
-        resources:
-          requests:
-            cpu: 50m
-            memory: 32Mi
-          limits:
-            cpu: 500m
-            memory: 64Mi        
-        volumeMounts:
-        - name: redis-data
-          mountPath: /data  
       - name: calendar-ui
         image: aboveos/calendar:v0.1.0
         imagePullPolicy: IfNotPresent
@@ -84,11 +71,11 @@ spec:
         - name: DB_PORT
           value: "{{ .Values.postgres.port }}"
         - name: DB_USERNAME
-          value: "calendar"  
+          value: {{ .Values.postgres.username }}  
         - name: DB_PASSWORD
           value: {{ .Values.postgres.password }}
         - name: DB_DATABASE
-          value: "bloben_api" 
+          value: {{ .Values.postgres.databases.bloben_api }}
         - name: DB_CONNECTION
           value: "postgres"    
         - name: DB_SYNCHRONIZE
@@ -99,10 +86,8 @@ spec:
           value: "/usr/app/server/data/entity/*.js"    
         - name: DB_MIGRATIONS
           value: "/usr/app/server/data/migrations/*.js"                     
-        - name: REDIS_HOST
-          value: localhost
-        - name: REDIS_PORT
-          value: "6379"    
+        - name: REDIS_URL
+          value: "redis://:{{ .Values.redis.password }}@{{ .Values.redis.host }}:{{ .Values.redis.port }}/"
         - name: SESSION_SECRET
           value: "asdasd"
         - name: OTP_SECRET
@@ -111,11 +96,7 @@ spec:
           value: "asfasgagag" 
         ports:
         - containerPort: 8080
-      volumes:
-      - name: redis-data
-        hostPath:
-          type: DirectoryOrCreate
-          path: {{ .Values.userspace.appData }}/calendar/redisdata  
+      
 
 ---
 apiVersion: v1
