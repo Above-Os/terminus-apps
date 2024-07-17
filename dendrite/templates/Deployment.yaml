@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: '{{ .Release.Namespace }}'
+  name: dendrite
+  labels:
+    helm.sh/chart: dendrite-0.13.5
+    app.kubernetes.io/name: dendrite
+    app.kubernetes.io/instance: dendrite
+    app.kubernetes.io/version: "0.13.4"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dendrite
+      app.kubernetes.io/instance: dendrite
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dendrite
+        app.kubernetes.io/instance: dendrite
+      annotations:
+        confighash: secret-0688e192e85752e66fe9b4930711428c
+    spec:
+      volumes:
+      - name: dendrite-conf-vol
+        secret:
+          secretName: dendrite-conf
+      - name: dendrite-signing-key
+        secret:
+          secretName: "dendrite-signing-key"
+
+
+      - name: dendrite-jetstream
+        hostPath:
+          path: '{{ .Values.userspace.appCache }}/dendrite/jetstream'
+          type: DirectoryOrCreate
+      - name: dendrite-media
+        hostPath:
+          path: '{{ .Values.userspace.appCache }}/dendrite/media'
+          type: DirectoryOrCreate
+      - name: dendrite-search
+        hostPath:
+          path: '{{ .Values.userspace.appCache }}/dendrite/search'
+          type: DirectoryOrCreate
+      containers:
+      - name: dendrite
+        image: ghcr.io/matrix-org/dendrite-monolith:v0.13.4
+        imagePullPolicy: IfNotPresent
+        args:
+          - '--config'
+          - '/etc/dendrite/dendrite.yaml'
+        ports:
+          - name: http
+            containerPort: 8008
+            protocol: TCP
+        resources:
+          limits:
+            memory: 4096Mi
+            cpu: 2000m
+          requests:
+            memory: 512Mi
+            cpu: 100m
+        volumeMounts:
+        - mountPath: /etc/dendrite/
+          name: dendrite-conf-vol
+        - mountPath: /etc/dendrite/secrets/
+          name: dendrite-signing-key
+        - mountPath: /data/media_store
+          name: dendrite-media
+        - mountPath: /data/jetstream
+          name: dendrite-jetstream
+        - mountPath: /data/search
+          name: dendrite-search
+        livenessProbe:
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+          httpGet:
+            path: /_dendrite/monitor/health
+            port: http
+        readinessProbe:
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+          httpGet:
+            path: /_dendrite/monitor/health
+            port: http
+        startupProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+          httpGet:
+            path: /_dendrite/monitor/up
+            port: http
