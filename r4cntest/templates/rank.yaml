@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
-  name: rank-train-r4sport
+  name: rank-r4cntest
   namespace: {{ .Release.Namespace }}
 spec:
-  schedule: '21 23 * * *'
+  schedule: '13,43 * * * *'
   startingDeadlineSeconds: 0
   concurrencyPolicy: Replace
   successfulJobsHistoryLimit: 1
@@ -15,7 +15,7 @@ spec:
     secondsAfterCompletion: 3600
     secondsAfterFailure: 3600
   workflowSpec:
-    entrypoint: trainFlow
+    entrypoint: rankFlow
     volumes:
       - name: model
         hostPath:
@@ -23,21 +23,21 @@ spec:
           path: >-
             {{ .Values.userspace.appData }}/rss/model
     templates:
-      - name: trainFlow
+      - name: rankFlow
         steps:
-          - - name: rank-train
-              template: rank-train-template
+          - - name: extractor
+              template: extractor-template
           - - name: rank
               template: rank-template
-      - name: rank-train-template
+      - name: extractor-template
         container:
-          image: 'beclab/r4train:v0.0.17'
+          image: 'beclab/r4extractor:v0.0.10'
           imagePullPolicy: IfNotPresent
           env:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: r4sport
+              value: r4cntest
           volumeMounts:
             - mountPath: /opt/rank_model
               name: model
@@ -49,7 +49,7 @@ spec:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
-              value: r4sport
+              value: r4cntest
           volumeMounts:
             - mountPath: /opt/rank_model
               name: model
