@@ -1,0 +1,65 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: element
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    app: element
+  annotations:
+    deployment.kubernetes.io/revision: '1'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: element
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: element
+    spec:
+      containers:
+        - name: element
+          image: 'vectorim/element-web:v1.11.71-rc.0'
+          ports:
+            - name: http-0
+              containerPort: 80
+              protocol: TCP
+          resources: 
+            limits:
+              memory: 200Mi
+              cpu: 200m
+            requests:
+              memory: 20Mi
+              cpu: 1m
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      serviceAccountName: default
+      serviceAccount: default
+      securityContext: {}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: '{{ .Release.Namespace }}'
+  name: element
+  labels:
+    app: element
+spec:
+  selector:
+    app: element
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
