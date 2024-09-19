@@ -104,7 +104,7 @@ spec:
     spec:
       initContainers:
       - name: terminus-sidecar-init
-        image: openservicemesh/init:v1.2.3
+        image: docker.io/aboveos/openservicemesh-init:v1.2.3
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -138,7 +138,7 @@ spec:
 
       containers:
       - name: terminus-envoy-sidecar
-        image: envoyproxy/envoy-distroless:v1.25.2
+        image: docker.io/aboveos/envoyproxy-envoy-distroless:v1.25.2
         imagePullPolicy: IfNotPresent
         resources:
           limits:
@@ -185,7 +185,7 @@ spec:
                 fieldPath: status.podIP
 
       - name: dify-gateway
-        image: beclab/search2-gateway:v0.0.42
+        image: beclab/search2-gateway:v0.0.43
         imagePullPolicy: IfNotPresent
         resources:
           limits:
@@ -254,7 +254,7 @@ spec:
             mountPath: /Home
 
       - name: dify-proxy
-        image: nginx:stable-alpine3.17-slim
+        image: docker.io/aboveos/nginx:stable-alpine3.17-slim
         imagePullPolicy: IfNotPresent
         ports:
         - name: proxy
@@ -295,46 +295,46 @@ spec:
           - key: nginx.conf
             path: nginx.conf
 
----
-apiVersion: sys.bytetrade.io/v1alpha1
-kind: ProviderRegistry
-metadata:
-  name: dify-gateway-provider
-  namespace: user-system-{{ .Values.bfl.username }}
-spec:
-  dataType: gateway
-  deployment: difyfusionclient-deployment
-  description: dify gateway provider
-  endpoint: difyfusionclient.{{ .Release.Namespace }}
-  group: service.difyfusionclient
-  kind: provider
-  namespace: {{ .Release.Namespace }}
-  opApis:
-    - name: DifyGatewayBaseProvider
-      uri: /api/controllers/dify_gateway_base_provider
-  version: v1
-status:
-  state: active
-
----
-apiVersion: sys.bytetrade.io/v1alpha1
-kind: ApplicationPermission
-metadata:
-  name: dify-gateway
-  namespace: user-system-{{ .Values.bfl.username }}
-spec:
-  app: difyfusionclient
-  appid: difyfusionclient
-  key: {{ .Values.os.difyfusionclient.appKey }}
-  secret: {{ .Values.os.difyfusionclient.appSecret }}
-  permissions:
-    - dataType: files
-      group: service.files
-      ops:
-        - GetDatasetFolderStatus
-      version: v1
-status:
-  state: active
+#---
+#apiVersion: sys.bytetrade.io/v1alpha1
+#kind: ProviderRegistry
+#metadata:
+#  name: dify-gateway-provider
+#  namespace: user-system-{{ .Values.bfl.username }}
+#spec:
+#  dataType: gateway
+#  deployment: difyfusionclient-deployment
+#  description: dify gateway provider
+#  endpoint: difyfusionclient.{{ .Release.Namespace }}
+#  group: service.difyfusionclient
+#  kind: provider
+#  namespace: {{ .Release.Namespace }}
+#  opApis:
+#    - name: DifyGatewayBaseProvider
+#      uri: /api/controllers/dify_gateway_base_provider
+#  version: v1
+#status:
+#  state: active
+#
+#---
+#apiVersion: sys.bytetrade.io/v1alpha1
+#kind: ApplicationPermission
+#metadata:
+#  name: dify-gateway
+#  namespace: user-system-{{ .Values.bfl.username }}
+#spec:
+#  app: difyfusionclient
+#  appid: difyfusionclient
+#  key: {{ .Values.os.difyfusionclient.appKey }}
+#  secret: {{ .Values.os.difyfusionclient.appSecret }}
+#  permissions:
+#    - dataType: files
+#      group: service.files
+#      ops:
+#        - GetDatasetFolderStatus
+#      version: v1
+#status:
+#  state: active
 
 ---
 apiVersion: v1

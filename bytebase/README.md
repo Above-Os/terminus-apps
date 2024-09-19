@@ -1,13 +1,3 @@
-### Test md 
-
-```yaml
-testcode: block
-test: true
-```
-
-> **test quote**<br>
-> text text
-
 ### Adding a PostgreSQL Database
 After opening **Bytebase**, click **'Add Instance'**, and select **PostgreSQL**.
 - The Instance Name could be `Terminus` or others.
