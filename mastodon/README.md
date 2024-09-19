@@ -2,8 +2,8 @@
 
 After installing the Mastodon application from the Market, you need to configure it to run your private Mastodon server instance.
 
-> **Prerequisites**<br>
-> You need an SMTP mail service to provide registration and notification services via email to the users on your server instance.
+**Prerequisites**<br>
+You need an SMTP mail service to provide registration and notification services via email to the users on your server instance.
 
 #### Configuring the Instance Backend
 
@@ -47,8 +47,7 @@ After installing the Mastodon application from the Market, you need to configure
     ```
     ![get_password](https://file.bttcdn.com/appstore/mastodon/readme/get_password.png)
 
-    > **Note**<br>
-    > Setting up the account takes approximately 30 seconds. During this time, please stay on this page and refrain from performing any other operations. You will receive the account password once everything is ready.
+    **Note**: Setting up the account takes approximately 30 seconds. During this time, please stay on this page and refrain from performing any other operations. You will receive the account password once everything is ready.
 
 #### Configuring the Server
 
@@ -76,13 +75,11 @@ After installing the Mastodon application from the Market, you need to configure
 
     You can follow users regardless of whether they're registered on your server instance or another server. To find people, search for the User Address. The User Address can either be in the format `@USER_NAME@SERVER_NAME` or `https://SERVER_NAME/@USER_NAME`.
 
-    > **Note**<br>
-    > The USER_NAME is not the same as the Display Name. It is an unmodifiable field that is filled in at the time of registration.
-
-    > **Note**<br>
-    > For users outside of your instance, you can only see their posts, or 'toots', in the Explore or Feeds stream from the time you start following them. To view all toots, you'll need to visit the user's homepage.
-
     <p style="display: flex; justify-content: center;">
     <img src="https://file.bttcdn.com/appstore/mastodon/readme/follow.png" alt="follow" style="max-width: 45%; height: auto; margin-right: 8px;">
     <img src="https://file.bttcdn.com/appstore/mastodon/readme/feed.png" alt="feed"  style="max-width: 45%; height: auto;">
     </p>
+    
+    **Note**: The USER_NAME is not the same as the Display Name. It is an unmodifiable field that is filled in at the time of registration.
+
+    **Note**: For users outside of your instance, you can only see their posts, or 'toots', in the Explore or Feeds stream from the time you start following them. To view all toots, you'll need to visit the user's homepage.

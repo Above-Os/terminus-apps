@@ -1,117 +1,105 @@
-apiVersion: v1
-data:
-  init.sh: |
-    #!/bin/bash
-
-    source_dir="/config"
-    dest_dir="/new-config"
-
-    if [ -z "$(ls -A $dest_dir)" ]; then
-      echo "$dest_dir is empty. Copying files from $source_dir..."
-      cp -r $source_dir/. $dest_dir
-      echo "Files copied successfully."
-    else
-      echo "$dest_dir is not empty. No action taken."
-    fi
-
-kind: ConfigMap
-metadata:
-  name: init-config
-  namespace: {{ .Release.Namespace }}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
-  namespace: {{ .Release.Namespace }}
+  creationTimestamp: null
   labels:
-    app: sonarr
+    io.kompose.service: ollama
+  name: ollama
+  namespace: '{{ .Release.Namespace }}'
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: sonarr
+      io.kompose.service: ollama
+  strategy: {}
   template:
     metadata:
+      creationTimestamp: null
       labels:
-        app: sonarr
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: ollama
     spec:
-      initContainers:
-      - env:
-        - name: PGID
-          value: "1000" 
-        - name: PUID
-          value: "1000" 
-        - name: TZ
-          value: Europe/London
-        name: sonarr-init-data
-        image: lscr.io/linuxserver/sonarr:latest
-        command:
-          - sh
-          - '-c'
-          - |
-            chmod +x /init.sh & bash /init.sh
-        resources:
-          requests:
-            cpu: 100m
-            memory: 32Mi
-          limits:
-            cpu: 1000m
-            memory: 256Mi
-        ports:
-        - containerPort: 8989
-        volumeMounts:
-        - mountPath: /new-config
-          name: sonarr-config
-        - name: init-config 
-          mountPath: /init.sh
-          subPath: init.sh
       containers:
       - env:
         - name: PGID
-          value: "1000" 
+          value: "1000"
         - name: PUID
-          value: "1000" 
+          value: "1000"
         - name: TZ
-          value: Europe/London
-        name: sonarr
-        image: lscr.io/linuxserver/sonarr:latest
-        resources:
-          requests:
-            cpu: 100m
-            memory: 32Mi
-          limits:
-            cpu: 1000m
-            memory: 256Mi
+          value: Etc/UTC
+        image: docker.io/aboveos/ollama-ollama:0.2.5
+        name: ollama
         ports:
-        - containerPort: 8989
+        - containerPort: 11434
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 11434
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 60
+          periodSeconds: 60
+          successThreshold: 1
+          failureThreshold: 10
+        startupProbe:
+          tcpSocket:
+            port: 11434
+          timeoutSeconds: 5
+          periodSeconds: 10
+          successThreshold: 1
+          failureThreshold: 30
+        resources:
+          limits:
+            cpu: "4"
+            memory: 16Gi
+          requests:
+            cpu: 50m
+            memory: 4Gi
         volumeMounts:
-        - mountPath: /config
-          name: sonarr-config
+        - mountPath: "/root/.ollama"
+          name: data
+      restartPolicy: Always
       volumes:
-      - name: sonarr-config
-        hostPath:
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/ollama'
           type: DirectoryOrCreate
-          path: {{ .Values.userspace.userData }}/sonarr 
-      - name: init-config
-        configMap:
-          name: init-config
-          defaultMode: 438
-          items:
-          - key: init.sh
-            path: init.sh
-
+        name: data
+status: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-svc
-  namespace: {{ .Release.Namespace }}
+  creationTimestamp: null
+  labels:
+    io.kompose.service: ollama
+  name: ollama
+  namespace: '{{ .Release.Namespace }}'
 spec:
-  type: ClusterIP
-  selector:
-    app: {{ .Release.Name }}
   ports:
-    - protocol: TCP
-      port: 8989
-      targetPort: 8989
+  - name: "11434"
+    port: 11434
+    targetPort: 11434
+  selector:
+    io.kompose.service: ollama
+status:
+  loadBalancer: {}
+---
+apiVersion: sys.bytetrade.io/v1alpha1
+kind: ProviderRegistry
+metadata:
+  name: legacy-{{ .Release.Name }}
+  namespace: user-system-{{ .Values.bfl.username }}
+spec:
+  dataType: legacy_ollama
+  deployment: ollama
+  description: ollama legacy api
+  endpoint: ollama.{{ .Release.Namespace }}:11434
+  group: api.ollama
+  kind: provider
+  namespace: {{ .Release.Namespace }}
+  version: v2
+  opApis:
+  - name: All
+    uri: /  
+status:
+  state: active
