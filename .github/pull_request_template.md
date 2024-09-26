@@ -1,20 +1,21 @@
-### PR Title Format 
-> [NEW][foldername][version]
+### PR Title 
+> [NEW][FolderName][version]
 > 
-> [UPDATE][foldername][version]
+> [UPDATE][FolderName][version]
 > 
-> [REMOVE][foldername][version]
+> [REMOVE][FolderName][version]
 > 
-> [SUSPEND][foldername][version]
+> [SUSPEND][FolderName][version]
 
 ### App Title
-> The title of your app appears on Market. Spaces and hyphens can be used.
-> e.g. "My Hello-World App"
+> The title of your application appears on Market.
+ 
 
 ### Description
-> Brief description about your app here. For app updates, please describe the changes.
+> Brief description about your application here. 
+>
+> For app updates, please describe the changes.
 
 
 ### Statement
-- [ ] I have tested the app to ensure it is compatible with the Terminus OS version stated in the app.cfg file
-- [ ] I guarantee that this submission adheres to the community rules
+- [ ] I have tested this application to ensure it is compatible with the Terminus OS version stated in the `TerminusManifest.yaml`
