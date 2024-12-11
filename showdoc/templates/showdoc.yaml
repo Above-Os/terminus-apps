@@ -22,7 +22,7 @@ spec:
             path: {{ .Values.userspace.userData }}/showdoc
       containers:
         - name: container-96l42k
-          image: kldtks/edge:showdoc-v3.2.5
+          image: docker.io/aboveos/kldtks-edge:showdoc-v3.2.5
           resources:
             requests:
               cpu: 500m
@@ -40,6 +40,17 @@ spec:
             - name: http-2
               containerPort: 9000
               protocol: TCP
+          readinessProbe:
+            failureThreshold: 6
+            httpGet:
+              httpHeaders: []
+              path: /
+              port: 'http-0'
+              scheme: 'HTTP'
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
           volumeMounts:
             - name: data
               mountPath: /var/www/html
