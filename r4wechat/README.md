@@ -1,9 +1,8 @@
 #### INTRODUCTION
 
-Welcome to R4Business, Feel free to subscribe!
+Welcome to R4WeChat, Feel free to subscribe!
 
-This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4Business specializes in collecting business intelligence from various sources. It offers a more comprehensive, unbiased, and accurate coverage of the complex business world.
-
+This algorithm is part of the broader R4 family, which is inspired by Obi-Wan's intelligent and trustworthy droid in the Star Wars series. R4WeChat collects trending articles on wechat, the most popular Chinese Social Media.
 
 #### KEY FEATURES
 **Security and Privacy First** <br> 
@@ -34,5 +33,8 @@ Upon installing this recommendation from the Olares Market, all processes run in
 **Training Workflow:**
 - Executes daily.
 - Uses behavioral data and global news trends to train the model used by in Recommendation Workflow
+
+
+
 
 
