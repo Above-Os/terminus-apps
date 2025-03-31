@@ -1,0 +1,179 @@
+olaresManifest.version: '0.8.1'
+olaresManifest.type: app
+metadata:
+  name: dify
+  description: The Innovation Engine for GenAI Applications
+  icon: https://file.bttcdn.com/appstore/dify/icon.png
+  version: '1.1.12'
+  title: Dify Shared
+  categories:
+  - Productivity
+permission:
+  appData: true
+  appCache: true
+  sysData:
+  - dataType: legacy_ollama
+    appName: ollama
+    svc: ollama
+    port: 11434
+    group: api.ollama
+    version: v2
+    ops:
+    - All
+  - dataType: legacy_gaianetai
+    appName: gaianetai
+    svc: gaianetai
+    port: 8080
+    group: api.gaianetai
+    version: v2
+    ops:
+    - All
+  - dataType: legacy_whisper
+    appName: whisper
+    svc: whisper
+    port: 8000
+    group: api.whisper
+    version: v2
+    ops:
+    - All
+  - dataType: legacy_openedaispeech
+    appName: openedaispeech
+    svc: openedaispeech
+    port: 8000
+    group: api.openedaispeech
+    version: v2
+    ops:
+    - All
+  - dataType: legacy_sdwebui
+    appName: sdwebui
+    svc: sdwebui
+    port: 7860
+    group: api.sdwebui
+    version: v2
+    ops:
+    - All
+spec:
+  versionName: '1.1.0'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared version of Dify. Only one service will be installed across the entire Olares system. After installation, everyone on this Olares cluster can use the same application. 
+    This shared setup makes it easier for users to share information with each other, while reducing maintenance work and using fewer resources.
+
+    ## OVERVIEW ##
+    Dify is an open-source LLM app development platform. Its intuitive interface combines AI workflow, RAG pipeline, agent capabilities, model management, observability features and more, letting you quickly go from prototype to production. Here's a list of the core features:
+
+    1. Workflow: Build and test powerful AI workflows on a visual canvas, leveraging all the following features and beyond.
+
+    2. Comprehensive model support: Seamless integration with hundreds of proprietary / open-source LLMs from dozens of inference providers and self-hosted solutions, covering GPT, Mistral, Llama3, and any OpenAI API-compatible models. A full list of supported model providers can be found here.
+
+    3. Prompt IDE: Intuitive interface for crafting prompts, comparing model performance, and adding additional features such as text-to-speech to a chat-based app.
+
+    4. RAG Pipeline: Extensive RAG capabilities that cover everything from document ingestion to retrieval, with out-of-box support for text extraction from PDFs, PPTs, and other common document formats.
+
+    5. Agent capabilities: You can define agents based on LLM Function Calling or ReAct, and add pre-built or custom tools for the agent. Dify provides 50+ built-in tools for AI agents, such as Google Search, DELL·E, Stable Diffusion and WolframAlpha.
+
+    6. LLMOps: Monitor and analyze application logs and performance over time. You could continuously improve prompts, datasets, and models based on production data and annotations.
+
+    7. Backend-as-a-Service: All of Dify's offerings come with corresponding APIs, so you could effortlessly integrate Dify into your own business logic.
+  upgradeDescription: |
+    What's New in v0.15.3?
+
+    Hey folks, it's time for another update, and we've got some exciting additions and improvements rolling out with version v0.15.3. Let’s dive into the highlights:
+
+    New Model Support
+    - DeepSeek Models: DeepSeek R1 is now supported across several platforms, including SiliconFlow, Azure AI Foundry, Ollama, Volcengine, OpenRouter, Nvidia Catalog, and more. This opens up new possibilities for leveraging AI reasoning and insights across diverse environments.
+
+    - Gemini 2.0 Series: Introducing the latest models in the Gemini 2.0 series, such as Gemini 2.0 Flash 001 and Gemini 2.0 Pro Exp. These models deliver exceptional performance and efficiency, perfect for high-precision, fast-processing tasks.
+
+    Enhancements
+    - Firecrawl Upgrade: Updated to the v1 API by @ftonato, providing improved performance and more refined results.
+
+    - GLM-4-AIR-0111 Support: Dive into advanced natural language processing tasks more effectively with this addition by @Jhvcc.
+
+    - Agent Thinking Content Display: Visualize agent thinking paths with DeepSeek’s R1 model, providing better understanding and debugging capabilities, courtesy of @hjlarry.
+
+    Bug Fixes
+    - SSRF Proxy File Descriptor Leak Fix: Eliminated file descriptor leaks to enhance performance in concurrent environments, thanks to @ZuzooVn.
+
+    - Page Crash on String Variable Property Access: Resolved issues where improper string handling could cause unintentional crashes, fixed by @iamjoel.
+
+    Keep exploring and integrating these new capabilities into your workflows. As always, happy building, and we look forward to hearing how you leverage these updates in your projects!
+
+    View full release note at: https://github.com/langgenius/dify/releases/tag/0.15.3
+
+  developer: LangGenius
+  website: https://dify.ai/
+  locale:
+  - en-US
+  - zh-CN
+  sourceCode: https://github.com/langgenius/dify
+  submitter: Olares
+  doc: https://github.com/langgenius/dify#readme
+  license:
+  - text: Apache-2.0
+    url: https://github.com/langgenius/dify?tab=License-1-ov-file#readme
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  requiredMemory: 2200Mi
+  limitedMemory: 8.5Gi
+  requiredDisk: 512Mi
+  limitedDisk: 50Gi
+  requiredCpu: 1
+  limitedCpu: 6
+{{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 256Mi
+  requiredDisk: 1Mi
+  limitedDisk: 100Mi
+  requiredCpu: 10m
+  limitedCpu: 100m
+{{- end }}
+  supportArch:
+  - amd64
+  - arm64
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+middleware:
+  redis:
+    namespace: dify
+  postgres:
+    username: dify
+    password: dify
+    databases:
+    - name: dify
+      distributed: true
+    - name: difyplugin
+      distributed: true
+{{- end }}
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.11.6-0'
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- else}}
+  - name: dify
+    type: application
+    version: '>=1.1.0'
+    mandatory: true
+{{- end }}
+
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  appScope:
+    clusterScoped: true
+    appRef:
+    - dify
+{{- end }}
+
+  # For external access to Dify, use the following configuration.
+  # policies:
+  #   - uriRegex: ^/(activate|_next|logo|favicon|console/api/activate/check|signin)
+  #     level: public
+  #     oneTime: false
+  #     validDuration: 3600s
+  #     entranceName: client
+entrances:
+- name: client
+  port: 8080
+  host: client
+  title: Dify
+  icon: https://file.bttcdn.com/appstore/dify/icon.png
