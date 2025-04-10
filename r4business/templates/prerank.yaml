@@ -17,12 +17,7 @@ spec:
   workflowSpec:
     entrypoint: algorithm
     volumes:
-      - name: nfs
-        hostPath:
-          type: DirectoryOrCreate
-          path: >-
-            {{ .Values.userspace.appData }}/rss/data
-      - name: juicefs
+      - name: appData
         hostPath:
           type: DirectoryOrCreate
           path: >-
@@ -36,15 +31,13 @@ spec:
               template: prerank-template
       - name: recall-template
         container:
-          image: 'beclab/r4recall:v0.0.13'
+          image: 'beclab/r4recall:v0.12.0'
           imagePullPolicy: IfNotPresent
           env:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
-            - name: NFS_ROOT_DIRECTORY
-              value: /nfs
-            - name: JUICEFS_ROOT_DIRECTORY
-              value: /juicefs
+            - name: APP_DATA_DIRECTORY
+              value: /appData
             - name: ALGORITHM_FILE_CONFIG_PATH
               value: /usr/config/
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
@@ -59,22 +52,20 @@ spec:
               value: business
             - name: SYNC_MODEL_NAME
               value: bert_v2
+            - name: BFL_USER
+              value: {{ .Values.bfl.username }}
           volumeMounts:
-            - mountPath: /nfs
-              name: nfs
-            - mountPath: /juicefs
-              name: juicefs
+            - mountPath: /appData
+              name: appData
       - name: prerank-template
         container:
-          image: 'beclab/r4prerank:v0.0.12'
+          image: 'beclab/r4prerank:v0.12.0'
           imagePullPolicy: IfNotPresent
           env:
             - name: KNOWLEDGE_BASE_API_URL
               value: {{ .Values.apiUrl }}
-            - name: NFS_ROOT_DIRECTORY
-              value: /nfs
-            - name: JUICEFS_ROOT_DIRECTORY
-              value: /juicefs
+            - name: APP_DATA_DIRECTORY
+              value: /appData
             - name: ALGORITHM_FILE_CONFIG_PATH
               value: /usr/config/
             - name: TERMINUS_RECOMMEND_SOURCE_NAME
@@ -83,9 +74,9 @@ spec:
               value: en
             - name: SUPPORT_TIMELINESS
               value: '0'
+            - name: BFL_USER
+              value: {{ .Values.bfl.username }}
           volumeMounts:
-            - mountPath: /nfs
-              name: nfs
-            - mountPath: /juicefs
-              name: juicefs
+            - mountPath: /appData
+              name: appData
       
