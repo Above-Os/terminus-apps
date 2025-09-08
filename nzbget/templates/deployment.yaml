@@ -8,6 +8,8 @@ metadata:
     app: nzbget
 spec:
   replicas: 1
+  strategy:
+    type: Recreate  
   selector:
     matchLabels:
       app: nzbget
@@ -16,6 +18,25 @@ spec:
       labels:
         app: nzbget
     spec:
+      initContainers:
+      - name: init-chmod-data
+        image: 'docker.io/aboveos/busybox:latest'
+        command:
+          - sh
+          - '-c'
+          - |
+            chown -R 1000:1000 /app-data-root; chown -R 1000:1000 /config
+        resources: {}
+        volumeMounts:
+          - name: nzbget-downloads
+            mountPath: /app-data-root
+          - mountPath: /config
+            name: nzbget-config
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: Always
+        securityContext:
+          runAsUser: 0
       containers:
       - env:
         - name: PGID
@@ -40,8 +61,6 @@ spec:
           name: nzbget-config
         - mountPath: /downloads
           name: nzbget-downloads
-        securityContext:
-          runAsUser: 0
       volumes:
       - name: nzbget-config
         hostPath:
@@ -67,6 +86,8 @@ spec:
       port: 6789
       targetPort: 6789
 
+{{- if .Values.sysVersion }}
+  {{- if semverCompare "<1.12.1-0" (toString .Values.sysVersion) }}
 ---
 apiVersion: sys.bytetrade.io/v1alpha1
 kind: ProviderRegistry
@@ -87,3 +108,5 @@ spec:
     uri: /  
 status:
   state: active
+  {{- end }}
+{{- end }}

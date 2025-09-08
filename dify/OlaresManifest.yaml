@@ -1,19 +1,21 @@
-olaresManifest.version: '0.8.1'
+olaresManifest.version: '0.10.0'
 olaresManifest.type: app
 metadata:
   name: dify
   description: The Innovation Engine for GenAI Applications
-  icon: https://file.bttcdn.com/appstore/dify/icon.png
-  version: '1.1.17'
+  icon: https://file.bttcdn.com/appstore/dify/icon-new.png
+  version: '1.1.14'
   title: Dify Shared
   categories:
+  - Productivity_v112
   - Productivity
 entrances:
 - name: client
   port: 8080
   host: client
   title: Dify
-  icon: https://file.bttcdn.com/appstore/dify/icon.png
+  icon: https://file.bttcdn.com/appstore/dify/icon-new.png
+  openMethod: window
 permission:
   appData: true
   appCache: true
@@ -29,22 +31,6 @@ permission:
     version: v2
     ops:
     - All
-  - dataType: legacy_gaianetai
-    appName: gaianetai
-    svc: gaianetai
-    port: 8080
-    group: api.gaianetai
-    version: v2
-    ops:
-    - All
-  - dataType: legacy_whisper
-    appName: whisper
-    svc: whisper
-    port: 8000
-    group: api.whisper
-    version: v2
-    ops:
-    - All
   - dataType: legacy_openedaispeech
     appName: openedaispeech
     svc: openedaispeech
@@ -53,21 +39,29 @@ permission:
     version: v2
     ops:
     - All
-  - dataType: legacy_sdwebui
-    appName: sdwebui
-    svc: sdwebui
-    port: 7860
-    group: api.sdwebui
-    version: v2
-    ops:
-    - All
+  provider:
+  - appName: ollama
+    providerName: ollamaclient
+  - appName: openedaispeech
+    providerName: openedaispeech    
 {{- end }}
 spec:
-  versionName: '1.1.0-bbb'
+  versionName: '1.4.3'
+  featuredImage: https://file.bttcdn.com/appstore/dify/1.webp
+  promoteImage:
+  - https://file.bttcdn.com/appstore/dify/1.webp
+  - https://file.bttcdn.com/appstore/dify/2.webp
+  - https://file.bttcdn.com/appstore/dify/3.webp
+  - https://file.bttcdn.com/appstore/dify/4.webp
+
   fullDescription: |
     ## IMPORTANT NOTE ##
-    This is a shared version of Dify. Only one service will be installed across the entire Olares system. After installation, everyone on this Olares cluster can use the same application. 
-    This shared setup makes it easier for users to share information with each other, while reducing maintenance work and using fewer resources.
+    This is a shared version of Dify. Only one service will be installed across the entire Olares system. However, every user still needs to install an desktop entry to access and use the service installed by the Olares Admin.
+
+    After installation, everyone on this Olares cluster can use the same application. This shared setup makes it easier for users to share information with each other, while reducing maintenance work and using fewer resources.
+
+    ## Migration Note ##
+    If you're using an older version of Dify, it might conflict with Dify v1.0 or later. We recommend backing up your data, uninstalling the old version, and then installing this latest version.
 
     ## OVERVIEW ##
     Dify is an open-source LLM app development platform. Its intuitive interface combines AI workflow, RAG pipeline, agent capabilities, model management, observability features and more, letting you quickly go from prototype to production. Here's a list of the core features:
@@ -86,30 +80,25 @@ spec:
 
     7. Backend-as-a-Service: All of Dify's offerings come with corresponding APIs, so you could effortlessly integrate Dify into your own business logic.
   upgradeDescription: |
-    What's New in v0.15.3?
+    Upgrade to Dify v1.4.0
 
-    Hey folks, it's time for another update, and we've got some exciting additions and improvements rolling out with version v0.15.3. Let’s dive into the highlights:
+    What's New in v1.4.0
 
-    New Model Support
-    - DeepSeek Models: DeepSeek R1 is now supported across several platforms, including SiliconFlow, Azure AI Foundry, Ollama, Volcengine, OpenRouter, Nvidia Catalog, and more. This opens up new possibilities for leveraging AI reasoning and insights across diverse environments.
+    New Features & Enhancements
+    - Dark Mode
+    We’ve rolled out a theme switcher that allows you to easily toggle between light and dark modes, perfect for those late-night coding sessions.
+    
+    - Multi-Modal LLM Output
+    Our platform now supports multimodal outputs, allowing LLMs to handle both text and images within the LLMNode. 
 
-    - Gemini 2.0 Series: Introducing the latest models in the Gemini 2.0 series, such as Gemini 2.0 Flash 001 and Gemini 2.0 Pro Exp. These models deliver exceptional performance and efficiency, perfect for high-precision, fast-processing tasks.
+    - Editable Questions
+    We’ve added greater control over your questions, allowing them to be edited before they go live. 
 
-    Enhancements
-    - Firecrawl Upgrade: Updated to the v1 API by @ftonato, providing improved performance and more refined results.
-
-    - GLM-4-AIR-0111 Support: Dive into advanced natural language processing tasks more effectively with this addition by @Jhvcc.
-
-    - Agent Thinking Content Display: Visualize agent thinking paths with DeepSeek’s R1 model, providing better understanding and debugging capabilities, courtesy of @hjlarry.
-
-    Bug Fixes
-    - SSRF Proxy File Descriptor Leak Fix: Eliminated file descriptor leaks to enhance performance in concurrent environments, thanks to @ZuzooVn.
-
-    - Page Crash on String Variable Property Access: Resolved issues where improper string handling could cause unintentional crashes, fixed by @iamjoel.
-
-    Keep exploring and integrating these new capabilities into your workflows. As always, happy building, and we look forward to hearing how you leverage these updates in your projects!
-
-    View full release note at: https://github.com/langgenius/dify/releases/tag/0.15.3
+    And Bug Fixes and Improvements
+    - Enhanced Redis Management
+    - Robust Workflow Management
+    
+    View full release note at: https://github.com/langgenius/dify/releases/tag/1.4.0
 
   developer: LangGenius
   website: https://dify.ai/
@@ -124,11 +113,11 @@ spec:
     url: https://github.com/langgenius/dify?tab=License-1-ov-file#readme
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   requiredMemory: 2200Mi
-  limitedMemory: 8.5Gi
+  limitedMemory: 12.5Gi
   requiredDisk: 512Mi
   limitedDisk: 50Gi
   requiredCpu: 1
-  limitedCpu: 6
+  limitedCpu: 8
 {{- else }}
   requiredMemory: 64Mi
   limitedMemory: 256Mi
@@ -154,35 +143,32 @@ middleware:
       distributed: true
 {{- end }}
 options:
+  allowedOutboundPorts:
+  - 3128
   apiTimeout: 0
   conflicts:
   - name: difyfusion
     type: application
   - name: difyfusionclient
     type: application  
-  - name: ollama
-    type: application
-  - name: comfyui
-    type: application
-  - name: immich
-    type: application    
   dependencies:
   - name: olares
     type: system
     version: '>=1.11.6-0'
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-{{- else}}
+{{- else }}
   - name: dify
     type: application
     version: '>=1.1.0'
     mandatory: true
 {{- end }}
-
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   appScope:
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
     clusterScoped: true
     appRef:
     - dify
+{{- else }}
+    clusterScoped: false
 {{- end }}
 
   # For external access to Dify, use the following configuration.

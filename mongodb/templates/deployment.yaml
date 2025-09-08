@@ -1,6 +1,6 @@
 {{- $mongo_secret := (lookup "v1" "Secret" .Release.Namespace "mdb-cluster-name-secrets") -}}
-{{ $mongo_rootpath := "/terminus/userdata/dbdata" }}
-{{ $mongo_backuppath := "/terminus/rootfs/middleware-backup" }}
+{{ $mongo_rootpath := "/olares/userdata/dbdata" }}
+{{ $mongo_backuppath := "/olares/rootfs/middleware-backup" }}
 
 
 ---
@@ -92,7 +92,7 @@ spec:
             requiredDuringSchedulingIgnoredDuringExecution:
               nodeSelectorTerms:
               - matchExpressions:
-                - key: node-role.kubernetes.io/master
+                - key: node-role.kubernetes.io/control-plane
                   operator: Exists
       resources:
         limits:
@@ -138,7 +138,7 @@ spec:
             requiredDuringSchedulingIgnoredDuringExecution:
               nodeSelectorTerms:
                 - matchExpressions:
-                  - key: node-role.kubernetes.io/master
+                  - key: node-role.kubernetes.io/control-plane
                     operator: Exists
       resources:
         limits:
@@ -247,12 +247,13 @@ spec:
             requiredDuringSchedulingIgnoredDuringExecution:
               nodeSelectorTerms:
                 - matchExpressions:
-                    - key: node-role.kubernetes.io/master
+                    - key: node-role.kubernetes.io/control-plane
                       operator: Exists
       restartPolicy: Never
       containers:
       - name: post-delete
         image: "busybox"
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "rm -rf /mongo/mdbdata/* /mongo/mdbdata-config/*"]
         volumeMounts:
         - mountPath: /mongo

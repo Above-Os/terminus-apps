@@ -10,6 +10,8 @@ spec:
   selector:
     matchLabels:
       app: showdoc
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -20,6 +22,23 @@ spec:
           hostPath:
             type: DirectoryOrCreate
             path: {{ .Values.userspace.userData }}/showdoc
+      initContainers:
+        - name: init-chmod-data
+          image: 'docker.io/aboveos/busybox:latest'
+          command:
+            - sh
+            - '-c'
+            - |
+              chown -R 1000:1000 /app-data-root
+          resources: {}
+          volumeMounts:
+            - name: data
+              mountPath: /app-data-root
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+          securityContext:
+            runAsUser: 0
       containers:
         - name: container-96l42k
           image: docker.io/aboveos/kldtks-edge:showdoc-v3.2.5
@@ -29,7 +48,7 @@ spec:
               memory: 64Mi
             limits:
               cpu: 1000m
-              memory: 128Mi
+              memory: 1Gi
           ports:
             - name: http-0
               containerPort: 80
@@ -40,22 +59,9 @@ spec:
             - name: http-2
               containerPort: 9000
               protocol: TCP
-          readinessProbe:
-            failureThreshold: 6
-            httpGet:
-              httpHeaders: []
-              path: /
-              port: 'http-0'
-              scheme: 'HTTP'
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 5
           volumeMounts:
             - name: data
               mountPath: /var/www/html
-          securityContext:
-            runAsUser: 0
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
