@@ -1,4 +1,4 @@
-﻿---
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,8 +20,8 @@ spec:
         app: studio
     spec:
       initContainers:
-      - name: olares-sidecar-init
-        image: docker.io/beclab/init:v1.2.3
+      - name: terminus-sidecar-init
+        image: openservicemesh/init:v1.2.3
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -55,7 +55,7 @@ spec:
 
       containers:
       - name: frontend
-        image: docker.io/beclab/studio:v1.6.20
+        image: beclab/studio:v1.4.28
         imagePullPolicy: IfNotPresent
         resources:
           requests:
@@ -68,8 +68,8 @@ spec:
         - containerPort: 80
         
 
-      - name: olares-envoy-sidecar
-        image: docker.io/beclab/envoy:v1.25.11.1
+      - name: terminus-envoy-sidecar
+        image: bytetrade/envoy:v1.25.11
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -80,7 +80,7 @@ spec:
         - name: proxy-inbound
           containerPort: 15003
         volumeMounts:
-        - name: olares-sidecar-config
+        - name: terminus-sidecar-config
           readOnly: true
           mountPath: /etc/envoy/envoy.yaml
           subPath: envoy.yaml
@@ -115,7 +115,7 @@ spec:
             cpu: 200m
             memory: 200Mi
       volumes:
-      - name: olares-sidecar-config
+      - name: terminus-sidecar-config
         configMap:
           name: sidecar-configs
           items:
