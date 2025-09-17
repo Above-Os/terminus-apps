@@ -1,0 +1,229 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-vc-gate-config
+  namespace: {{ .Release.Namespace }}
+data:
+  config.json: |
+    {
+        "issuer_id": "did:key:z6MktdEpjYpYocHibuZqMsjXmaVusyUHckMnkzM3xUCxpfa4",
+        "didName": "magicCow",
+        "issuer_privatekey": "",
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-vc-gate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: vc-gate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vc-gate
+  template:
+    metadata:
+      labels:
+        app: vc-gate
+    spec:
+      containers:
+      - name: vc-gate
+        image: aboveos/vc-gate:v3.2.46
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 300m
+            memory: 256Mi      
+        ports:
+        - containerPort: 6004
+          protocol: TCP
+        env:
+        - name: SSI_SERVICE_URL
+          value: "http://merchant-ssi-svc:6003"
+        - name: SERVER_DID_GATE
+          value: "https://did-gate.mdogs.me"
+        - name: ENVIRONMENT
+          value: "pro"
+        - name: "NAME_BLACK_LIST"
+          value: "olares"
+        - name: "INIT_SCHEMA"
+          value: "true"
+        - name: "MERCHANT_VC_GATE_HOST"
+          value: "http://merchant-vc-gate-svc:4001"
+        - name: "VC_GATE_HOST"
+          value: "https://vc-gate.mdogs.me"
+        volumeMounts:
+        - name: vc-gate-config
+          mountPath: /app/config
+          readOnly: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+      volumes:
+      - name: vc-gate-config
+        configMap:
+          name: {{ .Release.Name }}-vc-gate-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-vc-gate-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: vc-gate
+  ports:
+    - name: vc-gate-port
+      port: 6004            
+      targetPort: 4001       
+      protocol: TCP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-ssi-config
+  namespace: {{ .Release.Namespace }}
+data:
+  dev.toml: |
+    title = "SSI Service Config"
+    
+    svn = "0.0.1"
+    desc = "Dev configuration to be used while running the service for testing as a single go process."
+    
+    # http service configuration
+    [server]
+    env = "dev" # either 'dev', 'test', or 'prod'
+    api_host = "0.0.0.0:6003"
+    
+    jager_enabled = false
+    
+    # 5 seconds, time is in nanoseconds
+    read_timeout = 5000000000
+    write_timeout = 5000000000
+    shutdown_timeout = 5000000000
+    
+    log_location = ""
+    # options: trace, debug, info, warn, error, fatal, panic
+    log_level = "trace"
+    
+    enable_schema_caching = true
+    enable_allow_all_cors = true
+    
+    # Storage Configuration
+    [services]
+    service_endpoint = "http://localhost:6003"
+    
+    # use pg as storage
+    storage = "database_sql"
+    
+    [services.storage_encryption]
+    # encryption
+    disable_encryption = true
+    
+    [[services.storage_option]]
+    id = "sql-connection-string-option"
+    option = "host={{ .Values.postgres.host }} port={{ .Values.postgres.port }} user={{ .Values.postgres.username }} password={{ .Values.postgres.password }} dbname={{ .Values.postgres.databases.merchant }} sslmode=disable"
+    
+    [[services.storage_option]]
+    id = "sql-driver-name-option"
+    option = "postgres"
+    
+    # per-service configuration
+    [services.keystore]
+    name = "keystore"
+    
+    [services.did]
+    name = "did"
+    methods = ["key", "web"]
+    #local_resolution_methods = ["key", "web", "pkh", "peer"]
+    local_resolution_methods = []
+    batch_create_max_items = 100
+    #universal_resolver_url = "https://dev.uniresolver.io/"
+    #universal_resolver_methods = ["ion"]
+    universal_resolver_url = "https://did-gate.api.jointerminus.cn"
+    universal_resolver_methods = ["key"]
+    
+    
+    [services.schema]
+    name = "schema"
+    
+    [services.credential]
+    name = "credential"
+    batch_create_max_items = 100
+    
+    [services.issuance]
+    name = "issuance"
+    
+    [services.manifest]
+    name = "manifest"
+    
+    [services.presentation]
+    name = "presentation"
+    
+    [services.webhook]
+    name = "webhook"
+    webhook_timeout = "10s"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ssi
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: merchant-ssi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: merchant-ssi
+  template:
+    metadata:
+      labels:
+        app: merchant-ssi
+    spec:
+      containers:
+      - name: merchant-ssi
+        image: aboveos/ssi-service:v3.2.46
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi      
+        ports:
+        - containerPort: 6003
+          protocol: TCP
+        volumeMounts:
+        - name: ssi-config
+          mountPath: /app/config
+          readOnly: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+      volumes:
+      - name: ssi-config
+        configMap:
+          name: {{ .Release.Name }}-ssi-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ssi-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: merchant-ssi
+  ports:
+    - name: ssi-port
+      port: 6003            
+      targetPort: 6003       
+      protocol: TCP
