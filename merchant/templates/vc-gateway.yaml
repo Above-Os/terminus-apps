@@ -18,6 +18,7 @@ data:
         server {
             listen 8080;
             
+            # Add HTTP/2 and protocol upgrade support
             location /api/grpc/AuthService/ActivateAndGrant {
                 rewrite ^/api(.*)$ $1 break;
                 proxy_pass http://backend;
@@ -25,20 +26,38 @@ data:
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Connection "";
+                proxy_http_version 1.1;
             }
             
-            location /api/grpc/AuthService/GetActivationSchema {
+            location /api/grpc/AuthService/GetApplicationSchema {
                 rewrite ^/api(.*)$ $1 break;
                 proxy_pass http://backend;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Connection "";
+                proxy_http_version 1.1;
             }
             
             location /api/grpc/BlockchainService/LaresPassRsaKeyCallback {
                 rewrite ^/api(.*)$ $1 break;
                 proxy_pass http://backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Connection "";
+                proxy_http_version 1.1;
+            }
+            
+            # Handle WebSocket and HTTP upgrade requests
+            location /ws {
+                proxy_pass http://backend;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
