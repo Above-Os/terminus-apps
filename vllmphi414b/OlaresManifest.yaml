@@ -1,0 +1,94 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+
+metadata:
+  name: vllmphi414b
+  icon: https://file.bttcdn.com/appstore/vlm/icon.png
+  description: A high-throughput and memory-efficient inference and serving engine for LLMs
+  appid: vllmphi414b
+  title: Phi-4 14B (vLLM)
+  version: '1.0.1'
+  categories:
+    - Productivity
+
+entrances:
+  - authLevel: internal
+    host: vllmclient
+    icon: https://file.bttcdn.com/appstore/vlm/icon.png
+    name: vllmclient
+    openMethod: default
+    port: 8080
+    title: vLLM API
+    invisible: true
+
+spec:
+  versionName: '0.10.2'
+  fullDescription: |
+    A high-throughput and memory-efficient inference and serving engine for LLMs.
+  developer: vllm-project
+  website: https://vllm.ai/
+  sourceCode: https://github.com/vllm-project/vllm
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://docs.vllm.ai
+  license:
+    - text: Apache-2.0
+      url: https://github.com/vllm-project/vllm?tab=Apache-2.0-1-ov-file
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 5
+  requiredCpu: 150m
+  requiredDisk: 40Gi
+  limitedDisk: 60Gi
+  limitedMemory: 20Gi
+  requiredMemory: 10Gi
+  requiredGpu: 28Gi
+  limitedGpu: 48Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  onlyAdmin: true
+
+permission:
+  appData: true
+  appCache: true
+
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - vllmphi414b
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.11.0-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: vllmphi414b
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}
+
+provider:
+- name: vllmphi414b
+  entrance: vllmclient
+  paths: ["/*"]
+  verbs: ["*"]
