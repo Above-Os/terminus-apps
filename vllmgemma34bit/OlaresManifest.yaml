@@ -1,0 +1,94 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+
+metadata:
+  name: vllmgemma34bit
+  icon: https://file.bttcdn.com/appstore/vlm/icon.png
+  description: A high-throughput and memory-efficient inference and serving engine for LLMs
+  appid: vllmgemma34bit
+  title: Gemma3 4B(vLLM)
+  version: '1.0.1'
+  categories:
+    - Productivity
+
+entrances:
+  - authLevel: internal
+    host: vllmclient
+    icon: https://file.bttcdn.com/appstore/vlm/icon.png
+    name: vllmclient
+    openMethod: default
+    port: 8080
+    title: vLLM API
+    invisible: true
+
+spec:
+  versionName: '0.10.2'
+  fullDescription: |
+    A high-throughput and memory-efficient inference and serving engine for LLMs.
+  developer: vllm-project
+  website: https://vllm.ai/
+  sourceCode: https://github.com/vllm-project/vllm
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://docs.vllm.ai
+  license:
+    - text: Apache-2.0
+      url: https://github.com/vllm-project/vllm?tab=Apache-2.0-1-ov-file
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 6200m
+  requiredCpu: 150m
+  requiredDisk: 20Gi
+  limitedDisk: 30Gi
+  limitedMemory: 20Gi
+  requiredMemory: 4200Mi
+  requiredGpu: 22Gi
+  limitedGpu: 30Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  onlyAdmin: true
+
+permission:
+  appData: true
+  appCache: true
+
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - vllmgemma34bit
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.11.0-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: vllmgemma34bit
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}
+
+provider:
+- name: vllmgemma34bit
+  entrance: vllmclient
+  paths: ["/*"]
+  verbs: ["*"]

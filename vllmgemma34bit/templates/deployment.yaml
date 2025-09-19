@@ -1,0 +1,118 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  name: vllmgemma34bit
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: vllmgemma34bit
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: vllmgemma34bit
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: vllmgemma34bit
+    spec:
+      initContainers:
+        - name: init-chmod-data
+          image: "docker.io/aboveos/busybox:latest"
+          command:
+            - sh
+            - "-c"
+            - |
+              chown -R 1000:1000 /app-data-root
+          volumeMounts:
+            - name: data
+              mountPath: /app-data-root
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.10.2
+          args:
+            - "--model"
+            - "google/gemma-3-4b-it"
+          env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: HUGGING_FACE_HUB_TOKEN
+              value: "HF_TOKEN"
+            - name: VLLM_PORT
+              value: "8000"
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          startupProbe:
+            tcpSocket:
+              port: 8000
+            timeoutSeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            limits:
+              cpu: "4"
+              memory: 16Gi
+            requests:
+              cpu: 50m
+              memory: 4Gi
+          volumeMounts:
+            - mountPath: /root/.cache/huggingface
+              name: data
+      volumes:
+        - name: data
+          hostPath:
+            path: "{{ .Values.sharedlib }}/ai/vllm/gemma34bit"
+            type: DirectoryOrCreate
+      restartPolicy: Always
+status: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  name: vllm
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: vllm
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  selector:
+    io.kompose.service: vllmgemma34bit
+status:
+  loadBalancer: {}
+{{- end }}
