@@ -38,7 +38,29 @@ spec:
     - name: download
 
 ---
+apiVersion: apr.bytetrade.io/v1alpha1
+kind: MiddlewareRequest
+metadata:
+  name: ytdlp-nats
+  namespace: {{ .Release.Namespace }}
+spec:
+  app: download
+  appNamespace: os
+  middleware: nats
+  nats:
+    password:
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: download-secrets
+    user: "{{ .Release.Namespace }}-ytdlp"
+    subjects:
+      - name: ytdlp_download_status
+        permission:
+          pub: allow
+          sub: allow
 
+---
 apiVersion: apr.bytetrade.io/v1alpha1
 kind: MiddlewareRequest
 metadata:
@@ -56,6 +78,10 @@ spec:
           name: download-secrets
     user: "{{ .Release.Namespace }}-download"
     subjects:
+      - name: ytdlp_download_status
+        permission:
+          pub: allow
+          sub: allow
       - name: download_status
         permission:
           pub: allow
@@ -171,13 +197,50 @@ spec:
           limits:
             cpu: "1"
             memory: 300Mi
-            
-      - name: download-server
-        image: "beclab/download-server:v0.1.6"
+      - name: yt-dlp
+        image: "beclab/ytdlp-server:v0.1.2"
         imagePullPolicy: IfNotPresent
         securityContext:
-          runAsUser: 0
-          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          runAsUser: 1000
+
+        ports:
+        - containerPort: 3082
+        env:
+        - name: DEBUG
+          value: "false"
+        - name: NATS_HOST
+          value: nats.os-platform
+        - name: NATS_PORT
+          value: "4222"
+        - name: NATS_USERNAME
+          value: {{ .Release.Namespace }}-ytdlp
+        - name: NATS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: download-secrets
+        - name: NATS_SUBJECT
+          value: os.ytdlp_download_status
+        volumeMounts:
+        - name: config-dir
+          mountPath: /app/config
+        - name: download-dir
+          mountPath: /app/downloads
+        resources:
+          requests:
+            cpu: 20m
+            memory: 50Mi
+          limits:
+            cpu: "1"
+            memory: 300Mi
+            
+      - name: download-server
+        image: "beclab/download-server:v0.1.2"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsUser: 1000
 
         env:
         - name: DEBUG
@@ -205,6 +268,8 @@ spec:
               name: download-secrets
         - name: NATS_PROGRESS_PUBLISH_SUB
           value: os.download_status
+        - name: NATS_PROGRESS_SUBSCRIBE_SUB
+          value: os.ytdlp_download_status
         volumeMounts:
         - name: download-dir
           mountPath: /app/downloads
@@ -213,10 +278,10 @@ spec:
         resources:
           requests:
             cpu: 20m
-            memory: 80Mi
+            memory: 50Mi
           limits:
             cpu: "1"
-            memory: 2000Mi
+            memory: 300Mi
 
       volumes:
       - name: config-dir
@@ -249,4 +314,7 @@ spec:
       protocol: TCP
       port: 6800
       targetPort: 6800
-    
+    - name: ytdlp-server
+      protocol: TCP
+      port: 3082
+      targetPort: 3082
