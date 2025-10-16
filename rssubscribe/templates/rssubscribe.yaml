@@ -26,7 +26,7 @@ spec:
   appNamespace: {{ .Release.Namespace }}
   middleware: postgres
   postgreSQL:
-    user: wise_rssubscribe
+    user: rssubscribe_{{ .Values.bfl.username }}
     password:
       valueFrom:
         secretKeyRef:
@@ -124,17 +124,17 @@ spec:
           - name: LISTEN_ADDR
             value: 0.0.0.0:8082
           - name: PG_USERNAME
-            value: wise_rssubscribe
+            value: rssubscribe_{{ .Values.bfl.username }}
           - name: PG_PASSWORD
             value: {{ $password | b64dec }}
           - name: PG_HOST
-            value: {{ .Values.postgres.host }}
+            value: citus-master-svc.os-platform
           - name: PG_PORT
             value: "5432"
           - name: PG_DATABASE
-            value: knowledge_shared_rssubscribe
+            value: user_space_{{ .Values.bfl.username }}_rssubscribe
           - name: RSS_HUB_URL
-            value: http://rss-server.knowledge-shared:1200/
+            value: http://127.0.0.1:1200/
           - name: NATS_URL
             value: nats://nats.os-platform:4222
           - name: NATS_USERNAME
@@ -159,8 +159,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: rssubscribe
-  # namespace: knowledge-shared
+  name: rssubscribe-svc
   namespace: {{ .Release.Namespace }}
 spec:
   type: ClusterIP
