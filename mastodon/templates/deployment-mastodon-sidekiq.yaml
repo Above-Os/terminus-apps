@@ -128,9 +128,9 @@ spec:
             - name: BITNAMI_DEBUG
               value: "false"
             - name: MASTODON_S3_HOSTNAME
-              value: "{{ .Values.minio.host }}"
+              value: "mastodon-minio"
             - name: MASTODON_S3_PORT_NUMBER
-              value: "{{ .Values.minio.port }}"
+              value: "80"
           volumeMounts:
             - name: empty-dir
               mountPath: /tmp
@@ -168,7 +168,6 @@ spec:
               value: "sidekiq"
             - name: MASTODON_DATABASE_PASSWORD
               value: "{{ .Values.postgres.password }}"
-
             - name: DB_PASS
               value: "{{ .Values.postgres.password }}"
             - name: MASTODON_REDIS_PASSWORD
@@ -182,9 +181,15 @@ spec:
                   name: mastodon-redis
                   key: "redis-password"
             - name: MASTODON_AWS_ACCESS_KEY_ID
-              value: {{ .Values.minio.username }}
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-minio
+                  key: "root-user"
             - name: MASTODON_AWS_SECRET_ACCESS_KEY
-              value: {{ .Values.minio.password }}
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-minio
+                  key: "root-password"
           envFrom:
             - configMapRef:
                 name: mastodon-default
