@@ -1,132 +1,126 @@
-apiVersion: v1
-data:
-  init.sh: |
-    #!/bin/bash
-
-    source_dir="/config"
-    dest_dir="/new-config"
-
-    if [ -z "$(ls -A $dest_dir)" ]; then
-      echo "$dest_dir is empty. Copying files from $source_dir..."
-      cp -r $source_dir/. $dest_dir
-      echo "Files copied successfully."
-    else
-      echo "$dest_dir is not empty. No action taken."
-    fi
-
-kind: ConfigMap
-metadata:
-  name: init-config
-  namespace: {{ .Release.Namespace }}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
-  namespace: {{ .Release.Namespace }}
+  creationTimestamp: null
   labels:
-    app: radarr
+    io.kompose.service: llamafactory
+  name: llamafactory
+  namespace: '{{ .Release.Namespace }}'
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"  
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: radarr
+      io.kompose.service: llamafactory
+  strategy:
+    type: Recreate
   template:
     metadata:
+      creationTimestamp: null
       labels:
-        app: radarr
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: llamafactory
     spec:
-      initContainers:
-      - env:
-        - name: PGID
-          value: "1000" 
-        - name: PUID
-          value: "1000" 
-        - name: UMASK
-          value: "002" 
-        - name: TZ
-          value: Etc/UTC
-        name: radarr-init-data
-        image: hotio/radarr:latest
-        resources:
-          requests:
-            cpu: 100m
-            memory: 64Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
-        ports:
-        - containerPort: 7878
-        volumeMounts:
-        - mountPath: /new-config
-          name: radarr-config
-        - name: init-config 
-          mountPath: /init.sh
-          subPath: init.sh
-        command:
-          - sh
-          - '-c'
-          - |
-            chmod +x /init.sh & bash /init.sh
+      # initContainers:
+      # - name: init-chmod-data
+      #   image: 'docker.io/aboveos/busybox:latest'
+      #   command:
+      #     - sh
+      #     - '-c'
+      #     - |
+      #       chown -R 1000:1000 /app-data-root
+      #   resources: {}
+      #   volumeMounts:
+      #     - name:  data
+      #       mountPath: /app-data-root
+      #   terminationMessagePath: /dev/termination-log
+      #   terminationMessagePolicy: File
+      #   imagePullPolicy: IfNotPresent
+      #   securityContext:
+      #     runAsUser: 0
       containers:
-      - env:
-        - name: PGID
-          value: "1000" 
-        - name: PUID
-          value: "1000" 
-        - name: UMASK
-          value: "002" 
-        - name: TZ
-          value: Etc/UTC
-        name: radarr
-        image: hotio/radarr:latest
-        resources:
-          requests:
-            cpu: 100m
-            memory: 64Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
+      - name: llamafactory
+        image: 'kldtks/llama-factory:main-250218-b1'
         ports:
-        - containerPort: 7878
+          - containerPort: 7860
+            protocol: TCP
+          - containerPort: 8000
+            protocol: TCP
+        command:
+          - bash
+          - '-c'
+          - unset LD_PRELOAD;llamafactory-cli webui
+        env:
+          - name: HF_ENDPOINT
+            value: 'https://hf-mirror.com'
+        resources:
+          limits:
+            cpu: "5"
+            memory: 20Gi
+          requests:
+            cpu: "1"
+            memory: 2Gi
         volumeMounts:
-        - mountPath: /config
-          name: radarr-config
-        - name: home
-          mountPath: /home
-
+        - mountPath: /root
+          name: data
+        - mountPath: /app/data
+          name: appdata
+        - mountPath: /app/output
+          name: output
+        - mountPath: /home/Documents
+          name: userdata
+        - name: shm
+          mountPath: /dev/shm
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Always
       volumes:
-      - name: radarr-config
-        hostPath:
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/llamafactory'
           type: DirectoryOrCreate
-          path: {{ .Values.userspace.appData }}/radarr 
-      - name: home
+        name: data
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/llamafactory/app'
+          type: DirectoryOrCreate
+        name: appdata
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/llamafactory/output'
+          type: DirectoryOrCreate
+        name: output
+      - name: userdata
         hostPath:
           type: Directory
-          path: {{ .Values.userspace.userData }}
-      - name: init-config
-        configMap:
-          name: init-config
-          defaultMode: 438
-          items:
-          - key: init.sh
-            path: init.sh
-            
+          path: {{ .Values.userspace.userData }}/Documents
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: "2Gi"
+status: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-svc
-  namespace: {{ .Release.Namespace }}
+  creationTimestamp: null
+  labels:
+    io.kompose.service: llamafactory
+  name: llamafactory
+  namespace: '{{ .Release.Namespace }}'
 spec:
-  type: ClusterIP
-  selector:
-    app: {{ .Release.Name }}
   ports:
-    - protocol: TCP
-      port: 7878
-      targetPort: 7878
-
+  - name: "8000"
+    port: 8000
+    targetPort: 8000
+  - name: "7860"
+    port: 7860
+    targetPort: 7860
+  selector:
+    io.kompose.service: llamafactory
+status:
+  loadBalancer: {}
+{{- if .Values.sysVersion }}
+  {{- if semverCompare "<1.12.1-0" (toString .Values.sysVersion) }}
 ---
 apiVersion: sys.bytetrade.io/v1alpha1
 kind: ProviderRegistry
@@ -134,16 +128,18 @@ metadata:
   name: legacy-{{ .Release.Name }}
   namespace: user-system-{{ .Values.bfl.username }}
 spec:
-  dataType: legacy_{{ .Release.Name }}
-  deployment: {{ .Release.Name }}
-  description: {{ .Release.Name }} legacy api
-  endpoint: {{ .Release.Name }}-svc.{{ .Release.Namespace }}:7878
-  group: api.{{ .Release.Name }}
+  dataType: legacy_llamafactory
+  deployment: llamafactory
+  description: llamafactory legacy api
+  endpoint: llamafactory.{{ .Release.Namespace }}:8000
+  group: api.llamafactory
   kind: provider
   namespace: {{ .Release.Namespace }}
   version: v2
   opApis:
   - name: All
-    uri: /
+    uri: /  
 status:
-  state: active  
+  state: active
+  {{- end }}
+{{- end }}

@@ -11,11 +11,30 @@ spec:
   selector:
     matchLabels:
       app: bazarr
+  strategy:
+    type: Recreate  
   template:
     metadata:
       labels:
         app: bazarr
     spec:
+      initContainers:
+      - name: init-chmod-data
+        image: 'docker.io/aboveos/busybox:latest'
+        imagePullPolicy: IfNotPresent
+        command:
+          - sh
+          - '-c'
+          - |
+            chown -R 1000:1000 /app-data-root
+        resources: {}
+        volumeMounts:
+          - name: bazarr-config
+            mountPath: /app-data-root
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        securityContext:
+          runAsUser: 0
       containers:
       - env:
         - name: PGID
@@ -28,6 +47,7 @@ spec:
           value: Etc/UTC
         name: bazarr
         image: docker.io/aboveos/hotio-bazarr:latest
+        imagePullPolicy: IfNotPresent
         resources:
           requests:
             cpu: 100m
@@ -62,6 +82,8 @@ spec:
       port: 6767
       targetPort: 6767
 
+{{- if .Values.sysVersion }}
+  {{- if semverCompare "<1.12.1-0" (toString .Values.sysVersion) }}
 ---
 apiVersion: sys.bytetrade.io/v1alpha1
 kind: ProviderRegistry
@@ -82,3 +104,5 @@ spec:
     uri: /  
 status:
   state: active
+  {{- end }}  
+{{- end }}

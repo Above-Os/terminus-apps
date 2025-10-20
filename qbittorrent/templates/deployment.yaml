@@ -90,11 +90,14 @@ spec:
             - sh
             - '-c'
             - |
-              chown -R 1000:1000 /home
+              chown -R 1000:1000 /home; chown -R 1000:1000 /appdata
           resources: {}
+          imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: home
               mountPath: /home
+            - name: appdata
+              mountPath: /appdata
           securityContext:
             runAsUser: 0
         - name: init-qbittorrent-config
@@ -105,6 +108,7 @@ spec:
             - |
               chmod +x /init.sh & bash /init.sh
           resources: {}
+          imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: appdata
               mountPath: /appData
@@ -122,6 +126,7 @@ spec:
             subPath: nginx.conf
           ports:
           - containerPort: 8001
+          imagePullPolicy: IfNotPresent
           resources:
             requests:
               cpu: 10m
@@ -130,14 +135,14 @@ spec:
               cpu: 100m
               memory: 128Mi
         - name: qbittorrent
-          image: 'aboveos/qbittorrent:latest'
+          image: 'linuxserver/qbittorrent:5.1.2'
           resources:
             requests:
-              cpu: 40m
-              memory: 64Mi
+              cpu: 100m
+              memory: 100Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: "1"
+              memory: 2Gi
           ports:
             - name: http
               containerPort: 8080
@@ -193,6 +198,8 @@ spec:
   revisionHistoryLimit: 3
   progressDeadlineSeconds: 600
 
+{{- if .Values.sysVersion }}
+  {{- if semverCompare "<1.12.1-0" (toString .Values.sysVersion) }}
 ---
 apiVersion: sys.bytetrade.io/v1alpha1
 kind: ProviderRegistry
@@ -232,3 +239,5 @@ spec:
     uri: /  
 status:
   state: active
+  {{- end }}
+{{- end }}
