@@ -10,21 +10,21 @@ data:
     KEEP_ALIVE = "5m" # How long to keep Ollama models loaded into memory. (Instead of using -1 use "-1m")
 
     [MODELS.OPENAI]
-    API_KEY = ""
+    API_KEY = "{{ .Values.olaresEnv.OPENAI_APIKEY }}"
 
     [MODELS.GROQ]
-    API_KEY = ""
+    API_KEY = "{{ .Values.olaresEnv.GROQ_APIKEY }}"
 
     [MODELS.ANTHROPIC]
-    API_KEY = ""
+    API_KEY = "{{ .Values.olaresEnv.ANTHROPIC_APIKEY }}"
 
     [MODELS.GEMINI]
-    API_KEY = ""
+    API_KEY = "{{ .Values.olaresEnv.GEMINI_APIKEY }}"
 
     [MODELS.CUSTOM_OPENAI]
-    API_KEY = ""
-    API_URL = ""
-    MODEL_NAME = ""
+    API_KEY = "{{ .Values.olaresEnv.CUSTOMOPENAI_APIKEY }}"
+    API_URL = "{{ .Values.olaresEnv.CUSTOMOPENAI_URL }}"
+    MODEL_NAME = "{{ .Values.olaresEnv.CUSTOMOPENAI_NAME }}"
 
     [MODELS.OLLAMA]
     API_URL = "http://ollama.ollama-{{ .Values.admin }}:11434" # Ollama API URL - http://host.docker.internal:11434
@@ -66,6 +66,19 @@ spec:
         - mountPath: /home/perplexica-config/config.toml
           name: config
           subPath: config.toml
+      - name: seed-db
+        image: aboveos/itzcrazykns1337-perplexica:v1.10.2
+        command:
+          - sh
+          - -c
+          - |
+            if [ ! -s /mnt/data/db.sqlite ]; then
+              echo "Seeding db.sqlite into volume..."
+              cp /home/perplexica/data/db.sqlite /mnt/data/db.sqlite
+            fi
+        volumeMounts:
+          - name: appcache
+            mountPath: /mnt/data
       - name: init-chmod-data
         image: 'mirrors.joinolares.cn/aboveos/busybox:latest'
         command:

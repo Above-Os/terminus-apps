@@ -1,0 +1,100 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+
+metadata:
+  name: vllmbgererankerv2m3
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
+  description: Lightweight reranker model, possesses strong multilingual capabilities, easy to deploy, with fast inference.
+  appid: vllmbgererankerv2m3
+  title: BGE-Reranker-v2 (vLLM)
+  version: '1.0.3'
+  categories:
+    - AI
+
+entrances:
+  - authLevel: internal
+    host: vllmclient
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
+    name: vllmclient
+    openMethod: default
+    port: 8080
+    title: BGE-Reranker-v2 API
+    invisible: true
+
+spec:
+  versionName: 'BAAI/bge-reranker-v2-m3'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    ## Model OVERVIEW ##
+    bge-reranker-v2-m3 is trained based on bge-m3, introducing great multi-lingual capability as keeping a slim model size.
+
+    The BAAI/bge-reranker-v2-m3 is a 568-million-parameter multilingual model built on the XLM-RoBERTa-Large base. It is a lightweight cross-encoder with strong multilingual capabilities, ease of deployment, and fast inference performance.
+
+  developer: BAAI
+  website: https://bge-model.com/bge/bge_reranker_v2.html
+  sourceCode: https://huggingface.co/BAAI/bge-reranker-v2-m3
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/FlagOpen/FlagEmbedding/tree/master
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/BAAI/bge-reranker-v2-m3
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 6000m
+  requiredCpu: 150m
+  requiredDisk: 3Gi
+  limitedDisk: 20Gi
+  limitedMemory: 12Gi
+  requiredMemory: 4Gi
+  requiredGpu: 12Gi
+  limitedGpu: 24Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+
+permission:
+  appData: true
+  appCache: true
+
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - vllmbgererankerv2m3
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.2-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: vllmbgererankerv2m3
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}
+
+provider:
+- name: vllmbgererankerv2m3
+  entrance: vllmclient
+  paths: ["/*"]
+  verbs: ["*"]
