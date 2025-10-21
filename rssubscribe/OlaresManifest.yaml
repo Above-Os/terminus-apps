@@ -1,5 +1,6 @@
 olaresManifest.version: '0.10.0'
 olaresManifest.type: app
+apiVersion: 'v2'
 metadata:
   name: rssubscribe
   description: Provide RSS Subscribe service
@@ -29,6 +30,10 @@ spec:
   limitedCpu: 1000m
   supportArch:
   - amd64
+  subCharts:
+  - name: rsserver
+    shared: true
+  - name: rssubscribe  
 options:
   dependencies:
   - name: olares
@@ -36,8 +41,9 @@ options:
     version: '>=1.12.2-0'
   appScope:
     clusterScoped: true
+    systemService: true
     appRef:
-    - knowledge
+    - wise.*
 provider:
 - name: rssubscribe-svc
   entrance: rssubscribe-svc
@@ -45,9 +51,14 @@ provider:
   verbs: ["*"]
 entrances:
 - name: rssubscribe-svc
-  port: 8082
+  port: 8080
   host: rssubscribe-svc
   title: rssubscribe API
   icon: https://app.cdn.olares.com/appstore/rssubscribe/icon.png
-  authLevel: internal
+  authLevel: private
   invisible: true
+middleware:
+  postgres:
+    username: rssubscribe
+    databases:
+    - name: rssubscribe
