@@ -1,0 +1,112 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+
+metadata:
+  name: llamacppgptoss120bgguf
+  icon: https://file.bttcdn.com/appstore/llm/vllm/llm/gemma3-12B.png
+  description: The current, most capable model that runs on a single GPU.
+  appid: llamacppgptoss120bgguf
+  title: gpt-oss-120b(LLaMA)
+  version: '1.0.1'
+  categories:
+    - AI
+
+entrances:
+  - authLevel: internal
+    host: llamaclient
+    icon: https://file.bttcdn.com/appstore/llm/vllm/llm/gemma3-12B.png
+    name: llamaclient
+    openMethod: default
+    port: 8080
+    title: gpt-oss-120b API
+    invisible: true
+
+spec:
+  versionName: 'ggml-org/gpt-oss-120b-GGUF'
+  fullDescription: |
+    
+  developer: Google
+  website: https://ai.google.dev/gemma
+  sourceCode: https://huggingface.co/ggml-org/gpt-oss-120b-GGUF
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://ai.google.dev/gemma/docs/core
+  license:
+    - text: Gemma Terms of Use
+      url: https://ai.google.dev/gemma/terms
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 5
+  requiredCpu: 150m
+  requiredDisk: 70Gi
+  limitedDisk: 100Gi
+  limitedMemory: 70Gi
+  requiredMemory: 10Gi
+  requiredGpu: 16Gi
+  limitedGpu: 30Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+
+permission:
+  appData: true
+  appCache: true
+  userData:
+  - Home
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - llamacppgptoss120bgguf
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.2-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: llamacppgptoss120bgguf
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}
+
+provider:
+- name: llamacppgptoss120bgguf
+  entrance: llamaclient
+  paths: ["/*"]
+  verbs: ["*"]
+
+envs:
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "DESCRIPTION"
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "DESCRIPTION"
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
