@@ -1,99 +1,127 @@
 ---
 apiVersion: v1
-data:
-  nginx.conf: |
-    server {
-
-      listen 8080;
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
-
-      proxy_connect_timeout                          30s;
-      proxy_send_timeout                             60s;
-      proxy_read_timeout                             300s;
-      proxy_set_header      host                      $host;
-      proxy_set_header      x-forwarded-host          $http_host;
-
-      proxy_http_version 1.1;
-
-      proxy_set_header upgrade $http_upgrade;
-      proxy_set_header connection "upgrade";
-
-      location / {
-        {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-        proxy_pass http://vllm:8000;
-        {{- else }}
-        proxy_pass http://{{ .Release.Name }}.{{ .Release.Name }}-{{ .Values.admin }}:8000;
-        {{- end }}
-      }
-    }
-
 kind: ConfigMap
 metadata:
   name: nginx-config
   namespace: {{ .Release.Namespace }}
+data:
+  app_backend.conf: |
+    upstream app_backend {
+      zone app_backend 64k;
+      {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+      server vllm:8000 max_fails=1 fail_timeout=2s;
+      server download-svc:8090 backup;
+      {{- else }}
+      server vllm.{{ .Release.Name }}-{{ .Values.admin }}:8000 max_fails=1 fail_timeout=2s;
+      server download-svc.{{ .Release.Name }}-{{ .Values.admin }}:8090 backup;
+      {{- end }}
+    }
 
+    server {
+      listen 8080;
+      access_log /opt/bitnami/openresty/nginx/logs/access.log;
+      error_log  /opt/bitnami/openresty/nginx/logs/error.log;
+
+      location = /ping   { return 200 'pong'; }
+      location = /health { return 200 'ok'; }
+
+      location /progress {
+        {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+        proxy_pass http://download-svc:8090;
+        {{- else }}
+        proxy_pass http://download-svc.{{ .Release.Name }}-{{ .Values.admin }}:8090;
+        {{- end }}
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        add_header Access-Control-Allow-Origin *;
+        if ($request_method = 'OPTIONS') { return 204; }
+      }
+
+      location = /backend_health {
+        {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+        proxy_pass http://vllm:8000/health;
+        {{- else }}
+        proxy_pass http://vllm.{{ .Release.Name }}-{{ .Values.admin }}:8000/health;
+        {{- end }}
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+      }
+
+      location / {
+        proxy_pass http://app_backend;
+
+        proxy_connect_timeout 60s;
+        proxy_read_timeout    60s;
+        proxy_send_timeout    60s;
+
+        proxy_next_upstream         error timeout http_500 http_502 http_503 http_504 non_idempotent;
+        proxy_next_upstream_tries   2;
+        proxy_next_upstream_timeout 3s;
+
+        proxy_intercept_errors on;
+        error_page 500 502 503 504 = @download;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        add_header Access-Control-Allow-Origin *;
+        if ($request_method = 'OPTIONS') { return 204; }
+      }
+
+      location @download {
+        {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+        proxy_pass http://download-svc:8090;
+        {{- else }}
+        proxy_pass http://download-svc.{{ .Release.Name }}-{{ .Values.admin }}:8090;
+        {{- end }}
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        add_header Access-Control-Allow-Origin *;
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  creationTimestamp: null
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
   labels:
-    io.kompose.service: vllmclient
-  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-  name: vllmclient
-  {{- else }}
-  name: vllm
-  {{- end }}
-  namespace: '{{ .Release.Namespace }}'
+    io.kompose.service: {{ .Release.Name }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      io.kompose.service: vllmclient
-  strategy: {}
+      io.kompose.service: {{ .Release.Name }}
   template:
     metadata:
-      creationTimestamp: null
       labels:
         io.kompose.network/chrome-default: "true"
-        io.kompose.service: vllmclient
+        io.kompose.service: {{ .Release.Name }}
     spec:
       volumes:
         - name: nginx-config
           configMap:
             name: nginx-config
-            defaultMode: 438
+            defaultMode: 420 # 0644
             items:
-              - key: nginx.conf
-                path: nginx.conf
+              - key: app_backend.conf
+                path: app_backend.conf
       containers:
         - name: nginx
           image: docker.io/aboveos/bitnami-openresty:1.25.3-2
           ports:
             - containerPort: 8080
               protocol: TCP
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
-          startupProbe:
-            httpGet:
-              path: /ping
-              port: 8080
-            initialDelaySeconds: 30
-            timeoutSeconds: 60
-            periodSeconds: 40
-            failureThreshold: 120
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 30
-            timeoutSeconds: 60
-            periodSeconds: 60
-            successThreshold: 1
-            failureThreshold: 10
           resources:
             limits:
               cpu: 500m
@@ -101,14 +129,26 @@ spec:
             requests:
               cpu: 10m
               memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8080
+            initialDelaySeconds: 2
+            timeoutSeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-            - name: nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
-              subPath: nginx.conf
-
+              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/app_backend.conf
+              subPath: app_backend.conf
 ---
 apiVersion: v1
 kind: Service
@@ -118,9 +158,9 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    io.kompose.service: vllmclient
+    io.kompose.service: {{ .Release.Name }}
   ports:
-    - name: vllmclient
+    - name: http
       protocol: TCP
       port: 8080
       targetPort: 8080
