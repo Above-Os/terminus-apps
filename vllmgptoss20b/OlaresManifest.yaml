@@ -8,7 +8,7 @@ metadata:
   description: OpenAI’s open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases.
   appid: vllmgptoss20b
   title: GPT-OSS 20B (vLLM)
-  version: '1.0.1'
+  version: '1.0.5'
   categories:
     - AI
 
@@ -62,14 +62,14 @@ spec:
       url: https://huggingface.co/openai/gpt-oss-20b
 
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-  limitedCpu: 5
-  requiredCpu: 150m
-  requiredDisk: 40Gi
-  limitedDisk: 80Gi
-  limitedMemory: 20Gi
+  limitedCpu: 21
+  requiredCpu: 1
+  requiredDisk: 35Gi
+  limitedDisk: 50Gi
+  limitedMemory: 30Gi
   requiredMemory: 10Gi
-  requiredGpu: 28Gi
-  limitedGpu: 48Gi
+  requiredGpu: 16Gi
+  limitedGpu: 30Gi
   {{- else }}
   requiredMemory: 64Mi
   limitedMemory: 800Mi
@@ -86,7 +86,8 @@ spec:
 permission:
   appData: true
   appCache: true
-
+  userData:
+  - Home
 options:
   apiTimeout: 0
   appScope:
@@ -114,3 +115,16 @@ provider:
   entrance: vllmclient
   paths: ["/*"]
   verbs: ["*"]
+
+envs:
+  - envName: HF_TOKEN
+    required: true
+    applyOnChange: true
+    description: "Token from hugging face, required for model download"
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: HF_ENDPOINT
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
