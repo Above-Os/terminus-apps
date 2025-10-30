@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homebox
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: homebox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homebox
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: homebox
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+        - env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+            - name: HBOX_MODE
+              value: "production"
+            - name: HBOX_STORAGE_CONN_STRING
+              value: "file:///?no_tmp_dir=true"
+            - name: HBOX_STORAGE_PREFIX_PATH
+              value: "data"
+            - name: HBOX_DATABASE_SQLITE_PATH
+              value: "/data/homebox.db?_pragma=busy_timeout=2000&_pragma=journal_mode=WAL&_fk=1&_time_format=sqlite"
+            - name: HBOX_WEB_MAX_FILE_UPLOAD
+              value: "10"
+            - name: HBOX_OPTIONS_ALLOW_ANALYTICS
+              value: "false"
+          image: aby913/homebox:1.0.0
+          name: homebox
+          ports:
+            - containerPort: 7745
+          resources:
+            requests:
+              cpu: 50m
+              memory: 20Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
+          volumeMounts:
+            - mountPath: /data
+              name: data
+      volumes:
+        - name: data
+          hostPath:
+            type: DirectoryOrCreate
+            path: "{{ .Values.userspace.appData }}/homebox"
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homebox
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  type: ClusterIP
+  selector:
+    app: homebox
+  ports:
+    - name: "homebox"
+      port: 3100
+      targetPort: 7745
