@@ -70,7 +70,7 @@ spec:
             - mountPath: "/root/.ollama"
               name: data
         - name: api
-          image: harveyff/olares-ollama:v0.0.2
+          image: harveyff/olares-ollama:v0.0.3
           env:
             - name: PGID
               value: "1000"
@@ -85,7 +85,7 @@ spec:
             - name: OLLAMA_URL
               value: "http://localhost:11434"
             - name: APP_URL
-              value: "https://{{ $ollamaclientDomain }}"
+              value: "http://{{ $ollamaclientDomain }}"
           resources:
             requests:
               cpu: 300m
@@ -100,30 +100,10 @@ spec:
       volumes:
         - name: data
           hostPath:
-            path: "{{ .Values.userspace.userData }}/Ollama/{{ .Release.Name }}"
+            path: "{{ .Values.userspace.userData }}/Ollama"
             type: DirectoryOrCreate
       restartPolicy: Always
 status: {}
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  creationTimestamp: null
-  labels:
-    io.kompose.service: ollama
-  name: ollama
-  namespace: "{{ .Release.Namespace }}"
-spec:
-  ports:
-    - name: "11434"
-      port: 11434
-      targetPort: 11434
-  selector:
-    io.kompose.service: ollamagemma327b
-status:
-  loadBalancer: {}
-
 ---
 apiVersion: v1
 kind: Service
