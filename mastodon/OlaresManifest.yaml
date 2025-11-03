@@ -5,7 +5,7 @@ metadata:
   description: Your self-hosted, globally interconnected microblogging community
   icon: https://app.cdn.olares.com/appstore/mastodon/icon.png
   appid: mastodon
-  version: '1.0.5'
+  version: '1.0.6'
   title: Mastodon
   categories:
   - Fun
@@ -14,7 +14,7 @@ permission:
   appData: true
   appCache: true
 spec:
-  versionName: v4.2.3
+  versionName: "4.2.3"
   featuredImage: https://app.cdn.olares.com/appstore/mastodon/promote_image_1v2.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/mastodon/promote_image_1v2.webp
@@ -93,6 +93,7 @@ options:
   - name: minio
     type: middleware
     version: '>=1.0.0-0'
+    mandatory: true
   policies:
     - uriRegex: ^/
       level: public
@@ -115,31 +116,38 @@ envs:
     required: false
     valueFrom:
       envName: OLARES_USER_SMTP_SERVER
+    applyOnChange: true      
   - envName: SMTP_PORT
     required: false
     valueFrom:
       envName: OLARES_USER_SMTP_PORT
+    applyOnChange: true      
   - envName: SMTP_LOGIN
     required: false
     valueFrom:
       envName: OLARES_USER_SMTP_USERNAME
+    applyOnChange: true      
   - envName: SMTP_PASSWORD
     required: false
     valueFrom:
       envName: OLARES_USER_SMTP_PASSWORD
+    applyOnChange: true      
   - envName: SMTP_FROM_ADDRESS
     required: false
     valueFrom:
-      envName: OLARES_USER_SMTP_ADDRESS
+      envName: OLARES_USER_SMTP_FROM_ADDRESS
+    applyOnChange: true  
   - envName: SMTP_DOMAIN
     required: false
-    valueFrom:
-      envName: SMTP_SERVER
+    type: domain
+    editable: true
+    applyOnChange: true
   - envName: SMTP_DELIVERY_METHOD
     type: string
     editable: true
     applyOnChange: true
     required: false
+    default: "smtp"
   - envName: SMTP_AUTH_METHOD
     type: string
     editable: true
@@ -166,15 +174,15 @@ envs:
     applyOnChange: true
     required: false
   - envName: SMTP_TLS
-    type: string
-    editable: true
     applyOnChange: true
     required: false
-  - envName: SMTP_SSL
-    type: string
-    editable: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_USE_TLS
+  - envName: SMTP_SSL  
     applyOnChange: true
     required: false
+    valueFrom:
+      envName: OLARES_USER_SMTP_USE_SSL
 middleware:
   postgres:
     username: mastodon
