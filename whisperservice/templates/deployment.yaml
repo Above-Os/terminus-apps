@@ -36,6 +36,10 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
+            - name: HF_ENDPOINT
+              value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
+            - name: HF_TOKEN
+              value: "{{ .Values.olaresEnv.HF_TOKEN }}"
           envFrom:
             - configMapRef:
                 name: whisperapi-config
@@ -69,7 +73,7 @@ spec:
       volumes:
         - name: models
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/{{ .Release.Name }}"
+            path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}"
             type: DirectoryOrCreate
         - name: data
           hostPath:
@@ -94,7 +98,7 @@ spec:
     spec:
       containers:
         - name: {{ .Release.Name }}-downloadmodels
-          image: beclab/downloader-init:v0.1.0
+          image: beclab/downloader-init:v0.1.1
           ports:
             - containerPort: 8090
           envFrom:
@@ -130,11 +134,11 @@ spec:
       volumes:
         - name: downloader-tmp-vol
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/{{ .Release.Name }}/download/temp"
+            path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}/download/temp"
             type: DirectoryOrCreate
         - name: downloads-vol
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/{{ .Release.Name }}"
+            path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}"
             type: DirectoryOrCreate
         - name: tasks-txt-vol
           emptyDir: {}
