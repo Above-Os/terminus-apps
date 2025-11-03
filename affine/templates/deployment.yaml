@@ -1,4 +1,4 @@
-﻿{{- $affineDomainENV := split  ","  .Values.domain.affine -}}
+{{- $affineDomainENV := split  ","  .Values.domain.affine -}}
 {{- $affineDomain := index $affineDomainENV "_0" -}}
 
 ---
@@ -26,7 +26,7 @@ spec:
     spec:
       initContainers:
       - name: init-chmod-data
-        image: "docker.io/aboveos/busybox:1.37.0"
+        image: 'docker.io/aboveos/busybox:latest'
         imagePullPolicy: IfNotPresent
         command:
           - sh
@@ -65,7 +65,7 @@ spec:
           value: '{{$affineDomain}}'
         - name: AFFINE_SERVER_HTTPS
           value: 'false'
-        image: "docker.io/harveyff/affine-graphql:stable-e98f035"
+        image: harveyff/affine-graphql:stable-e98f035
         command: ['sh', '-c', 'node ./scripts/self-host-predeploy && node ./dist/main.js']
         name: affine
         ports:
@@ -88,37 +88,15 @@ spec:
       restartPolicy: Always
       volumes:
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: '{{ .Values.userspace.appData }}/config'
-            {{- else }}
-          path: '{{ .Values.userspace.appData }}/affine/config'
-            {{- end }}
-          {{- else }}
           path: '{{ .Values.userspace.appData }}/affine/config'
           type: DirectoryOrCreate
         name: config
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: '{{ .Values.userspace.appData }}/blob'
-            {{- else }}
-          path: '{{ .Values.userspace.appData }}/affine/blob'
-            {{- end }}
-          {{- else }}
           path: '{{ .Values.userspace.appData }}/affine/blob'
           type: DirectoryOrCreate
         name: blob
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: '{{ .Values.userspace.appData }}'
-            {{- else }}
           path: '{{ .Values.userspace.appData }}/affine'
-            {{- end }}
-          {{- else }}
-          path: '{{ .Values.userspace.appData }}/affine'
-          {{- end }}
           type: DirectoryOrCreate
         name: app-cache-root
       - hostPath:
