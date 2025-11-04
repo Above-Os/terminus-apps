@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: heygem
@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: heygem
-          image: "docker.io/guiji2025/fish-speech-ziming:1.0.39"
+          image: guiji2025/fish-speech-ziming:1.0.39
           command: ["/bin/bash", "-c", "/opt/conda/envs/python310/bin/python3 tools/api_server.py --listen 0.0.0.0:8080"]
           env:
             - name: NVIDIA_VISIBLE_DEVICES
@@ -52,7 +52,7 @@ spec:
               mountPath: /code/data
 
         - name: heygem-asr
-          image: "docker.io/guiji2025/fun-asr:1.0.2"
+          image: guiji2025/fun-asr:1.0.2
           command: ["sh", "/run.sh"]
           workingDir: /workspace/FunASR/runtime
           ports:
@@ -66,7 +66,7 @@ spec:
               memory: 16Gi
 
         - name: heygemgenvideo
-          image: "docker.io/guiji2025/heygem.ai:0.0.7_sdk_slim"
+          image: guiji2025/heygem.ai:0.0.7_sdk_slim
           command: ["python", "/code/app_local.py"]
           env:
             - name: PYTORCH_CUDA_ALLOC_CONF
@@ -87,27 +87,11 @@ spec:
       volumes:
         - name: voice-data
           hostPath:
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-            path: "{{ .Values.userspace.appData }}/voice/data"
-              {{- else }}
             path: "{{ .Values.userspace.appData }}/heygem/voice/data"
-              {{- end }}
-            {{- else }}
-            path: "{{ .Values.userspace.appData }}/heygem/voice/data"
-            {{- end }}
             type: DirectoryOrCreate
         - name: face2face-data
           hostPath:
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-            path: "{{ .Values.userspace.appData }}/face2face-data"
-              {{- else }}
             path: "{{ .Values.userspace.appData }}/heygem/face2face-data"
-              {{- end }}
-            {{- else }}
-            path: "{{ .Values.userspace.appData }}/heygem/face2face-data"
-            {{- end }}
             type: DirectoryOrCreate
       restartPolicy: Always
 ---
