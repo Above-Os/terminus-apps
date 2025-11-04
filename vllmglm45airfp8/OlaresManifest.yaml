@@ -1,0 +1,119 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+
+metadata:
+  name: vllmglm45airfp8
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/GLM-4.5-Air-106B.png
+  description: Zhipu AI's flagship open-source large language model, designed specifically for agentic AI applications
+  appid: vllmglm45airfp8
+  title: GLM-4.5-Air 106B (vLLM)
+  version: '1.0.2'
+  categories:
+    - AI
+
+entrances:
+  - authLevel: internal
+    host: vllmclient
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/GLM-4.5-Air-106B.png
+    name: vllmclient
+    openMethod: default
+    port: 8080
+    title: GLM-4.5-Air 106B API
+    invisible: true
+
+spec:
+  versionName: 'zai-org/GLM-4.5-Air-FP8'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    ## MODEL OVERVIEW ##
+    The GLM-4.5 series models are foundation models designed for intelligent agents. GLM-4.5-Air adopts a more compact design with 106 billion total parameters and 12 billion active parameters.
+
+    GLM-4.5-Air unify reasoning, coding, and intelligent agent capabilities to meet the complex demands of intelligent agent applications. It is hybrid reasoning model that provide two modes: thinking mode for complex reasoning and tool usage, and non-thinking mode for immediate responses.
+
+    # Features
+    Mixture-of-Experts Architecture
+    - 106B total parameters with only 312B active per inference, delivering massive scale with efficient computation.
+
+    GLM-4.5 Hybrid Reasoning
+    - Unique dual-mode system: "thinking" mode for complex analysis and "non-thinking" mode for instant responses.
+
+    Native Tool Calling
+    - Built-in support for function calling, web browsing, code execution, and external API integration.
+
+    Advanced Coding
+    - Full-stack development capabilities from frontend to backend, with 90.6% tool-use success rate in coding tasks.
+
+    Multilingual
+    - Trained on 24+ languages with exceptional English-Chinese bilingual capabilities and strong alignment.
+
+    Open Source
+    - MIT license allows unlimited commercial use, self-hosting, and customization without API dependencies.
+
+  developer: Zhipu AI
+  website: https://z.ai/blog/glm-4.5
+  sourceCode: https://huggingface.co/zai-org/GLM-4.5-Air-FP8
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://docs.vllm.ai
+  license:
+    - text: MIT
+      url: https://huggingface.co/zai-org/GLM-4.5-Air-FP8
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 5
+  requiredCpu: 150m
+  requiredDisk: 50Gi
+  limitedDisk: 100Gi
+  limitedMemory: 20Gi
+  requiredMemory: 10Gi
+  requiredGpu: 48Gi
+  limitedGpu: 60Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+
+permission:
+  appData: true
+  appCache: true
+
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - vllmglm45airfp8
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.2-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: vllmglm45airfp8
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}
+
+provider:
+- name: vllmglm45airfp8
+  entrance: vllmclient
+  paths: ["/*"]
+  verbs: ["*"]
