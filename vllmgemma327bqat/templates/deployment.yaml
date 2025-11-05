@@ -5,9 +5,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  creationTimestamp: null
   name: vllm
-  namespace: "{{ .Release.Namespace }}"
+  namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: vllm
   annotations:
@@ -21,7 +20,6 @@ spec:
     type: Recreate
   template:
     metadata:
-      creationTimestamp: null
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: vllm
@@ -67,8 +65,8 @@ spec:
               cpu: 500m
               memory: 9Gi
           volumeMounts:
-            - mountPath: /models/gemma-3-27b
-              name: data
+            - name: data
+              mountPath: /models/gemma-3-27b
         - name: download-model
           image: harveyff/hf-downloader:v0.0.11
           env:
@@ -97,6 +95,9 @@ spec:
             - "https://{{ $vllmDomain }}/health"
             - "--done-name"
             - ".gemma-3-27b-it-qat-W4A16-G128.done"
+          ports:
+            - name: http
+              containerPort: 8090
           startupProbe:
             httpGet:
               path: /ping
@@ -115,16 +116,13 @@ spec:
             periodSeconds: 60
             successThreshold: 1
             failureThreshold: 10
-          ports:
-            - containerPort: 8090
-              name: http
           volumeMounts:
             - name: data
               mountPath: /data
           resources:
             requests:
-              cpu: "100m"
-              memory: "500Mi"
+              cpu: 100m
+              memory: 500Mi
             limits:
               cpu: "1"
               memory: 1Gi
@@ -137,24 +135,19 @@ spec:
             path: "{{ .Values.userspace.userData }}/Huggingface/gemma327bqat"
             type: DirectoryOrCreate
       restartPolicy: Always
-status: {}
-
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  creationTimestamp: null
   name: download-svc
-  namespace: "{{ .Release.Namespace }}"
+  namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: vllm
 spec:
+  selector:
+    io.kompose.service: vllm
   ports:
     - name: http
       port: 8090
       targetPort: 8090
-  selector:
-    io.kompose.service: vllm
-status:
-  loadBalancer: {}
 {{- end }}
