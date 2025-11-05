@@ -4,11 +4,11 @@ olaresManifest.type: app
 
 metadata:
   name: vllmqwen330ba3binstruct4bit
-  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/qwen3-235B.png
-  description: The latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models.
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gpt-oss-20b.png
+  description: OpenAI’s open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases.
   appid: vllmqwen330ba3binstruct4bit
   title: Qwen3 30B (vLLM)
-  version: '1.0.2'
+  version: '1.0.3'
   categories:
     - AI
 
@@ -29,27 +29,34 @@ spec:
     This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
 
     ## MODEL OVERVIEW ##
-    Qwen3 is the latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models. Built upon extensive training, Qwen3 delivers groundbreaking advancements in reasoning, instruction-following, agent capabilities, and multilingual support
+    Welcome to the gpt-oss series, OpenAI’s open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases.
 
-    Key features:
-    Uniquely support of seamless switching between thinking mode (for complex logical reasoning, math, and coding) and non-thinking mode (for efficient, general-purpose dialogue) within single model, ensuring optimal performance across various scenarios.
+    # Models:
+    We’re releasing two flavors of these open models:
+    gpt-oss-120b
+    — for production, general purpose, high reasoning use cases that fit into a single 80GB GPU (like NVIDIA H100 or AMD MI300X) (117B parameters with 5.1B active parameters)
 
-    Significantly enhancement in its reasoning capabilities, surpassing previous QwQ (in thinking mode) and Qwen2.5 instruct models (in non-thinking mode) on mathematics, code generation, and commonsense logical reasoning.
+    gpt-oss-20b
+    — for lower latency, and local or specialized use cases (21B parameters with 3.6B active parameters)
 
-    Superior human preference alignment, excelling in creative writing, role-playing, multi-turn dialogues, and instruction following, to deliver a more natural, engaging, and immersive conversational experience.
+    Both models were trained on our harmony response format and should only be used with the harmony format as it will not work correctly otherwise.
 
-    Expertise in agent capabilities, enabling precise integration with external tools in both thinking and unthinking modes and achieving leading performance among open-source models in complex agent-based tasks.
+    # Feature highlights
+    - Permissive Apache 2.0 license: Build freely without copyleft restrictions or patent risk—ideal for experimentation, customization, and commercial deployment.
+    - Configurable reasoning effort: Easily adjust the reasoning effort (low, medium, high) based on your specific use case and latency needs.
+    - Full chain-of-thought: Gain complete access to the model’s reasoning process, facilitating easier debugging and increased trust in outputs. It’s not intended to be shown to end users.
+    - Fine-tunable: Fully customize models to your specific use case through parameter fine-tuning.
+    - Agentic capabilities: Use the models’ native capabilities for function calling, web browsing, Python code execution, and Structured Outputs.
+    - MXFP4 quantization: The models were post-trained with MXFP4 quantization of the MoE weights, making gpt-oss-120b run on a single 80GB GPU (like NVIDIA H100 or AMD MI300X) and the gpt-oss-20b model run within 16GB of memory. All evals were performed with the same MXFP4 quantization.
 
-    Support of 100+ languages and dialects with strong capabilities for multilingual instruction following and translation.
-    
-  developer: Alibaba
-  website: https://qwen.ai/home
+  developer: OpenAI
+  website: https://openai.com/open-models/
   sourceCode: https://huggingface.co/cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
   submitter: Olares
   locale:
     - en-US
     - zh-CN
-  doc: https://qwen.readthedocs.io/en/latest/
+  doc: https://cookbook.openai.com/topic/gpt-oss
   license:
     - text: Apache-2.0
       url: https://huggingface.co/cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
@@ -59,7 +66,7 @@ spec:
   requiredCpu: 1
   requiredDisk: 30Gi
   limitedDisk: 50Gi
-  limitedMemory: 20Gi
+  limitedMemory: 30Gi
   requiredMemory: 5Gi
   requiredGpu: 16Gi
   limitedGpu: 30Gi
@@ -108,15 +115,17 @@ provider:
   entrance: vllmclient
   paths: ["/*"]
   verbs: ["*"]
+
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
-  - envName: HF_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: true
     applyOnChange: true
-    description: "Token from hugging face, required for model download"
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  - envName: HF_ENDPOINT
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
     required: true
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}
