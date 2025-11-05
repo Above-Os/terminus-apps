@@ -1,12 +1,12 @@
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 {{- $llamaDomainENV := split "," .Values.domain.llamaclient -}}
-{{- $llamaDomain := index $llamaDomainENV "_0"  -}}
+{{- $llamaDomain := index $llamaDomainENV "_0" -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: llama
-  namespace: "{{ .Release.Namespace }}"
+  namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: llama
   annotations:
@@ -27,7 +27,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: llama
-          image: aboveos/ggml-org-llama.cpp:full-cuda-b6823
+          image: aboveos/ggml-org-llama.cpp:server-cuda-b6941
           command:
             - /bin/sh
             - -c
@@ -80,8 +80,8 @@ spec:
             - name: HUGGINGFACE_HUB_CACHE
               value: "/models/hub"
           ports:
-            - containerPort: 8080
-              name: http
+            - name: http
+              containerPort: 8080
           resources:
             limits:
               cpu: "14"
@@ -92,37 +92,19 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /models
-      volumes:
-        - name: data
-          hostPath:
-            path: "{{ .Values.userspace.userData }}/Huggingface/gptoss120bgguf"
-            type: DirectoryOrCreate
-
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ .Release.Name }}-download-models
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app: {{ .Release.Name }}-download-models
-spec:
-  ttlSecondsAfterFinished: 100
-  backoffLimit: 3
-  template:
-    metadata:
-      labels:
-        app: {{ .Release.Name }}-download-models
-    spec:
-      restartPolicy: OnFailure
-      containers:
         - name: download-model
-          image: harveyff/hf-downloader:v0.0.5
+          image: harveyff/hf-downloader:v0.0.11
           env:
             - name: HF_ENDPOINT
-              value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
             - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.HF_TOKEN }}"
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
+            - name: VLLM_PROXY_TARGET
+              value: http://localhost:8080
+            - name: MODEL_NAME
+              value: gpt-oss-120b
+            - name: APP_URL
+              value: "https://{{ $llamaDomain }}"
           args:
             - "--repo"
             - "ggml-org/gpt-oss-120b-GGUF"
@@ -135,19 +117,37 @@ spec:
             - "--port"
             - "8090"
             - "--probe-url"
-            - "https://{{ $llamaDomain }}/backend_health"
+            - "https://{{ $llamaDomain }}/health"
             - "--done-name"
             - ".gpt-oss-120b-GGUF.done"
           ports:
-            - containerPort: 8090
-              name: http
+            - name: http
+              containerPort: 8090
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
           volumeMounts:
             - name: data
               mountPath: /data
           resources:
             requests:
-              cpu: "500m"
-              memory: "500Mi"
+              cpu: 100m
+              memory: 500Mi
             limits:
               cpu: "1"
               memory: 1Gi
@@ -165,20 +165,6 @@ kind: Service
 metadata:
   name: download-svc
   namespace: {{ .Release.Namespace }}
-spec:
-  selector:
-    app: {{ .Release.Name }}-download-models
-  ports:
-    - name: download-status
-      port: 8090
-      targetPort: 8090
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: llama
-  namespace: "{{ .Release.Namespace }}"
   labels:
     io.kompose.service: llama
 spec:
@@ -186,7 +172,7 @@ spec:
     io.kompose.service: llama
   ports:
     - name: http
-      port: 8080
-      targetPort: 8080
+      port: 8090
+      targetPort: 8090
   type: ClusterIP
 {{- end }}
