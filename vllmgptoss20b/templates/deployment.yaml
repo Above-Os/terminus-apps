@@ -1,4 +1,4 @@
-﻿{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 {{- $vllmDomainENV := split "," .Values.domain.vllmclient -}}
 {{- $vllmDomain := index $vllmDomainENV "_0" -}}
 ---
@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: "docker.io/vllm/vllm-openai:v0.11.0"
+          image: vllm/vllm-openai:v0.11.0
           command:
             - /bin/bash
             - -c
@@ -70,7 +70,7 @@ spec:
             - mountPath: /models/gpt-oss-20b
               name: data
         - name: download-model
-          image: "docker.io/harveyff/hf-downloader:v0.0.13"
+          image: harveyff/hf-downloader:v0.0.15
           env:
             - name: HF_ENDPOINT
               value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
@@ -101,7 +101,7 @@ spec:
             httpGet:
               path: /ping
               port: 8090
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             timeoutSeconds: 10
             periodSeconds: 10
             failureThreshold: 10
@@ -110,7 +110,7 @@ spec:
               path: /ping
               port: 8090
               scheme: HTTP
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
             timeoutSeconds: 60
             periodSeconds: 60
             successThreshold: 1
