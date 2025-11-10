@@ -981,7 +981,15 @@ spec:
         - name: worker-claim0
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: {{ .Values.userspace.appCache }}/volumes/app/storage
+              {{- else }}
+            path: {{ .Values.userspace.appCache }}/dify/volumes/app/storage
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appCache }}/dify/volumes/app/storage
+            {{- end }}
         - name: redis-extension
           configMap:
             name: dify-redis-extension

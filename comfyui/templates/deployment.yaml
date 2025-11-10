@@ -335,7 +335,15 @@ spec:
         - name: appcache
           hostPath:
             type: DirectoryOrCreate
-            path: {{ .Values.userspace.appCache}}
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: {{ .Values.userspace.appCache}}
+            {{- else }}
+          path: {{ .Values.userspace.appCache}}/comfyui
+            {{- end }}
+          {{- else }}
+          path: {{ .Values.userspace.appCache}}/comfyui
+          {{- end }}
         - name: modellibckp
           hostPath:
             type: DirectoryOrCreate

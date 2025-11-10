@@ -57,7 +57,15 @@ spec:
         - name: memos-data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: '{{ .Values.userspace.appCache }}'
+              {{- else }}
+            path: '{{ .Values.userspace.appCache }}/memos'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appCache }}/memos'
+            {{- end }}
 ---
 apiVersion: v1
 kind: Service

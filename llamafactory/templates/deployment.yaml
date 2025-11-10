@@ -78,15 +78,39 @@ spec:
       restartPolicy: Always
       volumes:
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}'
+            {{- else }}
+          path: '{{ .Values.userspace.appCache }}/llamafactory'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appCache }}/llamafactory'
+          {{- end }}
           type: DirectoryOrCreate
         name: data
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}/app'
+            {{- else }}
+          path: '{{ .Values.userspace.appCache }}/llamafactory/app'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appCache }}/llamafactory/app'
+          {{- end }}
           type: DirectoryOrCreate
         name: appdata
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}/output'
+            {{- else }}
+          path: '{{ .Values.userspace.appCache }}/llamafactory/output'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appCache }}/llamafactory/output'
+          {{- end }}
           type: DirectoryOrCreate
         name: output
       - name: userdata

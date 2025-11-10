@@ -63,11 +63,27 @@ spec:
         - name: docmost-data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: '{{ .Values.userspace.appCache }}'
+              {{- else }}
+            path: '{{ .Values.userspace.appCache }}/docmost'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appCache }}/docmost'
+            {{- end }}
         - name: redis-data
           hostPath:
             type: DirectoryOrCreate
-            path: '{{ .Values.userspace.appdata }}/redisdata'
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/redisdata'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/docmost/redisdata'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/docmost/redisdata'
+            {{- end }}
 ---
 apiVersion: v1
 kind: Service
