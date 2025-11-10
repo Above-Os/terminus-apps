@@ -168,15 +168,39 @@ spec:
         - name: data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: {{ .Values.userspace.appData }}/data
+              {{- else }}
+            path: {{ .Values.userspace.appData }}/ipfs/data
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appData }}/ipfs/data
+            {{- end }}
         - name: export
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: {{ .Values.userspace.appData }}/export
+              {{- else }}
+            path: {{ .Values.userspace.appData }}/ipfs/export
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appData }}/ipfs/export
+            {{- end }}
         - name: app-data-root
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: {{ .Values.userspace.appData }}
+              {{- else }}
+            path: {{ .Values.userspace.appData }}/ipfs
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appData }}/ipfs
+            {{- end }}
         - name: nginx-config
           configMap:
             name: nginx-config

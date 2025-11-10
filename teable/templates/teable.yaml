@@ -64,7 +64,15 @@ spec:
         - name: teable-data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: '{{ .Values.userspace.appData }}'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/teable'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/teable'
+            {{- end }}
 
 ---
 apiVersion: batch/v1

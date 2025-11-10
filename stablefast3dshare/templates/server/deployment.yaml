@@ -112,7 +112,15 @@ spec:
       - name: sf3d
         hostPath:
           type: DirectoryOrCreate
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: {{ .Values.userspace.appCache}}
+            {{- else }}
+          path: {{ .Values.userspace.appCache}}/{{ .Release.Name }}
+            {{- end }}
+          {{- else }}
+          path: {{ .Values.userspace.appCache}}/{{ .Release.Name }}
+          {{- end }}
       - name: nginx-config-server
         configMap:
           name: nginx-config-server

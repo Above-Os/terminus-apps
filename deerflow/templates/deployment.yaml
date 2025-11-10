@@ -106,11 +106,27 @@ spec:
             type: DirectoryOrCreate
         - name: logs
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}/logs"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/deerflow/logs"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/deerflow/logs"
+            {{- end }}
             type: DirectoryOrCreate
         - name: app-volume
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}/app"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/deerflow/app"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/deerflow/app"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: v1

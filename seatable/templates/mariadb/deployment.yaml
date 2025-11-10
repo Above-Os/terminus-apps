@@ -104,5 +104,13 @@ spec:
       volumes:
         - name: mysql-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}/opt/seatable/mysql-data"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/seatable/opt/seatable/mysql-data"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/seatable/opt/seatable/mysql-data"
+            {{- end }}
             type: DirectoryOrCreate

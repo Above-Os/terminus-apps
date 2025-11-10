@@ -85,7 +85,15 @@ spec:
             type: DirectoryOrCreate
         - name: logs
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}/logs"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/logs"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/logs"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: batch/v1
