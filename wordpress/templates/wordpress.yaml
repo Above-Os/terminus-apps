@@ -1,4 +1,4 @@
-﻿# Source: wordpress/charts/mariadb/templates/serviceaccount.yaml
+# Source: wordpress/charts/mariadb/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -118,7 +118,7 @@ spec:
 
       initContainers:
         - name: init-chmod-data
-          image: "docker.io/aboveos/busybox:1.34.0"
+          image: aboveos/busybox:1.34.0
           command:
             - sh
             - '-c'
@@ -139,7 +139,7 @@ spec:
 
       containers:
         - name: wordpress
-          image: "docker.io/aboveos/bitnami-wordpress:6.4.2-debian-11-r14"
+          image: aboveos/bitnami-wordpress:6.4.2-debian-11-r14
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -249,12 +249,4 @@ spec:
         - name: wordpress-data
           hostPath:
             type: DirectoryOrCreate
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: {{ .Values.userspace.appCache}}
-              {{- else }}
-            path: {{ .Values.userspace.appCache}}/wordpress
-              {{- end }}
-            {{- else }}
-            path: {{ .Values.userspace.appCache}}/wordpress
-            {{- end }}

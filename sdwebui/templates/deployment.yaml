@@ -1,4 +1,4 @@
-﻿---
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,7 +18,7 @@ spec:
     spec:
       initContainers:
         - name: init-app
-          image: "docker.io/kldtks/sdwebui:v1.10.1-dm-t4"
+          image: kldtks/sdwebui:v1.10.1-dm-t4
           command:
             - sh
             - '-c'
@@ -48,7 +48,7 @@ spec:
             runAsUser: 0
 
         - name: initcache
-          image: "docker.io/kldtks/sdwebui:v1.10.1-dm-t4"
+          image: 'kldtks/sdwebui:v1.10.1-dm-t4'
           command:
             - sh
             - '-c'
@@ -68,7 +68,7 @@ spec:
           imagePullPolicy: IfNotPresent
 
         - name: init-chmod-data
-          image: "docker.io/aboveos/busybox:1.37.0"
+          image: 'aboveos/busybox:latest'
           command:
             - sh
             - '-c'
@@ -84,7 +84,7 @@ spec:
           securityContext:
             runAsUser: 0
         - name: update-chmod-data-ai
-          image: "docker.io/aboveos/busybox:1.37.0"
+          image: 'aboveos/busybox:latest'
           command:
             - sh
             - '-c'
@@ -103,7 +103,7 @@ spec:
       - name: sdwebui
         securityContext:
           runAsUser: 1000
-        image: "docker.io/kldtks/sdwebui:v1.10.1-dm-t4"
+        image: kldtks/sdwebui:v1.10.1-dm-t4
         command:
           - sh
           - '-c'
@@ -212,74 +212,29 @@ spec:
       - name: sddata
         hostPath:
           type: DirectoryOrCreate
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: {{ .Values.userspace.appCache}}
-            {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui
-          {{- end }}
       - name: app
         hostPath:
           type: DirectoryOrCreate
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: {{ .Values.userspace.appCache}}/app
-            {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/app
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/app
-          {{- end }}
       - name: systemcache
         hostPath:
           type: DirectoryOrCreate
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: {{ .Values.userspace.appCache}}/systemcache
-            {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/systemcache
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/systemcache
-          {{- end }}
       - name: sdcache
         hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: {{ .Values.userspace.appCache}}/.cache
-            {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/.cache
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/.cache
-          {{- end }}
+          path: >-
+            {{ .Values.userspace.appCache}}/.cache
           type: DirectoryOrCreate
       - name: sdconfig
         hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: {{ .Values.userspace.appCache}}/config
-            {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/config
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/config
-          {{- end }}
+          path: >-
+            {{ .Values.userspace.appCache}}/config
           type: DirectoryOrCreate
       - name: sdopenai
         hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: {{ .Values.userspace.appCache}}/openai
-            {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/openai
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appCache}}/sdwebui/openai
-          {{- end }}
+          path: >-
+            {{ .Values.userspace.appCache}}/openai
           type: DirectoryOrCreate
       - name: ai
         hostPath:

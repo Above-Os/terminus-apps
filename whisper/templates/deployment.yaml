@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   creationTimestamp: null
@@ -22,7 +22,7 @@ spec:
     spec:
       initContainers:
       - name: init-chmod-data
-        image: "docker.io/aboveos/busybox:1.37.0"
+        image: 'docker.io/aboveos/busybox:latest'
         command:
           - sh
           - '-c'
@@ -45,7 +45,7 @@ spec:
           value: "1000"
         - name: TZ
           value: Etc/UTC
-        image: "docker.io/aboveos/fedirz-faster-whisper-server:0.3-cuda"
+        image: docker.io/aboveos/fedirz-faster-whisper-server:0.3-cuda
         name: whisper
         ports:
         - containerPort: 8000
@@ -78,15 +78,7 @@ spec:
           name: data
       volumes:
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}'
-            {{- else }}
-          path: '{{ .Values.userspace.appCache }}/whisper'
-            {{- end }}
-          {{- else }}
-          path: '{{ .Values.userspace.appCache }}/whisper'
-          {{- end }}
           type: DirectoryOrCreate
         name: data
 status: {}

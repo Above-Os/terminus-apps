@@ -1,4 +1,4 @@
-﻿{{- $ipfsDomainENV := split  ","  .Values.domain.awesomedigitalhuman -}}
+{{- $ipfsDomainENV := split  ","  .Values.domain.awesomedigitalhuman -}}
 {{- $serverDomain := index $ipfsDomainENV "_0" -}}
 
 {{- $parts := split "." $serverDomain }}
@@ -34,7 +34,7 @@ spec:
     spec:
       initContainers:
       - name: init-server-config
-        image: "docker.io/aboveos/busybox:1.37.0"
+        image: 'docker.io/aboveos/busybox:latest'
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -76,7 +76,7 @@ spec:
           runAsUser: 0
 
       - name: init-web-config
-        image: "docker.io/aboveos/busybox:1.37.0"
+        image: 'docker.io/aboveos/busybox:latest'
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -92,7 +92,7 @@ spec:
         securityContext:
           runAsUser: 0
       - name: init-chmod-data
-        image: "docker.io/aboveos/busybox:1.37.0"
+        image: 'docker.io/aboveos/busybox:latest'
         command:
           - sh
           - '-c'
@@ -109,7 +109,7 @@ spec:
           runAsUser: 0
       containers:
       - name: adh-web
-        image: "docker.io/kldtks/adh-web:20250107-t1"
+        image: "kldtks/adh-web:20250107-t1"
         command:
           - sh
           - '-c'
@@ -162,39 +162,15 @@ spec:
       restartPolicy: Always
       volumes:
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}'
-            {{- else }}
-          path: '{{ .Values.userspace.appCache }}/awesomedigitalhuman'
-            {{- end }}
-          {{- else }}
-          path: '{{ .Values.userspace.appCache }}/awesomedigitalhuman'
-          {{- end }}
           type: DirectoryOrCreate
         name: appcache
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}/server'
-            {{- else }}
-          path: '{{ .Values.userspace.appCache }}/awesomedigitalhuman/server'
-            {{- end }}
-          {{- else }}
-          path: '{{ .Values.userspace.appCache }}/awesomedigitalhuman/server'
-          {{- end }}
           type: DirectoryOrCreate
         name: server
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appCache }}/web'
-            {{- else }}
-          path: '{{ .Values.userspace.appCache }}/awesomedigitalhuman/web'
-            {{- end }}
-          {{- else }}
-          path: '{{ .Values.userspace.appCache }}/awesomedigitalhuman/web'
-          {{- end }}
           type: DirectoryOrCreate
         name: web
       - name: config-for-adh
