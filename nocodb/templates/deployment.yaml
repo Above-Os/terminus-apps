@@ -62,11 +62,27 @@ spec:
         - name: nc-data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}/nc-data"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/nocodb/nc-data"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/nocodb/nc-data"
+            {{- end }}
         - name: app-data-root
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/nocodb"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/nocodb"
+            {{- end }}
 
 ---
 apiVersion: v1

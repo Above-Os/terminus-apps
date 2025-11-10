@@ -100,10 +100,26 @@ spec:
               name: bytebase-shared-volume
       volumes:
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appData }}/data'
+            {{- else }}
+          path: '{{ .Values.userspace.appData }}/bytebase/data'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/bytebase/data'
+          {{- end }}
           type: DirectoryOrCreate
         name: bytebase-volume
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: '{{ .Values.userspace.appData }}/shared/data'
+            {{- else }}
+          path: '{{ .Values.userspace.appData }}/bytebase/shared/data'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/bytebase/shared/data'
+          {{- end }}
           type: DirectoryOrCreate
         name: bytebase-shared-volume
