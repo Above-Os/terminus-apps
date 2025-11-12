@@ -1,4 +1,4 @@
-{{ $dbbackup_rootpath := printf "%s%s" .Values.rootPath "/rootfs/middleware-backup" }}
+﻿{{ $dbbackup_rootpath := printf "%s%s" .Values.rootPath "/rootfs/middleware-backup" }}
 {{- $knowledge_secret := (lookup "v1" "Secret" .Release.Namespace "knowledge-secrets") -}}
 {{- $nats_password := "" -}}
 {{ if $knowledge_secret -}}
@@ -135,7 +135,7 @@ spec:
       serviceAccount: knowledge-cluster-view
       initContainers:
       - name: init-data
-        image: busybox:1.28
+        image: "docker.io/busybox:1.28"
         securityContext:
           privileged: true
           runAsNonRoot: false
@@ -152,7 +152,7 @@ spec:
           chown -R 1000:1000 /data && \
           chown -R 1000:1000 /appCache
       - name: init-container
-        image: 'postgres:16.0-alpine3.18'
+        image: "docker.io/postgres:16.0-alpine3.18"
         command:
           - sh
           - '-c'
@@ -171,7 +171,7 @@ spec:
             value: {{ .Values.postgres.databases.knowledge }}
       containers:
       - name: knowledge
-        image: "beclab/knowledge-base-api:v0.12.47"
+        image: "docker.io/beclab/knowledge-base-api:v0.12.47"
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
@@ -240,7 +240,7 @@ spec:
             memory: 6Gi
 
       - name: vectorcrawl
-        image: "beclab/vectorcrawl:v0.1.7"
+        image: "docker.io/beclab/vectorcrawl:v0.1.7"
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -292,7 +292,7 @@ spec:
             memory: 2Gi
 
       - name: sync
-        image: "beclab/recommend-sync:v0.12.1"
+        image: "docker.io/beclab/recommend-sync:v0.12.1"
         securityContext:
           runAsUser: 0
           runAsNonRoot: false
@@ -327,7 +327,7 @@ spec:
             mountPath: /data
        
       - name: crawler
-        image: "beclab/recommend-crawler:v0.12.2"
+        image: "docker.io/beclab/recommend-crawler:v0.12.2"
         securityContext:
           allowPrivilegeEscalation: false
           runAsUser: 1000
