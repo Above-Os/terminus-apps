@@ -43,15 +43,39 @@ spec:
             type: Directory
             path: {{ .Values.userspace.userData }}
         - hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/config'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/jellyfin/config'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/jellyfin/config'
+            {{- end }}
             type: DirectoryOrCreate
           name: config
         - hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/cache'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/jellyfin/cache'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/jellyfin/cache'
+            {{- end }}
             type: DirectoryOrCreate
           name: cache
         - hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/jellyfin'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/jellyfin'
+            {{- end }}
             type: DirectoryOrCreate
           name: app-data-root
         - name: external

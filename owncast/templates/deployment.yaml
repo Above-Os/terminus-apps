@@ -44,7 +44,15 @@ spec:
       volumes:
         - name: data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}/data"
+              {{- else }}
             path: "{{ .Values.userspace.appData }}/owncast/data"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/owncast/data"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: v1

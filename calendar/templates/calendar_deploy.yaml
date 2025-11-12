@@ -115,8 +115,15 @@ spec:
       - name: redis-data
         hostPath:
           type: DirectoryOrCreate
-          path: {{ .Values.userspace.appdata }}/calendar/redisdata  
-      
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: {{ .Values.userspace.appData }}/redisdata
+            {{- else }}
+          path: {{ .Values.userspace.appData }}/calendar/redisdata
+            {{- end }}
+          {{- else }}
+          path: {{ .Values.userspace.appData }}/calendar/redisdata
+          {{- end }}
 
 ---
 apiVersion: v1

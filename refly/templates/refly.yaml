@@ -76,7 +76,15 @@ spec:
             name: qdrant-config
         - name: qdrant-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}/data/qdrant"
+              {{- else }}
             path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/data/qdrant"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/data/qdrant"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -187,7 +195,15 @@ spec:
       volumes:
         - name: es-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}/data/es"
+              {{- else }}
             path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/data/es"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/data/es"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: v1

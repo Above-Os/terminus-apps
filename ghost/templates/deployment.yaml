@@ -74,11 +74,27 @@ spec:
       volumes:
         - name: app-data-root
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/ghost'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/ghost'
+            {{- end }}
             type: DirectoryOrCreate
         - name: ghost
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/ghost'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/ghost/ghost'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/ghost/ghost'
+            {{- end }}
             type: DirectoryOrCreate
         - name: userdata
           hostPath:

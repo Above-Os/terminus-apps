@@ -55,11 +55,27 @@ spec:
             memory: 512Mi
       volumes:
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appCache }}'
+            {{- else }}
           path: '{{ .Values.userspace.appCache }}/ragflow'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appCache }}/ragflow'
+          {{- end }}
           type: DirectoryOrCreate
         name: appcache
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appCache }}/minio'
+            {{- else }}
           path: '{{ .Values.userspace.appCache }}/ragflow/minio'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appCache }}/ragflow/minio'
+          {{- end }}
           type: DirectoryOrCreate
         name: minio-data
 ---

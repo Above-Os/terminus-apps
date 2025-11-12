@@ -8,7 +8,7 @@ metadata:
   description: The current, most capable model that runs on a single GPU.
   appid: vllmgemma312bit
   title: Gemma3 12B (vLLM)
-  version: '1.0.3'
+  version: '1.0.7'
   categories:
     - AI
 
@@ -66,7 +66,7 @@ spec:
   requiredCpu: 1
   requiredDisk: 35Gi
   limitedDisk: 50Gi
-  limitedMemory: 20Gi
+  limitedMemory: 30Gi
   requiredMemory: 5Gi
   requiredGpu: 16Gi
   limitedGpu: 24Gi
@@ -110,20 +110,16 @@ options:
       mandatory: true
   {{- end }}
 
-provider:
-- name: vllmgemma312bit
-  entrance: vllmclient
-  paths: ["/*"]
-  verbs: ["*"]
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
-  - envName: HF_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: true
     applyOnChange: true
-    description: "Token from hugging face, required for model download"
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  - envName: HF_ENDPOINT
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
     required: true
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}

@@ -82,7 +82,15 @@ spec:
       restartPolicy: Always
       volumes:
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appCache }}'
+            {{- else }}
           path: '{{ .Values.userspace.appCache }}/gaianetai'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appCache }}/gaianetai'
+          {{- end }}
           type: DirectoryOrCreate
         name: appcache
 status: {}

@@ -87,7 +87,15 @@ spec:
 
         - name: userdata
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}/user_data"
+              {{- else }}
             path: "{{ .Values.userspace.appData }}/jaaz/user_data"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/jaaz/user_data"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: v1

@@ -63,7 +63,15 @@ spec:
       - name: app-data-storage
         hostPath:
           type: DirectoryOrCreate
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appData }}/storage'
+            {{- else }}
           path: '{{ .Values.userspace.appData }}/nocobase/storage'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/nocobase/storage'
+          {{- end }}
 
 ---
 apiVersion: v1

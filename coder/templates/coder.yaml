@@ -83,7 +83,15 @@ spec:
       volumes:
         - name: coder-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: {{ .Values.userspace.appData }}
+              {{- else }}
             path: {{ .Values.userspace.appData }}/coder
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appData }}/coder
+            {{- end }}
             type: DirectoryOrCreate
         - name: dind-storage
           emptyDir: {}

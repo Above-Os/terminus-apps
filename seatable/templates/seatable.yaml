@@ -65,7 +65,15 @@ spec:
         - name: seatable-data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/opt/seatable/seatable-data'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/seatable/opt/seatable/seatable-data'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/seatable/opt/seatable/seatable-data'
+            {{- end }}
         - name: seatable-license
           configMap:
             name: seatable-config

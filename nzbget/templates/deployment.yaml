@@ -65,7 +65,15 @@ spec:
       - name: nzbget-config
         hostPath:
           type: DirectoryOrCreate
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: {{ .Values.userspace.appData }} 
+            {{- else }}
           path: {{ .Values.userspace.appData }}/nzbget 
+            {{- end }}
+          {{- else }}
+          path: {{ .Values.userspace.appData }}/nzbget 
+          {{- end }}
       - name: nzbget-downloads
         hostPath:
           type: DirectoryOrCreate
