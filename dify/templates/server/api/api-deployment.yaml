@@ -1,5 +1,9 @@
 ﻿{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 
+{{- $difyDomainENV := split "," .Values.domain.client -}}
+{{- $difyDomain := index $difyDomainENV "_0" -}}
+{{- $localDomain := $difyDomain -}}
+
 ---
 # Redis extension ConfigMap
 apiVersion: v1
@@ -223,11 +227,13 @@ spec:
             - name: API_TOOL_DEFAULT_READ_TIMEOUT
               value: "60"
             - name: APP_API_URL
+              value: 'https://{{$difyDomain}}'
+            - name: APP_WEB_URL
+              value: 'https://{{$difyDomain}}'
             - name: APP_MAX_ACTIVE_REQUESTS
               value: "0"
             - name: APP_MAX_EXECUTION_TIME
               value: "1200"
-            - name: APP_WEB_URL
             - name: AZURE_BLOB_ACCOUNT_KEY
               value: difyai
             - name: AZURE_BLOB_ACCOUNT_NAME
@@ -326,9 +332,11 @@ spec:
             - name: CODE_MIN_NUMBER
               value: "-9223372036854775808"
             - name: CONSOLE_API_URL
+              value: 'https://{{$difyDomain}}'
             - name: CONSOLE_CORS_ALLOW_ORIGINS
               value: '*'
             - name: CONSOLE_WEB_URL
+              value: 'https://{{$difyDomain}}'
             - name: COUCHBASE_BUCKET_NAME
               value: Embeddings
             - name: COUCHBASE_CONNECTION_STRING
@@ -880,7 +888,6 @@ spec:
             - name: SCARF_NO_ANALYTICS
               value: "true"
             - name: SECRET_KEY
-              value: sk-9f73s3ljTXVcMT3Blb3ljTqtsKiGHXVcMT3BlbkFJLK7U
             - name: SENTRY_DSN
             - name: SENTRY_PROFILES_SAMPLE_RATE
               value: "1.0"
@@ -893,6 +900,7 @@ spec:
             - name: SERVER_WORKER_CONNECTIONS
               value: "10"
             - name: SERVICE_API_URL
+              value: 'https://{{$difyDomain}}'
             - name: SMTP_OPPORTUNISTIC_TLS
               value: "false"
             - name: SMTP_PASSWORD
