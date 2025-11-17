@@ -1,0 +1,89 @@
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+metadata:
+  name: indextts
+  description: An Industrial-Level Controllable and Efficient Zero-Shot Text-To-Speech System
+  icon: https://file.bttcdn.com/appstore/indextts/icon.png
+  appid: indextts
+  version: '1.0.1'
+  title: IndexTTS2
+  categories:
+  - AI
+  - Utilities_v112
+  - Utilities
+entrances:
+  - name: indextts
+    port: 8080
+    host: indextts-web-svc
+    title: IndexTTS2
+    icon: https://file.bttcdn.com/appstore/indextts/icon.png
+    authLevel: internal
+    openMethod: window
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+spec:
+  versionName: '0.0.1'
+  fullDescription: |
+    An Industrial-Level Controllable and Efficient Zero-Shot Text-To-Speech System
+  developer: index-tts
+  website: https://github.com/index-tts/index-tts
+  sourceCode: https://github.com/index-tts/index-tts
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/index-tts/index-tts
+  license:
+    - text: bilibili Model Use License
+      url: https://github.com/index-tts/index-tts?tab=License-1-ov-file
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  requiredMemory: 6Gi
+  limitedMemory: 20Gi
+  requiredDisk: 8Gi
+  limitedDisk: 20Gi
+  requiredCpu: 1
+  limitedCpu: 5
+  requiredGpu: 5Gi
+  limitedGpu: 16Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 500Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 500m
+  {{- end }}
+  supportArch:
+    - amd64
+    - arm64
+options:
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      type: system
+      version: '>=1.12.2-0'
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: indextts
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - indextts
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+envs:
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
