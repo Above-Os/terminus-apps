@@ -1,4 +1,4 @@
----
+﻿---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: anythingllm
-          image: docker.io/mintplexlabs/anythingllm:1.7.5
+          image: "docker.io/mintplexlabs/anythingllm:1.9.0"
           securityContext:
             runAsUser: 0
           env:
@@ -46,7 +46,7 @@ spec:
               memory: 512Mi
             limits:
               cpu: 1000m
-              memory: 1Gi
+              memory: 2Gi
           livenessProbe:
             httpGet:
               path: /
@@ -74,7 +74,15 @@ spec:
       volumes:
         - name: anythingllm-storage
           hostPath:
-            path: "{{ .Values.userspace.appData }}/anythingllm2"
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}"
+            {{- end }}
             type: DirectoryOrCreate
 ---
 apiVersion: v1
