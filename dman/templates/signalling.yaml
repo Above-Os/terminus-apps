@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: ../kompose -f ../compose.yml convert
+    kompose.version: 1.37.0 (fb0539e64)
+  labels:
+    io.kompose.service: signalling
+  name: signalling
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: signalling
+  strategy:
+    type: Recreate  
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: ../kompose -f ../compose.yml convert
+        kompose.version: 1.37.0 (fb0539e64)
+      labels:
+        io.kompose.service: signalling
+    spec:
+      containers:
+        - image: ghcr.io/zhongl/pixel-streaming-signalling-server:5.6
+          name: signalling
+          ports:
+            - containerPort: 80
+              protocol: TCP
+            - containerPort: 8889
+              protocol: TCP
+            - containerPort: 8888
+              protocol: UDP
+          resources:
+            requests:
+              cpu: 1
+              memory: 4Gi
+            limits:
+              cpu: 4
+              memory: 8Gi              
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signalling
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    kompose.cmd: ../kompose -f ../compose.yml convert
+    kompose.version: 1.37.0 (fb0539e64)
+  labels:
+    io.kompose.service: signalling
+  name: signalling
+spec:
+  type: ClusterIP
+  selector:
+    io.kompose.service: signalling
+  ports:
+    - name: "dman"
+      port: 80
+      targetPort: 80
+    - name: "8889"
+      port: 8889
+      protocol: TCP
+      targetPort: 8889
+    - name: "8888"
+      port: 8888
+      protocol: UDP
+      targetPort: 8888
+
