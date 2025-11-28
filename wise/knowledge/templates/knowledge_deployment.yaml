@@ -36,6 +36,10 @@ spec:
           name: knowledge-secrets
     user: "{{ .Release.Namespace }}-knowledge"
     subjects:
+      - name: rssubscribe_status
+        permission:
+          pub: allow
+          sub: allow
       - name: download_status
         permission:
           pub: allow
@@ -46,30 +50,7 @@ spec:
           sub: allow
 
 ---
-apiVersion: apr.bytetrade.io/v1alpha1
-kind: MiddlewareRequest
-metadata:
-  name: vectorcrawl-nats
-  namespace: {{ .Release.Namespace }}
-spec:
-  app: knowledge
-  appNamespace: os
-  middleware: nats
-  nats:
-    password:
-      valueFrom:
-        secretKeyRef:
-          key: nats_password
-          name: knowledge-secrets
-    user: "{{ .Release.Namespace }}-vectorcrawl"
-    subjects:
-      - name: rssubscribe_status
-        permission:
-          pub: allow
-          sub: allow
-      
 
----
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -171,7 +152,7 @@ spec:
             value: {{ .Values.postgres.databases.knowledge }}
       containers:
       - name: knowledge
-        image: "docker.io/beclab/knowledge-base-api:v0.12.47"
+        image: "docker.io/beclab/knowledge-base-api:v0.12.50"
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
@@ -220,8 +201,10 @@ spec:
             secretKeyRef:
               key: nats_password
               name: knowledge-secrets
-        - name: NATS_SUBJECT
+        - name: NATS_DOWNLOAD_SUBJECT
           value: os.download_status
+        - name: NATS_RSSUBSCRIBE_SUBJECT
+          value: os.rssubscribe_status
         - name: SOCKET_URL
           value: 'http://localhost:40010'
         - name: BACKUP_PATH
@@ -240,7 +223,7 @@ spec:
             memory: 6Gi
 
       - name: vectorcrawl
-        image: "docker.io/beclab/vectorcrawl:v0.1.7"
+        image: "docker.io/beclab/vectorcrawl:v0.1.11"
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -264,19 +247,6 @@ spec:
           value: "{{ .Values.postgres.port }}"
         - name: PG_DATABASE
           value: {{ .Values.postgres.databases.knowledge }}
-        - name: NATS_ENABLED
-          value: "true"
-        - name: NATS_URL
-          value: nats://nats.os-platform:4222
-        - name: NATS_USERNAME
-          value: {{ .Release.Namespace }}-vectorcrawl
-        - name: NATS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: nats_password
-              name: knowledge-secrets
-        - name: NATS_SUBJECT
-          value: os.rssubscribe_status
         - name: YT_DLP_API_URL
           value: http://ytdlp-provider.ytserver-shared:28080/api
         - name: DOWNLOAD_API_URL
