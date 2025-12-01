@@ -180,7 +180,7 @@ spec:
           emptyDir: {}
       initContainers:
         - name: init-chmod-data
-          image: busybox:1.28
+          image: "docker.io/aboveos/busybox:1.37.0"
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -200,7 +200,7 @@ spec:
             - name: data
               mountPath: /data
         - name: generate-certs
-          image: beclab/openssl:v3
+          image: "docker.io/beclab/openssl:v3"
           imagePullPolicy: IfNotPresent
           command: [ "/bin/sh", "-c" ]
           args:
@@ -224,7 +224,7 @@ spec:
 
       containers:
         - name: studio
-          image: beclab/studio-server:v0.1.60
+          image: beclab/studio-server:v0.1.67
           imagePullPolicy: IfNotPresent
           args:
             - server
@@ -267,6 +267,8 @@ spec:
               value: {{ .Values.postgres.databases.studioserver }}
             - name: DB_PORT
               value: "5432"
+            - name: USER_ZONE
+              value: {{ .Values.user.zone }}
             - name: NATS_HOST
               value: nats.os-platform
             - name: NATS_PORT
@@ -286,7 +288,7 @@ spec:
               cpu: "0.5"
               memory: 1000Mi
         - name: chartmuseum
-          image: aboveos/helm-chartmuseum:v0.15.0
+          image: "docker.io/aboveos/helm-chartmuseum:v0.15.0"
           args:
             - --port=8888
             - --storage-local-rootdir=/storage
