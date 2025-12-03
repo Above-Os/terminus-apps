@@ -8,7 +8,7 @@ metadata:
   description: The current, most capable model that runs on a single GPU.
   appid: vllmgemma327bqat
   title: Gemma 27B (vLLM)
-  version: '1.0.1'
+  version: '1.0.12'
   categories:
     - AI
 
@@ -17,10 +17,9 @@ entrances:
     host: vllmclient
     icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
     name: vllmclient
-    openMethod: default
+    openMethod: window
     port: 8080
-    title: Gemma 27B API
-    invisible: true
+    title: Gemma 27B
 
 spec:
   versionName: 'leon-se/gemma-3-27b-it-qat-W4A16-G128'
@@ -67,7 +66,7 @@ spec:
   requiredDisk: 30Gi
   limitedDisk: 50Gi
   limitedMemory: 30Gi
-  requiredMemory: 5Gi
+  requiredMemory: 25Gi
   requiredGpu: 16Gi
   limitedGpu: 30Gi
   {{- else }}
@@ -87,7 +86,7 @@ permission:
   appData: true
   appCache: true
   userData:
-  - Home
+    - Home
 options:
   apiTimeout: 0
   appScope:
@@ -110,21 +109,16 @@ options:
       mandatory: true
   {{- end }}
 
-provider:
-- name: vllmgemma327bqat
-  entrance: vllmclient
-  paths: ["/*"]
-  verbs: ["*"]
-  
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
-  - envName: HF_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: true
     applyOnChange: true
-    description: "Token from hugging face, required for model download"
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  - envName: HF_ENDPOINT
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
     required: true
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}
