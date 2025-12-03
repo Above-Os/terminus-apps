@@ -1,4 +1,4 @@
-apiVersion: v1
+﻿apiVersion: v1
 data:
   config.json: |
     {
@@ -41,7 +41,7 @@ spec:
     spec:
       initContainers:
       - name: init-chmod-data
-        image: 'docker.io/aboveos/busybox:latest'
+        image: "docker.io/aboveos/busybox:1.37.0"
         command:
           - sh
           - '-c'
@@ -58,7 +58,7 @@ spec:
           runAsUser: 0
       containers:
       - name: immich-redis
-        image: aboveos/redis:latest
+        image: "docker.io/aboveos/redis:7"
         resources:
           limits:
             cpu: "1"
@@ -70,11 +70,7 @@ spec:
         - mountPath: /data
           name: redis
         imagePullPolicy: IfNotPresent
-      - args:
-        - sed -i "s/RedisConnection.minimumVersion = '5.0.0';/RedisConnection.minimumVersion = '4.0.0';/" ./node_modules/bullmq/dist/cjs/classes/redis-connection.js; sed -i 's/0.2.x/0.3.x/' ./dist/constants.js; exec ./start.sh
-        command:
-        - /bin/sh
-        - -c
+      - name: immich
         env:
         - name: PGID
           value: "1000"
@@ -110,9 +106,8 @@ spec:
           value: "openid,profile,email"
         - name: IMMICH_CONFIG_FILE
           value: "/config.json"
-        image: aboveos/immich-app-immich-server:v1.135.1
+        image: "docker.io/aboveos/immich-app-immich-server:v2.2.2"
         imagePullPolicy: IfNotPresent
-        name: immich
         ports:
         - containerPort: 3001
           name: http
@@ -126,7 +121,7 @@ spec:
             memory: 300Mi
         volumeMounts:
         - name: appcache
-          mountPath: /usr/src/app/upload          
+          mountPath: /data
         - name: home  
           mountPath: /home
         - name: config
@@ -136,18 +131,50 @@ spec:
       volumes:
       - name: appcache
         hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appData }}/data/upload'
+            {{- else }}
           path: '{{ .Values.userspace.appData }}/immich/data/upload'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/immich/data/upload'
+          {{- end }}
           type: DirectoryOrCreate  
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appData }}/redis'
+            {{- else }}
           path: '{{ .Values.userspace.appData }}/immich/redis'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/immich/redis'
+          {{- end }}
           type: DirectoryOrCreate
         name: redis
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appData }}/machine-learning'
+            {{- else }}
           path: '{{ .Values.userspace.appData }}/immich/machine-learning'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/immich/machine-learning'
+          {{- end }}
           type: DirectoryOrCreate
         name: learningcache      
       - hostPath:
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: '{{ .Values.userspace.appData }}'
+            {{- else }}
           path: '{{ .Values.userspace.appData }}/immich'
+            {{- end }}
+          {{- else }}
+          path: '{{ .Values.userspace.appData }}/immich'
+          {{- end }}
           type: DirectoryOrCreate
         name: app-data-root   
       - name: home

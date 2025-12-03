@@ -1,4 +1,4 @@
-# Copyright 2023 bytetrade
+﻿# Copyright 2023 bytetrade
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ spec:
     spec:
       containers:
       - name: redis
-        image: docker.io/aboveos/redis:7.0.5-alpine3.16
+        image: "docker.io/aboveos/redis:7.0.5-alpine3.16"
         imagePullPolicy: IfNotPresent
         resources:
           requests:
@@ -47,7 +47,7 @@ spec:
         - name: redis-data
           mountPath: /data  
       - name: calendar-ui
-        image: aboveos/calendar:v0.1.0
+        image: "docker.io/aboveos/calendar:v0.1.0"
         imagePullPolicy: IfNotPresent
         resources:
           requests:
@@ -59,7 +59,7 @@ spec:
         ports:
         - containerPort: 80 
       - name: calendar-api
-        image: aboveos/calendar-server:v0.1.0
+        image: "docker.io/aboveos/calendar-server:v0.1.0"
         imagePullPolicy: IfNotPresent
         resources:
           requests:
@@ -115,8 +115,15 @@ spec:
       - name: redis-data
         hostPath:
           type: DirectoryOrCreate
-          path: {{ .Values.userspace.appdata }}/calendar/redisdata  
-      
+          {{- if .Values.sysVersion }}
+            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+          path: {{ .Values.userspace.appData }}/redisdata
+            {{- else }}
+          path: {{ .Values.userspace.appData }}/calendar/redisdata
+            {{- end }}
+          {{- else }}
+          path: {{ .Values.userspace.appData }}/calendar/redisdata
+          {{- end }}
 
 ---
 apiVersion: v1
