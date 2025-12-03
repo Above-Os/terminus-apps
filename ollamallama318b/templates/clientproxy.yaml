@@ -10,7 +10,7 @@ data:
 
       proxy_connect_timeout                          30s;
       proxy_send_timeout                             60s;
-      proxy_read_timeout                             300s;
+      proxy_read_timeout                             1800s;
       proxy_set_header      host                      $host;
       proxy_set_header      x-forwarded-host          $http_host;
 
@@ -21,9 +21,9 @@ data:
 
       location / {
         {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-        proxy_pass http://ollama:11434;
+        proxy_pass http://api:8081;
         {{- else }}
-        proxy_pass http://{{ .Release.Name }}.{{ .Release.Name }}-{{ .Values.admin }}:11435;
+        proxy_pass http://api.{{ .Release.Name }}-{{ .Values.admin }}:8081;
         {{- end }}
       }
     }
@@ -43,7 +43,7 @@ metadata:
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   name: ollamaclient
   {{- else }}
-  name: ollama
+  name: {{ .Release.Name }}
   {{- end }}
   namespace: '{{ .Release.Namespace }}'
 spec:
@@ -51,7 +51,6 @@ spec:
   selector:
     matchLabels:
       io.kompose.service: ollamaclient
-  strategy: {}
   template:
     metadata:
       creationTimestamp: null
@@ -69,7 +68,7 @@ spec:
                 path: nginx.conf
       containers:
         - name: nginx
-          image: docker.io/aboveos/bitnami-openresty:1.25.3-2
+          image: "docker.io/aboveos/bitnami-openresty:1.25.3-2"
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -83,7 +82,7 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /
+              path: /health
               port: 8080
             initialDelaySeconds: 30
             timeoutSeconds: 60

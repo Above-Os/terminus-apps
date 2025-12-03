@@ -1,4 +1,4 @@
----
+﻿---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +22,7 @@ spec:
 
       initContainers:
         - name: tc-log-cleaner
-          image: alpine:3.18
+          image: "docker.io/alpine:3.18"
           command:
             - "/bin/sh"
             - "-c"
@@ -46,7 +46,7 @@ spec:
 
       containers:
         - name: seatable-mysql
-          image: docker.io/mariadb:11.4.3-noble
+          image: "docker.io/mariadb:11.4.3-noble"
           lifecycle:
             preStop:
               exec:
@@ -104,5 +104,13 @@ spec:
       volumes:
         - name: mysql-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}/opt/seatable/mysql-data"
+              {{- else }}
             path: "{{ .Values.userspace.appData }}/seatable/opt/seatable/mysql-data"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/seatable/opt/seatable/mysql-data"
+            {{- end }}
             type: DirectoryOrCreate
