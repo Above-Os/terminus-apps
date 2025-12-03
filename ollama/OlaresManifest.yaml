@@ -1,26 +1,29 @@
-olaresManifest.version: '0.10.0'
+---
+olaresManifest.version: "0.10.0"
 olaresManifest.type: app
+
 metadata:
   name: ollama
-  icon: https://file.bttcdn.com/appstore/ollama/icon.png
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
   description: Get up and running with large language models.
   appid: ollama
   title: Ollama
-  version: '1.1.8'
+  version: "1.1.13"
   categories:
     - Utilities_v112
     - Productivity
+
 entrances:
   - name: terminal
     port: 80
     host: terminal
     title: Ollama
-    icon: https://file.bttcdn.com/appstore/ollama/icon.png
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
     openMethod: default
 
   # - authLevel: private
   #   host: ollama
-  #   icon: https://file.bttcdn.com/appstore/ollama/icon.png
+  #   icon: https://app.cdn.olares.com/appstore/ollama/icon.png
   #   name: ollama
   #   openMethod: default
   #   port: 11434
@@ -29,7 +32,7 @@ entrances:
 
   - authLevel: internal
     host: ollamaclient
-    icon: https://file.bttcdn.com/appstore/ollama/icon.png
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
     name: ollamaclient
     openMethod: default
     port: 8080
@@ -37,49 +40,60 @@ entrances:
     invisible: true
 
 spec:
-  versionName: '0.11.8'
-  featuredImage: https://file.bttcdn.com/appstore/ollama/1.webp
+  versionName: "0.12.11"
+  featuredImage: https://app.cdn.olares.com/appstore/ollama/1.webp
   promoteImage:
-    - https://file.bttcdn.com/appstore/ollama/1.webp
-    - https://file.bttcdn.com/appstore/ollama/2.webp
-    - https://file.bttcdn.com/appstore/ollama/3.webp
+    - https://app.cdn.olares.com/appstore/ollama/1.webp
+    - https://app.cdn.olares.com/appstore/ollama/2.webp
+    - https://app.cdn.olares.com/appstore/ollama/3.webp
 
   fullDescription: |
     ## IMPORTANT NOTE ##
     This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
 
     ## OVERVIEW ##
-    Ollama is a user-friendly interface for running large language models (LLMs) locally. It is a valuable tool for researchers, developers, and anyone who wants to experiment with language models. With Ollama, you can easily download and run LLMs, customize and create your own, and chat with your LLMs using files on your device.
+    Ollama is a user-friendly interface for running large language models (LLMs) locally. It is a valuable tool for researchers, developers, and anyone who wants to experiment with language models. With Ollama, you can easily download and run LLMs, customize and create your own models, and chat with your LLMs using files on your device.
 
     Ollama supports a wide range of models, including:
-    - Llama 3	8B
-    - Llama 3	70B
-    - Phi 3 Mini	3.8B
-    - Phi 3 Medium	14B
-    - Gemma 2	9B
-    - Gemma 2	27B
-    - Mistral	7B
-    - Moondream 2	1.4B
-    - Neural Chat	7B
-    - Starling	7B
-    - Code Llama	7B
-    - Llama 2 Uncensored	7B
-    - LLaVA	7B
-    - Solar	10.7B
+    - Llama 3 8B
+    - Llama 3 70B
+    - Phi 3 Mini 3.8B
+    - Phi 3 Medium 14B
+    - Gemma 2 9B
+    - Gemma 2 27B
+    - Mistral 7B
+    - Moondream 2 1.4B
+    - Neural Chat 7B
+    - Starling 7B
+    - Code Llama 7B
+    - Llama 2 Uncensored 7B
+    - LLaVA 7B
+    - Solar 10.7B
 
   upgradeDescription: |
-    Upgrade Ollama version to v0.11.8
+    Upgrade Ollama version to v0.12.11
+
+    ollama run now works with embedding models
+    ollama run can now run embedding models to generate vector embeddings from text:
+
+      ollama run embeddinggemma "Hello world"
+
+    Content can also be provided to ollama run via standard input:
+
+      echo "Hello world" | ollama run embeddinggemma
 
     # What's Changed
-    - gpt-oss now has flash attention enabled by default for systems that support it
-    - Improved load times for gpt-oss
-    - Fixed issue where multiple models would not be loaded on CPU-only systems
-    - Ollama will now work with models who skip outputting the initial<think> tag (e.g. DeepSeek-V3.1)
-    - Fixed issue where text would be emitted when there is no opening <think> tag from a model
-    - Fixed issue where tool calls containing { or } would not be parsed correctly
+    - Fixed errors when running qwen3-vl:235b and qwen3-vl:235b-instruct
+    - Enable flash attention for Vulkan (currently needs to be built from source)
+    - Add Vulkan memory detection for Intel GPU using DXGI+PDH
+    - Ollama will now return tool call IDs from the /api/chat API
+    - Fixed hanging due to CPU discovery
+    - Ollama will now show login instructions when switching to a cloud model in interactive mode
+    - Fix reading stale VRAM data
+    - ollama run now works with embedding models
 
-
-    Get full release note at: https://github.com/ollama/ollama/releases/tag/v0.11.8
+    **Full release notes:**
+    https://github.com/ollama/ollama/releases/tag/v0.12.10
 
   developer: ollama
   website: https://ollama.com/
@@ -98,7 +112,7 @@ spec:
   requiredCpu: 150m
   requiredDisk: 50Mi
   limitedDisk: 500Gi
-  limitedMemory: 18200Mi
+  limitedMemory: 40Gi
   requiredMemory: 4200Mi
   requiredGpu: 0
   limitedGpu: 16Gi
@@ -126,6 +140,7 @@ options:
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
     clusterScoped: true
     appRef:
+      - openwebui
       - perplexica
       - n8n
       - ragflow
@@ -133,7 +148,7 @@ options:
       - comfyuishare
       - ollama
   {{- else }}
-    clusterScoped: false
+  clusterScoped: false
   {{- end }}
   dependencies:
     - name: olares
@@ -148,8 +163,9 @@ options:
   {{- end }}
 
 provider:
-- name: ollamaclient
-  entrance: ollamaclient
-  paths: ["/*"]
-  verbs: ["*"]
-
+  - name: ollamaclient
+    entrance: ollamaclient
+    paths:
+      - "/*"
+    verbs:
+      - "*"

@@ -1,4 +1,4 @@
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mastodon-web
@@ -48,7 +48,7 @@ spec:
         sysctls: []
       initContainers:
         - name: prepare-tmp-dir
-          image: docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6
+          image: "docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -88,7 +88,7 @@ spec:
         # As it is a ReplicaSet, we need that all nodes are configured in order to start with
         # the application or race conditions can occur
         - name: wait-for-db
-          image: docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6
+          image: "docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -124,29 +124,23 @@ spec:
             - name: BITNAMI_DEBUG
               value: "false"
             - name: MASTODON_DATABASE_HOST
-              value: "mastodon-postgresql"
+              value: "{{ .Values.postgres.host }}"
             - name: MASTODON_DATABASE_PORT_NUMBER
-              value: "5432"
+              value: "{{ .Values.postgres.port }}"
             - name: MASTODON_DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mastodon-postgresql
-                  key: password
+              value: "{{ .Values.postgres.password }}"
             - name: DB_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: mastodon-postgresql
-                  key: "password"
+              value: "{{ .Values.postgres.password }}"
             - name: MASTODON_DATABASE_USER
-              value: bn_mastodon
+              value: "{{ .Values.postgres.username }}"
             - name: MASTODON_DATABASE_NAME
-              value: bitnami_mastodon
+              value: "{{ .Values.postgres.databases.mastodon }}"
         
         # We need to wait for the Redis(TM) to be ready in order to start with Mastodon.
         # As it is a ReplicaSet, we need that all nodes are configured in order to start with
         # the application or race conditions can occur
         - name: wait-for-redis
-          image: docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6
+          image: "docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -196,7 +190,7 @@ spec:
                   name: mastodon-redis
                   key: "redis-password"
         - name: wait-for-elasticsearch
-          image: docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6
+          image: "docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6"
           imagePullPolicy: IfNotPresent
           securityContext:
             # allowPrivilegeEscalation: false
@@ -240,7 +234,7 @@ spec:
               mountPath: /tmp
               subPath: tmp-dir
         - name: wait-for-s3
-          image: docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6
+          image: "docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6"
           imagePullPolicy: IfNotPresent
           securityContext:
             # allowPrivilegeEscalation: false
@@ -276,16 +270,16 @@ spec:
             - name: BITNAMI_DEBUG
               value: "false"
             - name: MASTODON_S3_HOSTNAME
-              value: "mastodon-minio"
+              value: "{{ .Values.minio.host }}"
             - name: MASTODON_S3_PORT_NUMBER
-              value: "80"
+              value: "{{ .Values.minio.port }}"
           volumeMounts:
             - name: empty-dir
               mountPath: /tmp
               subPath: tmp-dir
       containers:
         - name: mastodon
-          image: docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6
+          image: "docker.io/aboveos/bitnami-mastodon:4.2.8-debian-12-r6"
           imagePullPolicy: IfNotPresent
           resources:
             requests:
@@ -317,15 +311,9 @@ spec:
             - name: MASTODON_WEB_PORT_NUMBER
               value: "3000"
             - name: MASTODON_DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mastodon-postgresql
-                  key: "password"
+              value: "{{ .Values.postgres.password }}"
             - name: DB_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: mastodon-postgresql
-                  key: "password"
+              value: "{{ .Values.postgres.password }}"
             - name: MASTODON_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -337,15 +325,9 @@ spec:
                   name: mastodon-redis
                   key: "redis-password"
             - name: MASTODON_AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: mastodon-minio
-                  key: "root-user"
+              value: "{{ .Values.minio.username }}"
             - name: MASTODON_AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: mastodon-minio
-                  key: "root-password"
+              value: "{{ .Values.minio.password }}"
           envFrom:
             - configMapRef:
                 name: mastodon-default

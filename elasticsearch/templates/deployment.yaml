@@ -1,0 +1,78 @@
+{{- $ca := genCA "KubeBlocks" 36500 }}
+{{- $cert := genSignedCert "elasticsearch" (list "127.0.0.1" "::1") (list "localhost" "*.cluster.local") 36500 $ca }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: es-tls-secret
+  namespace: {{ .Release.Namespace }}
+  labels:
+    helm.sh/chart: elasticsearch-cluster-1.0.1
+    app.kubernetes.io/name: elasticsearch-cluster
+    app.kubernetes.io/instance: elasticsearch
+    app.kubernetes.io/version: "8.8.2"
+type: Opaque
+stringData:
+  ca.crt: {{ $ca.Cert | quote }}
+  tls.crt: {{ $cert.Cert | quote }}
+  tls.key: {{ $cert.Key | quote }}
+---
+apiVersion: apps.kubeblocks.io/v1
+kind: Cluster
+metadata:
+  annotations:
+    kubeblocks.io/crd-api-version: apps.kubeblocks.io/v1
+    kubeblocks.io/extra-env: '{"mode":"single-node"}'
+  labels:
+    app.kubernetes.io/instance: elasticsearch
+    app.kubernetes.io/version: 8.8.2
+    helm.sh/chart: elasticsearch-cluster-1.0.1
+  name: elasticsearch
+  namespace: {{ .Release.Namespace }}
+spec:
+  componentSpecs:
+    - componentDef: elasticsearch-8-1.0.1
+      configs:
+        - name: es-cm
+          variables:
+            mode: single-node
+            version: 8.8.2
+      disableExporter: false
+      name: mdit
+      replicas: 1
+      tls: true
+      issuer:
+        name: UserProvided
+        secretRef:
+          namespace: {{ .Release.Namespace }}
+          name: es-tls-secret
+          ca: ca.crt
+          cert: tls.crt
+          key: tls.key
+      resources:
+        limits:
+          cpu: 2000m
+          memory: 8Gi
+        requests:
+          cpu: 1000m
+          memory: 2Gi
+      schedulingPolicy:
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: elasticsearch
+                      apps.kubeblocks.io/component-name: elasticsearch
+                  topologyKey: kubernetes.io/hostname
+                weight: 100
+      serviceVersion: 8.8.2
+      volumeClaimTemplates:
+        - name: data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 100Gi
+  terminationPolicy: Delete

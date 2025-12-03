@@ -1,4 +1,4 @@
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
@@ -25,7 +25,7 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
-          image: nginx:stable-alpine
+          image: "docker.io/nginx:stable-alpine"
           imagePullPolicy: IfNotPresent
           name: jaeger-frontend
           command:
@@ -76,6 +76,8 @@ spec:
     app: jaeger-frontend
 
 
+{{- if .Values.sysVersion }}
+  {{- if semverCompare "<1.12.1-0" (toString .Values.sysVersion) }}
 ---
 apiVersion: sys.bytetrade.io/v1alpha1
 kind: ProviderRegistry
@@ -96,6 +98,8 @@ spec:
       uri: /
 status:
   state: active
+  {{- end }}
+{{- end }}
 
 ---
 kind: ConfigMap

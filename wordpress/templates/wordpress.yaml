@@ -1,4 +1,4 @@
-# Source: wordpress/charts/mariadb/templates/serviceaccount.yaml
+﻿# Source: wordpress/charts/mariadb/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -27,78 +27,6 @@ metadata:
 automountServiceAccountToken: false
 
 
----
-# Source: wordpress/charts/mariadb/templates/primary/configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: wordpress-mariadb
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/instance: wordpress
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/name: mariadb
-    app.kubernetes.io/version: 11.2.2
-    helm.sh/chart: mariadb-15.0.1
-    app.kubernetes.io/component: primary
-data:
-  my.cnf: |-
-    [mysqld]
-    skip-name-resolve
-    explicit_defaults_for_timestamp
-    basedir=/opt/bitnami/mariadb
-    datadir=/bitnami/mariadb/data
-    plugin_dir=/opt/bitnami/mariadb/plugin
-    port=3306
-    socket=/opt/bitnami/mariadb/tmp/mysql.sock
-    tmpdir=/opt/bitnami/mariadb/tmp
-    max_allowed_packet=16M
-    bind-address=*
-    pid-file=/opt/bitnami/mariadb/tmp/mysqld.pid
-    log-error=/opt/bitnami/mariadb/logs/mysqld.log
-    character-set-server=UTF8
-    collation-server=utf8_general_ci
-    slow_query_log=0
-    long_query_time=10.0
-    
-    [client]
-    port=3306
-    socket=/opt/bitnami/mariadb/tmp/mysql.sock
-    default-character-set=UTF8
-    plugin_dir=/opt/bitnami/mariadb/plugin
-    
-    [manager]
-    port=3306
-    socket=/opt/bitnami/mariadb/tmp/mysql.sock
-    pid-file=/opt/bitnami/mariadb/tmp/mysqld.pid
----
-# Source: wordpress/charts/mariadb/templates/primary/svc.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: wordpress-mariadb
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/instance: wordpress
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/name: mariadb
-    app.kubernetes.io/version: 11.2.2
-    helm.sh/chart: mariadb-15.0.1
-    app.kubernetes.io/component: primary
-  annotations:
-spec:
-  type: ClusterIP
-  sessionAffinity: None
-  ports:
-    - name: mysql
-      port: 3306
-      protocol: TCP
-      targetPort: mysql
-      nodePort: null
-  selector:
-    app.kubernetes.io/instance: wordpress
-    app.kubernetes.io/name: mariadb
-    app.kubernetes.io/component: primary
 ---
 # Source: wordpress/templates/svc.yaml
 apiVersion: v1
@@ -166,8 +94,6 @@ spec:
           ip: 127.0.0.1
       # yamllint enable rule:indentation
       affinity:
-        podAffinity:
-          
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - podAffinityTerm:
@@ -192,7 +118,7 @@ spec:
 
       initContainers:
         - name: init-chmod-data
-          image: 'docker.io/aboveos/busybox:latest'
+          image: "docker.io/aboveos/busybox:1.34.0"
           command:
             - sh
             - '-c'
@@ -213,8 +139,8 @@ spec:
 
       containers:
         - name: wordpress
-          image: docker.io/aboveos/bitnami-wordpress:6.4.2-debian-11-r14
-          imagePullPolicy: "IfNotPresent"
+          image: "docker.io/aboveos/bitnami-wordpress:6.4.2-debian-11-r14"
+          imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -239,18 +165,15 @@ spec:
             - name: WORDPRESS_SKIP_BOOTSTRAP
               value: "no"
             - name: MARIADB_HOST
-              value: "wordpress-mariadb"
+              value: {{ .Values.mariadb.host }}
             - name: MARIADB_PORT_NUMBER
               value: "3306"
             - name: WORDPRESS_DATABASE_NAME
-              value: "bitnami_wordpress"
+              value: {{ .Values.mariadb.databases.wordpress}}
             - name: WORDPRESS_DATABASE_USER
-              value: "bn_wordpress"
+              value: {{ .Values.mariadb.username }}
             - name: WORDPRESS_DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: wordpress-mariadb
-                  key: mariadb-password
+              value: {{ .Values.mariadb.password }}
             - name: WORDPRESS_USERNAME
               value: "user"
             - name: WORDPRESS_PASSWORD
@@ -284,7 +207,6 @@ spec:
               value: "8080"
             - name: APACHE_HTTPS_PORT_NUMBER
               value: "8443"
-          envFrom:
           ports:
             - name: http
               containerPort: 8080
@@ -327,156 +249,12 @@ spec:
         - name: wordpress-data
           hostPath:
             type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: {{ .Values.userspace.appCache}}
+              {{- else }}
             path: {{ .Values.userspace.appCache}}/wordpress
----
-# Source: wordpress/charts/mariadb/templates/primary/statefulset.yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: wordpress-mariadb
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/instance: wordpress
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/name: mariadb
-    app.kubernetes.io/version: 11.2.2
-    helm.sh/chart: mariadb-15.0.1
-    app.kubernetes.io/component: primary
-spec:
-  replicas: 1
-  revisionHistoryLimit: 10
-  selector:
-    matchLabels:
-      app.kubernetes.io/instance: wordpress
-      app.kubernetes.io/name: mariadb
-      app.kubernetes.io/component: primary
-  serviceName: wordpress-mariadb
-  updateStrategy:
-    type: RollingUpdate
-  template:
-    metadata:
-      annotations:
-        checksum/configuration: f4c985db908bdeb9775bcabd503cace7266d5b67ff093a3795190ef0a24ad719
-      labels:
-        app.kubernetes.io/instance: wordpress
-        app.kubernetes.io/managed-by: Helm
-        app.kubernetes.io/name: mariadb
-        app.kubernetes.io/version: 11.2.2
-        helm.sh/chart: mariadb-15.0.1
-        app.kubernetes.io/component: primary
-    spec:
-      
-      serviceAccountName: wordpress-mariadb
-      affinity:
-        podAffinity:
-          
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/instance: wordpress
-                    app.kubernetes.io/name: mariadb
-                    app.kubernetes.io/component: primary
-                topologyKey: kubernetes.io/hostname
-              weight: 1
-        nodeAffinity:
-          
-      securityContext:
-        fsGroup: 1000
-      containers:
-        - name: mariadb
-          image: docker.io/aboveos/bitnami-mariadb:11.2.2-debian-11-r1
-          imagePullPolicy: IfNotPresent
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-              - ALL
-            privileged: false
-            runAsNonRoot: true
-            runAsUser: 1000
-            seccompProfile:
-              type: RuntimeDefault
-          env:
-            - name: BITNAMI_DEBUG
-              value: "false"
-            - name: MARIADB_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: wordpress-mariadb
-                  key: mariadb-root-password
-            - name: MARIADB_USER
-              value: "bn_wordpress"
-            - name: MARIADB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: wordpress-mariadb
-                  key: mariadb-password
-            - name: MARIADB_DATABASE
-              value: "bitnami_wordpress"
-          ports:
-            - name: mysql
-              containerPort: 3306
-          livenessProbe:
-            failureThreshold: 3
-            initialDelaySeconds: 120
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-            exec:
-              command:
-                - /bin/bash
-                - -ec
-                - |
-                  password_aux="${MARIADB_ROOT_PASSWORD:-}"
-                  if [[ -f "${MARIADB_ROOT_PASSWORD_FILE:-}" ]]; then
-                      password_aux=$(cat "$MARIADB_ROOT_PASSWORD_FILE")
-                  fi
-                  mysqladmin status -uroot -p"${password_aux}"
-          readinessProbe:
-            failureThreshold: 3
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-            exec:
-              command:
-                - /bin/bash
-                - -ec
-                - |
-                  password_aux="${MARIADB_ROOT_PASSWORD:-}"
-                  if [[ -f "${MARIADB_ROOT_PASSWORD_FILE:-}" ]]; then
-                      password_aux=$(cat "$MARIADB_ROOT_PASSWORD_FILE")
-                  fi
-                  mysqladmin status -uroot -p"${password_aux}"
-          resources: 
-            limits: 
-              cpu: 1000m
-              memory: 1024Mi
-            requests: 
-              cpu: 100m
-              memory: 256Mi
-          volumeMounts:
-            - name: data
-              mountPath: /bitnami/mariadb
-            - name: config
-              mountPath: /opt/bitnami/mariadb/conf/my.cnf
-              subPath: my.cnf
-      volumes:
-        - name: config
-          configMap:
-            name: wordpress-mariadb
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-        labels:
-          app.kubernetes.io/instance: wordpress
-          app.kubernetes.io/name: mariadb
-          app.kubernetes.io/component: primary
-      spec:
-        accessModes:
-          - "ReadWriteOnce"
-        resources:
-          requests:
-            storage: "8Gi"
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appCache}}/wordpress
+            {{- end }}

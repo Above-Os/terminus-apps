@@ -1,4 +1,4 @@
-{{- $planeDomainENV := split  ","  .Values.domain.plane -}}
+﻿{{- $planeDomainENV := split  ","  .Values.domain.plane -}}
 {{- $planeDomain := index $planeDomainENV "_0" -}}
 
 # -------------------------
@@ -22,7 +22,7 @@ spec:
     spec:
       initContainers:
         - name: check-ready
-          image: owncloudci/wait-for:latest
+          image: "docker.io/aboveos/harveyff-wait-for:0.0.1"
           args:
             - '-it'
             - >-
@@ -33,7 +33,7 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: proxy
-          image: harveyff/plane-proxy-commercial:v1.12.1
+          image: "docker.io/harveyff/plane-proxy-commercial:v1.12.1"
           ports:
             - containerPort: 80
           env:
@@ -98,7 +98,7 @@ spec:
     spec:
       initContainers:
         - name: check-ready
-          image: owncloudci/wait-for:latest
+          image: "docker.io/aboveos/harveyff-wait-for:0.0.1"
           args:
             - '-it'
             - >-
@@ -109,7 +109,7 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: web
-          image: harveyff/plane-web:v1.12.1
+          image: "docker.io/harveyff/plane-web:v1.12.1"
           env:
             - name: NEXT_PUBLIC_API_BASE_URL
               value: "https://{{$planeDomain}}"
@@ -172,7 +172,7 @@ spec:
     spec:
       containers:
         - name: admin
-          image: harveyff/plane-admin:v1.12.1
+          image: "docker.io/harveyff/plane-admin:v1.12.1"
           env:
             - name: NEXT_PUBLIC_API_BASE_URL
               value: "https://{{$planeDomain}}"
@@ -225,7 +225,7 @@ spec:
     spec:
       initContainers:
         - name: check-ready
-          image: owncloudci/wait-for:latest
+          image: "docker.io/aboveos/harveyff-wait-for:0.0.1"
           args:
             - '-it'
             - >-
@@ -236,7 +236,7 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: space
-          image: harveyff/plane-space:v1.12.1
+          image: "docker.io/harveyff/plane-space:v1.12.1"
           env:
             - name: NEXT_PUBLIC_API_BASE_URL
               value: "https://{{$planeDomain}}"
@@ -289,7 +289,7 @@ spec:
     spec:
       containers:
         - name: live
-          image: harveyff/plane-live:v1.12.1
+          image: "docker.io/harveyff/plane-live:v1.12.1"
           env:
             - name: NEXT_PUBLIC_API_BASE_URL
               value: "https://{{$planeDomain}}"
@@ -341,17 +341,8 @@ spec:
         app: plane-api
     spec:
       initContainers:
-        - name: check-ready
-          image: owncloudci/wait-for:latest
-          args:
-            - '-it'
-            - redis-svc:6379
-          resources: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          imagePullPolicy: IfNotPresent
         - name: data-migrator
-          image: harveyff/plane-api:v1.12.1
+          image: "docker.io/harveyff/plane-api:v1.12.1"
           command:
             - sh
             - -c
@@ -368,7 +359,7 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: api
-          image: harveyff/plane-api:v1.12.1
+          image: "docker.io/harveyff/plane-api:v1.12.1"
           command:
             - sh
             - -c
@@ -393,7 +384,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: api
-  namespace: '{{ .Release.Namespace }}'
+  namespace: {{ .Release.Namespace }}
 spec:
   ports:
     - port: 8000
@@ -401,133 +392,3 @@ spec:
       name: http
   selector:
     app: plane-api
-
----
-
-# -------------------------
-# PLANE MQ
-# -------------------------
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: plane-mq
-  namespace: '{{ .Release.Namespace }}'
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: plane-mq
-  strategy:
-    type: Recreate
-  template:
-    metadata:
-      labels:
-        app: plane-mq
-    spec:
-      containers:
-        - name: plane-mq
-          image: rabbitmq:3.13.6-management-alpine
-          env:
-            - name: RABBITMQ_DEFAULT_USER
-              value: plane
-            - name: RABBITMQ_DEFAULT_PASS
-              value: plane
-            - name: RABBITMQ_DEFAULT_VHOST
-              value: plane
-          volumeMounts:
-            - mountPath: /var/lib/rabbitmq
-              name: rabbitmq-data
-          resources:
-            requests:
-              cpu: "100m"
-              memory: 200Mi
-            limits:
-              cpu: "2"
-              memory: 2Gi
-      volumes:
-        - name: rabbitmq-data
-          hostPath:
-            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/rabbitmq"
-            type: DirectoryOrCreate
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: plane-mq
-  namespace: '{{ .Release.Namespace }}'
-spec:
-  ports:
-    - port: 5672
-      targetPort: 5672
-      name: amqp
-  selector:
-    app: plane-mq
-
----
-
-# -------------------------
-# PLANE MINIO
-# -------------------------
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: plane-minio
-  namespace: '{{ .Release.Namespace }}'
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: plane-minio
-  strategy:
-    type: Recreate
-  template:
-    metadata:
-      labels:
-        app: plane-minio
-    spec:
-      containers:
-        - name: plane-minio
-          image: minio/minio
-          command: ["minio", "server", "/export", "--console-address", ":9090"]
-          env:
-            - name: MINIO_ROOT_USER
-              value: plane
-            - name: MINIO_ROOT_PASSWORD
-              value: plane2024
-          volumeMounts:
-            - mountPath: /export
-              name: uploads
-          resources:
-            requests:
-              cpu: "100m"
-              memory: 200Mi
-            limits:
-              cpu: "2"
-              memory: 2Gi
-      volumes:
-        - name: uploads
-          hostPath:
-            path: "{{ .Values.userspace.appData }}/{{ .Release.Name }}/minio"
-            type: DirectoryOrCreate
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: minio
-  namespace: '{{ .Release.Namespace }}'
-spec:
-  ports:
-    - port: 9000
-      targetPort: 9000
-      name: minio-api
-    - port: 9090
-      targetPort: 9090
-      name: minio-console
-  selector:
-    app: plane-minio

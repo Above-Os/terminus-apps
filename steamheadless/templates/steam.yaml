@@ -1,4 +1,4 @@
-{{- $ipfsDomainENV := split  ","  .Values.domain.steamheadlessaudio -}}
+﻿{{- $ipfsDomainENV := split  ","  .Values.domain.steamheadlessaudio -}}
 {{- $webDomain := index $ipfsDomainENV "_0" -}}
 
 {{- $parts := split "." $webDomain }}
@@ -85,9 +85,9 @@ spec:
             - name: ENABLE_SUNSHINE
               value: 'true'
             - name: SUNSHINE_USER
-              value: sam
+              value: {{ .Values.olaresEnv.SUNSHINE_USER }}
             - name: SUNSHINE_PASS
-              value: password
+              value: {{ .Values.olaresEnv.SUNSHINE_PASS }}
             - name: ENABLE_STEAM
               value: 'true'
             - name: ENABLE_EVDEV_INPUTS
@@ -100,7 +100,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP
-          image: bytetrade/steam-headless:v0.1.10
+          image: "docker.io/bytetrade/steam-headless:v0.1.10"
           livenessProbe:
             httpGet:
               path: /
@@ -184,11 +184,27 @@ spec:
         - name: steam-headless-claim0
           hostPath:
             type: DirectoryOrCreate
-            path: {{ .Values.userspace.appCache }}/steam-headless/c0
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: {{ .Values.userspace.appCache }}/c0
+              {{- else }}
+            path: {{ .Values.userspace.appCache }}/{{ .Release.Name }}/c0
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appCache }}/{{ .Release.Name }}/c0
+            {{- end }}
         - name: steam-headless-claim1
           hostPath:
             type: DirectoryOrCreate
-            path: {{ .Values.userspace.appCache }}/steam-headless/c1
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: {{ .Values.userspace.appCache }}/c1
+              {{- else }}
+            path: {{ .Values.userspace.appCache }}/{{ .Release.Name }}/c1
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appCache }}/{{ .Release.Name }}/c1
+            {{- end }}
         - name: input-devices
           hostPath:
             path: /dev/input/

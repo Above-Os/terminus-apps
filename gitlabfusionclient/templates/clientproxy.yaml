@@ -1,4 +1,4 @@
-{{- $cpDomainENV := split  ","  .Values.domain.clientproxyprivate -}}
+﻿{{- $cpDomainENV := split  ","  .Values.domain.clientproxyprivate -}}
 {{- $cpDomain := index $cpDomainENV "_0" -}}
 
 {{- $clientproxyDomainENV := split  ","  .Values.domain.clientproxy -}}
@@ -22,7 +22,7 @@ data:
 kind: ConfigMap
 apiVersion: v1
 metadata:
-  name: terminus-sidecar-config
+  name: olares-sidecar-config
   namespace: {{ .Release.Namespace }}
 data:
   envoy.yaml: |
@@ -196,16 +196,16 @@ spec:
                         apiVersion: v1
                         fieldPath: metadata.namespace
             defaultMode: 420
-        - name: terminus-sidecar-config
+        - name: olares-sidecar-config
           configMap:
-            name: terminus-sidecar-config
+            name: olares-sidecar-config
             items:
               - key: envoy.yaml
                 path: envoy.yaml
             defaultMode: 420
       initContainers:
-        - name: terminus-sidecar-init
-          image: 'docker.io/aboveos/openservicemesh-init:v1.2.3'
+        - name: olares-sidecar-init
+          image: "docker.io/aboveos/openservicemesh-init:v1.2.3"
           command:
             - /bin/sh
           args:
@@ -245,7 +245,7 @@ spec:
             runAsNonRoot: false
       containers:
         - name: gitlabfusion-cp
-          image: 'beclab/gitlab-client-proxy:988961f5'
+          image: "docker.io/beclab/gitlab-client-proxy:988961f5"
           ports:
             - name: ext-port
               containerPort: 8000
@@ -297,8 +297,8 @@ spec:
             limits:
               cpu: 1000m
               memory: 512Mi
-        - name: terminus-envoy-sidecar
-          image: 'docker.io/aboveos/envoyproxy-envoy-distroless:v1.25.1'
+        - name: olares-envoy-sidecar
+          image: "docker.io/aboveos/envoyproxy-envoy-distroless:v1.25.1"
           command:
             - envoy
           args:
@@ -352,7 +352,7 @@ spec:
               cpu: 500m
               memory: 256Mi
           volumeMounts:
-            - name: terminus-sidecar-config
+            - name: olares-sidecar-config
               readOnly: true
               mountPath: /etc/envoy/envoy.yaml
               subPath: envoy.yaml
