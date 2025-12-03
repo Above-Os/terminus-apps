@@ -2,10 +2,11 @@ olaresManifest.version: '0.10.0'
 olaresManifest.type: app
 metadata:
   name: windows
+  appid: windows
   description: Run Windows on Olares
   icon: https://app.cdn.olares.com/appstore/windows/logo.png
-  version: '1.0.18'
-  title: Windows 11
+  version: '1.0.19'
+  title: Windows
   categories:
     - Utilities_v112
     - Utilities
@@ -13,7 +14,7 @@ permission:
   appData: true
   appCache: true
 spec:
-  versionName: '4.09'
+  versionName: '5.14'
   featuredImage: https://app.cdn.olares.com/appstore/windows/1.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/windows/1.webp
@@ -22,14 +23,41 @@ spec:
   fullDescription: |
     This app helps you run Windows on Olars.
     Based on dockur's Windows inside a Docker container.
-
-    # Note
-    This app installs Windows 11 Pro by default.
     
     Features
     ISO downloader
     KVM acceleration
     Web-based viewer  
+
+    Supported Windows	Versions
+    - Windows 11 Pro
+    - Windows 11 LTSC
+    - Windows 11 Enterprise
+    - Windows 10 Pro
+    - Windows 10 Enterprise
+    - Windows 8.1 Enterprise
+    - Windows 7 Ultimate
+    - Windows Vista Ultimate
+    - Windows XP Professional
+    - Windows 2000 Professional
+    - Windows Server 2025
+    - Windows Server 2022
+    - Windows Server 2019
+    - Windows Server 2016
+    - Windows Server 2012
+    - Windows Server 2008
+    - Windows Server 2003
+  upgradeDescription: |
+    Upgrade to version 5.14
+    
+    What's Changed
+    - fix: Update Workspaces configuration by @kroese in #1569
+    - build: Update VirtIO drivers to v1.9.49 by @kroese in #1570
+    - refactor: replace duplicated PID cleanup with loop by @tree-1917 in #1579
+    - chore(deps): update actions/checkout action to v6 by @renovate[bot] in #1580
+    - build: Update QEMU base image to v7.29 by @kroese in #1583
+
+    full release note: https://github.com/dockur/windows/releases/tag/v5.14
 
   developer: dockur
   website: https://github.com/dockur/windows?tab=readme-ov-file#readme
@@ -55,6 +83,7 @@ spec:
     ios: https://aka.ms/iOSWindowsApp
     mac: https://aka.ms/macOSWindowsApp
 options:
+  allowMultipleInstall: true
   dependencies:
     - name: olares
       type: system
@@ -63,7 +92,7 @@ entrances:
   - name: vnc-svc
     port: 8006
     host: windows-svc
-    title: Windows 11
+    title: Windows
     icon: https://app.cdn.olares.com/appstore/windows/logo.png
     openMethod: window
 ports:
@@ -72,21 +101,39 @@ ports:
   port: 3389
   addToTailscaleAcl: true
 envs:
-  - envName: WINDOWS_USERNAME
+  - envName: USERNAME
     type: string
     required: true
     editable: false
-  - envName: WINDOWS_PASSWORD
+  - envName: PASSWORD
     type: password
     required: true
     editable: false
-  - envName: WINDOWS_VERSION
+  - envName: VERSION
     type: string
     required: true
     editable: false
-    options:
-      - title: Windows11
-        value: "11"
-      - title: Windows10
-        value: "10"
-    remoteOptions: http://192.168.31.15:8080
+    remoteOptions: "https://app.cdn.olares.com/appstore/windows/version_options.json"    
+  - envName: RAM_SIZE
+    type: string
+    required: true
+    editable: true
+    applyOnChange: true
+    description: "RAM size for Windows instance, e.g: 4G"
+    regex: "^([1-9][0-9]{0,})G$"
+    default: "4G"
+  - envName: CPU_CORES
+    type: string
+    required: true
+    editable: true
+    applyOnChange: true
+    description: "CPU cores for Windows instance, e.g: 4"
+    regex: "^([1-9][0-9]{0,})$"
+    default: "4"
+  - envName: DISK_SIZE
+    type: string
+    required: true
+    editable: true
+    applyOnChange: true
+    description: "Disk space for Windows instance, e.g: 128G"
+    regex: "^([1-9][0-9]{0,})G$"
