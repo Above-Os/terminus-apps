@@ -1,0 +1,96 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+metadata:
+  name: rembgv2
+  description: Rembg is a tool to remove images background
+  icon: https://app.cdn.olares.com/appstore/default/icon.png
+  appid: rembgv2
+  version: '1.0.1'
+  title: Rembg
+  categories:
+  - AI
+  - Utilities_v112
+  - Utilities
+sharedEntrances:
+- name: rembgv2
+  title: Rembg
+  host: sharedentrances-ai
+  icon: https://app.cdn.olares.com/appstore/default/icon.png
+  port: 0
+  invisible: true
+  authLevel: internal
+entrances:
+  - name: rembgv2
+    port: 8080
+    host: rembgv2-web-svc
+    title: Rembg
+    icon: https://app.cdn.olares.com/appstore/default/icon.png
+    authLevel: internal
+    openMethod: window
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+spec:
+  versionName: '0.0.1'
+  fullDescription: |
+    Rembg is a tool to remove images background
+  developer: danielgatis
+  website: https://github.com/danielgatis/rembg
+  sourceCode: https://github.com/danielgatis/rembg
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/danielgatis/rembg
+  license:
+    - text: MIT License
+      url: https://github.com/danielgatis/rembg?tab=MIT-1-ov-file
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  requiredMemory: 6Gi
+  limitedMemory: 20Gi
+  requiredDisk: 8Gi
+  limitedDisk: 20Gi
+  requiredCpu: 1
+  limitedCpu: 5
+  requiredGpu: 4Gi
+  limitedGpu: 16Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 500Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 500m
+  {{- end }}
+  supportArch:
+    - amd64
+  subCharts:
+  - name: rembgv2server
+    shared: true
+  - name: rembgv2
+options:
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      type: system
+      version: '>=1.12.3-0'
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: rembgv2
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - rembgv2
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
