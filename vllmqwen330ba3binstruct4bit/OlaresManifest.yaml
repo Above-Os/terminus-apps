@@ -4,23 +4,22 @@ olaresManifest.type: app
 
 metadata:
   name: vllmqwen330ba3binstruct4bit
-  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/qwen3-235B.png
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/qwen3.png
   description: The latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models.
   appid: vllmqwen330ba3binstruct4bit
   title: Qwen3 30B (vLLM)
-  version: '1.0.2'
+  version: '1.0.12'
   categories:
     - AI
 
 entrances:
   - authLevel: internal
     host: vllmclient
-    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gpt-oss-20b.png
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/qwen3.png
     name: vllmclient
-    openMethod: default
+    openMethod: window
     port: 8080
-    title: Qwen3 30B API
-    invisible: true
+    title: Qwen3 30B
 
 spec:
   versionName: 'cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit'
@@ -59,8 +58,8 @@ spec:
   requiredCpu: 1
   requiredDisk: 30Gi
   limitedDisk: 50Gi
-  limitedMemory: 20Gi
-  requiredMemory: 5Gi
+  limitedMemory: 30Gi
+  requiredMemory: 22Gi
   requiredGpu: 16Gi
   limitedGpu: 30Gi
   {{- else }}
@@ -103,20 +102,16 @@ options:
       mandatory: true
   {{- end }}
 
-provider:
-- name: vllmqwen330ba3binstruct4bit
-  entrance: vllmclient
-  paths: ["/*"]
-  verbs: ["*"]
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
-  - envName: HF_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: true
     applyOnChange: true
-    description: "Token from hugging face, required for model download"
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  - envName: HF_ENDPOINT
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
     required: true
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}
