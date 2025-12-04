@@ -1,4 +1,4 @@
----
+﻿---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,26 +36,49 @@ spec:
               containerPort: 3210
               protocol: TCP
           readinessProbe:
-            tcpSocket:
-              port: 3210
-            initialDelaySeconds: 30
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  if (echo > /dev/tcp/127.0.0.1/3210) >/dev/null 2>&1; then
+                    exit 0
+                  else
+                    exit 1
+                  fi
+            initialDelaySeconds: 5
             periodSeconds: 15
             timeoutSeconds: 3
-            failureThreshold: 6
+            failureThreshold: 3
           livenessProbe:
-            tcpSocket:
-              port: 3210
-            initialDelaySeconds: 60
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  if (echo > /dev/tcp/127.0.0.1/3210) >/dev/null 2>&1; then
+                    exit 0
+                  else
+                    exit 1
+                  fi
+            initialDelaySeconds: 10
             periodSeconds: 20
             timeoutSeconds: 5
-            failureThreshold: 6
+            failureThreshold: 3
           resources:
             limits:
               cpu: 2000m
-              memory: 2000Mi
+              memory: 3000Mi
             requests:
               cpu: 200m
               memory: 300Mi
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
 ---
 apiVersion: v1
 kind: Service
