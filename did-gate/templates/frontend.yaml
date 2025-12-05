@@ -1,0 +1,53 @@
+---
+# DID Gate Frontend - Web Dashboard
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: did-gate-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: did-gate-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: did-gate-frontend
+  template:
+    metadata:
+      labels:
+        app: did-gate-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: {{ .Values.images.frontend.repository }}:{{ .Values.images.frontend.tag }}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: http
+          resources:
+            requests:
+              cpu: {{ .Values.resources.frontend.requests.cpu }}
+              memory: {{ .Values.resources.frontend.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.frontend.limits.cpu }}
+              memory: {{ .Values.resources.frontend.limits.memory }}
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: did-gate-frontend-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: did-gate-frontend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: did-gate-frontend
+
