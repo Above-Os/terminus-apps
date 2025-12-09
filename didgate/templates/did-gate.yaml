@@ -1,0 +1,58 @@
+---
+# DID Gate Service - Main API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: didgate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: didgate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: didgate
+  template:
+    metadata:
+      labels:
+        app: didgate
+    spec:
+      containers:
+        - name: didgate
+          image: aboveos/did-gate:v3.4.10-rc-4
+          command:
+            - node
+            - dist/main.js
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.did_gate }}"
+          ports:
+            - containerPort: 4010
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.resources.didGate.requests.cpu }}
+              memory: {{ .Values.resources.didGate.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.didGate.limits.cpu }}
+              memory: {{ .Values.resources.didGate.limits.memory }}
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: didgate-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: didgate
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4010
+      targetPort: 4010
+      protocol: TCP
+      name: http
+  selector:
+    app: didgate
+

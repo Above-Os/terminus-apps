@@ -1,4 +1,63 @@
-﻿{{ $dbbackup_rootpath := printf "%s%s" .Values.rootPath "/rootfs/middleware-backup" }}
+﻿
+apiVersion: v1
+data:
+  blacklist.conf: |
+    #url 
+    https://edition.cnn.com/2025/09/07/politics/video/baltimore-mayor-brandon-scott-trump-national-guard-contd-digvid
+    https://edition.cnn.com/2025/04/29/us/video/illinois-car-crash-vrtc-digvid
+    https://edition.cnn.com/videos/travel/2018/10/26/parts-unknown-bts-ron-4.cnn
+    https://edition.cnn.com/videos/us/2022/02/25/anthony-bourdain-favorite-song-film-roadrunner-origseriesfilms-ron.cnn
+    https://edition.cnn.com/audio/podcasts/terms-of-service-with-clare-duffy
+    https://nypost.com/video/trillionaire-elon-musk-what-a-trillion-dollars-actually-looks-like
+    https://nypost.com/video/chuck-grassley-exposes-democrat-plot-to-take-down-trump
+    https://apnews.com/video/animals-fires-cats-pets-oklahoma-5d5187012bf945d0962e3165aae6ca71
+    https://apnews.com/live/top-25-college-football-poll-9-7-2025
+    https://www.dailymail.co.uk/video/news/video-3506065/Video-Car-wash-bosses-caught-running-worldwide-people-smuggling-business.html
+    https://www.theguardian.com/world/live/2025/sep/08/middle-east-crisis-live-jerusalem-shooting-israel-threatens-gaza-city-powerful-hurricane-latest-news
+    https://www.theguardian.com/world/video/2025/sep/08/two-children-still-missing-after-police-shooting-of-nz-fugitive-tom-phillips-police-say-video
+    https://www.theguardian.com/news/video/2025/jul/22/last-orders-a-pub-crawl-across-the-uks-dying-booze-industry-video
+    https://www.theguardian.com/australia-news/audio/2025/sep/08/sentencing-erin-patterson-how-judge-reached-verdict-full-story-podcast
+    https://www.theguardian.com/news/audio/2025/sep/05/dont-call-it-morning-sickness-at-times-in-my-pregnancy-i-wondered-if-this-was-death-coming-for-me-podcast
+    https://www.cnbc.com/video/2025/09/08/socialism-vs-capitalism-sen-rick-scott-vivek-ramaswamy-on-nyc-mayoral-race-industrial-policy.html
+    #domain
+    youtubekids.com
+    live.bilibili.com
+    manga.bilibili.com
+    cheese.bilibili.com
+    newsweek.com
+    usatoday.com
+    facebook.com
+    threads.com
+    instagram.com
+    pinterest.com
+    xiaohongshu.com
+    xhslink.com
+    tiktok.com
+    douyin.com
+    open.spotify.com
+    spreaker.com
+    buzzsproutweekly.buzzsprout.com
+    nytimes.com
+    foxnews.com
+    wsj.com
+    marketwatch.com
+    barrons.com
+    washingtonpost.com
+    usnews.com
+    rfi.fr
+    bloomberg.com
+    euronews.com
+    youtube.com#/^(https?:\/\/)?([a-zA-Z0-9-]+\.)*youtube\.com\/post(\/.*)?$/
+    bilibili.com#/^(https?:\/\/)?([a-zA-Z0-9-]+\.)*bilibili\.com\/cheese(\/.*)?$/
+    x.com#/^https:\/\/(www\.)?x\.com\/i\/trending\/\d+$/,/^https:\/\/(www\.)?x\.com\/i\/events\/\d+$/
+
+kind: ConfigMap
+metadata:
+  name: blacklist-config 
+  namespace: {{ .Release.Namespace }}
+
+---
+{{ $dbbackup_rootpath := printf "%s%s" .Values.rootPath "/rootfs/middleware-backup" }}
 {{- $knowledge_secret := (lookup "v1" "Secret" .Release.Namespace "knowledge-secrets") -}}
 {{- $nats_password := "" -}}
 {{ if $knowledge_secret -}}
@@ -115,25 +174,8 @@ spec:
       serviceAccountName: knowledge-cluster-view
       serviceAccount: knowledge-cluster-view
       initContainers:
-      - name: init-data
-        image: "docker.io/aboveos/busybox:1.37.0"
-        securityContext:
-          privileged: true
-          runAsNonRoot: false
-          runAsUser: 0
-        volumeMounts:
-        - name: userspace-dir
-          mountPath: /data
-        - name: cache-dir
-          mountPath: /appCache
-        command:
-        - sh
-        - -c
-        - |
-          chown -R 1000:1000 /data && \
-          chown -R 1000:1000 /appCache
       - name: init-container
-        image: "docker.io/postgres:16.0-alpine3.18"
+        image: "beclab/postgres:16.0-alpine3.18"
         command:
           - sh
           - '-c'
@@ -152,7 +194,7 @@ spec:
             value: {{ .Values.postgres.databases.knowledge }}
       containers:
       - name: knowledge
-        image: "docker.io/beclab/knowledge-base-api:v0.12.52"
+        image: "beclab/knowledge-base-api:v0.12.53"
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
@@ -212,10 +254,10 @@ spec:
         - name: BACKUP_PATH
           value: /backup/
         volumeMounts:
-          - name: userspace-dir
-            mountPath: /data
           - name: pgbackup
             mountPath: /backup
+          - name: blacklist-config
+            mountPath: /blacklist-config
         resources:
           requests:
             cpu: 20m
@@ -225,7 +267,7 @@ spec:
             memory: 6Gi
 
       - name: vectorcrawl
-        image: "docker.io/beclab/vectorcrawl:v0.1.15"
+        image: "beclab/vectorcrawl:v0.1.15"
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -264,7 +306,7 @@ spec:
             memory: 2Gi
 
       - name: sync
-        image: "docker.io/beclab/recommend-sync:v0.12.1"
+        image: "beclab/recommend-sync:v0.12.1"
         securityContext:
           runAsUser: 0
           runAsNonRoot: false
@@ -293,13 +335,10 @@ spec:
             memory: 20Mi
           limits:
             cpu: "300m"
-            memory: 100Mi        
-        volumeMounts:
-          - name: userspace-dir
-            mountPath: /data
+            memory: 100Mi
        
       - name: crawler
-        image: "docker.io/beclab/recommend-crawler:v0.12.2"
+        image: "beclab/recommend-crawler:v0.12.2"
         securityContext:
           allowPrivilegeEscalation: false
           runAsUser: 1000
@@ -313,19 +352,8 @@ spec:
           limits:
             cpu: "400m"
             memory: 500Mi
-        volumeMounts:
-          - name: cache-dir
-            mountPath: /appCache
 
       volumes:
-      - name: userspace-dir
-        hostPath:
-          type: Directory
-          path: '{{ .Values.rootPath }}/rootfs/userspace'
-      - name: cache-dir
-        hostPath:
-          path: '{{ .Values.rootPath }}/userdata/Cache/rss'
-          type: DirectoryOrCreate
       - name: pgbackup
         hostPath:
           path: '{{ $dbbackup_rootpath }}/pg_backup'
@@ -336,6 +364,12 @@ spec:
           items:
           - key: envoy.yaml
             path: envoy.yaml
+      - name: blacklist-config
+        configMap:
+          name: blacklist-config
+          items:
+            - key: blacklist.conf
+              path: blacklist.conf
 
 ---
 apiVersion: v1
