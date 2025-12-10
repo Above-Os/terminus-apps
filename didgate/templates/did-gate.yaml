@@ -1,0 +1,120 @@
+---
+# ConfigMap for database initialization
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: didgate-db-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: didgate
+data:
+  init.sql: |
+    -- Create did_entity table if it doesn't exist
+    CREATE TABLE IF NOT EXISTS did_entity (
+        id SERIAL PRIMARY KEY,
+        did VARCHAR NOT NULL UNIQUE,
+        name VARCHAR NOT NULL,
+        document TEXT NOT NULL
+    );
+
+    -- Create index on name column for faster lookups
+    CREATE INDEX IF NOT EXISTS IDX_did_entity_name ON did_entity (name);
+
+---
+# DID Gate Service - Main API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: didgate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: didgate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: didgate
+  template:
+    metadata:
+      labels:
+        app: didgate
+    spec:
+      initContainers:
+        - name: db-init
+          image: postgres:15-alpine
+          env:
+            - name: PGHOST
+              value: "{{ .Values.postgres.host }}"
+            - name: PGPORT
+              value: "{{ .Values.postgres.port }}"
+            - name: PGUSER
+              value: "{{ .Values.postgres.username }}"
+            - name: PGPASSWORD
+              value: "{{ .Values.postgres.password }}"
+            - name: PGDATABASE
+              value: "{{ .Values.postgres.databases.did_gate }}"
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL to be ready..."
+              until pg_isready -h $PGHOST -p $PGPORT -U $PGUSER; do
+                echo "PostgreSQL is unavailable - sleeping"
+                sleep 2
+              done
+              echo "PostgreSQL is ready - executing init script"
+              psql -h $PGHOST -p $PGPORT -U $PGUSER -d $PGDATABASE -f /docker-entrypoint-initdb.d/init.sql
+              echo "Database initialization completed"
+          volumeMounts:
+            - name: db-init-script
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: db-init-script
+          configMap:
+            name: didgate-db-init
+      containers:
+        - name: didgate
+          image: aboveos/did-gate:v3.4.13-rc-5
+          command:
+            - node
+            - dist/main.js
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.did_gate }}"
+          ports:
+            - containerPort: 4010
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.resources.didGate.requests.cpu }}
+              memory: {{ .Values.resources.didGate.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.didGate.limits.cpu }}
+              memory: {{ .Values.resources.didGate.limits.memory }}
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: didgate-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: didgate
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4010
+      targetPort: 4010
+      protocol: TCP
+      name: http
+  selector:
+    app: didgate
+
