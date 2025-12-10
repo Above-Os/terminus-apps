@@ -1,0 +1,153 @@
+---
+olaresManifest.version: "0.10.0"
+olaresManifest.type: app
+apiVersion: 'v2'
+metadata:
+  name: ollamav2
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  description: Get up and running with large language models.
+  appid: ollamav2
+  title: Ollama
+  version: "1.0.6"
+  categories:
+    - Utilities_v112
+    - Productivity
+
+sharedEntrances:
+  - name: ollamav2
+    host: sharedentrances-ollama
+    port: 0
+    title: Ollama API
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    invisible: true
+    authLevel: internal
+entrances:
+  - name: terminal
+    port: 8081
+    host: terminalclient
+    title: Ollama
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+  - authLevel: internal
+    host: ollamaclient
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    name: ollamaclient
+    openMethod: window
+    port: 8080
+    title: Ollama API
+    invisible: true
+
+spec:
+  versionName: "0.13.1"
+  featuredImage: https://app.cdn.olares.com/appstore/ollama/1.webp
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/ollama/1.webp
+    - https://app.cdn.olares.com/appstore/ollama/2.webp
+    - https://app.cdn.olares.com/appstore/ollama/3.webp
+
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    ## OVERVIEW ##
+    Ollama is a user-friendly interface for running large language models (LLMs) locally. It is a valuable tool for researchers, developers, and anyone who wants to experiment with language models. With Ollama, you can easily download and run LLMs, customize and create your own models, and chat with your LLMs using files on your device.
+
+    Ollama supports a wide range of models, including:
+    - Llama 3 8B
+    - Llama 3 70B
+    - Phi 3 Mini 3.8B
+    - Phi 3 Medium 14B
+    - Gemma 2 9B
+    - Gemma 2 27B
+    - Mistral 7B
+    - Moondream 2 1.4B
+    - Neural Chat 7B
+    - Starling 7B
+    - Code Llama 7B
+    - Llama 2 Uncensored 7B
+    - LLaVA 7B
+    - Solar 10.7B
+
+  upgradeDescription: |
+    Upgrade Ollama version to v0.13.1
+
+    # New models
+    - Ministral-3: The Ministral 3 family is designed for edge deployment, capable of running on a wide range of hardware.
+    - Mistral-Large-3: A general-purpose multimodal mixture-of-experts model for production-grade tasks and enterprise workloads.
+
+    # What's Changed
+    - nomic-embed-text will now use Ollama's engine by default
+    - Tool calling support for cogito-v2.1
+    - Fixed issues with CUDA VRAM discovery
+    - Fixed link to docs in Ollama's app
+    - Fixed issue where models would be evicted on CPU-only systems
+    - Ollama will now better render errors instead of showing Unmarshal: errors
+    - Fixed issue where CUDA GPUs would fail to be detected with older GPUs
+    - Added thinking and tool parsing for cogito-v2.1
+
+
+    Full release notes:
+    https://github.com/ollama/ollama/releases/tag/v0.13.1
+
+  developer: ollama
+  website: https://ollama.com/
+  sourceCode: https://github.com/ollama/ollama
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/ollama/ollama/tree/main/docs
+  license:
+    - text: MIT
+      url: https://github.com/ollama/ollama#MIT-1-ov-file
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: "7"
+  requiredCpu: 150m
+  requiredDisk: 50Mi
+  limitedDisk: 500Gi
+  limitedMemory: 40Gi
+  requiredMemory: 5Gi
+  requiredGpu: 0
+  limitedGpu: 16Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  onlyAdmin: false
+  subCharts:
+  - name: ollamaserver
+    shared: true
+  - name: ollamav2
+permission:
+  appData: true
+  appCache: true
+
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - ollamav2
+  {{- else }}
+  clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.3-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: ollamav2
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}

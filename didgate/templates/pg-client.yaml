@@ -1,0 +1,45 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-pg-client
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: didgate-pg-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: didgate-pg-client
+  template:
+    metadata:
+      labels:
+        app: didgate-pg-client
+    spec:
+      containers:
+      - name: pg-client
+        image: postgres:15-alpine
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+        env:
+        - name: PGHOST
+          value: "{{ .Values.postgres.host }}"
+        - name: PGPORT
+          value: "{{ .Values.postgres.port }}"
+        - name: PGUSER
+          value: "{{ .Values.postgres.username }}"
+        - name: PGPASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: PGDATABASE
+          value: "{{ .Values.postgres.databases.did_gate }}"
+        command: ["/bin/sh"]
+        args: ["-c", "while true; do sleep 3600; done"]
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+
