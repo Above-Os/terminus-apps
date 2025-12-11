@@ -42,7 +42,7 @@ spec:
     spec:
       containers:
       - name: vc-gate
-        image: aboveos/vc-gate:v3.4.5-test
+        image: aboveos/vc-gate:v3.4.13-rc-6
         resources:
           requests:
             cpu: 100m
@@ -57,7 +57,11 @@ spec:
         - name: SSI_SERVICE_URL
           value: "http://merchant-ssi-svc:6003"
         - name: SERVER_DID_GATE
+        {{- if hasSuffix ".cn" .Values.user.zone }}
+          value: "https://api.olares.cn/did"
+        {{- else }}
           value: "https://api.olares.com/did"
+        {{- end }}
         - name: ENVIRONMENT
           value: "pro"
         - name: NODE_ENV
@@ -65,7 +69,11 @@ spec:
         - name: "NAME_BLACK_LIST"
           value: "olares"
         - name: "OLARES_DOMAIN"
+        {{- if hasSuffix ".cn" .Values.user.zone }}
+          value: "olares.cn"
+        {{- else }}
           value: "olares.com"
+        {{- end }}
         volumeMounts:
         - name: vc-gate-config
           mountPath: /app/dist/config.json
@@ -205,7 +213,7 @@ spec:
     spec:
       containers:
       - name: merchant-ssi
-        image: aboveos/ssi-service:v3.4.5-test
+        image: aboveos/ssi-service:v3.4.13-rc-6
         resources:
           requests:
             cpu: 100m
@@ -279,7 +287,7 @@ spec:
     spec:
       containers:
       - name: vc-gate-admin
-        image: aboveos/vc-gate-admin:v3.4.5-test
+        image: aboveos/vc-gate-admin:v3.4.13-rc-6
         resources:
           requests:
             cpu: 100m
@@ -294,7 +302,11 @@ spec:
         - name: SSI_SERVICE_URL
           value: "http://merchant-ssi-svc:6003"
         - name: SERVER_DID_GATE
+        {{- if hasSuffix ".cn" .Values.user.zone }}
+          value: "https://api.olares.cn/did"
+        {{- else }}
           value: "https://api.olares.com/did"
+        {{- end }}
         - name: ENVIRONMENT
           value: "pro"
         - name: NODE_ENV
