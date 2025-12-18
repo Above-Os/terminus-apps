@@ -1,4 +1,4 @@
----
+﻿---
 apiVersion: v1
 kind: Service
 metadata:
@@ -26,7 +26,7 @@ kind: Deployment
 metadata:
   labels:
     name: windows
-  name: windows
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
@@ -42,22 +42,23 @@ spec:
     spec:
       containers:
       - name: windows
-        image: beclab/dockurr-windows:4.34
+        image: "beclab/dockurr-windows:4.34"
+        envFrom:
+          - configMapRef:
+              name: windows-config        
         env:
         - name: VERSION
-          value: "https://cdn.joinolares.cn/iso/Win11_24H2_English_x64.iso"
+          value: "$(CDN_HOST)/{{ .Values.olaresEnv.VERSION }}"
         - name: RAM_SIZE
-          value: "4G"
+          value: "{{ .Values.olaresEnv.RAM_SIZE }}"
         - name: CPU_CORES
-          value: "4"
+          value: "{{ .Values.olaresEnv.CPU_CORES }}"
         - name: DISK_SIZE
-          value: "128G"
+          value: "{{ .Values.olaresEnv.DISK_SIZE }}"
         - name: USERNAME
-          value: {{ .Values.olaresEnv.WINDOWS_USERNAME }}
+          value: "{{ .Values.olaresEnv.USERNAME }}"
         - name: PASSWORD
-          value: {{ .Values.olaresEnv.WINDOWS_PASSWORD }}
-        - name: GPU
-          value: "Y"
+          value: "{{ .Values.olaresEnv.PASSWORD }}"
         ports:
         - containerPort: 8006
         - containerPort: 3389
@@ -87,7 +88,7 @@ spec:
       terminationGracePeriodSeconds: 300
       volumes:
         - hostPath:
-            path: '{{ .Values.userspace.appCache }}/windows'
+            path: '{{ .Values.userspace.appCache }}'
             type: DirectoryOrCreate
           name: storage
         - hostPath:
