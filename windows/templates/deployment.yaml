@@ -42,7 +42,7 @@ spec:
     spec:
       containers:
       - name: windows
-        image: "beclab/dockurr-windows:4.34"
+        image: "beclab/dockurr-windows:igpu1"
         envFrom:
           - configMapRef:
               name: windows-config        
@@ -59,6 +59,14 @@ spec:
           value: "{{ .Values.olaresEnv.USERNAME }}"
         - name: PASSWORD
           value: "{{ .Values.olaresEnv.PASSWORD }}"
+        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+        - name: GPU
+          value: "Y"
+        - name: VGA
+          value: 'vfio-pci,host=0000:00:02.1,multifunction=on,x-vga=on -vga virtio'
+        - name: RENDERNODE
+          value: /dev/dri/renderD129        
+        {{- end }}
         ports:
         - containerPort: 8006
         - containerPort: 3389
