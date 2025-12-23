@@ -1,6 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"  
   labels:
     io.kompose.service: dman
   name: dman
@@ -39,7 +41,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP                
-
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 2
+              memory: 1Gi    
         - image: docker.io/riddlemeteng/ainpc:v0.0.1
           name: project
           command:
@@ -90,7 +98,13 @@ spec:
             - name: NODE_IP
               valueFrom:
                 fieldRef:
-                  fieldPath: status.hostIP                
+                  fieldPath: status.hostIP   
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 2
+            memory: 1Gi                      
       restartPolicy: Always
 
 ---
