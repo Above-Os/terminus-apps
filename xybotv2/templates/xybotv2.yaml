@@ -1,4 +1,4 @@
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: xybotv2
@@ -20,7 +20,7 @@ spec:
     spec:
       initContainers:
         - name: init-data
-          image: docker.io/henryxiaoyang/xybotv2:6278ec6
+          image: "docker.io/beclab/henryxiaoyang-xybotv2:6278ec6"
           command:
             - sh
             - -c
@@ -36,7 +36,7 @@ spec:
               mountPath: /mnt/volume
       containers:
         - name: xybotv2
-          image: docker.io/henryxiaoyang/xybotv2:6278ec6
+          image: "docker.io/beclab/henryxiaoyang-xybotv2:6278ec6"
           ports:
             - containerPort: 9999
           env:
@@ -63,11 +63,27 @@ spec:
       volumes:
         - name: redis-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/redis-data'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/xybotv2/redis-data'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/xybotv2/redis-data'
+            {{- end }}
             type: DirectoryOrCreate
         - name: app-data
           hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/app-data'
+              {{- else }}
             path: '{{ .Values.userspace.appData }}/xybotv2/app-data'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/xybotv2/app-data'
+            {{- end }}
             type: DirectoryOrCreate
       restartPolicy: Always
 

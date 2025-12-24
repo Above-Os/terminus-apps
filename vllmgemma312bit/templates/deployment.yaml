@@ -1,4 +1,4 @@
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+﻿{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 {{- $vllmDomainENV := split "," .Values.domain.vllmclient -}}
 {{- $vllmDomain := index $vllmDomainENV "_0" -}}
 ---
@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: vllm/vllm-openai:v0.11.0
+          image: "docker.io/beclab/vllm-vllm-openai:v0.11.0"
           command:
             - /bin/bash
             - -c
@@ -59,67 +59,29 @@ spec:
               value: "8000"
           ports:
             - containerPort: 8000
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 30
-            timeoutSeconds: 60
-            periodSeconds: 40
-            failureThreshold: 120
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-              scheme: HTTP
-            initialDelaySeconds: 30
-            timeoutSeconds: 60
-            periodSeconds: 60
-            successThreshold: 1
-            failureThreshold: 10
           resources:
             limits:
               cpu: "18"
-              memory: 18Gi
+              memory: 28Gi
             requests:
               cpu: 500m
-              memory: 9Gi
+              memory: 11Gi
           volumeMounts:
             - mountPath: /models/gemma-3-12b
               name: data
-      volumes:
-        - name: data
-          hostPath:
-            path: "{{ .Values.userspace.userData }}/Huggingface/gemma312bit"
-            type: DirectoryOrCreate
-      restartPolicy: Always
-status: {}
-
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: {{ .Release.Name }}-download-models
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app: {{ .Release.Name }}-download-models
-spec:
-  ttlSecondsAfterFinished: 100
-  backoffLimit: 3
-  template:
-    metadata:
-      labels:
-        app: {{ .Release.Name }}-download-models
-    spec:
-      restartPolicy: OnFailure
-      containers:
         - name: download-model
-          image: harveyff/hf-downloader:v0.0.5
+          image: "docker.io/beclab/harveyff-hf-downloader:v0.0.15"
           env:
             - name: HF_ENDPOINT
-              value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
             - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.HF_TOKEN }}"
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
+            - name: VLLM_PROXY_TARGET
+              value: http://localhost:8000
+            - name: MODEL_NAME
+              value: /models/gemma-3-12b
+            - name: APP_URL
+              value: "https://{{ $vllmDomain }}"
           args:
             - "--repo"
             - "abhishekchohan/gemma-3-12b-it-quantized-W4A16"
@@ -132,9 +94,27 @@ spec:
             - "--port"
             - "8090"
             - "--probe-url"
-            - "https://{{ $vllmDomain }}/backend_health"
+            - "/health"
             - "--done-name"
             - ".gemma-3-12b-it-quantized-W4A16.done"
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+            initialDelaySeconds: 5
+            timeoutSeconds: 10
+            periodSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
           ports:
             - containerPort: 8090
               name: http
@@ -156,34 +136,23 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/gemma312bit"
             type: DirectoryOrCreate
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: download-svc
-  namespace: {{ .Release.Namespace }}
-spec:
-  selector:
-    app: {{ .Release.Name }}-download-models
-  ports:
-    - name: download-status
-      port: 8090
-      targetPort: 8090
-  type: ClusterIP
+      restartPolicy: Always
+status: {}
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
   creationTimestamp: null
-  name: vllm
+  name: download-svc
   namespace: "{{ .Release.Namespace }}"
   labels:
     io.kompose.service: vllm
 spec:
   ports:
     - name: http
-      port: 8000
-      targetPort: 8000
+      port: 8090
+      targetPort: 8090
   selector:
     io.kompose.service: vllm
 status:

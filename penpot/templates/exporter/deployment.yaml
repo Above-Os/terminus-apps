@@ -1,4 +1,4 @@
-{{- $penpotDomainENV := split  ","  .Values.domain.penpot -}}
+﻿{{- $penpotDomainENV := split  ","  .Values.domain.penpot -}}
 {{- $penpotDomain := index $penpotDomainENV "_0" -}}
 
 ---
@@ -14,6 +14,8 @@ spec:
   selector:
     matchLabels:
       app: penpot-exporter
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -29,7 +31,7 @@ spec:
             readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 1001
-          image: docker.io/aboveos/penpotapp-exporter:latest
+          image: "docker.io/beclab/penpotapp-exporter:2.11.1"
           resources:
             requests:
               cpu: 10m
@@ -51,4 +53,12 @@ spec:
         - name: data-assets
           hostPath:
             type: DirectoryOrCreate
-            path: {{ .Values.userspace.appData }}/penpot/data/assets
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/data/assets'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/penpot/data/assets'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/penpot/data/assets'
+            {{- end }}
