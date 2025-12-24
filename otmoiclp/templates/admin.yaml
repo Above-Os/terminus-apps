@@ -1,4 +1,4 @@
-﻿kind: ConfigMap
+kind: ConfigMap
 apiVersion: v1
 metadata:
   name: otmoic-admin-base-data
@@ -19,7 +19,7 @@ data:
               precision: 18,
               chainType: "evm",
               rpcTx: "https://etherscan.io/tx/{tx}",
-              image: "docker.io/beclab/otmoic-chainclient:v2.5.60",
+              image: "otmoic/chainclient:v2.5.60",
               serviceName: "chain-client-evm-eth-server-60",
               envList: [
                 {
@@ -36,7 +36,7 @@ data:
               precision: 18,
               chainType: "evm",
               rpcTx: "https://bscscan.com/tx/{tx}",
-              image: "docker.io/beclab/otmoic-chainclient:v2.5.60",
+              image: "otmoic/chainclient:v2.5.60",
               serviceName: "chain-client-evm-bsc-server-9006",
               envList: [
                 {
@@ -53,7 +53,7 @@ data:
               precision: 18,
               chainType: "evm",
               rpcTx: "",
-              image: "docker.io/beclab/otmoic-chainclient:v2.5.60",
+              image: "otmoic/chainclient:v2.5.60",
               serviceName: "chain-client-evm-op-server-614",
               deployName: "chain-client-evm-op-614",
               envList: [
@@ -71,7 +71,7 @@ data:
               precision: 9,
               chainType: "solana",
               rpcTx: "https://solscan.io/tx/{tx}",
-              image: "docker.io/beclab/otmoic-chainclient:v2.5.60",
+              image: "otmoic/chainclient:v2.5.60",
               serviceName: "chain-client-solana-solana-server-501",
               deployName: "chain-client-solana-solana-501",
               envList: [
@@ -171,6 +171,34 @@ apiVersion: v1
 metadata:
   name: lpnode-sa
   namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: admin
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale", "deployments/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "services/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
