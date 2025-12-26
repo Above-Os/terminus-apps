@@ -1,13 +1,10 @@
-﻿{{- $appRoot := "" -}}
-{{- if .Values.sysVersion }}
-  {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-    {{- $appRoot = .Values.userspace.appData -}}
-  {{- else }}
-    {{- $appRoot = printf "%s/obsidian" .Values.userspace.appData -}}
-  {{- end }}
-{{- else }}
-  {{- $appRoot = printf "%s/obsidian" .Values.userspace.appData -}}
-{{- end }}
+﻿{{- $basePath := default "" .Values.userspace.appData -}}
+{{- $appRoot := "" -}}
+{{- if and .Values.sysVersion (semverCompare ">=1.12.3-0" (toString .Values.sysVersion)) -}}
+  {{- $appRoot = $basePath -}}
+{{- else -}}
+  {{- $appRoot = printf "%s/obsidian" $basePath -}}
+{{- end -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -17,24 +14,23 @@ metadata:
 data:
   nginx.conf: |
     http {
-        server {
-            listen 8001;
+      server {
+        listen 8001;
 
-            location = / {
-                rewrite ^ /_utils;
-            }
-
-            location / {
-                proxy_pass http://127.0.0.1:5984;
-            }
+        location = / {
+          rewrite ^ /_utils;
         }
+
+        location / {
+          proxy_pass http://127.0.0.1:5984;
+        }
+      }
     }
 
     events {
     }
 
 ---
-
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -52,7 +48,6 @@ data:
     fi
 
 ---
-
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -87,7 +82,6 @@ data:
     max_age = 3600
 
 ---
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -116,11 +110,11 @@ spec:
             - |
               bash /init.sh
           volumeMounts:
-            - mountPath: /opt/couchdb/etc/local.ini
-              name: obsidian-config
+            - name: obsidian-config
+              mountPath: /opt/couchdb/etc/local.ini
               subPath: local.ini
-            - mountPath: /new-etc
-              name: server-etc
+            - name: server-etc
+              mountPath: /new-etc
             - name: init-config
               mountPath: /init.sh
               subPath: init.sh
@@ -153,68 +147,95 @@ spec:
           image: docker.io/beclab/nginx:1.27.0
           ports:
             - containerPort: 8001
+          env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: "500m"
+              memory: 1Gi
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
-            - mountPath: /var/cache/nginx
-              name: nginx-cache
-            - mountPath: /var/run
-              name: nginx-run
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
         - name: server
           image: docker.io/beclab/couchdb:3.5.1
+          env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
           ports:
             - containerPort: 5984
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: "4"
+              memory: 2Gi
           volumeMounts:
-            - mountPath: /opt/couchdb/data
-              name: server-data
-            - mountPath: /opt/couchdb/etc
-              name: server-etc
+            - name: server-data
+              mountPath: /opt/couchdb/data
+            - name: server-etc
+              mountPath: /opt/couchdb/etc
           command:
             - tini
             - --
             - /opt/couchdb/bin/couchdb
       volumes:
-      - name: server-data
-        hostPath:
-          type: DirectoryOrCreate
-          path: {{ $appRoot }}/data
-      - name: server-etc
-        hostPath:
-          type: DirectoryOrCreate
-          path: {{ $appRoot }}/etc
-      - name: app-data-root
-        hostPath:
-          type: DirectoryOrCreate
-          path: {{ $appRoot }}
-      - name: obsidian-config
-        configMap:
-          defaultMode: 420
-          name: obsidian-config
-          items:
-            - key: local.ini
-              path: local.ini
-      - name: init-config
-        configMap:
-          name: init-config
-          defaultMode: 438
-          items:
-            - key: init.sh
-              path: init.sh
-      - name: nginx-config
-        configMap:
-          name: nginx-config
-          defaultMode: 438
-          items:
-            - key: nginx.conf
-              path: nginx.conf
-      - name: nginx-cache
-        emptyDir: {}
-      - name: nginx-run
-        emptyDir: {}
+        - name: server-data
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ $appRoot }}/data
+        - name: server-etc
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ $appRoot }}/etc
+        - name: app-data-root
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ $appRoot }}
+        - name: obsidian-config
+          configMap:
+            defaultMode: 420
+            name: obsidian-config
+            items:
+              - key: local.ini
+                path: local.ini
+        - name: init-config
+          configMap:
+            name: init-config
+            defaultMode: 438
+            items:
+              - key: init.sh
+                path: init.sh
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+            defaultMode: 438
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:
