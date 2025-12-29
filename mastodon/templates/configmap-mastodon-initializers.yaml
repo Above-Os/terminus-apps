@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mastodon-initializers
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app.kubernetes.io/name: mastodon
+    helm.sh/chart: mastodon-0.1.2
+    app.kubernetes.io/instance: mastodon
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: mastodon
+data:
+  static_files.rb: |-
+    # Ensure Rails serves static files in production
+    if Rails.env.production?
+      # Enable static file server
+      Rails.application.config.public_file_server.enabled = ENV['RAILS_SERVE_STATIC_FILES'].present? || true
+      # Set cache headers
+      Rails.application.config.public_file_server.headers = {
+        'Cache-Control' => 'public, max-age=31536000, immutable'
+      }
+      # Ensure ActionDispatch::Static middleware exists and is correctly configured
+      # Note: Rails.public_path returns Pathname, needs to be converted to string
+      public_path_str = Rails.public_path.to_s
+      Rails.application.config.middleware.use ActionDispatch::Static, public_path_str if Rails.env.production?
+    end
+
+  sidekiq_mail_retry.rb: |-
+    # Limit email retry attempts to 1 (max 1 retry, total 2 attempts)
+    # This prevents excessive email retries when SMTP fails
+    Rails.application.config.after_initialize do
+      # Configure ActionMailer::MailDeliveryJob to retry only once
+      if defined?(ActionMailer::MailDeliveryJob)
+        ActionMailer::MailDeliveryJob.sidekiq_options retry: 1
+      end
+    end
+
+  auto_fix_rules_and_es.rb: |-
+    # Auto-fix server rules and Elasticsearch indexes on startup
+    # This ensures these issues are automatically resolved without manual intervention
+    # Runs after Rails initialization, in a background thread to avoid blocking startup
+    Rails.application.config.after_initialize do
+      # Use a background thread to avoid blocking application startup
+      Thread.new do
+        # Wait for database connection to be established
+        sleep 15
+        
+        begin
+          # 1. Fix server rules (create default rule if none exist)
+          if ActiveRecord::Base.connection.table_exists?('rules')
+            rule_count = Rule.count rescue 0
+            if rule_count == 0
+              Rails.logger.info "[Auto-fix] Creating default server rule..."
+              begin
+                rule = Rule.create!(
+                  priority: 0,
+                  text: 'Be respectful and follow community guidelines'
+                )
+                Rails.logger.info "[Auto-fix] ✓ Default server rule created: ID=#{rule.id}"
+              rescue => e
+                Rails.logger.warn "[Auto-fix] ✗ Failed to create server rule: #{e.class}: #{e.message}"
+              end
+            else
+              Rails.logger.debug "[Auto-fix] Server rules already exist (#{rule_count} rules)"
+            end
+          else
+            Rails.logger.debug "[Auto-fix] Rules table does not exist yet, skipping"
+          end
+        rescue => e
+          Rails.logger.warn "[Auto-fix] Error checking server rules: #{e.class}: #{e.message}"
+        end
+        
+        # 2. Fix Elasticsearch indexes (deploy if needed)
+        begin
+          if ENV['ES_ENABLED'] == 'true' || ENV['ES_ENABLED'] == '1'
+            require 'chewy'
+            
+            # Wait a bit more for Elasticsearch to be ready
+            sleep 5
+            
+            # Check if indexes need deployment by verifying they exist
+            indexes_need_deployment = false
+            missing_indexes = []
+            
+            ['InstancesIndex', 'AccountsIndex', 'TagsIndex', 'StatusesIndex', 'PublicStatusesIndex'].each do |name|
+              begin
+                index_class = name.constantize
+                index_name_str = index_class.index_name rescue nil
+                
+                if index_name_str
+                  exists = Chewy.client.indices.exists?(index: index_name_str) rescue false
+                  unless exists
+                    indexes_need_deployment = true
+                    missing_indexes << name
+                  end
+                else
+                  indexes_need_deployment = true
+                  missing_indexes << name
+                end
+              rescue => e
+                Rails.logger.debug "[Auto-fix] Could not check #{name}: #{e.message}"
+                indexes_need_deployment = true
+                missing_indexes << name
+              end
+            end
+            
+            # Always attempt to deploy indexes to ensure mappings are up to date
+            # This is especially important after ES version changes
+            # Use reset! to force update mappings (deletes and recreates index with latest mapping)
+            Rails.logger.info "[Auto-fix] Deploying/updating Elasticsearch indexes to ensure mappings are current..."
+            begin
+              Chewy.strategy(:bypass) do
+                ['InstancesIndex', 'AccountsIndex', 'TagsIndex', 'StatusesIndex', 'PublicStatusesIndex'].each do |name|
+                  begin
+                    index_class = name.constantize
+                    Rails.logger.info "[Auto-fix] Resetting #{name} to update mapping..."
+                    index_class.reset!
+                    Rails.logger.info "[Auto-fix] ✓ #{name} mapping force updated"
+                  rescue => e
+                    # Log error but continue with other indexes
+                    Rails.logger.warn "[Auto-fix] ✗ Failed to update #{name}: #{e.class}: #{e.message}"
+                  end
+                end
+              end
+              Rails.logger.info "[Auto-fix] ✓ Elasticsearch indexes deployment completed"
+            rescue => e
+              Rails.logger.warn "[Auto-fix] ✗ Error deploying Elasticsearch indexes: #{e.class}: #{e.message}"
+            end
+          else
+            Rails.logger.debug "[Auto-fix] Elasticsearch is disabled, skipping index deployment"
+          end
+        rescue => e
+          Rails.logger.warn "[Auto-fix] Error checking Elasticsearch: #{e.class}: #{e.message}"
+        end
+      end
+    end
+
