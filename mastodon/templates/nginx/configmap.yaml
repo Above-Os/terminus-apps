@@ -1,4 +1,5 @@
-{{- $mastodonDomainENV := split  ","  .Values.domain.mastodonapache -}}
+{{- $mastodonDomainStr := toString (.Values.domain.mastodonapache | default "") -}}
+{{- $mastodonDomainENV := split "," $mastodonDomainStr -}}
 {{- $webDomain := index $mastodonDomainENV "_0" -}}
 
 ---
@@ -27,17 +28,14 @@ data:
         listen 8080;
         server_name {{ $webDomain }};
         
-        # Increase body size limit
         client_max_body_size 40m;
         
-        # Health check endpoint for Kubernetes
         location = /healthz {
             access_log off;
             return 200 "ok\n";
             add_header Content-Type text/plain;
         }
         
-        # Static resources are directly served by Mastodon, Nginx only acts as proxy
         location / {
             proxy_http_version 1.1;
             proxy_buffering off;
@@ -57,11 +55,8 @@ data:
             proxy_http_version 1.1;
             proxy_buffering off;
             
-            # CRITICAL: Streaming service preserves trailing slash in redirects
-            # Remove trailing slash before proxying to ensure consistent path format
-            # Use if statement to check $request_uri and rewrite $uri variable
-            if ($request_uri ~ "^/api/v1/streaming/(\?.*)$") {
-                rewrite ^/api/v1/streaming/(.*)$ /api/v1/streaming$1 break;
+            if ($request_uri ~ "^/api/v1/streaming/\?(.*)$") {
+                rewrite ^/api/v1/streaming/\?(.*)$ /api/v1/streaming?$1 break;
             }
             if ($request_uri = "/api/v1/streaming/") {
                 rewrite ^/api/v1/streaming/$ /api/v1/streaming break;
@@ -81,13 +76,9 @@ data:
             proxy_read_timeout 86400;
             proxy_send_timeout 86400;
             
-            # Forward to streaming service
-            # When proxy_pass has no URI, Nginx uses $uri (after rewrite) + $args
-            # After rewrite: /api/v1/streaming/?stream=public -> /api/v1/streaming?stream=public
             proxy_pass http://mastodon_streaming;
         }
         
-        # S3 storage proxy
         location /{{ .Values.minio.buckets.mastodon }}/ {
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
