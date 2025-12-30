@@ -119,6 +119,41 @@ spec:
               # If above methods don't work, directly remove middleware
               Rails.application.config.middleware.delete(ActionDispatch::HostAuthorization) rescue nil
               EOF
+              # Fix Content Security Policy configuration to handle nil values
+              # Ensure domain environment variables have default values
+              if [ -z "$WEB_DOMAIN" ] || [ "$WEB_DOMAIN" = "" ]; then
+                export WEB_DOMAIN="localhost"
+              fi
+              if [ -z "$LOCAL_DOMAIN" ] || [ "$LOCAL_DOMAIN" = "" ]; then
+                export LOCAL_DOMAIN="$WEB_DOMAIN"
+              fi
+              # Fix or disable Content Security Policy initializer
+              if [ -f config/initializers/content_security_policy.rb ]; then
+                # Backup original file
+                cp config/initializers/content_security_policy.rb config/initializers/content_security_policy.rb.bak 2>/dev/null || true
+                # Create a fixed version that handles nil values
+                cat > config/initializers/content_security_policy.rb << 'EOFCSP'
+              # Fixed Content Security Policy configuration
+              # Ensure domain values are not nil before configuring CSP
+              web_domain = ENV['WEB_DOMAIN'].presence || 'localhost'
+              local_domain = ENV['LOCAL_DOMAIN'].presence || web_domain
+              
+              Rails.application.config.content_security_policy do |policy|
+                policy.default_src :self, :https
+                policy.font_src    :self, :https, :data
+                policy.img_src     :self, :https, :data, :blob
+                policy.style_src   :self, :https, :unsafe_inline
+                policy.script_src  :self, :https, :unsafe_inline, :unsafe_eval
+                policy.connect_src :self, :https, "wss://#{local_domain}", "ws://#{local_domain}"
+                policy.media_src   :self, :https, :data, :blob
+                policy.frame_src   :self, :https
+                policy.worker_src  :self, :blob
+                policy.manifest_src :self
+              end
+              
+              Rails.application.config.content_security_policy_report_only = false
+              EOFCSP
+              fi
               # Check if config file exists and if port is already specified
               if [ -f config/puma-streaming.rb ]; then
                 # Use streaming-specific config file, don't repeat port specification
@@ -174,6 +209,84 @@ spec:
               value: "{{ .Values.minio.username }}"
             - name: MASTODON_AWS_SECRET_ACCESS_KEY
               value: "{{ .Values.minio.password }}"
+            {{- end }}
+            # SMTP configuration - extracted to env for special scenario needs
+            {{- if .Values.olaresEnv.SMTP_SERVER }}
+            - name: SMTP_SERVER
+              value: "{{ .Values.olaresEnv.SMTP_SERVER }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_PORT }}
+            - name: SMTP_PORT
+              value: "{{ .Values.olaresEnv.SMTP_PORT }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_LOGIN }}
+            - name: SMTP_LOGIN
+              value: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_PASSWORD }}
+            - name: SMTP_PASSWORD
+              value: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_FROM_ADDRESS }}
+            - name: SMTP_FROM_ADDRESS
+              value: "{{ .Values.olaresEnv.SMTP_FROM_ADDRESS }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_DOMAIN }}
+            - name: SMTP_DOMAIN
+              value: "{{ .Values.olaresEnv.SMTP_DOMAIN }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_DELIVERY_METHOD }}
+            - name: SMTP_DELIVERY_METHOD
+              value: "{{ .Values.olaresEnv.SMTP_DELIVERY_METHOD }}"
+            {{- else }}
+            - name: SMTP_DELIVERY_METHOD
+              value: "smtp"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_AUTH_METHOD }}
+            - name: SMTP_AUTH_METHOD
+              value: "{{ .Values.olaresEnv.SMTP_AUTH_METHOD }}"
+            {{- else }}
+            - name: SMTP_AUTH_METHOD
+              value: "plain"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_CA_FILE }}
+            - name: SMTP_CA_FILE
+              value: "{{ .Values.olaresEnv.SMTP_CA_FILE }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_OPENSSL_VERIFY_MODE }}
+            - name: SMTP_OPENSSL_VERIFY_MODE
+              value: "{{ .Values.olaresEnv.SMTP_OPENSSL_VERIFY_MODE }}"
+            {{- else }}
+            - name: SMTP_OPENSSL_VERIFY_MODE
+              value: "peer"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_SSL }}
+            - name: SMTP_SSL
+              value: "{{ .Values.olaresEnv.SMTP_SSL }}"
+            {{- else }}
+            - name: SMTP_SSL
+              value: "false"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_TLS }}
+            - name: SMTP_TLS
+              value: "{{ .Values.olaresEnv.SMTP_TLS }}"
+            {{- else }}
+            - name: SMTP_TLS
+              value: "false"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}
+            - name: SMTP_ENABLE_STARTTLS
+              value: "{{ .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}"
+            {{- else }}
+            - name: SMTP_ENABLE_STARTTLS
+              value: "false"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}
+            - name: SMTP_ENABLE_STARTTLS_AUTO
+              value: "{{ .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}"
+            {{- else }}
+            - name: SMTP_ENABLE_STARTTLS_AUTO
+              value: "false"
             {{- end }}
           envFrom:
             - configMapRef:
