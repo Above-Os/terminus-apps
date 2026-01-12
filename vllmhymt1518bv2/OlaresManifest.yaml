@@ -1,0 +1,109 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+
+metadata:
+  name: vllmhymt1518bv2
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+  description: Hunyuan Translation Model.
+  appid: vllmhymt1518bv2
+  title: HY-MT1.5-1.8B (vLLM)
+  version: '1.0.1'
+  categories:
+    - AI
+
+sharedEntrances:
+  - name: vllmhymt1518bv2
+    host: sharedentrances-api
+    post: 0
+    title: Hunyuan Translation
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+
+entrances:
+  - authLevel: internal
+    host: vllmclient
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+    name: vllmclient
+    openMethod: window
+    port: 8080
+    title: Hunyuan Translation
+
+spec:
+  versionName: 'tencent/HY-MT1.5-1.8B'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+    
+    ## About HY-MT1.5-1.8B ##
+    Tencent Hunyuan Translation Model 1.8B (HY-MT1.5-1.8B) is a lightweight translation model optimized for efficient inference with vLLM. This model provides high-quality translation capabilities with lower resource requirements compared to larger models.
+
+  developer: Tencent
+  website: https://huggingface.co/tencent/HY-MT1.5-1.8B
+  sourceCode: https://huggingface.co/tencent/HY-MT1.5-1.8B
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://huggingface.co/tencent/HY-MT1.5-1.8B
+  license:
+    - text: Hunyuan Translation Model License
+      url: https://huggingface.co/tencent/HY-MT1.5-1.8B
+  limitedCpu: 12
+  requiredCpu: 1
+  requiredDisk: 10Gi
+  limitedDisk: 50Gi
+  limitedMemory: 10Gi
+  requiredMemory: 8Gi
+  requiredGpu: 8Gi
+  limitedGpu: 16Gi
+
+  supportArch:
+    - amd64
+    - arm64
+  subCharts:
+  - name: vllmhymt1518bv2server
+    shared: true
+  - name: vllmhymt1518bv2
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - vllmhymt1518bv2
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.2-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: vllmhymt1518bv2
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+envs:
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}
