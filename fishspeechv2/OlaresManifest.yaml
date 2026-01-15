@@ -1,69 +1,68 @@
 ---
-olaresManifest.version: '0.10.0'
+olaresManifest.version: '0.11.0'
 olaresManifest.type: app
 apiVersion: 'v2'
 metadata:
   name: fishspeechv2
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  description: Open-Source Multilingual Text-to-Speech with Voice Cloning
+  icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
+  description: SOTA Open Source TTS
   appid: fishspeechv2
   title: Fish Speech
   version: '1.0.0'
   categories:
-  - Utilities_v112
-  - Productivity
+  - AI
 sharedEntrances:
 - name: fishspeechv2
   title: Fish Speech
   host: sharedentrances-api
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
   port: 0
   invisible: true
   authLevel: internal
 entrances:
 - authLevel: internal
   host: fishspeechclient
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
   name: fishspeechclient
   openMethod: window
   port: 8080
   title: Fish Speech
 spec:
-  versionName: 'latest'
+  versionName: 'fishaudio/openaudio-s1-mini'
   fullDescription: |
     ## IMPORTANT NOTE ##
-    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+    This is a shared app. Only one service will be installed across the entire Olares system. Every user can install a desktop entry to access or use the shared entrance to call the service API.
 
     ## OVERVIEW ##
-    Fish Speech is an open-source multilingual text-to-speech (TTS) system with voice cloning capabilities. It provides high-quality TTS synthesis with support for multiple languages including English, Japanese, Korean, Chinese, French, German, Arabic, and Spanish.
+    True human-like Text-to-Speech and Voice Cloning
+    
+    FishAudio-S1 is an expressive text-to-speech (TTS) and voice cloning model developed by Fish Audio, designed to generate speech that sounds natural, realistic, and emotionally rich — not robotic, not flat, and not constrained to studio-style narration.
+    
+    FishAudio-S1 focuses on how humans actually speak: with emotion, variation, pauses, and intent.
 
-    Key Features
-    Zero-shot & Few-shot TTS: Input a 10 to 30-second vocal sample to generate high-quality TTS output.
+    Features
+    - Zero-shot & Few-shot TTS: Input a 10 to 30-second vocal sample to generate high-quality TTS output.
 
-    Multilingual & Cross-lingual Support: Simply copy and paste multilingual text into the input box—no need to worry about the language. Currently supports English, Japanese, Korean, Chinese, French, German, Arabic, and Spanish.
+    - Multilingual & Cross-lingual Support: Simply copy and paste multilingual text into the input box—no need to worry about the language. Currently supports English, Japanese, Korean, Chinese, French, German, Arabic, and Spanish.
 
-    No Phoneme Dependency: The model has strong generalization capabilities and does not rely on phonemes for TTS. It can handle text in any language script.
+    - No Phoneme Dependency: The model has strong generalization capabilities and does not rely on phonemes for TTS. It can handle text in any language script.
 
-    Highly Accurate: Achieves a low CER (Character Error Rate) of around 0.4% and WER (Word Error Rate) of around 0.8% for Seed-TTS Eval.
+    - Highly Accurate: Achieves a low CER (Character Error Rate) of around 0.4% and WER (Word Error Rate) of around 0.8% for Seed-TTS Eval.
 
-    Fast: Accelerated by torch compile, the real-time factor is approximately 1:7 on an Nvidia RTX 4090 GPU.
+    - Fast: Accelerated by torch compile, the real-time factor is approximately 1:7 on an Nvidia RTX 4090 GPU.
 
-    WebUI Inference: Features an easy-to-use, Gradio-based web UI compatible with Chrome, Firefox, Edge, and other browsers.
-
-    Speech Control: Supports a variety of emotional, tone, and special markers to enhance speech synthesis.
-
-  upgradeDescription: |
-    Initial release
-    - Fish Speech WebUI deployment
-        
+    - WebUI Inference: Features an easy-to-use, Gradio-based web UI compatible with Chrome, Firefox, Edge, and other browsers.
+    
+    - GUI Inference: Offers a PyQt6 graphical interface that works seamlessly with the API server. Supports Linux, Windows, and macOS.
+            
   developer: Fish Audio
-  website: https://fish.audio/
+  website: https://speech.fish.audio/
   sourceCode: https://github.com/fishaudio/fish-speech
   submitter: Olares
   locale:
   - en-US
   - zh-CN
-  doc: https://github.com/fishaudio/fish-speech
+  doc: https://speech.fish.audio/
   license:
   - text: Apache-2.0
     url: https://github.com/fishaudio/fish-speech/blob/main/LICENSE
@@ -117,15 +116,16 @@ options:
     clusterScoped: false
 {{- end }}
 
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
   - envName: OLARES_USER_HUGGINGFACE_SERVICE
     required: true
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
-  - envName: OLARES_USER_HUGGINGFACE_TOKEN
-    required: false
-    applyOnChange: true
-    valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_TOKEN
-
+{{- end }}
