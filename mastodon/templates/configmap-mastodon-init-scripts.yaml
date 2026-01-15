@@ -295,16 +295,63 @@ data:
           puts 'Updating existing admin account...'
           user = User.find_by(email: '${admin_email}')
           if user
-            user.password = '${admin_password}'
-            user.password_confirmation = '${admin_password}'
-            user.confirmed_at ||= Time.now
-            user.agreement = true
-            user.approved = true if user.respond_to?(:approved)
-            user.save!
+            # Check if password actually changed to avoid unnecessary updates and email notifications
+            password_changed = false
+            begin
+              # Try to authenticate with current password to check if it matches
+              if user.valid_password?('${admin_password}')
+                puts 'Password unchanged, skipping password update to avoid email notification'
+              else
+                password_changed = true
+                puts 'Password changed, updating...'
+              end
+            rescue => e
+              # If validation fails, assume password needs to be updated
+              password_changed = true
+              puts 'Password validation check failed, updating password...'
+            end
             
-            # Use tootctl to ensure role is set successfully (most reliable method)
-            puts \"Setting Owner role using tootctl...\"
-            system(\"bundle exec tootctl accounts modify #{user.account.username} --role Owner\")
+            # Only update password if it actually changed
+            if password_changed
+              # Use update_columns to skip callbacks and avoid triggering email notifications
+              user.update_columns(
+                encrypted_password: BCrypt::Password.create('${admin_password}'),
+                confirmed_at: user.confirmed_at || Time.now,
+                agreement: true,
+                approved: true
+              ) rescue begin
+                # Fallback to normal save if update_columns fails
+                user.password = '${admin_password}'
+                user.password_confirmation = '${admin_password}'
+                user.skip_password_change_notification! if user.respond_to?(:skip_password_change_notification!)
+                user.confirmed_at ||= Time.now
+                user.agreement = true
+                user.approved = true if user.respond_to?(:approved)
+                user.save(validate: false)
+              end
+            else
+              # Only update other fields if password didn't change
+              user.update_columns(
+                confirmed_at: user.confirmed_at || Time.now,
+                agreement: true,
+                approved: true
+              ) rescue nil
+            end
+            
+            # Use tootctl to ensure role is set successfully and approve account (most reliable method)
+            puts \"Setting Owner role and approving account using tootctl...\"
+            system(\"bundle exec tootctl accounts modify #{user.account.username} --role Owner --approve\")
+            
+            # Ensure account status is correct again (prevent caching issues)
+            user.reload
+            user.confirmed_at ||= Time.now
+            user.approved = true if user.respond_to?(:approved)
+            user.agreement = true
+            user.save! rescue user.update_columns(
+              confirmed_at: user.confirmed_at || Time.now,
+              agreement: true,
+              approved: true
+            ) if user.respond_to?(:approved)
             
             # Verify role assignment
             user.reload
@@ -315,14 +362,24 @@ data:
               puts '⚠ WARNING: Owner role may not be set correctly, trying Rails method...'
               if owner_role
                 user.role = owner_role
-                user.save!
+                user.save(validate: false)
                 user.reload
+                # If still not set, use update_column as last resort
+                if user.role != owner_role
+                  user.update_column(:role_id, owner_role.id)
+                  user.reload
+                end
               end
             end
             
+            # Final verification
+            user.reload
             puts \"✓ Admin account updated: #{user.account.username} (#{user.email})\"
-            puts \"  Role: #{user.reload.role&.name || 'Unknown'}\"
+            puts \"  Role: #{user.role&.name || 'Unknown'} (ID: #{user.role_id})\"
             puts \"  Confirmed: #{user.confirmed_at.present?}\"
+            puts \"  Approved: #{user.approved if user.respond_to?(:approved)}\"
+            puts \"  Agreement: #{user.agreement}\"
+            puts \"  Password changed: #{password_changed}\"
           else
             puts '✗ Admin user not found by email: ${admin_email}'
           end
@@ -395,12 +452,46 @@ data:
               existing_user = User.find_by(email: admin_email)
               if existing_user
                 puts 'User with email already exists, updating...'
-                existing_user.password = admin_password
-                existing_user.password_confirmation = admin_password
-                existing_user.confirmed_at = Time.now
-                existing_user.agreement = true
-                existing_user.approved = true if existing_user.respond_to?(:approved)
-                existing_user.save!
+                # Check if password actually changed to avoid unnecessary updates and email notifications
+                password_changed = false
+                begin
+                  if existing_user.valid_password?(admin_password)
+                    puts 'Password unchanged, skipping password update to avoid email notification'
+                  else
+                    password_changed = true
+                    puts 'Password changed, updating...'
+                  end
+                rescue => e
+                  password_changed = true
+                  puts 'Password validation check failed, updating password...'
+                end
+                
+                # Only update password if it actually changed
+                if password_changed
+                  # Use update_columns to skip callbacks and avoid triggering email notifications
+                  existing_user.update_columns(
+                    encrypted_password: BCrypt::Password.create(admin_password),
+                    confirmed_at: existing_user.confirmed_at || Time.now,
+                    agreement: true,
+                    approved: true
+                  ) rescue begin
+                    # Fallback to normal save if update_columns fails
+                    existing_user.password = admin_password
+                    existing_user.password_confirmation = admin_password
+                    existing_user.skip_password_change_notification! if existing_user.respond_to?(:skip_password_change_notification!)
+                    existing_user.confirmed_at ||= Time.now
+                    existing_user.agreement = true
+                    existing_user.approved = true if existing_user.respond_to?(:approved)
+                    existing_user.save(validate: false)
+                  end
+                else
+                  # Only update other fields if password didn't change
+                  existing_user.update_columns(
+                    confirmed_at: existing_user.confirmed_at || Time.now,
+                    agreement: true,
+                    approved: true
+                  ) rescue nil
+                end
                 
                 # Use tootctl to ensure role is set successfully and approve account (most reliable method)
                 puts \"Setting Owner role and approving account using tootctl...\"

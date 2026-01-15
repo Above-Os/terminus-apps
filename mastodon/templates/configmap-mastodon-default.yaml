@@ -1,7 +1,8 @@
-{{- $mastodonDomainENV := split  ","  .Values.domain.mastodonapache -}}
-{{- $webDomain := index $mastodonDomainENV "_0" -}}
+{{- $mastodonDomainStr := toString (.Values.domain.mastodonapache | default "") -}}
+{{- $mastodonDomainENV := split "," $mastodonDomainStr -}}
+{{- $webDomain := index $mastodonDomainENV "_0" | default "localhost" -}}
 
-{{- $localDomain := $webDomain -}}
+{{- $localDomain := $webDomain | default "localhost" -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -135,29 +136,29 @@ data:
   {{- else if and .Values.smtp .Values.smtp.opensslVerifyMode }}
     {{- $smtpOpensslVerifyMode = .Values.smtp.opensslVerifyMode }}
   {{- end }}
-  {{- $smtpEnableStarttlsAuto := "true" }}
-  {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}
-    {{- $smtpEnableStarttlsAuto = .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}
-  {{- else if and .Values.smtp .Values.smtp.enableStarttlsAuto }}
-    {{- $smtpEnableStarttlsAuto = .Values.smtp.enableStarttlsAuto }}
-  {{- end }}
-  {{- $smtpEnableStarttls := "true" }}
-  {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}
-    {{- $smtpEnableStarttls = .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}
-  {{- else if and .Values.smtp .Values.smtp.enableStarttls }}
-    {{- $smtpEnableStarttls = .Values.smtp.enableStarttls }}
-  {{- end }}
-  {{- $smtpTls := "true" }}
-  {{- if .Values.olaresEnv.SMTP_TLS }}
-    {{- $smtpTls = .Values.olaresEnv.SMTP_TLS }}
-  {{- else if and .Values.smtp .Values.smtp.tls }}
-    {{- $smtpTls = .Values.smtp.tls }}
-  {{- end }}
   {{- $smtpSsl := "false" }}
   {{- if .Values.olaresEnv.SMTP_SSL }}
     {{- $smtpSsl = .Values.olaresEnv.SMTP_SSL }}
   {{- else if and .Values.smtp .Values.smtp.ssl }}
     {{- $smtpSsl = .Values.smtp.ssl }}
+  {{- end }}
+  {{- $smtpTls := "false" }}
+  {{- if .Values.olaresEnv.SMTP_TLS }}
+    {{- $smtpTls = .Values.olaresEnv.SMTP_TLS }}
+  {{- else if and .Values.smtp .Values.smtp.tls }}
+    {{- $smtpTls = .Values.smtp.tls }}
+  {{- end }}
+  {{- $smtpEnableStarttls := "false" }}
+  {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}
+    {{- $smtpEnableStarttls = .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}
+  {{- else if and .Values.smtp .Values.smtp.enableStarttls }}
+    {{- $smtpEnableStarttls = .Values.smtp.enableStarttls }}
+  {{- end }}
+  {{- $smtpEnableStarttlsAuto := "false" }}
+  {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}
+    {{- $smtpEnableStarttlsAuto = .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}
+  {{- else if and .Values.smtp .Values.smtp.enableStarttlsAuto }}
+    {{- $smtpEnableStarttlsAuto = .Values.smtp.enableStarttlsAuto }}
   {{- end }}
   {{- if $smtpServer }}
   SMTP_SERVER: "{{ $smtpServer }}"

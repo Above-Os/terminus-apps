@@ -135,7 +135,7 @@ spec:
             value: {{ .Values.postgres.databases.knowledge }}
       containers:
       - name: knowledge
-        image: "beclab/knowledge-base-api:v0.12.62"
+        image: "beclab/knowledge-base-api:v0.12.66"
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
@@ -197,8 +197,10 @@ spec:
         volumeMounts:
           - name: pgbackup
             mountPath: /backup
-          - name: blacklist-config
-            mountPath: /blacklist-config
+          - name: domain-config
+            mountPath: /domain-config
+          - name: ytdlp-supportedsites
+            mountPath: /ytdlp-supportedsites
         resources:
           requests:
             cpu: 20m
@@ -208,7 +210,7 @@ spec:
             memory: 6Gi
 
       - name: vectorcrawl
-        image: "beclab/vectorcrawl:v0.1.20"
+        image: "beclab/vectorcrawl:v0.1.21"
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -313,12 +315,19 @@ spec:
           items:
           - key: envoy.yaml
             path: envoy.yaml
-      - name: blacklist-config
+      - name: domain-config
         configMap:
-          name: blacklist-config
+          name: domain-config
           items:
-            - key: blacklist.conf
-              path: blacklist.conf
+            - key: domain.conf
+              path: domain.conf
+      - name: ytdlp-supportedsites
+        configMap:
+          name: ytdlp-supportedsites
+          items:
+            - key: ytdlpsupported.conf
+              path: ytdlpsupported.conf
+      
 
 ---
 apiVersion: v1
