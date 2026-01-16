@@ -1,0 +1,128 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doclingservev2
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    app: doclingservev2
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: doclingservev2
+  template:
+    metadata:
+      labels:
+        app: doclingservev2
+    spec:
+      initContainers:
+      - name: init-chmod-cache
+        image: docker.io/beclab/aboveos-busybox:1.37.0
+        command:
+          - sh
+          - -c
+          - |
+            mkdir -p /opt/app-root/src/.cache/docling
+            chmod -R 777 /opt/app-root/src/.cache/docling || true
+        volumeMounts:
+          - name: docling-cache
+            mountPath: /opt/app-root/src/.cache/docling
+        securityContext:
+          runAsUser: 0
+
+      containers:
+      - name: docling-serve
+        image: beclab/docling-project-docling-serve-cu128:v1.10.0
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 5001
+        env:
+          - name: DOCLING_SERVE_ENABLE_UI
+            value: "true"
+        volumeMounts:
+          - name: docling-cache
+            mountPath: /opt/app-root/src/.cache/docling
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      restartPolicy: Always
+
+      volumes:
+        - name: docling-cache
+          hostPath:
+            path: '{{ .Values.userspace.appData }}/docling'
+            type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: doclingservev2
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    app: doclingservev2
+spec:
+  selector:
+    app: doclingservev2
+  ports:
+    - name: http
+      port: 5001
+      targetPort: 5001
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: doclingservev2-ui
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    app: doclingservev2
+spec:
+  selector:
+    app: doclingservev2
+  ports:
+    - name: ui
+      port: 80
+      targetPort: 5001
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    app: doclingservev2
+spec:
+  selector:
+    app: doclingservev2
+  ports:
+    - name: sharedentrances-api
+      port: 80
+      targetPort: 5001
+  type: ClusterIP
+{{- end }}
