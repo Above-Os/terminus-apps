@@ -1,0 +1,94 @@
+﻿{{- $ntfyDomainENV := split  ","  .Values.domain.ntfy -}}
+{{- $ntfyDomain := index $ntfyDomainENV "_0" -}}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: ntfy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: ntfy
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: ntfy
+    spec:
+      containers:
+        - name: ntfy
+          image: docker.io/beclab/binwiederhier-ntfy:v2.15.0
+          args: [ "serve" ]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: ntfy-data
+              mountPath: "/var/cache/ntfy"
+            - name: ntfy-config
+              mountPath: "/etc/ntfy"
+              readOnly: true
+      restartPolicy: Always
+      volumes:
+        - name: ntfy-data
+          hostPath:
+            type: DirectoryOrCreate
+                {{- if .Values.sysVersion }}
+                  {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appCache }}'
+                  {{- else }}
+            path: '{{ .Values.userspace.appCache }}/ntfy'
+                  {{- end }}
+                {{- else }}
+            path: '{{ .Values.userspace.appCache }}/ntfy'
+                {{- end }}
+        - name: ntfy-config
+          configMap:
+            name: ntfy-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: ntfy
+spec:
+  ports:
+    - name: "80"
+      protocol: TCP
+      port: 80
+      targetPort: 80
+  selector:
+    io.kompose.service: ntfy
+status:
+  loadBalancer: {}
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ntfy-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: ntfy
+data:
+  server.yml: |
+    # Template: https://github.com/binwiederhier/ntfy/blob/main/server/server.yml
+    base-url: 'https://{{ $ntfyDomain }}'
+    cache-file: "/var/cache/ntfy/cache.db"
+    attachment-cache-dir: "/var/cache/ntfy/attachments"
