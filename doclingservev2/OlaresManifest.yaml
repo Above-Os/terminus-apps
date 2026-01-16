@@ -1,0 +1,115 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+metadata:
+  name: doclingservev2
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  description: Document processing API service with UI
+  appid: doclingservev2
+  title: Docling Serve
+  version: '1.0.0'
+  categories:
+  - Utilities_v112
+  - Productivity
+sharedEntrances:
+- name: doclingservev2
+  title: Docling Serve API
+  host: sharedentrances-api
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  port: 0
+  invisible: true
+  authLevel: internal
+entrances:
+- authLevel: internal
+  host: doclingservev2ingress
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  name: doclingservev2ingress
+  openMethod: window
+  port: 8080
+  title: Docling Serve
+spec:
+  versionName: '1.10.0'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    ## OVERVIEW ##
+    Docling Serve is an official HTTP API service for Docling, providing document processing and conversion capabilities. It supports multiple document formats including PDF, DOCX, PPTX, XLSX, HTML, images, and more, with advanced PDF understanding including page layout, reading order, table structure, code, formulas, and image classification.
+
+    Key Features:
+    - Multiple Document Formats: Parse PDF, DOCX, PPTX, XLSX, HTML, WAV, MP3, VTT, images (PNG, TIFF, JPEG, etc.)
+    - Advanced PDF Understanding: Page layout, reading order, table structure, code, formulas, image classification
+    - Unified Document Format: Expressive DoclingDocument representation
+    - Various Export Formats: Markdown, HTML, DocTags and lossless JSON
+    - Local Execution: Capabilities for sensitive data and air-gapped environments
+    - UI Interface: Easy-to-use web UI for document conversion
+    - GPU Acceleration: CUDA 12.8 support (compatible with RTX 50 series)
+
+  upgradeDescription: |
+    Initial release
+    - Docling Serve API service deployment
+    - CUDA 12.8 GPU support
+    - UI interface support
+        
+  developer: IBM Research
+  website: https://docling-project.github.io/docling/
+  sourceCode: https://github.com/docling-project/docling-serve
+  submitter: Olares
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://docling-project.github.io/docling-serve/
+  license:
+  - text: MIT
+    url: https://github.com/docling-project/docling-serve/blob/main/LICENSE
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 6
+  requiredCpu: 50m
+  requiredDisk: 50Mi
+  limitedDisk: 500Gi
+  limitedMemory: 16Gi
+  requiredMemory: 2Gi
+  requiredGpu: 4Gi
+  limitedGpu: 24Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 256Mi
+  requiredDisk: 1Mi
+  limitedDisk: 100Mi
+  requiredCpu: 10m
+  limitedCpu: 100m
+  {{- end }}
+  supportArch:
+  - amd64
+  subCharts:
+  - name: doclingservev2server
+    shared: true
+  - name: doclingservev2
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    version: '>=1.12.3-0'
+    type: system
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- else }}
+  - name: doclingservev2
+    type: application
+    version: '>=1.0.0'
+    mandatory: true
+{{- end }}    
+  appScope:
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+    - doclingservev2
+{{- else }}
+    clusterScoped: false
+{{- end }}
+
