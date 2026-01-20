@@ -1,0 +1,132 @@
+﻿{{- $freshrssDomainENV := split  ","  .Values.domain.freshrss -}}
+{{- $freshrssDomain := index $freshrssDomainENV "_0" -}}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: freshrss
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: freshrss
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: freshrss
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: freshrss
+    spec:
+      containers:
+        - name: freshrss
+          image: docker.io/beclab/freshrss-freshrss:1.28.0
+          env:
+             - name: TZ
+               value: UTC # Europe/Paris
+             - name: CRON_MIN
+               value: "2,32"
+             - name: FRESHRSS_ENV
+               value: production
+             - name: TRUSTED_PROXY
+               value: 172.16.0.1/12 192.168.0.1/16
+             - name: ADMIN_NAME
+               value: {{ .Values.olaresEnv.ADMIN_NAME }}
+             - name: ADMIN_EMAIL
+               value: {{ .Values.olaresEnv.ADMIN_EMAIL }}
+             - name: ADMIN_PASSWORD
+               value: {{ .Values.olaresEnv.ADMIN_PASSWORD }}
+             - name: ADMIN_API_PASSWORD
+               value: {{ .Values.olaresEnv.ADMIN_API_PASSWORD }}
+             - name: BASE_URL
+               value: 'https://{{ $freshrssDomain }}'
+             - name: SERVER_DNS
+               value: {{ $freshrssDomain }}
+             - name: DB_HOST
+               value: {{ .Values.postgres.host }}
+             - name: DB_BASE
+               value: {{ .Values.postgres.databases.freshrssdb }}
+             - name: DB_USER
+               value: {{ .Values.postgres.username }}
+             - name: DB_PASSWORD
+               value: {{ .Values.postgres.password }}
+             - name: FRESHRSS_INSTALL
+               value: |-
+                 --api-enabled
+                 --base-url=https://{{ $freshrssDomain }}
+                 --db-base={{ .Values.postgres.databases.freshrssdb }}
+                 --db-host={{ .Values.postgres.host }}
+                 --db-password={{ .Values.postgres.password }}
+                 --db-type=pgsql
+                 --db-user={{ .Values.postgres.username }}
+                 --db-prefix={{ .Values.olaresEnv.DB_PREFIX }}
+                 --default-user={{ .Values.olaresEnv.ADMIN_NAME }}
+                 --language=en
+             - name: FRESHRSS_USER
+               value: |-
+                 --api-password={{ .Values.olaresEnv.ADMIN_API_PASSWORD }}
+                 --email={{ .Values.olaresEnv.ADMIN_EMAIL }}
+                 --language=en
+                 --password={{ .Values.olaresEnv.ADMIN_PASSWORD }}
+                 --user={{ .Values.olaresEnv.ADMIN_NAME }}
+          livenessProbe:
+            exec:
+              command:
+                - cli/health.php
+            failureThreshold: 3
+            initialDelaySeconds: 60
+            periodSeconds: 75
+            timeoutSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: freshrss-data
+              mountPath: /var/www/FreshRSS/data
+              subPath: data
+            - name: freshrss-data
+              mountPath: /var/www/FreshRSS/extensions
+              subPath: extensions
+      restartPolicy: Always
+      volumes:
+        - name: freshrss-data
+          hostPath:
+            type: DirectoryOrCreate
+                {{- if .Values.sysVersion }}
+                  {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appCache }}'
+                  {{- else }}
+            path: '{{ .Values.userspace.appCache }}/freshrss'
+                  {{- end }}
+                {{- else }}
+            path: '{{ .Values.userspace.appCache }}/freshrss'
+                {{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: freshrss
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: freshrss
+spec:
+  ports:
+    - name: "80"
+      protocol: TCP
+      port: 80
+      targetPort: 80
+  selector:
+    io.kompose.service: freshrss
+status:
+  loadBalancer: {}
