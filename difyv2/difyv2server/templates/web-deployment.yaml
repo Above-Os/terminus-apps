@@ -74,11 +74,33 @@ spec:
               value: "{{ $topDomain }}"
             - name: NEXT_PUBLIC_COOKIE_DOMAIN
               value: "1"
-          image: "docker.io/beclab/langgenius-dify-web:1.11.1"
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_PUBLIC_ENABLE_SENTRY
+              value: "false"
+          image: "docker.io/beclab/langgenius-dify-web:1.11.4"
           name: web
           ports:
             - containerPort: 3000
               name: http
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
           resources:
             requests:
               cpu: 200m
