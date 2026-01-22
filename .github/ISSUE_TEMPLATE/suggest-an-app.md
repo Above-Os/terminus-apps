@@ -19,3 +19,9 @@ assignees: ''
 
 **Additional context**:
 [Add any other context about the app here.]
+
+## Community Voting & Contribution
+**Voting Matters**:​
+If you want this update, vote with 👍 (thumbs up) on the issue. We prioritize requests with higher community interest.
+**You Can Help!​**
+If you are willing and able to work on porting this app, please leave a comment stating so. You can request to be assigned to this issue.
