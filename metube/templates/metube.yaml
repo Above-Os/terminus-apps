@@ -1,0 +1,103 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metube
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: metube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: metube
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: metube
+    spec:
+      containers:
+        - name: metube
+          image: docker.io/beclab/alexta69-metube:2026.01.11
+          envFrom:
+            - configMapRef:
+                name: metube-env
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.port | default 3000 }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.port | default 3000 }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          ports:
+            - containerPort: 8081
+          volumeMounts:
+            - name: metube-data
+              subPath: downloads
+              mountPath: /downloads
+            - name: metube-data
+              subPath: cookies
+              mountPath: /cookies
+            - name: metube-config
+              mountPath: /cookies/cookies.txt
+              subPath: cookies.txt
+
+      restartPolicy: Always
+      volumes:
+        - name: metube-data
+          hostPath:
+            type: DirectoryOrCreate
+                  {{- if .Values.sysVersion }}
+                    {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appCache }}'
+                    {{- else }}
+            path: '{{ .Values.userspace.appCache }}/metube'
+                    {{- end }}
+                  {{- else }}
+            path: '{{ .Values.userspace.appCache }}/metube'
+                  {{- end }}
+        - name: metube-config
+          configMap:
+            name: metube-config
+            items:
+              - key: cookies.txt
+                path: cookies.txt
+            defaultMode: 420
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metube
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: metube
+spec:
+  ports:
+    - name: "{{ .Values.port | default 3000 }}"
+      port: {{ .Values.port | default 3000 }}
+      targetPort: {{ .Values.port | default 3000 }}
+      protocol: TCP
+  selector:
+    io.kompose.service: metube
+status:
+  loadBalancer: {}
