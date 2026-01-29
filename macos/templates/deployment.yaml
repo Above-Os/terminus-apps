@@ -1,0 +1,78 @@
+﻿apiVersion: v1
+kind: Service
+metadata:
+  name: macos-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  internalTrafficPolicy: Cluster
+  ports:
+    - name: http
+      port: 8006
+      protocol: TCP
+      targetPort: 8006
+    - name: vnc
+      port: 5900
+      protocol: TCP
+      targetPort: 5900
+  selector:
+    app: macos
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: macos
+  namespace: {{ .Release.Namespace}}
+  labels:
+    name: macos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: macos
+  template:
+    metadata:
+      labels:
+        app: macos
+    spec:
+      containers:
+        - name: macos
+          image: dockurr/macos:2.29
+          env:
+            - name: VERSION
+              value: "14"
+            - name: DISK_SIZE
+              value: "128G"
+          ports:
+            - containerPort: 8006
+              name: http
+              protocol: TCP
+            - containerPort: 5900
+              name: vnc
+              protocol: TCP
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+            privileged: true
+          volumeMounts:
+            - mountPath: /storage
+              name: storage
+            - mountPath: /dev/kvm
+              name: dev-kvm
+            - mountPath: /dev/net/tun
+              name: dev-tun
+      terminationGracePeriodSeconds: 120
+      volumes:
+        - hostPath:
+            path: '{{ .Values.userspace.appCache }}'
+            type: DirectoryOrCreate
+          name: storage
+        - hostPath:
+            path: /dev/kvm
+          name: dev-kvm
+        - hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+          name: dev-tun
