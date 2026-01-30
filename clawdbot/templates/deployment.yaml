@@ -1,3 +1,8 @@
+# openclaw.json lifecycle:
+# 1) First deploy: init-config creates openclaw.json from default (ConfigMap) on app-data-config volume.
+# 2) Runtime: app reads/writes openclaw.json on the same volume; changes persist across restarts.
+# 3) Helm upgrade: init-config runs but only copies default when file is missing; never overwrites.
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,12 +30,24 @@ spec:
             - sh
             - "-c"
             - |
-              mkdir -p /home/node/.openclaw
-              mkdir -p /home/node/openclaw
+              if [ ! -d /home/node/.openclaw ]; then
+                mkdir -p /home/node/.openclaw
+                echo "Created directory: /home/node/.openclaw"
+              else
+                echo "Directory already exists: /home/node/.openclaw"
+              fi
+              if [ ! -d /home/node/openclaw ]; then
+                mkdir -p /home/node/openclaw
+                echo "Created directory: /home/node/openclaw"
+              else
+                echo "Directory already exists: /home/node/openclaw"
+              fi
+              
               chown -R 1000:1000 /home/node/.openclaw || true
               chown -R 1000:1000 /home/node/openclaw || true
               chmod -R 755 /home/node/.openclaw || true
               chmod -R 755 /home/node/openclaw || true
+              echo "Directory permissions set successfully"
           resources: {}
           volumeMounts:
             - mountPath: /home/node/.openclaw
@@ -47,12 +64,19 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              echo '{"gateway":{"mode":"local","auth":{"mode":"token","token":"clawdbot"},"trustedProxies":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],"controlUi":{"allowInsecureAuth":true}}}' > /home/node/.openclaw/openclaw.json
-              chown -R 1000:1000 /home/node/.openclaw || true
-              echo "Created/updated config with trustedProxies and allowInsecureAuth"
+              if [ ! -f /home/node/.openclaw/openclaw.json ]; then
+                cp /default-openclaw/openclaw.json /home/node/.openclaw/openclaw.json
+                chown -R 1000:1000 /home/node/.openclaw || true
+                echo "Created openclaw.json from default config"
+              else
+                echo "openclaw.json already exists, skipping (upgrade-safe)"
+              fi
           volumeMounts:
             - mountPath: /home/node/.openclaw
               name: app-data-config
+            - mountPath: /default-openclaw
+              name: default-openclaw
+              readOnly: true
       containers:
         - env:
             - name: HOME
@@ -100,7 +124,12 @@ spec:
             path: "{{ .Values.userspace.appData }}/workspace"
             type: DirectoryOrCreate
           name: app-data-workspace
-status: {}
+        - name: default-openclaw
+          configMap:
+            name: clawdbot-default-openclaw
+            items:
+              - key: openclaw.json
+                path: openclaw.json
 
 ---
 apiVersion: v1
