@@ -1,4 +1,5 @@
-﻿{{- $ollamaclientDomainENV := split "," .Values.domain.ollamaclient -}}
+﻿{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- $ollamaclientDomainENV := split "," .Values.domain.ollamaclient -}}
 {{- $ollamaclientDomain := index $ollamaclientDomainENV "_0" -}}
 ---
 apiVersion: apps/v1
@@ -28,6 +29,8 @@ spec:
       containers:
         - name: ollama
           image: "docker.io/beclab/ollama-ollama:0.15.2"
+{{- with .Values.olaresEnv }}
+{{- if and .KEEP_ALIVE (eq (lower (toString .KEEP_ALIVE)) "true") }}
           command:
             - sh
             - '-c'
@@ -45,9 +48,18 @@ spec:
               ELAPSED=$((END_TIME - START_TIME))
               echo "Model preloading completed in ${ELAPSED} seconds"
               wait $SERVER_PID
+{{- end }}
+{{- end }}
           envFrom:
             - configMapRef:
                 name: ollama-env
+          env:
+{{- with .Values.olaresEnv }}
+{{- if and .KEEP_ALIVE (eq (lower (toString .KEEP_ALIVE)) "true") }}
+            - name: OLLAMA_KEEP_ALIVE
+              value: "-1"
+{{- end }}
+{{- end }}
           ports:
             - containerPort: 11434
           livenessProbe:
@@ -152,3 +164,4 @@ spec:
     io.kompose.service: ollama
 status:
   loadBalancer: {}
+{{- end }}
