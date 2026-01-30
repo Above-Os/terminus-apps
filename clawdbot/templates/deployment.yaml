@@ -25,12 +25,24 @@ spec:
             - sh
             - "-c"
             - |
-              mkdir -p /home/node/.openclaw
-              mkdir -p /home/node/openclaw
+              if [ ! -d /home/node/.openclaw ]; then
+                mkdir -p /home/node/.openclaw
+                echo "Created directory: /home/node/.openclaw"
+              else
+                echo "Directory already exists: /home/node/.openclaw"
+              fi
+              if [ ! -d /home/node/openclaw ]; then
+                mkdir -p /home/node/openclaw
+                echo "Created directory: /home/node/openclaw"
+              else
+                echo "Directory already exists: /home/node/openclaw"
+              fi
+              
               chown -R 1000:1000 /home/node/.openclaw || true
               chown -R 1000:1000 /home/node/openclaw || true
               chmod -R 755 /home/node/.openclaw || true
               chmod -R 755 /home/node/openclaw || true
+              echo "Directory permissions set successfully"
           resources: {}
           volumeMounts:
             - mountPath: /home/node/.openclaw
@@ -47,9 +59,13 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              echo '{"gateway":{"mode":"local","auth":{"mode":"token","token":"clawdbot"},"trustedProxies":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],"controlUi":{"allowInsecureAuth":true}}}' > /home/node/.openclaw/openclaw.json
-              chown -R 1000:1000 /home/node/.openclaw || true
-              echo "Created/updated config with trustedProxies and allowInsecureAuth"
+              if [ ! -f /home/node/.openclaw/openclaw.json ]; then
+                echo '{"gateway":{"mode":"local","auth":{"mode":"token","token":"clawdbot"},"trustedProxies":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],"controlUi":{"allowInsecureAuth":true}}}' > /home/node/.openclaw/openclaw.json
+                chown -R 1000:1000 /home/node/.openclaw || true
+                echo "Created new config file with trustedProxies and allowInsecureAuth"
+              else
+                echo "Config file already exists, skipping creation"
+              fi
           volumeMounts:
             - mountPath: /home/node/.openclaw
               name: app-data-config
