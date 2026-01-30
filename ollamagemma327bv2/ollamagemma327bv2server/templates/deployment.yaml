@@ -27,18 +27,27 @@ spec:
     spec:
       containers:
         - name: ollama
-          image: "docker.io/beclab/ollama-ollama:0.13.5"
-          env:
-            - name: PGID
-              value: "1000"
-            - name: PUID
-              value: "1000"
-            - name: TZ
-              value: Etc/UTC
-            - name: GGML_CUDA_DISABLE_GRAPHS
-              value: "1"
-            - name: OLLAMA_ORIGINS
-              value: "*"
+          image: "docker.io/beclab/ollama-ollama:0.15.2"
+          command:
+            - sh
+            - '-c'
+            - |
+              echo "Starting Ollama server..."
+              ollama serve &
+              SERVER_PID=$!
+              until ollama list > /dev/null 2>&1; do
+                sleep 1
+              done
+              echo "Ollama server is ready. Preloading model..."
+              START_TIME=$(date +%s)
+              ollama run ${MODEL_NAME} "Hello"
+              END_TIME=$(date +%s)
+              ELAPSED=$((END_TIME - START_TIME))
+              echo "Model preloading completed in ${ELAPSED} seconds"
+              wait $SERVER_PID
+          envFrom:
+            - configMapRef:
+                name: ollama-env
           ports:
             - containerPort: 11434
           livenessProbe:
@@ -80,7 +89,10 @@ spec:
             - name: DISPLAY
               value: ":0"
             - name: OLLAMA_MODEL
-              value: "gemma3:27b"
+              valueFrom:
+                configMapKeyRef:
+                  name: ollama-env
+                  key: MODEL_NAME
             - name: OLLAMA_URL
               value: "http://localhost:11434"
             - name: APP_URL
