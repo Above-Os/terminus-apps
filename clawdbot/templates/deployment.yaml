@@ -22,6 +22,7 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: clawdbot
+        bytetrade.io/terminal: clawdbot
     spec:
       initContainers:
         - name: init-chmod-data
@@ -43,8 +44,8 @@ spec:
                 echo "Directory already exists: /home/node/openclaw"
               fi
               
-              chown -R 1000:1000 /home/node/.openclaw || true
-              chown -R 1000:1000 /home/node/openclaw || true
+              chown -R 0:0 /home/node/.openclaw || true
+              chown -R 0:0 /home/node/openclaw || true
               chmod -R 755 /home/node/.openclaw || true
               chmod -R 755 /home/node/openclaw || true
               echo "Directory permissions set successfully"
@@ -66,7 +67,7 @@ spec:
             - |
               if [ ! -f /home/node/.openclaw/openclaw.json ]; then
                 cp /default-openclaw/openclaw.json /home/node/.openclaw/openclaw.json
-                chown -R 1000:1000 /home/node/.openclaw || true
+                chown -R 0:0 /home/node/.openclaw || true
                 echo "Created openclaw.json from default config"
               else
                 echo "openclaw.json already exists, skipping (upgrade-safe)"
@@ -77,6 +78,8 @@ spec:
             - mountPath: /default-openclaw
               name: default-openclaw
               readOnly: true
+          securityContext:
+            runAsUser: 0
       containers:
         - env:
             - name: HOME
@@ -85,10 +88,15 @@ spec:
               value: xterm-256color
             - name: TZ
               value: Asia/Shanghai
+            - name: PATH
+              value: "/app/packages/clawdbot/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             - name: CLAWDBOT_GATEWAY_TOKEN
               value: clawdbot
           image: "beclab/openclaw-openclaw:2026.1.29"
           name: clawdbot
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
           command:
             [
               "node",
@@ -104,11 +112,11 @@ spec:
             - containerPort: 18789
           resources:
             limits:
-              cpu: "2"
-              memory: 2Gi
+              cpu: "4"
+              memory: 8Gi
             requests:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 1
+              memory: 1Gi
           volumeMounts:
             - mountPath: /home/node/.openclaw
               name: app-data-config
