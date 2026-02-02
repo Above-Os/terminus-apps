@@ -19,7 +19,14 @@ spec:
         io.kompose.service: litellm
     spec:
       containers:
-      - name: litellm
+      - command:
+          - /usr/bin/python3.13
+          - /usr/bin/litellm
+          - --port
+          - "4000"
+          - --config
+          - /app/proxy_config.yaml
+        name: litellm
         image: "beclab/aby913-litellm:v1.81.4"
         ports:
           - containerPort: 4000
@@ -29,29 +36,42 @@ spec:
           - name: LITELLM_MASTER_KEY
             value: {{ .Values.olaresEnv.LITELLM_MASTER_KEY | quote }}
           {{- end }}
+          - name: UI_USERNAME
+            value: {{ .Values.olaresEnv.UI_USERNAME | quote }}
+          - name: UI_PASSWORD
+            value: {{ .Values.olaresEnv.UI_PASSWORD | quote }}
+          {{- if and (hasKey .Values.olaresEnv "LITELLM_DROP_PARAMS") (ne (toString .Values.olaresEnv.LITELLM_DROP_PARAMS) "") }}
+          - name: LITELLM_DROP_PARAMS
+            value: {{ .Values.olaresEnv.LITELLM_DROP_PARAMS | quote }}
+          {{- end }}
           - name: STORE_MODEL_IN_DB
             value: "true"
           - name: DATABASE_URL
             value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:5432/{{ .Values.postgres.databases.litellm }}"
+          {{- if and (eq (toString .Values.olaresEnv.USE_SYSTEM_SMTP_SETTINGS) "true") (eq (toString .Values.olaresEnv.SMTP_ENABLED) "true") }}
           - name: SMTP_HOST
             value: "{{ .Values.olaresEnv.SMTP_HOST }}"
           - name: SMTP_PORT
             value: "{{ .Values.olaresEnv.SMTP_PORT }}"
-          - name: SMTP_TLS
-            value: "{{ .Values.olaresEnv.SMTP_TLS }}"
-          - name: SMTP_SENDER_EMAIL
-            value: "{{ .Values.olaresEnv.SMTP_SENDER_EMAIL }}"
           - name: SMTP_USERNAME
             value: "{{ .Values.olaresEnv.SMTP_USERNAME }}"
           - name: SMTP_PASSWORD
             value: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
+          - name: SMTP_SENDER_EMAIL
+            value: "{{ .Values.olaresEnv.SMTP_SENDER_EMAIL }}"
+          - name: SMTP_TLS
+            value: "{{ .Values.olaresEnv.SMTP_TLS }}"
+          {{- end }}
         volumeMounts:
           - mountPath: /data
             name: data
+          - mountPath: /app/proxy_config.yaml
+            subPath: proxy_config.yaml
+            name: init-config
         resources:
           limits:
             cpu: "4"
-            memory: 8Gi
+            memory: 4Gi
           requests:
             cpu: 100m
             memory: 512Mi
@@ -81,6 +101,13 @@ spec:
           hostPath:
             type: DirectoryOrCreate
             path: "{{ .Values.userspace.appData }}/litellm"
+        - name: init-config
+          configMap:
+            name: litellm-config
+            defaultMode: 0755
+            items:
+              - key: proxy_config.yaml
+                path: proxy_config.yaml
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -97,6 +124,7 @@ spec:
     targetPort: 4000
   selector:
     io.kompose.service: litellm
+
 
 
 

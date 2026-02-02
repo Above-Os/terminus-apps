@@ -31,6 +31,8 @@ spec:
   selector:
     matchLabels:
       app: macos
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -38,12 +40,15 @@ spec:
     spec:
       containers:
         - name: macos
-          image: docker.io/beclab/dockurr-macos:2.29
+          image: beclab/dockurr-macos:2.29-ext
+          envFrom:
+            - configMapRef:
+                name: macos-config
           env:
             - name: VERSION
-              value: "14"
+              value: "$(CDN_HOST)/{{ .Values.olaresEnv.VERSION }}"
             - name: DISK_SIZE
-              value: "128G"
+              value: "{{ .Values.olaresEnv.DISK_SIZE }}"
           ports:
             - containerPort: 8006
               name: http
