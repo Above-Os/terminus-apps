@@ -13,8 +13,11 @@
 {{- end }}
 {{- /* Prefer existing windows-env; else migrate from legacy windows-config for CDN_HOST */}}
 {{- $cdnForNew := $cdnBase }}
-{{- if and (not $existing) $legacy (index $legacy.data "CDN_HOST") }}
-{{- $cdnForNew = index $legacy.data "CDN_HOST" }}
+{{- if and (not $existing) $legacy $legacy.data }}
+  {{- $legacyCdn := index $legacy.data "CDN_HOST" }}
+  {{- if $legacyCdn }}
+    {{- $cdnForNew = $legacyCdn }}
+  {{- end }}
 {{- end }}
 ---
 apiVersion: v1
