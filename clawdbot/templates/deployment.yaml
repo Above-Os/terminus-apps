@@ -86,6 +86,8 @@ spec:
               value: /home/node
             - name: TERM
               value: xterm-256color
+            - name: PATH
+              value: /opt/openclaw-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           image: "beclab/alpine-openclaw:2026.2.6"
           name: clawdbot
           securityContext:
@@ -117,7 +119,10 @@ spec:
             - mountPath: /home/node/openclaw
               name: app-data-workspace
             - mountPath: /home/node/
-              name: app-data-node              
+              name: app-data-node
+            - mountPath: /opt/openclaw-bin
+              name: openclaw-bin
+              readOnly: true              
       restartPolicy: Always
       volumes:
         - hostPath:
@@ -138,6 +143,10 @@ spec:
             items:
               - key: openclaw.json
                 path: openclaw.json
+        - name: openclaw-bin
+          configMap:
+            name: clawdbot-openclaw-bin
+            defaultMode: 0755
 
 ---
 apiVersion: v1
