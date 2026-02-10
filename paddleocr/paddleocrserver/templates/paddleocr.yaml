@@ -33,6 +33,11 @@ spec:
       containers:
         - name: paddleocr
           image: {{ $paddleocrImage }}
+          command:
+            - /usr/local/bin/paddlex
+            - --serve
+            - --pipeline
+            - /home/paddleocr/pipeline_config_fastdeploy.yaml
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "0"
@@ -40,15 +45,25 @@ spec:
               value: "compute,graphics,utility,video,display"
           ports:
             - containerPort: 8080
+          volumeMounts:
+            - name: pipeline-config
+              mountPath: /home/paddleocr/pipeline_config_fastdeploy.yaml
+              subPath: pipeline_config_fastdeploy.yaml
+              readOnly: true
           resources:
             requests:
               cpu: 100m
               memory: 2Gi
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 6000
             limits:
               cpu: "2000m"
               memory: 9Gi
-          volumeMounts:
-            - name: voice-data
-              mountPath: /code/data
-            - name: logfile
-              mountPath: /logfile
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 6000
+      volumes:
+        - name: pipeline-config
+          configMap:
+            name: pipeline-config
+            defaultMode: 0444
+      restartPolicy: Always

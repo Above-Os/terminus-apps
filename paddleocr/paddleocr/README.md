@@ -9,7 +9,7 @@ PaddleOCR 前端客户端 Helm Chart，用于在 Olares 系统中部署 PaddleOC
 ## 结构
 
 ```
-paddleocrclient/
+paddleocr/
 ├── Chart.yaml              # Chart 元数据
 ├── values.yaml             # 默认配置值
 ├── templates/
@@ -52,7 +52,7 @@ Nginx 配置通过 ConfigMap 挂载，主要功能：
 1. **主 Chart**: `paddleocr`
 2. **子 Charts**:
    - `paddleocrserver` (shared: true) - 后端服务
-   - `paddleocrclient` - 前端客户端（本 Chart）
+   - `paddleocr` - 前端客户端（本 Chart，必须与主 Chart 同名）
 
 ### 入口配置
 
@@ -62,7 +62,7 @@ Nginx 配置通过 ConfigMap 挂载，主要功能：
 entrances:
 - name: paddleocr-client
   port: 80
-  host: paddleocrclient-svc
+  host: paddleocr-svc
   title: PaddleOCR Frontend
   authLevel: private
   openMethod: window
@@ -87,15 +87,15 @@ entrances:
 
 1. **镜像类型**:
    - `heygemv2`: 使用 `bitnami-openresty` 作为纯代理
-   - `paddleocrclient`: 使用 `paddleocr-frontend` 镜像，包含前端静态文件
+   - `paddleocr`: 使用 `paddleocr-frontend` 镜像，包含前端静态文件
 
 2. **配置方式**:
    - `heygemv2`: 使用 openresty 的 server_blocks 配置
-   - `paddleocrclient`: 直接覆盖 nginx 的 default.conf
+   - `paddleocr`: 直接覆盖 nginx 的 default.conf
 
 3. **端口**:
    - `heygemv2`: 监听 8080 端口
-   - `paddleocrclient`: 监听 80 端口（前端标准端口）
+   - `paddleocr`: 监听 80 端口（前端标准端口）
 
 ## 注意事项
 
