@@ -1,0 +1,32 @@
+{{- $gpuInfo := include "GPU.getGPUInfo" . | fromJson -}}
+{{- $is50Series := $gpuInfo.is50Series -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paddleocr-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paddleocr
+spec:
+  selector:
+    io.kompose.service: paddleocr
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-paddleocr
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paddleocr
+spec:
+  selector:
+    io.kompose.service: paddleocr
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
