@@ -1,4 +1,4 @@
-﻿{{- $freshrssDomainENV := split  ","  .Values.domain.freshrss -}}
+{{- $freshrssDomainENV := split  ","  .Values.domain.freshrss -}}
 {{- $freshrssDomain := index $freshrssDomainENV "_0" -}}
 
 ---
@@ -21,6 +21,49 @@ spec:
       labels:
         io.kompose.service: freshrss
     spec:
+      # First install: do-install.php merges config.custom.php into config.php.
+      # After install: init-config applies config.custom.php only for missing/empty keys in config.php,
+      # so user-edited values in config.php are never overwritten on upgrade.
+      initContainers:
+        - name: init-config
+          image: docker.io/beclab/freshrss-freshrss:1.28.0
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /data/config.php ]; then
+                echo "config.php not found, do-install will create it with config.custom.php"
+                exit 0
+              fi
+              php -r '
+              $configPath = "/data/config.php";
+              $customPath = "/config/config.custom.php";
+              $config = include $configPath;
+              $custom = include $customPath;
+              if (!is_array($config) || !is_array($custom)) { echo "Invalid config\n"; exit(1); }
+              foreach ($custom as $k => $v) {
+                if (is_array($v) && isset($config[$k]) && is_array($config[$k])) {
+                  foreach ($v as $sk => $sv) {
+                    if (!array_key_exists($sk, $config[$k]) || $config[$k][$sk] === "" || $config[$k][$sk] === null) {
+                      $config[$k][$sk] = $sv;
+                    }
+                  }
+                } else {
+                  if (!array_key_exists($k, $config) || $config[$k] === "" || $config[$k] === null) {
+                    $config[$k] = $v;
+                  }
+                }
+              }
+              $out = "<?php\nreturn " . var_export($config, true) . ";\n";
+              if (file_put_contents($configPath, $out) === false) { echo "Write failed\n"; exit(1); }
+              echo "Applied config.custom.php (only filled missing/empty, user edits kept)\n";
+              '
+          volumeMounts:
+            - name: freshrss-data
+              mountPath: /data
+              subPath: data
+            - name: freshrss-config
+              mountPath: /config
       containers:
         - name: freshrss
           image: docker.io/beclab/freshrss-freshrss:1.28.0
