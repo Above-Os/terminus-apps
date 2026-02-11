@@ -1,6 +1,11 @@
 {{- $ntfyDomainENV := split  ","  .Values.domain.ntfy -}}
 {{- $ntfyDomain := index $ntfyDomainENV "_0" -}}
 
+{{- $smtpAddr := "" -}}
+{{- if or .Values.olaresEnv.SMTP_SERVER .Values.olaresEnv.SMTP_PORT -}}
+  {{- $smtpAddr = printf "%s:%s" .Values.olaresEnv.SMTP_SERVER .Values.olaresEnv.SMTP_PORT -}}
+{{- end -}}
+
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -182,7 +187,7 @@ data:
     # - smtp-sender-from is the e-mail address of the sender
     # - smtp-sender-user/smtp-sender-pass are the username and password of the SMTP user (leave blank for no auth)
     #
-    smtp-sender-addr: "{{ .Values.olaresEnv.SMTP_SERVER }}:{{ .Values.olaresEnv.SMTP_PORT }}"
+    smtp-sender-addr: "{{ $smtpAddr }}"
     smtp-sender-from: "{{ .Values.olaresEnv.SMTP_FROM_ADDRESS }}"
     smtp-sender-user: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
     smtp-sender-pass: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
