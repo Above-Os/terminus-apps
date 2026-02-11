@@ -1,5 +1,31 @@
-﻿{{- $fireflyiiiDomainENV := split  ","  .Values.domain.fireflyiii -}}
+{{- $fireflyiiiDomainENV := split  ","  .Values.domain.fireflyiii -}}
 {{- $fireflyiiiDomain := index $fireflyiiiDomainENV "_0" -}}
+
+{{- $smtpServer := .Values.olaresEnv.MAIL_HOST | default "" }}
+{{- $defaultSmtpPort := "" }}
+{{- if (ne $smtpServer "") }}
+  {{- $defaultSmtpPort = "25" }}
+{{- end }}
+{{- $mailPort := .Values.olaresEnv.MAIL_PORT | default $defaultSmtpPort }}
+{{- $smtpSecure := "null" }}
+
+{{- $smtpUseSSL := .Values.olaresEnv.SMTP_SSL | default "" }}
+{{- $smtpUseTLS := .Values.olaresEnv.SMTP_TLS | default "" }}
+{{- $smtpSecurityProtocols := .Values.olaresEnv.SMTP_SECURITY_PROTOCOLS | default "" }}
+{{- $smtpSecurityLower := lower (toString $smtpSecurityProtocols) }}
+{{- if eq $smtpSecurityLower "tls" }}
+  {{- $smtpSecure = "tls" }}
+{{- else if eq $smtpSecurityLower "ssl" }}
+  {{- $smtpSecure = "ssl" }}
+{{- else if eq $smtpSecurityLower "none" }}
+  {{- $smtpSecure = "null" }}
+{{- else }}
+  {{- if or (eq (lower $smtpUseSSL) "true") (eq $smtpUseSSL "1") }}
+    {{- $smtpSecure = "ssl" }}
+  {{- else if or (eq (lower $smtpUseTLS) "true") (eq $smtpUseTLS "1") }}
+    {{- $smtpSecure = "tls" }}
+  {{- end }}
+{{- end }}
 
 ---
 apiVersion: apps/v1
@@ -29,6 +55,21 @@ spec:
                 name: fireflyiii-env
             - secretRef:
                 name: fireflyiii-secrets
+          env:
+            {{- if and (eq (toString .Values.olaresEnv.USE_SYSTEM_SMTP_SETTINGS) "true") (eq (toString .Values.olaresEnv.SMTP_ENABLED) "true") }}
+            - name: MAIL_HOST
+              value: "{{ .Values.olaresEnv.MAIL_HOST }}"
+            - name: MAIL_PORT
+              value: "{{ .Values.olaresEnv.MAIL_PORT }}"
+            - name: MAIL_USERNAME
+              value: "{{ .Values.olaresEnv.MAIL_USERNAME }}"
+            - name: MAIL_PASSWORD
+              value: "{{ .Values.olaresEnv.MAIL_PASSWORD }}"
+            - name: MAIL_FROM
+              value: "{{ .Values.olaresEnv.MAIL_FROM }}"
+            - name: MAIL_ENCRYPTION
+              value: "{{ $smtpSecure }}"
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /
