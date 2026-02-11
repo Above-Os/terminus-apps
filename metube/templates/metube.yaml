@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: metube
@@ -17,6 +17,28 @@ spec:
       labels:
         io.kompose.service: metube
     spec:
+      initContainers:
+        - name: init-cookies-and-dirs
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              # Create Netscape-format cookies.txt in appData only if not present (persists across nodes)
+              if [ ! -f /app-data/cookies.txt ]; then
+                cp /default-cookies/cookies.txt /app-data/cookies.txt
+              fi
+              chown -R 1000:1000 /app-data /downloads
+          volumeMounts:
+            - name: metube-appdata
+              mountPath: /app-data
+              subPath: metube
+            - name: metube-cache
+              mountPath: /downloads
+              subPath: metube
+            - name: metube-config
+              mountPath: /default-cookies
+              readOnly: true
       containers:
         - name: metube
           image: docker.io/beclab/alexta69-metube:2026.01.11
@@ -51,30 +73,29 @@ spec:
           ports:
             - containerPort: 8081
           volumeMounts:
-            - name: metube-data
-              subPath: downloads
+            - name: metube-appdata
+              mountPath: /app-data
+              subPath: metube
+            - name: metube-cache
               mountPath: /downloads
-            - name: metube-data
-              subPath: cookies
-              mountPath: /cookies
-            - name: metube-config
-              mountPath: /cookies/cookies.txt
-              subPath: cookies.txt
+              subPath: metube
+            - name: home
+              mountPath: /home
 
       restartPolicy: Always
       volumes:
-        - name: metube-data
+        - name: metube-appdata
           hostPath:
             type: DirectoryOrCreate
-                  {{- if .Values.sysVersion }}
-                    {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}'
+        - name: metube-cache
+          hostPath:
+            type: DirectoryOrCreate
             path: '{{ .Values.userspace.appCache }}'
-                    {{- else }}
-            path: '{{ .Values.userspace.appCache }}/metube'
-                    {{- end }}
-                  {{- else }}
-            path: '{{ .Values.userspace.appCache }}/metube'
-                  {{- end }}
+        - name: home
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.userData }}'
         - name: metube-config
           configMap:
             name: metube-config
