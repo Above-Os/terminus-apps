@@ -6,6 +6,35 @@
   {{- $smtpAddr = printf "%s:%s" .Values.olaresEnv.SMTP_SERVER .Values.olaresEnv.SMTP_PORT -}}
 {{- end -}}
 
+{{- $smtpFrom := .Values.olaresEnv.SMTP_FROM_ADDRESS | default "" }}
+{{- $smtpUser := .Values.olaresEnv.SMTP_LOGIN | default "" }}
+{{- $smtpPass := .Values.olaresEnv.SMTP_PASSWORD | default "" }}
+
+{{- $smtpServer := .Values.olaresEnv.SMTP_SERVER | default "" }}
+{{- $defaultSmtpPort := "" }}
+{{- if (ne $smtpServer "") }}
+  {{- $defaultSmtpPort = "25" }}
+{{- end }}
+{{- $smtpPort := .Values.olaresEnv.SMTP_PORT | default $defaultSmtpPort }}
+{{- $smtpSecure := "null" }}
+
+{{- $smtpUseSSL := .Values.olaresEnv.SMTP_SSL | default "" }}
+{{- $smtpUseTLS := .Values.olaresEnv.SMTP_TLS | default "" }}
+{{- if or (eq (lower $smtpUseSSL) "true") (eq $smtpUseSSL "1") (eq $smtpPort "465") }}
+  {{- $smtpSecure = "ssl" }}
+  {{- $smtpPort = "465" }}
+{{- else if or (eq (lower $smtpUseTLS) "true") (eq $smtpUseTLS "1") (eq $smtpPort "587") }}
+  {{- $smtpSecure = "tls" }}
+  {{- $smtpPort = "587" }}
+{{- end }}
+
+{{- if ne $smtpSecure "tls" }}
+  {{- $smtpAddr = "" }}
+  {{- $smtpFrom = "" }}
+  {{- $smtpUser = "" }}
+  {{- $smtpPass = "" }}
+{{- end }}
+
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -188,9 +217,9 @@ data:
     # - smtp-sender-user/smtp-sender-pass are the username and password of the SMTP user (leave blank for no auth)
     #
     smtp-sender-addr: "{{ $smtpAddr }}"
-    smtp-sender-from: "{{ .Values.olaresEnv.SMTP_FROM_ADDRESS }}"
-    smtp-sender-user: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
-    smtp-sender-pass: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
+    smtp-sender-from: "{{ $smtpFrom }}"
+    smtp-sender-user: "{{ $smtpUser }}"
+    smtp-sender-pass: "{{ $smtpPass }}"
 
     # If enabled, ntfy will launch a lightweight SMTP server for incoming messages. Once configured, users can send
     # emails to a topic e-mail address to publish messages to a topic.
