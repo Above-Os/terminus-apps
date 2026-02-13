@@ -7,7 +7,7 @@ metadata:
   description: PaddleOCR is an open-source OCR (Optical Character Recognition) toolkit based on PaddlePaddle
   icon: https://app.cdn.olares.com/appstore/heygemai/icon.png
   appid: paddleocr
-  version: '1.0.5'
+  version: '1.0.7'
   title: PaddleOCR
   categories:
   - Utilities_v112
@@ -77,6 +77,7 @@ spec:
   locale:
     - en-US
     - zh-CN
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   requiredMemory: 2Gi
   limitedMemory: 9Gi
   requiredDisk: 128Mi
@@ -85,13 +86,20 @@ spec:
   limitedCpu: 2
   requiredGpu: 8Gi
   limitedGpu: 24Gi
+{{- else }}
+  requiredMemory: 100Mi
+  limitedMemory: 1Gi
+  requiredDisk: 128Mi
+  limitedDisk: 256Mi
+  requiredCpu: 0.1
+  limitedCpu: 1
+{{- end }}
   doc: https://github.com/PaddlePaddle/PaddleOCR
   license:
   - text: Apache-2.0
     url: https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE
   supportArch:
     - amd64
-  onlyAdmin: true
   subCharts:
   - name: paddleocrserver
     shared: true
@@ -103,8 +111,22 @@ options:
     - name: olares
       type: system
       version: '>=1.12.3-0'
+{{- if not (and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username)) }}
+    - name: paddleocr
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+{{- end }}
   appScope:
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
     clusterScoped: true
+    appRef:
+    - paddleocr
+{{- else }}
+    clusterScoped: false
+    appRef:
+    - paddleocr
+{{- end }}
 envs:
   - envName: PU
     type: string
