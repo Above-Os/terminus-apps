@@ -28,29 +28,43 @@ spec:
 
     7. 后端即服务：Dify 的所有产品都配有相应的 API，因此您可以毫不费力地将 Dify 集成到您自己的业务逻辑中。
   upgradeDescription: |
-    升级至 Dify v1.11.1
+    升级至 Dify v1.13.0 - 人机协作和工作流执行升级
 
-    重要提示：本版本包含非常重要的安全更新，我们强烈建议所有用户尽快升级到此版本。
+    ## 新功能
 
-    本次版本重点加强了安全性、提升了性能，并修复了多个问题。
+    ### 人机协作（Human-in-the-Loop, HITL）
 
-    修复和改进
+    我们引入了 **人工输入** 节点，这是一个重大更新，改变了 AI 和人类在 Dify 工作流中的协作方式。
 
-    - React 和 Next.js 安全升级：将 react 和 react-dom 升级至 19.2.3，修复 CVE 漏洞（@douxc 贡献于 #29532、#29545）
-    - 凭证管理：修复了 available_credentials 为空的问题（@fatelei 贡献于 #29521）
-    - 描述长度限制：自动生成的描述现在会被截断，以避免 400 字符限制错误（@shua-chen 贡献于 #28681）
-    - 内容类型字符集：响应内容类型现在包含字符集，确保数据格式一致性（@Pleasurecruise 贡献于 #29534）
-    - Flask-Restx 属性错误：修复了 flask-restx 中 validate=True 导致的 AttributeError（@Mairuis 贡献于 #29552）
-    - 文档处理：优化了 save_document_with_dataset_id 函数，并修复了 DOCX 文件中外部图片导致提取失败的问题（@fatelei 贡献于 #29550，@JohnJyong 贡献于 #29558）
-    - Token 检索：修复了 access_token 为空时的错误，现在会优雅地返回 None（@kashira2339 贡献于 #29516）
-    - Hit-Test 失败：修复了当附件 ID 不存在时的 hit-test 失败问题（@JohnJyong 贡献于 #29563）
+    **核心能力：**
 
-    新功能
+    - **原生工作流暂停：** 在关键决策点插入"人工输入"节点以暂停工作流执行。
+    - **审查和编辑：** 节点生成一个 UI，人类可以在流程继续之前审查 AI 输出并修改变量（例如，编辑草稿或更正数据）。
+    - **基于操作的路由：** 配置自定义按钮（如"批准"、"拒绝"或"升级"），这些按钮决定工作流的后续路径。
+    - **灵活的交付方式：** 人工输入表单可以通过 **Webapp** 或 **Email** 交付。在云环境中，Email 交付的可用性可能取决于计划/功能设置。
 
-    - Amplitude 集成：将 Amplitude API 密钥集成到布局和提供者组件中，以增强分析功能（@CodingOnStar 贡献于 #29546）
+    ## 架构更新
 
-      性能增强
+    为了支持 HITL 所需的有状态暂停/恢复机制并提供事件订阅 API，我们重构了执行引擎：**基于工作流的流式执行和高级聊天执行现在在 Celery workers 中运行**，而非流式 **WORKFLOW** 运行仍在 API 进程中执行。所有暂停/恢复路径（例如 HITL）都通过 Celery 恢复，事件通过 Redis Pub/Sub 流式传输回来。
 
-    - Excel 提取器：优化了 Excel 提取器的性能和内存使用（@NieRonghua 贡献于 #29551）
+    **对于大型部署和自托管用户：**
+
+    我们引入了一个名为 `workflow_based_app_execution` 的新 Celery 队列。虽然标准设置可以开箱即用，但高吞吐量环境应考虑以下优化：
+
+    1. **扩展 Workers：** 根据您的特定工作负载调整使用 `workflow_based_app_execution` 队列的 workers 数量。
+    2. **专用 Redis（可选）：** 对于大规模部署，我们建议配置新的 `PUBSUB_REDIS_URL` 环境变量，指向专用的 Redis 实例。强烈建议使用 **Redis 集群模式与分片 PubSub** 以确保水平可扩展性。
+
+    ## 重要升级说明
+
+    **需要新的 Celery 队列：`workflow_based_app_execution`**
+
+    请确保您的部署配置包含监听新的 **`workflow_based_app_execution`** 队列的 workers。此队列是工作流流式执行和所有恢复流程（例如 HITL）所必需的；否则，流式执行和恢复任务将无法处理。
+
+    ## 其他更新
+
+    - 增强的工作流运行历史管理和 UI 更新
+    - API 端点和数据库操作的性能优化
+    - 平台范围内的多个错误修复和改进
+    - 支持 nl-NL 语言
     
-    完整发布说明请见：https://github.com/langgenius/dify/releases/tag/1.11.1
+    完整发布说明请见：https://github.com/langgenius/dify/releases/tag/1.13.0

@@ -85,11 +85,15 @@ spec:
               value: all
             - name: NVIDIA_VISIBLE_DEVICES
               value: all
+        {{- if .Values.deviceName }}
+            - name: DEVICE_NAME
+              value: {{ .Values.deviceName }}
+        {{- end }}  
             - name: NODE_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP
-          image: docker.io/beclab/steam-headless:v0.1.11
+          image: docker.io/beclab/steam-headless:v0.1.14
           livenessProbe:
             httpGet:
               path: /
@@ -150,6 +154,14 @@ spec:
               cpu: 8
               memory: 64Gi
           name: steam-headless
+          lifecycle:
+            postStart:
+              exec:  
+                command: 
+                - sh
+                - -c
+                - |
+                  cat /dev/null > /usr/libexec/upowerd
           securityContext:
             privileged: true
             runAsUser: 0
@@ -168,6 +180,10 @@ spec:
               mountPath: /dev/input/
             - name: dshm
               mountPath: /dev/shm
+        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+            - name: snd
+              mountPath: /dev/snd
+        {{- end }}
       restartPolicy: Always
       volumes:
         - name: steam-headless-claim0
@@ -185,6 +201,12 @@ spec:
         - name: dshm
           emptyDir:
             medium: Memory
+    {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+        - name: snd
+          hostPath:
+            path: /dev/snd
+            type: ''
+    {{- end }}
       securityContext:
         runAsUser: 0
 

@@ -70,7 +70,7 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: mastodon
-          image: "docker.io/beclab/linuxserver-mastodon:4.5.3"
+          image: "docker.io/beclab/linuxserver-mastodon:4.5.4"
           imagePullPolicy: IfNotPresent
           resources:
             requests:
@@ -131,6 +131,84 @@ spec:
               value: {{ .Values.minio.username }}
             - name: MASTODON_AWS_SECRET_ACCESS_KEY
               value: {{ .Values.minio.password }}
+            {{- end }}
+            # SMTP configuration - extracted to env for special scenario needs
+            {{- if .Values.olaresEnv.SMTP_SERVER }}
+            - name: SMTP_SERVER
+              value: "{{ .Values.olaresEnv.SMTP_SERVER }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_PORT }}
+            - name: SMTP_PORT
+              value: "{{ .Values.olaresEnv.SMTP_PORT }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_LOGIN }}
+            - name: SMTP_LOGIN
+              value: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_PASSWORD }}
+            - name: SMTP_PASSWORD
+              value: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_FROM_ADDRESS }}
+            - name: SMTP_FROM_ADDRESS
+              value: "{{ .Values.olaresEnv.SMTP_FROM_ADDRESS }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_DOMAIN }}
+            - name: SMTP_DOMAIN
+              value: "{{ .Values.olaresEnv.SMTP_DOMAIN }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_DELIVERY_METHOD }}
+            - name: SMTP_DELIVERY_METHOD
+              value: "{{ .Values.olaresEnv.SMTP_DELIVERY_METHOD }}"
+            {{- else }}
+            - name: SMTP_DELIVERY_METHOD
+              value: "smtp"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_AUTH_METHOD }}
+            - name: SMTP_AUTH_METHOD
+              value: "{{ .Values.olaresEnv.SMTP_AUTH_METHOD }}"
+            {{- else }}
+            - name: SMTP_AUTH_METHOD
+              value: "plain"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_CA_FILE }}
+            - name: SMTP_CA_FILE
+              value: "{{ .Values.olaresEnv.SMTP_CA_FILE }}"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_OPENSSL_VERIFY_MODE }}
+            - name: SMTP_OPENSSL_VERIFY_MODE
+              value: "{{ .Values.olaresEnv.SMTP_OPENSSL_VERIFY_MODE }}"
+            {{- else }}
+            - name: SMTP_OPENSSL_VERIFY_MODE
+              value: "peer"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_SSL }}
+            - name: SMTP_SSL
+              value: "{{ .Values.olaresEnv.SMTP_SSL }}"
+            {{- else }}
+            - name: SMTP_SSL
+              value: "false"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_TLS }}
+            - name: SMTP_TLS
+              value: "{{ .Values.olaresEnv.SMTP_TLS }}"
+            {{- else }}
+            - name: SMTP_TLS
+              value: "false"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}
+            - name: SMTP_ENABLE_STARTTLS
+              value: "{{ .Values.olaresEnv.SMTP_ENABLE_STARTTLS }}"
+            {{- else }}
+            - name: SMTP_ENABLE_STARTTLS
+              value: "false"
+            {{- end }}
+            {{- if .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}
+            - name: SMTP_ENABLE_STARTTLS_AUTO
+              value: "{{ .Values.olaresEnv.SMTP_ENABLE_STARTTLS_AUTO }}"
+            {{- else }}
+            - name: SMTP_ENABLE_STARTTLS_AUTO
+              value: "false"
             {{- end }}
           envFrom:
             - configMapRef:
