@@ -1,24 +1,6 @@
 {{- $fireflyiiiDomainENV := split  ","  .Values.domain.fireflyiii -}}
 {{- $fireflyiiiDomain := index $fireflyiiiDomainENV "_0" -}}
 
-{{- $smtpServer := .Values.olaresEnv.SMTP_SERVER | default "" }}
-{{- $defaultSmtpPort := "" }}
-{{- if (ne $smtpServer "") }}
-  {{- $defaultSmtpPort = "25" }}
-{{- end }}
-{{- $smtpPort := .Values.olaresEnv.SMTP_PORT | default $defaultSmtpPort }}
-{{- $smtpSecure := "null" }}
-
-{{- $smtpUseSSL := .Values.olaresEnv.SMTP_SSL | default "" }}
-{{- $smtpUseTLS := .Values.olaresEnv.SMTP_TLS | default "" }}
-{{- if or (eq (lower $smtpUseSSL) "true") (eq $smtpUseSSL "1") (eq $smtpPort "465") }}
-  {{- $smtpSecure = "ssl" }}
-  {{- $smtpPort = "465" }}
-{{- else if or (eq (lower $smtpUseTLS) "true") (eq $smtpUseTLS "1") (eq $smtpPort "587") }}
-  {{- $smtpSecure = "tls" }}
-  {{- $smtpPort = "587" }}
-{{- end }}
-
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -66,13 +48,6 @@ data:
   COOKIE_DOMAIN: ""
   COOKIE_SECURE: "false"
   COOKIE_SAMESITE: "lax"
-  MAIL_MAILER: "smtp"
-  MAIL_HOST: "{{ $smtpServer }}"
-  MAIL_PORT: "{{ $smtpPort }}"
-  MAIL_FROM: "{{ .Values.olaresEnv.SMTP_FROM_ADDRESS }}"
-  MAIL_USERNAME: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
-  MAIL_PASSWORD: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
-  MAIL_ENCRYPTION: "{{ $smtpSecure }}"
   MAIL_SENDMAIL_COMMAND: ""
   MAIL_ALLOW_SELF_SIGNED: "false"
   MAIL_VERIFY_PEER: "true"
