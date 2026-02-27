@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: odigos-instrumentor
+    odigos.io/system-object: "true"
+  name: odigos-instrumentor
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: odigos-instrumentor
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: odigos-instrumentor
+    spec:
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range .Values.topologySpreadConstraints }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey | quote }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable | quote }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: odigos-instrumentor
+        {{- end }}
+      {{- end }}
+      {{- if .Values.instrumentor.nodeSelector }}
+      # Component-specific nodeSelector (overrides global values.yaml nodeSelector)
+      nodeSelector:
+      {{- toYaml .Values.instrumentor.nodeSelector | nindent 8 }}
+      {{- else if .Values.nodeSelector }}
+      # Global nodeSelector from values.yaml
+      nodeSelector:
+      {{- toYaml .Values.nodeSelector | nindent 8 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: odigos-instrumentor
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .Values.instrumentor.priorityClassName }}
+      priorityClassName: {{ .Values.instrumentor.priorityClassName }}
+      {{- end }}
+      containers:
+      - args:
+          - --health-probe-bind-address=:8081
+          - --metrics-bind-address=0.0.0.0:8080
+          - --leader-elect
+        command:
+          - /app
+        image: beclab/odigos-instrumentor:v1.16.7
+        ports:
+          - containerPort: 9443
+            name: webhook-server
+            protocol: TCP
+        env:
+          - name: OTEL_SERVICE_NAME
+            value: instrumentor
+          - name: CURRENT_NS
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: ODIGOS_TIER
+            valueFrom:
+              configMapKeyRef:
+                key: ODIGOS_TIER
+                name: odigos-deployment
+          - name: ODIGOS_VERSION
+            valueFrom:
+              configMapKeyRef:
+                key: ODIGOS_VERSION
+                name: odigos-deployment
+          {{- if include "odigos.secretExists" . }}
+          - name: ODIGOS_ONPREM_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: odigos-pro
+                key: odigos-onprem-token
+          {{- end }}
+          - name: ODIGOS_INIT_CONTAINER_IMAGE
+            value: registry.odigos.io/odigos-agents:v1.16.7
+          - name: GOMEMLIMIT
+            value: 400MiB
+        volumeMounts:
+          - name: instrumentor-webhooks-cert
+            mountPath: /tmp/k8s-webhook-server/serving-certs
+            readOnly: true
+        envFrom:
+          - configMapRef:
+              name: odigos-own-telemetry-otel-config
+              optional: true
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          periodSeconds: 10
+          timeoutSeconds: 5
+        name: manager
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+      serviceAccountName: odigos-instrumentor
+      volumes:
+        - name: instrumentor-webhooks-cert
+          secret:
+            secretName: instrumentor-webhooks-cert
+            defaultMode: 420
+      terminationGracePeriodSeconds: 10
+{{- with .Values.instrumentor }}
+  {{- if .tolerations }}
+      tolerations: {{ toYaml .tolerations | nindent 8 }}
+  {{- end }}
+  {{- if .affinity }}
+      affinity: {{ toYaml .affinity | nindent 8 }}
+  {{- end }}
+{{- end }}

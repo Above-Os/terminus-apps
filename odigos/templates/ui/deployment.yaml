@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: odigos-ui
+    odigos.io/system-object: "true"
+  name: odigos
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: odigos-ui
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: ui
+      labels:
+        app: odigos-ui
+    spec:
+      {{- if .Values.ui.nodeSelector }}
+      # Component-specific nodeSelector (overrides global values.yaml nodeSelector)
+      nodeSelector:
+      {{- toYaml .Values.ui.nodeSelector | nindent 8 }}
+      {{- else if .Values.nodeSelector }}
+      # Global nodeSelector from values.yaml
+      nodeSelector:
+      {{- toYaml .Values.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range .Values.topologySpreadConstraints }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey | quote }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable | quote }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: odigos-ui
+        {{- end }}
+      {{- end }}
+      {{- if .Values.ui.priorityClassName }}
+      priorityClassName: {{ .Values.ui.priorityClassName }}
+      {{- end }}
+      containers:
+      - name: ui
+        image: beclab/odigos-ui:v1.16.7
+        args:
+          - --namespace=$(CURRENT_NS)
+          - --address=0.0.0.0
+        env:
+          - name: CURRENT_NS
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          {{- if .Values.ui.centralBackendURL }}
+          - name: CENTRAL_BACKEND_WS_URL
+            valueFrom:
+              configMapKeyRef:
+                name: odigos-configuration
+                key: centralBackendURL
+          {{- end }}
+          - name: GOMEMLIMIT
+            value: 409MiB
+        ports:
+          - containerPort: 3000
+            name: ui
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 3000
+          periodSeconds: 10
+          timeoutSeconds: 5
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+          - name: ui-db-storage
+            mountPath: /data
+      serviceAccountName: odigos-ui
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: ui-db-storage
+          emptyDir:
+            sizeLimit: 50Mi
+{{- with .Values.ui }}
+  {{- if .tolerations }}
+      tolerations: {{ toYaml .tolerations | nindent 8 }}
+  {{- end }}
+  {{- if .affinity }}
+      affinity: {{ toYaml .affinity | nindent 8 }}
+  {{- end }}
+{{- end }}

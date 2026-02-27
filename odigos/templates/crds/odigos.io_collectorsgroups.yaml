@@ -1,0 +1,434 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    odigos.io/system-object: "true"
+  name: collectorsgroups.odigos.io
+spec:
+  group: odigos.io
+  names:
+    kind: CollectorsGroup
+    listKind: CollectorsGroupList
+    plural: collectorsgroups
+    singular: collectorsgroup
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CollectorsGroup is the Schema for the collectors API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CollectorsGroupSpec defines the desired state of Collector
+            properties:
+              clusterMetricsEnabled:
+                description: |-
+                  ClusterMetricsEnabled is a feature that allows you to enable the cluster metrics.
+                  It is disabled by default and can be enabled by setting the enabled flag to true.
+                type: boolean
+              collectorOwnMetricsPort:
+                description: |-
+                  The port to use for exposing the collector's own metrics as a prometheus endpoint.
+                  This can be used to resolve conflicting ports when a collector is using the host network.
+                format: int32
+                type: integer
+              enableDataCompression:
+                description: |-
+                  Deprecated - use OtlpExporterConfiguration instead.
+                  EnableDataCompression is a feature that allows you to enable data compression before sending data to the Gateway collector.
+                  It is disabled by default and can be enabled by setting the enabled flag to true.
+                type: boolean
+              httpsProxyAddress:
+                description: |-
+                  for destinations that uses https for exporting data, this value can be used to set the address for an https proxy.
+                  when unset or empty, no proxy will be used.
+                type: string
+              k8sNodeLogsDirectory:
+                description: |-
+                  Additional directory to mount in the node collector pod for logs.
+                  This is used to allow the collector to read logs from the host node if /var/log is  symlinked to another directory.
+                type: string
+              metrics:
+                description: |-
+                  configuration for metrics handling in this collectors group
+                  if metric collection is disabled, this will be nil
+                  the content is populated only if relevant to this collectors group
+                  it's being calculated based on active destinations and their settings,
+                  and global settings provided in the odigos configuration or instrumentation rules.
+                  it allows for the collector group reconciler to be simplified,
+                  and for visibility into the aggregated settings being used to derive configurations deployments and rollouts.
+                properties:
+                  agentsTelemetry:
+                    description: |-
+                      this part controls the metrics which are received from agents in the otlp receiver.
+                      it is generally enabled when we want to record metrics, and listed here for completeness.
+                      any "otlp receiver" specific settings can go here
+                    type: object
+                  hostMetrics:
+                    description: |-
+                      if not nil for node collector, it means host metrics is enabled,
+                      and the opentelemetry collector "hostmetrics" receiver should be included in the pipeline.
+                      host metrics are metrics that are collected from the host node,
+                      such as cpu, memory, disk, network, etc.
+                    properties:
+                      disabled:
+                        description: |-
+                          control beahvior for when to collect host metrics.
+                          - true - host metrics will never be collected, even if destinations require it.
+                          - false / nil - host metrics will be collected if destinations require it (can be opt-in and out in destination level).
+                        type: boolean
+                      interval:
+                        description: 'time interval for scraping metrics (format:
+                          15s, 1m etc). defaults: 10s.'
+                        type: string
+                    type: object
+                  kubeletStats:
+                    description: |-
+                      if not nil for node collector, it means kubelet stats is enabled,
+                      and the opentelemetry collector "kubeletstats" receiver should be included in the pipeline.
+                      kubelet stats are metrics that are collected from the kubelet point of view,
+                      such as cpu, memory, disk, network, per pod, node and more.
+                    properties:
+                      disabled:
+                        description: |-
+                          control beahvior for when to collect kubelet stats.
+                          - true - kubelet stats will never be collected, even if destinations require it.
+                          - false / nil - kubelet stats will be collected if destinations require it (can be opt-in and out in destination level).
+                        type: boolean
+                      interval:
+                        description: 'time interval for scraping metrics (format:
+                          15s, 1m etc). defaults: 10s.'
+                        type: string
+                    type: object
+                  odigosOwnMetrics:
+                    description: |-
+                      if not nil for node collector, it means that some metric destinations are
+                      intresseted in collecting metrics about: odigos, the collected data, and the pipeline itself.
+                      this allows for users to monitor and operate odigos within their existing system,
+                      create dashboards, alerting, and more.
+                    properties:
+                      interval:
+                        description: 'time interval for flusing metrics (format: 15s,
+                          1m etc). defaults: 10s'
+                        type: string
+                      sendToMetricsDestinations:
+                        description: |-
+                          if true, odigos will send all the metrics it collects about itself to the metrics pipeline,
+                          which will make them available to the metrics destinations.
+                          users can troubleshoot odigos itself by monitoring these metrics in their existing systems,
+                          and create their own dashboards, alerting, and more.
+                        type: boolean
+                      sendToOdigosMetricsStore:
+                        description: |-
+                          if true, odigos will send all the metrics it collects about itself to the odigos metrics store,
+                          which is available to odigos UI.
+                          it can help in presenting a consistent view of odigos itself, without relying on user system and integrations.
+                        type: boolean
+                    type: object
+                  serviceGraph:
+                    description: |-
+                      if not nil for cluster collector, it means service graph is enabled,
+                      and metrics for the "connectivity" between services should be calculated
+                      to be exported to metrics destinations.
+                    type: object
+                  spanMetrics:
+                    description: |-
+                      if not nil for node collector, it means span to metrics is enabled,
+                      and the node collector should set it up in the pipeline.
+                      span to metrics is the ability to calculate metrics like http requests/errors/duration etc
+                      from the individual spans recorded for relevant operation.
+                    properties:
+                      additionalDimensions:
+                        description: |-
+                          additional dimensions to add to the span metrics.
+                          these are span attributes that you want to convert to metrics attributes during collection.
+                          the values of the attributes must have low cardinality.
+                          it can increase the number of series in the destination.
+                          some dimensions are already added by default, regardless of this setting.
+                        items:
+                          type: string
+                        type: array
+                      disabled:
+                        description: |-
+                          control beahvior for when to collect span metrics.
+                          - true - span metrics will never be collected, even if destinations require it.
+                          - false / nil - span metrics will be collected if destinations require it (can be opt-in and out in destination level).
+                        type: boolean
+                      excludedResourceAttributes:
+                        description: |-
+                          exclude resource attributes from being added to span metrics.
+                          for example - if you don't care about the process granularity,
+                          and prefer the metrics to be aggregated for all processes in a pod container,
+                          you can list all "process.*" attributes here to exclude them from being added to span metrics.
+                          any other resource attribute can be set, either for sanitation or to reduce dimenssions for generate metrics.
+                        items:
+                          type: string
+                        type: array
+                      histogramBuckets:
+                        description: "explicit buckets list for the histogram metrics.\nformat
+                          is duration string (`1us`, `2ms`, `3s`, `4m`, `5h`, `6d`
+                          etc).\nif not set, the default buckets list will be used.\nthe
+                          buckets must be in ascending order.\nexample: [\"100us\",
+                          \"1ms\", \"2ms\", \"6ms\", \"10ms\", \"100ms\", \"250ms\"]\nDefault
+                          value when unset:\n\t\t[\"2ms\", \"4ms\", \"6ms\", \"8ms\",
+                          \"10ms\", \"50ms\", \"100ms\", \"200ms\", \"400ms\", \"800ms\",
+                          \"1s\", \"1400ms\", \"2s\", \"5s\", \"10s\", \"15s\"]\nnotice
+                          that more granular buckets are recommended for better precision
+                          but costs more since more metric series are produced."
+                        items:
+                          type: string
+                        type: array
+                      histogramDisabled:
+                        description: if true, histogram metrics will not be collected.
+                        type: boolean
+                      includedProcessInDimensions:
+                        description: |-
+                          By default, Odigos does not include process labels - meaning
+                          metrics will be aggregated by container as the lowest level.
+                          This means that multiple processes running in the same container
+                          will be aggregated into the same time series.
+                          For more granular metrics, set this option to true.
+                          This will include process-specific labels on metrics,
+                          which will cause more unique time series to be created.
+                        type: boolean
+                      interval:
+                        description: 'time interval for flusing metrics (format: 15s,
+                          1m etc). defaults: 60s (one minute).'
+                        type: string
+                      metricsExpiration:
+                        description: |-
+                          used to remove metrics after time that they are not reporting.
+                          if an app only generates metrics once in a while, this parameter can tune
+                          how much gap is allowed.
+                          format: duration string (15s, 1m, etc).
+                          default is 5m (five minutes).
+                        type: string
+                      resourceMetricsKeyAttributes:
+                        description: |-
+                          Advanced configuration - avoid using unless you know what you are doing.
+                          This list controls which resource attributes are included in the metric stream identity.
+                          These attributes are used to determines how span metrics are grouped.
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                type: object
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Node selector for the collectors group deployment.
+                  Use this to force the gateway to run only on nodes with specific labels.
+                  This is a hard requirement: the pod will be scheduled ONLY on nodes that match all labels.
+                  If no matching nodes exist, the pod will remain Pending.
+                type: object
+              otlpExporterConfiguration:
+                description: OtlpExporterConfiguration is the configuration for the
+                  OTLP exporter from node collector to cluster gateway collector.
+                properties:
+                  enableDataCompression:
+                    type: boolean
+                  retryOnFailure:
+                    properties:
+                      enabled:
+                        type: boolean
+                      initialInterval:
+                        type: string
+                      maxElapsedTime:
+                        type: string
+                      maxInterval:
+                        type: string
+                    type: object
+                  timeout:
+                    type: string
+                type: object
+              resourcesSettings:
+                description: |-
+                  Resources [memory/cpu] settings for the collectors group.
+                  these settings are used to protect the collectors instances from:
+                  - running out of memory and being killed by the k8s OOM killer
+                  - consuming all available memory on the node which can lead to node instability
+                  - pushing back pressure to the instrumented applications
+                properties:
+                  cpuLimitMillicores:
+                    description: |-
+                      CPU resource limit to be used on the pod template.
+                      it will be embedded in the as a resource limit of the form `cpu: <value>m`
+                    type: integer
+                  cpuRequestMillicores:
+                    description: |-
+                      CPU resource request to be used on the pod template.
+                      it will be embedded in the as a resource request of the form `cpu: <value>m`
+                    type: integer
+                  gomemlimitMiB:
+                    description: |-
+                      the GOMEMLIMIT environment variable value for the collector pod.
+                      this is when go runtime will start garbage collection.
+                      it is recommended to be set to 80% of the hard limit of the memory limiter.
+                    type: integer
+                  maxReplicas:
+                    type: integer
+                  memoryLimitMiB:
+                    description: |-
+                      This option sets the limit on the memory usage of the collector.
+                      since the memory limiter mechanism is heuristic, and operates on fixed intervals,
+                      while it cannot fully prevent OOMs, it can help in reducing the chances of OOMs in edge cases.
+                      the settings should prevent the collector from exceeding the memory request,
+                      so one can set this to the same value as the memory request or higher to allow for some buffer for bursts.
+                    type: integer
+                  memoryLimiterLimitMiB:
+                    description: |-
+                      this parameter sets the "limit_mib" parameter in the memory limiter configuration for the collector.
+                      it is the hard limit after which a force garbage collection will be performed.
+                      this value will end up comparing against the go runtime reported heap Alloc value.
+                      According to the memory limiter docs:
+                      > Note that typically the total memory usage of process will be about 50MiB higher than this value
+                      a test from nov 2024 showed that fresh odigos collector with no traffic takes 38MiB,
+                      thus the 50MiB is a good value to start with.
+                    type: integer
+                  memoryLimiterSpikeLimitMiB:
+                    description: |-
+                      this parameter sets the "spike_limit_mib" parameter in the memory limiter configuration for the collector memory limiter.
+                      note that this is not the processor soft limit itself, but the diff in Mib between the hard limit and the soft limit.
+                      according to the memory limiter docs, it is recommended to set this to 20% of the hard limit.
+                      changing this value allows trade-offs between memory usage and resiliency to bursts.
+                    type: integer
+                  memoryRequestMiB:
+                    description: |-
+                      MemoryRequestMiB is the memory resource request to be used on the pod template.
+                      it will be embedded in the as a resource request of the form `memory: <value>Mi`
+                    type: integer
+                  minReplicas:
+                    description: Minumum + Maximum number of replicas for the collector
+                      - these relevant only for gateway.
+                    type: integer
+                required:
+                - cpuLimitMillicores
+                - cpuRequestMillicores
+                - gomemlimitMiB
+                - memoryLimitMiB
+                - memoryLimiterLimitMiB
+                - memoryLimiterSpikeLimitMiB
+                - memoryRequestMiB
+                type: object
+              role:
+                enum:
+                - CLUSTER_GATEWAY
+                - NODE_COLLECTOR
+                type: string
+              serviceGraphDisabled:
+                description: |-
+                  ServiceGraphEnabled is a feature that allows you to visualize the service graph of your application.
+                  It is enabled by default and can be disabled by setting the enabled flag to false.
+                type: boolean
+            required:
+            - collectorOwnMetricsPort
+            - resourcesSettings
+            - role
+            type: object
+          status:
+            description: CollectorsGroupStatus defines the observed state of Collector
+            properties:
+              conditions:
+                description: |-
+                  Represents the observations of a collectorsroup's current state.
+                  Known .status.conditions.type are: "Available", "Progressing"
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              ready:
+                type: boolean
+              receiverSignals:
+                description: |-
+                  Receiver Signals are the signals (trace, metrics, logs) that the collector has setup
+                  an otlp receiver for, thus it can accept data from an upstream component.
+                  this is used to determine if a workload should export each signal or not.
+                  this list is calculated based on the odigos destinations that were configured
+                items:
+                  enum:
+                  - LOGS
+                  - TRACES
+                  - METRICS
+                  type: string
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
