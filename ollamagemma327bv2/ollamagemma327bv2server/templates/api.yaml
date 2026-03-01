@@ -42,10 +42,10 @@ spec:
                   name: ollama-env
                   key: MODEL_NAME
             - name: OLLAMA_URL
-              value: "http://ollama.ollamaqwen3527bq4kmv2server-shared:11434"
+              value: "http://ollama.ollamagemma327bv2server-shared:11434"
             - name: APP_URL
               value: "https://{{ $ollamaclientDomain }}"
-            - name: OLLAMA_NOPRUNE 
+            - name: OLLAMA_NOPRUNE
               value: "1"
           resources:
             requests:
@@ -73,6 +73,25 @@ spec:
   ports:
     - name: "api"
       port: 8081
+      targetPort: 8080
+  selector:
+    io.kompose.service: api
+status:
+  loadBalancer: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  labels:
+    io.kompose.service: api
+  name: sharedentrances-api
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  ports:
+    - name: "api"
+      port: 80
       targetPort: 8080
   selector:
     io.kompose.service: api
