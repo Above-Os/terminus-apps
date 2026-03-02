@@ -99,8 +99,23 @@ spec:
       serviceAccountName: rssubscribe-cluster-account
       serviceAccount: rssubscribe-cluster-account
       containers:
+        - name: rss-server
+          image: "docker.io/beclab/rsshub:v0.1.0"
+          imagePullPolicy: IfNotPresent
+          ports:
+          - containerPort: 3010
+          volumeMounts:
+            - name: rsshub-rules
+              mountPath: /rsshub-rules
+          resources:
+            requests:
+              cpu: 10m
+              memory: 200Mi
+            limits:
+              cpu: "400m"
+              memory: 350Mi
         - name: rssubscribe
-          image: "docker.io/beclab/rssubscribe:v0.1.10"
+          image: "docker.io/beclab/rssubscribe:v0.1.11"
           imagePullPolicy: IfNotPresent
           env:
           - name: LISTEN_ADDR
@@ -116,7 +131,7 @@ spec:
           - name: PG_DATABASE
             value: "{{ .Values.postgres.databases.rssubscribe }}"
           - name: RSS_HUB_URL
-            value: http://rss-server:1200/
+            value: http://127.0.0.1:3010/rss
           - name: NATS_URL
             value: nats://nats.os-platform:4222
           - name: NATS_USERNAME
