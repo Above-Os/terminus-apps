@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-startups
+  namespace: {{ .Release.Namespace }}
+data:
+  tensorzero.toml: |
+    # ┌────────────────────────────────────────────────────────────────────────────┐
+    # │                                   MODELS                                   │
+    # └────────────────────────────────────────────────────────────────────────────┘
+
+    # [models."gpt-4o-mini-2024-07-18"]
+    # routing = ["openai"]
+
+    # [models."gpt-4o-mini-2024-07-18".providers.openai]
+    # type = "openai"
+    # model_name = "gpt-4o-mini-2024-07-18"
+
+    # ┌────────────────────────────────────────────────────────────────────────────┐
+    # │                                 FUNCTIONS                                  │
+    # └────────────────────────────────────────────────────────────────────────────┘
+
+    # [functions.simple_llm_call]
+    # type = "chat"
+
+    # [functions.simple_llm_call.variants.baseline]
+    # type = "chat_completion"
+    # model = "gpt-4o-mini-2024-07-18"
+
+    # ┌────────────────────────────────────────────────────────────────────────────┐
+    # │                                  METRICS                                   │
+    # └────────────────────────────────────────────────────────────────────────────┘
+
+    [metrics.task_success]
+    type = "boolean"
+    optimize = "max"
+    level = "episode"
+
+  start.sh: |
+    #!/bin/bash
+    set -e
+
+    # 等待 postgres 就绪（尝试连接）
+    echo "Waiting for PostgreSQL..."
+    for i in {1..30}; do
+      if echo > /dev/tcp/{{ .Values.postgres.host }}/{{ .Values.postgres.port }} 2>/dev/null; then
+        echo "PostgreSQL is ready!"
+        break
+      fi
+      echo "Waiting... ($i/30)"
+      sleep 2
+    done
+    sleep 2
+
+    # 运行迁移
+    echo "Running database migrations..."
+    gateway --run-postgres-migrations --enable-optimization-postgres-migrations
+
+    echo "Running clickhouse migrations..."
+    gateway --run-clickhouse-migrations
+
+    # 启动主程序（假设 gateway 命令不带参数会启动服务）
+    echo "Starting gateway server..."
+    # exec gateway --default-config
+    exec gateway --config-file /app/config/tensorzero.toml
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tensorzero-env
+  namespace: {{ .Release.Namespace }}
+data:
+  TENSORZERO_GATEWAY_URL: "http://localhost:3000"
+
+  # ┌────────────────────────────────────────────────────────────────────────────┐
+  # │                                 CLICKHOUSE                                 │
+  # └────────────────────────────────────────────────────────────────────────────┘
+  TENSORZERO_CLICKHOUSE_URL: "http://chuser:chpassword@localhost:8123/tensorzero"
+
+  # ┌────────────────────────────────────────────────────────────────────────────┐
+  # │                                 POSTGRESQL                                 │
+  # └────────────────────────────────────────────────────────────────────────────┘
+  TENSORZERO_POSTGRES_URL: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.tensorzerodb }}?sslmode=disable"
+
+  # ┌────────────────────────────────────────────────────────────────────────────┐
+  # │                              MODEL PROVIDERS                               │
+  # └────────────────────────────────────────────────────────────────────────────┘
+
+  # Each of these is optional but necessary to infer using the provider
+
+  # ANTHROPIC_API_KEY=example
+  # AWS_ACCESS_KEY_ID=example
+  # AWS_REGION=us-east-1
+  # AWS_SECRET_ACCESS_KEY=example
+  # AZURE_API_KEY=example
+  # DEEPSEEK_API_KEY=example
+  # FIREWORKS_API_KEY=example
+  # GCP_VERTEX_CREDENTIALS_PATH=/path/to/credentials.json
+  # GOOGLE_AI_STUDIO_API_KEY=example
+  # HYPERBOLIC_API_KEY=example
+  # MISTRAL_API_KEY=example
+  # OPENAI_API_KEY=example
+  # TGI_API_KEY=example
+  # TOGETHER_API_KEY=example
+  # VLLM_API_KEY=example
+  # VOYAGE_API_KEY=example
+  # XAI_API_KEY=example
