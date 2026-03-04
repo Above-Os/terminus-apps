@@ -92,9 +92,6 @@ spec:
         - name: gateway
           image: docker.io/beclab/tensorzero-gateway:2026.2.2
           command: ["/bin/bash", "/etc/gateway/start.sh"]
-          envFrom:
-            - configMapRef:
-                name: tensorzero-env
           resources:
             limits:
               cpu: 1
@@ -112,6 +109,9 @@ spec:
             - name: gateway-startups
               mountPath: /app/config/tensorzero.toml
               subPath: tensorzero.toml
+            - name: gateway-startups
+              mountPath: /etc/gateway/env.sh
+              subPath: env.sh
           livenessProbe:
             httpGet:
               path: /status
@@ -129,9 +129,11 @@ spec:
 
         - name: ui
           image: docker.io/beclab/tensorzero-ui:2026.2.2
-          envFrom:
-            - configMapRef:
-                name: tensorzero-env
+          env:
+            - name: TENSORZERO_GATEWAY_URL
+              value: "http://localhost:3000"
+            - name: TENSORZERO_POSTGRES_URL
+              value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.tensorzerodb }}?sslmode=disable"
           resources:
             limits:
               cpu: 1
