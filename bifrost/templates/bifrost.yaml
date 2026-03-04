@@ -45,7 +45,10 @@ spec:
             runAsUser: 0
       containers:
         - name: bifrost
-          image: docker.io/beclab/maximhq-bifrost:v1.4.9
+          image: docker.io/beclab/maximhq-bifrost:v1.4.10
+          envFrom:
+            - configMapRef:
+                name: bifrost-env
           readinessProbe:
             httpGet:
               path: /
@@ -65,18 +68,22 @@ spec:
             successThreshold: 1
             failureThreshold: 5
           resources:
-            limits:
-              cpu: 100m
-              memory: 256Mi
             requests:
-              cpu: 10m
-              memory: 64Mi
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
           ports:
             - containerPort: 8000
               name: http
           volumeMounts:
             - name: bifrost-data
               mountPath: /app/data
+            - name: bifrost-config
+              mountPath: /app/data/config.json
+              readOnly: true
+              subPath: config.json
 
       restartPolicy: Always
       volumes:
@@ -92,6 +99,9 @@ spec:
                 {{- else }}
             path: '{{ .Values.userspace.appCache }}/bifrost'
                 {{- end }}
+        - name: bifrost-config
+          configMap:
+            name: bifrost-config
 
 ---
 apiVersion: v1
