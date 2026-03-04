@@ -5,6 +5,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   tensorzero.toml: |
+    # Demo below: config as demand, remove "#" and restart tensorzero to enable
+    # official doc:
+    # - https://www.tensorzero.com/docs/quickstart#migrating-to-tensorzero
+    # more reference:
+    # - https://github.com/tensorzero/tensorzero/blob/main/ui/fixtures/config/tensorzero.toml
+
     # ┌────────────────────────────────────────────────────────────────────────────┐
     # │                                   MODELS                                   │
     # └────────────────────────────────────────────────────────────────────────────┘
@@ -31,16 +37,19 @@ data:
     # │                                  METRICS                                   │
     # └────────────────────────────────────────────────────────────────────────────┘
 
-    [metrics.task_success]
-    type = "boolean"
-    optimize = "max"
-    level = "episode"
+    # [metrics.task_success]
+    # type = "boolean"
+    # optimize = "max"
+    # level = "episode"
 
   start.sh: |
     #!/bin/bash
     set -e
 
-    # 等待 postgres 就绪（尝试连接）
+    echo "Exporting environments..."
+    source /etc/gateway/env.sh
+    env
+
     echo "Waiting for PostgreSQL..."
     for i in {1..30}; do
       if echo > /dev/tcp/{{ .Values.postgres.host }}/{{ .Values.postgres.port }} 2>/dev/null; then
@@ -52,57 +61,47 @@ data:
     done
     sleep 2
 
-    # 运行迁移
     echo "Running database migrations..."
     gateway --run-postgres-migrations --enable-optimization-postgres-migrations
 
     echo "Running clickhouse migrations..."
     gateway --run-clickhouse-migrations
 
-    # 启动主程序（假设 gateway 命令不带参数会启动服务）
     echo "Starting gateway server..."
     # exec gateway --default-config
     exec gateway --config-file /app/config/tensorzero.toml
 
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: tensorzero-env
-  namespace: {{ .Release.Namespace }}
-data:
-  TENSORZERO_GATEWAY_URL: "http://localhost:3000"
+  env.sh: |
+    # ┌────────────────────────────────────────────────────────────────────────────┐
+    # │                                 CLICKHOUSE                                 │
+    # └────────────────────────────────────────────────────────────────────────────┘
+    export TENSORZERO_CLICKHOUSE_URL="http://chuser:chpassword@localhost:8123/tensorzero"
 
-  # ┌────────────────────────────────────────────────────────────────────────────┐
-  # │                                 CLICKHOUSE                                 │
-  # └────────────────────────────────────────────────────────────────────────────┘
-  TENSORZERO_CLICKHOUSE_URL: "http://chuser:chpassword@localhost:8123/tensorzero"
+    # ┌────────────────────────────────────────────────────────────────────────────┐
+    # │                                 POSTGRESQL                                 │
+    # └────────────────────────────────────────────────────────────────────────────┘
+    export TENSORZERO_POSTGRES_URL="postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.tensorzerodb }}?sslmode=disable"
 
-  # ┌────────────────────────────────────────────────────────────────────────────┐
-  # │                                 POSTGRESQL                                 │
-  # └────────────────────────────────────────────────────────────────────────────┘
-  TENSORZERO_POSTGRES_URL: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.tensorzerodb }}?sslmode=disable"
+    # ┌────────────────────────────────────────────────────────────────────────────┐
+    # │                              MODEL PROVIDERS                               │
+    # └────────────────────────────────────────────────────────────────────────────┘
 
-  # ┌────────────────────────────────────────────────────────────────────────────┐
-  # │                              MODEL PROVIDERS                               │
-  # └────────────────────────────────────────────────────────────────────────────┘
+    # Each of these is optional but necessary to infer using the provider
 
-  # Each of these is optional but necessary to infer using the provider
-
-  # ANTHROPIC_API_KEY=example
-  # AWS_ACCESS_KEY_ID=example
-  # AWS_REGION=us-east-1
-  # AWS_SECRET_ACCESS_KEY=example
-  # AZURE_API_KEY=example
-  # DEEPSEEK_API_KEY=example
-  # FIREWORKS_API_KEY=example
-  # GCP_VERTEX_CREDENTIALS_PATH=/path/to/credentials.json
-  # GOOGLE_AI_STUDIO_API_KEY=example
-  # HYPERBOLIC_API_KEY=example
-  # MISTRAL_API_KEY=example
-  # OPENAI_API_KEY=example
-  # TGI_API_KEY=example
-  # TOGETHER_API_KEY=example
-  # VLLM_API_KEY=example
-  # VOYAGE_API_KEY=example
-  # XAI_API_KEY=example
+    # export ANTHROPIC_API_KEY=example
+    # export AWS_ACCESS_KEY_ID=example
+    # export AWS_REGION=us-east-1
+    # export AWS_SECRET_ACCESS_KEY=example
+    # export AZURE_API_KEY=example
+    # export DEEPSEEK_API_KEY=example
+    # export FIREWORKS_API_KEY=example
+    # export GCP_VERTEX_CREDENTIALS_PATH=/path/to/credentials.json
+    # export GOOGLE_AI_STUDIO_API_KEY=example
+    # export HYPERBOLIC_API_KEY=example
+    # export MISTRAL_API_KEY=example
+    # export OPENAI_API_KEY=example
+    # export TGI_API_KEY=example
+    # export TOGETHER_API_KEY=example
+    # export VLLM_API_KEY=example
+    # export VOYAGE_API_KEY=example
+    # export XAI_API_KEY=example
