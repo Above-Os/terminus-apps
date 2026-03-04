@@ -1,4 +1,4 @@
-﻿---
+---
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 {{- $clsENV := split  ","  .Values.domain.comfyuilauncherweb -}}
 {{- $cls := index $clsENV "_0" -}}
@@ -10,13 +10,17 @@
 
 {{ $image := "" }}
 {{ if .Values.GPU }}
-  {{ if ge (float64 .Values.GPU.Cuda) 12.8 }}
-    {{ $image = "beclab/comfyui:v0.10.0-fe1.38.9-launcher0.2.23" }}
+  {{ if eq .Values.cluster.arch "arm64" }}  
+    {{ $image = "beclab/comfyui_launcher-arm64:v0.13.0-fe1.40.3-launcher0.2.26-arm64" }}
   {{ else }}
-    {{ $image = "docker.io/beclab/kldtks-comfyui:c124-0d3d51-1d26d6-launcher-b1" }}
+    {{ if ge (float64 .Values.GPU.Cuda) 12.8 }}
+      {{ $image = "beclab/comfyui:v0.13.0-fe1.40.3-launcher0.2.26" }}
+    {{ else }}
+      {{ $image = "docker.io/beclab/kldtks-comfyui:c124-0d3d51-1d26d6-launcher-b1" }}
+    {{ end }}
   {{ end }}
 {{ else }}
-    {{ $image = "beclab/comfyui:v0.10.0-fe1.38.9-launcher0.2.23" }}
+    {{ $image = "beclab/comfyui:v0.13.0-fe1.40.3-launcher0.2.26" }}
 {{ end }}
 
 ---
@@ -255,8 +259,18 @@ spec:
               value: "0"
             - name: TZ
               value: Etc/UTC
+{{ if .Values.GPU }}
+  {{ if eq .Values.cluster.arch "arm64" }}
             - name: CLI_ARGS
-              value: '--normalvram --disable-xformers --disable-smart-memory --disable-cuda-malloc --front-end-version Comfy-Org/ComfyUI_frontend@v1.38.9'
+              value: '--normalvram --disable-xformers --disable-smart-memory --disable-cuda-malloc --front-end-version Comfy-Org/ComfyUI_frontend@v1.40.3'
+  {{ else }}
+            - name: CLI_ARGS
+              value: '--normalvram --disable-xformers --disable-smart-memory --disable-cuda-malloc --front-end-version Comfy-Org/ComfyUI_frontend@v1.40.3'
+  {{ end }}
+{{ else }}
+            - name: CLI_ARGS
+              value: '--normalvram --disable-xformers --disable-smart-memory --disable-cuda-malloc --front-end-version Comfy-Org/ComfyUI_frontend@v1.40.3'
+{{ end }}
             - name: HOME
               value: /root
             - name: PIP_CACHE_DIR
@@ -297,6 +311,11 @@ spec:
               value: 'http://desktop.{{ $desktopApiDomain }}/server/intent/send'
             - name: FORCE_LOG_LANGUAGE
               value: en
+            - name: NODENAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
           securityContext:
             runAsUser: 0
           image: {{ $image }}
