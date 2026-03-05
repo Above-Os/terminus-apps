@@ -1,0 +1,101 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: odigos-instrumentor
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    odigos.io/system-object: "true"
+rules:
+  - apiGroups:
+      - ''
+    resourceNames:
+      - effective-config
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - odigos.io
+    resources:
+      - collectorsgroups
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - odigos.io
+    resources:
+      - collectorsgroups/status
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - odigos.io
+    resources:
+      - destinations
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - odigos.io
+    resources:
+      - instrumentationrules
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - odigos.io
+    resources:
+      - instrumentationrules/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - odigos.io
+    resources:
+      - actions
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - secrets
+    resourceNames:
+      - instrumentor-webhooks-cert
+    verbs:
+      - update
+# migration from the old webhook cert - this can be removed once we are confident that the old secrets have been deleted
+  - apiGroups:
+      - ''
+    resources:
+      - secrets
+    resourceNames:
+      - webhook-cert
+    verbs:
+      - delete
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+    resourceNames:
+      - odiglet
+    verbs:
+      - get
+      - list
+      - watch

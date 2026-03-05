@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: odigos-configuration
+  namespace: {{ .Release.Namespace }}
+  labels:
+    odigos.io/config: '1'
+    odigos.io/system-object: "true"
+data:
+  config.yaml: |
+    configVersion: 1
+    imagePrefix: registry.odigos.io
+    uiMode: default
+    collectorGateway:
+      minReplicas: 1
+      maxReplicas: 1
+      requestMemoryMiB: 600
+      limitMemoryMiB: 600
+      requestCPUm: 1000
+      limitCPUm: 1000
+      memoryLimiterLimitMiB: 550
+      memoryLimiterSpikeLimitMiB: 110
+      goMemLimitMiB: 440
+      serviceGraphDisabled: false
+      clusterMetricsEnabled: false
+      # Global nodeSelector from values.yaml
+      nodeSelector:
+        kubernetes.io/os: linux
+    collectorNode:
+      collectorOwnMetricsPort: 55682
+      requestMemoryMiB: 250
+      limitMemoryMiB:   500
+      requestCPUm:      250
+      limitCPUm:        500
+      memoryLimiterLimitMiB: 450
+      memoryLimiterSpikeLimitMiB: 90
+      goMemLimitMiB: 360
+      otlpExporterConfiguration:
+        enableDataCompression: false
+        timeout: 5s
+        retryOnFailure:
+          enabled: true
+          initialInterval: 5s
+          maxInterval: 30s
+          maxElapsedTime: 300s
+    telemetryEnabled: true
+    openshiftEnabled: false
+    psp: false
+    ignoreOdigosNamespace: true
+    agentsInitContainerResources:
+      requestCPUm: 300
+      limitCPUm: 300
+      requestMemoryMiB: 300
+      limitMemoryMiB: 300
+    resourceSizePreset: size_m
+    nodeSelector:
+      kubernetes.io/os: linux
+    rollbackGraceTime: 5m
+    rollbackStabilityWindow: 1h
+    rollout:
+    goAutoOffsetsMode: "off"
+    metricsSources:
+      agentMetrics:
+        runtimeMetrics:
+          java: null
+      hostMetrics: null
+      kubeletStats: null
+      odigosOwnMetrics: null
+      spanMetrics: null
+    odigosOwnTelemetryStore:
+      metricsStoreDisabled: true
