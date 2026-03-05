@@ -27,6 +27,16 @@ data:
       proxy_set_header upgrade $http_upgrade;
       proxy_set_header connection "upgrade";
 
+      location /inference {
+          proxy_pass http://tensorzero:3000/inference;
+          proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+          proxy_connect_timeout 60s;
+          proxy_read_timeout 60s;
+          proxy_send_timeout 180s;
+          # Support large file uploads
+          client_max_body_size 100m;
+      }
+
       location / {
           proxy_pass http://tensorzero:4000;
           proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
