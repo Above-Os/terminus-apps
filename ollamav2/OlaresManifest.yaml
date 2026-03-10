@@ -8,7 +8,7 @@ metadata:
   description: Get up and running with large language models.
   appid: ollamav2
   title: Ollama
-  version: "1.0.12"
+  version: "1.0.16"
   categories:
     - Utilities_v112
     - Productivity
@@ -38,7 +38,7 @@ entrances:
     invisible: true
 
 spec:
-  versionName: "0.15.6"
+  versionName: "0.17.7"
   featuredImage: https://app.cdn.olares.com/appstore/ollama/1.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/ollama/1.webp
@@ -69,49 +69,24 @@ spec:
     - Solar 10.7B
 
   upgradeDescription: |
-    Upgrade Ollama version from v0.15.5 to v0.15.6
+    Upgrade Ollama version from v0.17.5 to v0.17.7
 
     ## What's Changed
 
-    # v0.15.6
-    - Bug fixes and stability improvements
-    - Performance optimizations
-    - Enhanced model compatibility
+    # v0.17.7 (2026-03-06)
+    - Add context length to support compaction when using `ollama launch`
+    - Allow thinking levels such as "medium" to be correctly interpreted in Ollama's API for all thinking models
 
-    # v0.15.5 (2025-02-03)
+    # v0.17.5 (2026-03-02)
     ## New models
-    - Qwen3-Coder-Next: a coding-focused language model from Alibaba's Qwen team, optimized for agentic coding workflows and local development.
-    - GLM-OCR: GLM-OCR is a multimodal OCR model for complex document understanding, built on the GLM-V encoder–decoder architecture.
+    - Qwen3.5: the small Qwen 3.5 model series is now available in 0.8B, 2B, 4B and 9B parameter sizes.
 
-    ## Improvements to `ollama launch`
-    - `ollama launch` can now be provided arguments, for example `ollama launch claude -- --resume`
-    - `ollama launch` will now work run subagents when using `ollama launch claude`
-    - Ollama will now set context limits for a set of models when using `ollama launch opencode`
-
-    ## What's Changed
-    - Sub-agent support for `ollama launch` for planning, deep research, and similar tasks
-    - `ollama signin` will now open a browser window to make signing in easier
-    - Ollama will now default to the following context lengths based on VRAM:
-      * < 24 GiB VRAM: 4,096 context
-      * 24-48 GiB VRAM: 32,768 context
-      * >= 48 GiB VRAM: 262,144 context
-    - GLM-4.7-Flash support on Ollama's experimental MLX engine
-    - `ollama signin` will now open the browser to the connect page
-    - Fixed off by one error when using `num_predict` in the API
-    - Fixed issue where tokens from a previous sequence would be returned when hitting `num_predict`
-
-    # v0.15.2 (2026-01-27)
-    - New `ollama launch clawdbot` command for launching Clawdbot using Ollama models
-
-    # v0.15.1
-    - Bug fixes and stability improvements
-    - Performance optimizations
-    - Enhanced model compatibility
-
-    # v0.15.0
-    - Major version update with enhanced features
-    - Improved model support and architecture
-    - API improvements and stability enhancements
+    ## Fixes
+    - Fixed crash in Qwen 3.5 models when split over GPU & CPU
+    - Fixed issue where Qwen 3.5 models would repeat themselves due to no presence penalty (note: you may have to redownload the `qwen3.5` models: `ollama pull qwen3.5:35b` for example)
+    - `ollama run --verbose` will now show peak memory usage when using Ollama's MLX engine
+    - Fixed memory issues and crashes in MLX runner
+    - Fixed issue where Ollama would not be able to run models imported from Qwen3.5 GGUF files
 
     For detailed release notes including new models and features in each version, please visit:
     https://github.com/ollama/ollama/releases
@@ -134,8 +109,8 @@ spec:
   limitedDisk: 500Gi
   limitedMemory: 40Gi
   requiredMemory: 5Gi
-  requiredGpu: 0
-  limitedGpu: 16Gi
+  requiredGpu: 1Gi
+  limitedGpu: 24Gi
   {{- else }}
   requiredMemory: 64Mi
   limitedMemory: 800Mi
@@ -165,7 +140,7 @@ options:
     appRef:
       - ollamav2
   {{- else }}
-  clusterScoped: false
+    clusterScoped: false
   {{- end }}
   dependencies:
     - name: olares

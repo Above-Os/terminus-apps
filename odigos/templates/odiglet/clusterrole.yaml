@@ -1,0 +1,106 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: odiglet
+  labels:
+    odigos.io/system-object: "true"
+rules:
+  - apiGroups:
+      - ''
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - pods/status
+    verbs:
+      - get
+{{- if .Values.openshift.enabled }}
+  - apiGroups:
+      - ''
+    resources:
+      - pods/finalizers
+    verbs:
+      - update
+{{- end }}
+  - apiGroups:
+      - ''
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - update
+  - apiGroups:
+      - odigos.io
+    resources:
+      - instrumentationinstances
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - update
+      - watch
+      - delete
+  - apiGroups:
+      - odigos.io
+    resources:
+      - instrumentationinstances/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - odigos.io
+    resources:
+      - instrumentationconfigs
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - update
+  - apiGroups:
+      - odigos.io
+    resources:
+      - instrumentationconfigs/status
+    verbs:
+      - get
+      - patch
+      - update
+## related to node collector
+  - apiGroups:
+      - ''
+    resources:
+      - pods
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - replicasets
+      - deployments
+      - daemonsets
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - endpoints
+    verbs:
+      - get
+      - list
+      - watch
