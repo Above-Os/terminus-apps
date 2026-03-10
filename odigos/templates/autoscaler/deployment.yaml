@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: odigos-autoscaler
+    odigos.io/system-object: "true"
+  name: odigos-autoscaler
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: odigos-autoscaler
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: odigos-autoscaler
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
+      {{- if .Values.autoscaler.nodeSelector }}
+      # Component-specific nodeSelector (overrides global values.yaml nodeSelector)
+      nodeSelector:
+      {{- toYaml .Values.autoscaler.nodeSelector | nindent 8 }}
+      {{- else if .Values.nodeSelector }}
+      # Global nodeSelector from values.yaml
+      nodeSelector:
+      {{- toYaml .Values.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+      {{- range .Values.topologySpreadConstraints }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey | quote }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable | quote }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: odigos-autoscaler
+      {{- end }}
+      {{- end }}
+      {{- if .Values.autoscaler.priorityClassName }}
+      priorityClassName: {{ .Values.autoscaler.priorityClassName }}
+      {{- end }}
+      containers:
+      - args:
+          - --health-probe-bind-address=:8081
+          - --metrics-bind-address=0.0.0.0:8080
+          - --leader-elect
+        command:
+          - /app
+        image: beclab/odigos-autoscaler:v1.16.7
+        env:
+          - name: OTEL_SERVICE_NAME
+            value: auto-scaler
+          - name: CURRENT_NS
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: ODIGOS_VERSION
+            valueFrom:
+              configMapKeyRef:
+                key: ODIGOS_VERSION
+                name: odigos-deployment
+          - name: ODIGOS_COLLECTOR_IMAGE
+            value: 'beclab/odigos-collector:v1.16.7'
+          - name: GOMEMLIMIT
+            value: 409MiB
+        envFrom:
+          - configMapRef:
+              name: odigos-own-telemetry-otel-config
+              optional: true
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          periodSeconds: 10
+          timeoutSeconds: 5
+        name: manager
+        volumeMounts:
+          - name: autoscaler-webhooks-cert
+            mountPath: /tmp/k8s-webhook-server/serving-certs
+            readOnly: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+      serviceAccountName: odigos-autoscaler
+      volumes:
+        - name: autoscaler-webhooks-cert
+          secret:
+            secretName: autoscaler-webhooks-cert
+            defaultMode: 420
+      terminationGracePeriodSeconds: 10
+{{- with .Values.autoscaler }}
+  {{- if .tolerations }}
+      tolerations: {{ toYaml .tolerations | nindent 8 }}
+  {{- end }}
+  {{- if .affinity }}
+      affinity: {{ toYaml .affinity | nindent 8 }}
+  {{- end }}
+{{- end }}

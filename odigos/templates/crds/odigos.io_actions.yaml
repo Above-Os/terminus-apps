@@ -1,0 +1,781 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    odigos.io/system-object: "true"
+  name: actions.odigos.io
+spec:
+  group: odigos.io
+  names:
+    kind: Action
+    listKind: ActionList
+    plural: actions
+    singular: action
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              actionName:
+                description: Allows you to attach a meaningful name to the action
+                  for convenience. Odigos does not use or assume any meaning from
+                  this field.
+                type: string
+              addClusterInfo:
+                description: AddClusterInfo is the config for the AddClusterInfo Action.
+                properties:
+                  clusterAttributes:
+                    items:
+                      properties:
+                        attributeName:
+                          description: the name of the attribute to insert
+                          type: string
+                        attributeStringValue:
+                          description: |-
+                            if the value is a string, this field should be used.
+                            empty string is a valid value
+                          type: string
+                      required:
+                      - attributeName
+                      - attributeStringValue
+                      type: object
+                    type: array
+                  overwriteExistingValues:
+                    type: boolean
+                required:
+                - clusterAttributes
+                type: object
+              deleteAttribute:
+                description: DeleteAttribute is the config for the DeleteAttribute
+                  Action.
+                properties:
+                  attributeNamesToDelete:
+                    items:
+                      type: string
+                    type: array
+                required:
+                - attributeNamesToDelete
+                type: object
+              disabled:
+                description: A boolean field allowing to temporarily disable the action,
+                  but keep it around for future use
+                type: boolean
+              k8sAttributes:
+                description: K8sAttributes is the config for the K8sAttributes Action.
+                properties:
+                  annotationsAttributes:
+                    description: list of annotations to be extracted from the pod,
+                      and the attribute key to be used for the resource attribute
+                      created from each annotation.
+                    items:
+                      properties:
+                        annotationKey:
+                          description: |-
+                            The annotation name to be extracted.
+                            e.g. "kubectl.kubernetes.io/restartedAt"
+                          type: string
+                        attributeKey:
+                          description: |-
+                            The attribute key to be used for the resource attribute created from the annotation.
+                            e.g. "kubectl.kubernetes.restartedAt"
+                          type: string
+                        from:
+                          default: pod
+                          description: |-
+                            The source of the annotation.
+                            e.g. "pod" or "namespace"
+                            Deprecated: Use FromSources instead for specifying multiple sources with precedence.
+                          type: string
+                        fromSources:
+                          description: |-
+                            The sources from which to extract the annotation, in order of precedence (most specific first).
+                            When multiple sources are specified, the most specific source (e.g., pod) takes precedence
+                            over less specific sources (e.g., namespace).
+                            If an annotation exists in multiple sources, the value from the most specific source will be used.
+                            Supported sources: "pod", "namespace", "node"
+                          items:
+                            enum:
+                            - pod
+                            - namespace
+                            - node
+                            type: string
+                          type: array
+                      required:
+                      - annotationKey
+                      - attributeKey
+                      type: object
+                    type: array
+                  collectClusterUID:
+                    description: Collect the k8s.cluster.uid attribute, which is set
+                      to the uid of the namespace "kube-system"
+                    type: boolean
+                  collectContainerAttributes:
+                    description: |-
+                      Collect the following container related attributes:
+                      k8s.container.name
+                      container.id
+                      container.image.name
+                      container.image.tag
+                    type: boolean
+                  collectReplicaSetAttributes:
+                    description: |-
+                      collect replicaset related attributes (when relevant, e.g. for deployments):
+                      k8s.replicaset.name
+                      if CollectWorkloadUID is set, also collect:
+                      k8s.replicaset.uid
+                      DEPRECATED: ReplicaSet attributes are now collected by default during instrumentation.
+                    type: boolean
+                  collectWorkloadUID:
+                    description: |-
+                      Collect the following workload UID attributes:
+                      k8s.deployment.uid
+                      k8s.daemonset.uid
+                      k8s.statefulset.uid
+                      DEPRECATED: Workload UID attributes are now collected by default during instrumentation.
+                    type: boolean
+                  labelsAttributes:
+                    description: list of labels to be extracted from the pod, and
+                      the attribute key to be used for the resource attribute created
+                      from each label.
+                    items:
+                      properties:
+                        attributeKey:
+                          description: |-
+                            The attribute key to be used for the resource attribute created from the label.
+                            e.g. "app.kubernetes.name"
+                          type: string
+                        from:
+                          default: pod
+                          description: |-
+                            The source of the label.
+                            e.g. "pod" or "namespace"
+                            Deprecated: Use FromSources instead for specifying multiple sources with precedence.
+                          enum:
+                          - pod
+                          - namespace
+                          - node
+                          type: string
+                        fromSources:
+                          description: |-
+                            The sources from which to extract the label, in order of precedence (most specific first).
+                            When multiple sources are specified, the most specific source (e.g., pod) takes precedence
+                            over less specific sources (e.g., namespace).
+                            If a label exists in multiple sources, the value from the most specific source will be used.
+                            Supported sources: "pod", "namespace", "node"
+                          items:
+                            enum:
+                            - pod
+                            - namespace
+                            - node
+                            type: string
+                          type: array
+                        labelKey:
+                          description: |-
+                            The label name to be extracted.
+                            e.g. "app.kubernetes.io/name"
+                          type: string
+                      required:
+                      - attributeKey
+                      - labelKey
+                      type: object
+                    type: array
+                type: object
+              notes:
+                description: 'A free-form text field that allows you to attach notes
+                  regarding the action for convenience. For example: why it was added.
+                  Odigos does not use or assume any meaning from this field.'
+                type: string
+              piiMasking:
+                description: PiiMasking is the config for the PiiMasking Action.
+                properties:
+                  piiCategories:
+                    items:
+                      enum:
+                      - CREDIT_CARD
+                      type: string
+                    type: array
+                required:
+                - piiCategories
+                type: object
+              renameAttribute:
+                description: RenameAttribute is the config for the RenameAttribute
+                  Action.
+                properties:
+                  renames:
+                    additionalProperties:
+                      type: string
+                    type: object
+                required:
+                - renames
+                type: object
+              samplers:
+                description: Samplers is the config for the Samplers Action.
+                properties:
+                  errorSampler:
+                    description: ErrorSamplerSpec defines the desired state of ErrorSampler
+                    properties:
+                      fallback_sampling_ratio:
+                        description: |-
+                          FallbackSamplingRatio determines the percentage (0–100) of non-error traces
+                          that should be sampled. Error traces are always sampled.
+                        type: number
+                    required:
+                    - fallback_sampling_ratio
+                    type: object
+                  ignoreHealthChecks:
+                    description: |-
+                      automatically sample out health checks by a set fraction.
+                      health checks are discovered based on the livenessProbe and readinessProbe in the workload spec.
+                      if set, health checks are sampled regardless of any other configuration (head sampling at agent level, before traces are pushed into the collector pipeline)
+                    properties:
+                      fractionToRecord:
+                        default: 0
+                        description: |-
+                          FractionToRecord determines the percentage (0–100) of health checks traces to record.
+                          should be in range [0, 1]
+                          0 (default) means no health checks traces will be recorded
+                          1 means all health checks traces will be recorded
+                        maximum: 1
+                        minimum: 0
+                        type: number
+                    type: object
+                  latencySampler:
+                    description: LatencySamplerSpec defines the desired state of LatencySampler
+                    properties:
+                      endpoints_filters:
+                        description: |-
+                          EndpointsFilters defines the list of route-based latency sampling filters.
+                          Each filter targets a specific service and HTTP route with a latency threshold.
+                        items:
+                          description: HttpRouteFilter defines a single latency-based
+                            sampling rule for an HTTP route.
+                          properties:
+                            fallback_sampling_ratio:
+                              description: |-
+                                FallbackSamplingRatio is the percentage (0–100) of traces to sample if the route
+                                and service match but the span latency is below the threshold.
+                              type: number
+                            http_route:
+                              description: HttpRoute is the route name (from span
+                                attribute "http.route") that this rule applies to.
+                              type: string
+                            minimum_latency_threshold:
+                              description: |-
+                                MinimumLatencyThreshold is the latency in milliseconds that spans must exceed
+                                to be considered for sampling. Spans with latency >= this value are eligible.
+                              type: integer
+                            service_name:
+                              description: |-
+                                ServiceName specifies the service that must emit the span for this rule to apply.
+                                Matches the value of the "service.name" attribute in the span.
+                              type: string
+                          required:
+                          - fallback_sampling_ratio
+                          - http_route
+                          - minimum_latency_threshold
+                          - service_name
+                          type: object
+                        type: array
+                    required:
+                    - endpoints_filters
+                    type: object
+                  probabilisticSampler:
+                    description: ProbabilisticSamplerSpec defines the desired state
+                      of ProbabilisticSampler
+                    properties:
+                      sampling_percentage:
+                        description: SamplingPercentage determines the percentage
+                          (0–100) of traces to sample.
+                        type: string
+                    required:
+                    - sampling_percentage
+                    type: object
+                  serviceNameSampler:
+                    description: ServiceNameSamplerSpec defines the desired state
+                      of ServiceNameSampler
+                    properties:
+                      services_name_filters:
+                        description: |-
+                          ServicesNameFilters defines rules for sampling traces based on the presence
+                          of specific service names. If a trace contains a span from one of the listed
+                          services, the associated sampling ratio is applied.
+                        items:
+                          description: ServiceNameFilter defines a single rule that
+                            maps a service name to a sampling decision.
+                          properties:
+                            fallback_sampling_ratio:
+                              default: 100
+                              description: |-
+                                FallbackSamplingRatio is the percentage (0–100) of traces to sample
+                                if the specified service is not present in the trace.
+                              maximum: 100
+                              minimum: 0
+                              type: number
+                            sampling_ratio:
+                              default: 100
+                              description: |-
+                                SamplingRatio determines the percentage (0–100) of traces to sample
+                                when the specified service is present in the trace.
+
+                                For example, a value of 100 means all such traces will be kept,
+                                while a value of 0 means all will be dropped.
+                              maximum: 100
+                              minimum: 0
+                              type: number
+                            service_name:
+                              description: |-
+                                ServiceName specifies the name of the service to look for within a trace.
+                                If any span in the trace comes from this service, the rule will apply.
+                              type: string
+                          required:
+                          - fallback_sampling_ratio
+                          - sampling_ratio
+                          - service_name
+                          type: object
+                        type: array
+                    required:
+                    - services_name_filters
+                    type: object
+                  spanAttributeSampler:
+                    description: SpanAttributeSamplerSpec defines the desired state
+                      of SpanAttributeSampler
+                    properties:
+                      attribute_filters:
+                        description: |-
+                          AttributeFilters defines a list of criteria to decide how spans should be
+                          sampled based on their attributes. At least one filter is required.
+                        items:
+                          description: SpanAttributeFilter allows sampling traces
+                            based on specific span attributes and conditions.
+                          properties:
+                            attribute_key:
+                              description: AttributeKey indicates which attribute
+                                on the span to evaluate.
+                              type: string
+                            condition:
+                              description: |-
+                                Condition is the rule or expression that will be used to evaluate
+                                the attribute's value. Exactly one of the condition types must be set:
+                                  - StringCondition
+                                  - NumberCondition
+                                  - BooleanCondition
+                                  - JsonCondition
+                              properties:
+                                boolean_condition:
+                                  description: BooleanCondition applies to boolean
+                                    attributes.
+                                  properties:
+                                    expected_value:
+                                      description: ExpectedValue is only used if Operation
+                                        == "equals".
+                                      type: boolean
+                                    operation:
+                                      description: |-
+                                        Operation can be:
+                                          - "exists": Checks that the boolean attribute is present.
+                                          - "equals": Checks if the attribute exactly matches ExpectedValue.
+
+                                        ExpectedValue is required only for the "equals" operation.
+                                      enum:
+                                      - exists
+                                      - equals
+                                      type: string
+                                  required:
+                                  - operation
+                                  type: object
+                                json_condition:
+                                  description: JsonCondition applies to attributes
+                                    that are JSON-encoded strings.
+                                  properties:
+                                    expected_value:
+                                      description: |-
+                                        ExpectedValue is required for:
+                                          - equals
+                                          - not_equals
+                                          - key_equals
+                                          - key_not_equals
+
+                                        The value to compare against during evaluation.
+                                      type: string
+                                    json_path:
+                                      description: |-
+                                        JsonPath is required for:
+                                          - jsonpath_exists
+                                          - key_equals
+                                          - key_not_equals
+
+                                        It is a JSONPath expression used to navigate the JSON structure.
+                                        Example: $.user.role or $.events[0].code
+                                      type: string
+                                    operation:
+                                      description: |-
+                                        Operation defines the evaluation logic applied to the JSON value.
+
+                                        Supported values:
+                                          - is_valid_json
+                                          - is_invalid_json
+                                          - equals
+                                          - not_equals
+                                          - jsonpath_exists
+                                          - key_equals
+                                          - key_not_equals
+                                      enum:
+                                      - is_valid_json
+                                      - is_invalid_json
+                                      - equals
+                                      - not_equals
+                                      - jsonpath_exists
+                                      - key_equals
+                                      - key_not_equals
+                                      type: string
+                                  required:
+                                  - operation
+                                  type: object
+                                number_condition:
+                                  description: NumberCondition applies to numeric
+                                    attributes (int, long, float, double).
+                                  properties:
+                                    expected_value:
+                                      description: ExpectedValue is required for all
+                                        operations except "exists".
+                                      type: number
+                                    operation:
+                                      description: |-
+                                        Operation determines the numeric comparison to perform.
+
+                                        Valid operations:
+
+                                          - "exists": Checks that the numeric attribute is present (non-null).
+                                          - "equals": Checks if the attribute equals ExpectedValue.
+                                          - "not_equals": Checks if the attribute does not equal ExpectedValue.
+                                          - "greater_than": Checks if attribute > ExpectedValue.
+                                          - "less_than": Checks if attribute < ExpectedValue.
+                                          - "greater_than_or_equal": Checks if attribute >= ExpectedValue.
+                                          - "less_than_or_equal": Checks if attribute <= ExpectedValue.
+
+                                        For operations other than "exists", ExpectedValue must be specified.
+                                      enum:
+                                      - exists
+                                      - equals
+                                      - not_equals
+                                      - greater_than
+                                      - less_than
+                                      - greater_than_or_equal
+                                      - less_than_or_equal
+                                      type: string
+                                  required:
+                                  - operation
+                                  type: object
+                                string_condition:
+                                  description: StringCondition applies to string-type
+                                    attributes.
+                                  properties:
+                                    expected_value:
+                                      description: |-
+                                        ExpectedValue is required for all operations except "exists". Its usage
+                                        depends on the chosen Operation, e.g. it may represent an exact string
+                                        to match, a substring, or a regular expression.
+                                      type: string
+                                    operation:
+                                      description: |-
+                                        Operation determines what comparison or check should be performed.
+
+                                        The valid operations are:
+
+                                          - "exists": Checks that the attribute is present (and not an empty string).
+                                          - "equals": String equality comparison with ExpectedValue.
+                                          - "not_equals": String inequality comparison with ExpectedValue.
+                                          - "contains": Checks if the attribute contains ExpectedValue as a substring.
+                                          - "not_contains": Checks if the attribute does not contain ExpectedValue.
+                                          - "regex": Interprets ExpectedValue as a regular expression (RE2 syntax)
+                                              and checks for a match within the attribute.
+
+                                        For operations other than "exists", ExpectedValue must be provided.
+                                      enum:
+                                      - exists
+                                      - equals
+                                      - not_equals
+                                      - contains
+                                      - not_contains
+                                      - regex
+                                      type: string
+                                  required:
+                                  - operation
+                                  type: object
+                              type: object
+                            fallback_sampling_ratio:
+                              default: 100
+                              description: |-
+                                FallbackSamplingRatio is the percentage (0–100) of spans to sample
+                                when the condition does not explicitly match. For example, if set to 50,
+                                then half of non-matching spans would be sampled.
+                              maximum: 100
+                              minimum: 0
+                              type: number
+                            sampling_ratio:
+                              default: 100
+                              description: |-
+                                SamplingRatio determines the percentage (0–100) of traces to sample
+                                when the specified attribute satisfies the filter.
+
+                                For example, a value of 100 means all such traces will be kept,
+                                while a value of 0 means all will be dropped.
+                              maximum: 100
+                              minimum: 0
+                              type: number
+                            service_name:
+                              description: |-
+                                ServiceName specifies which service this filter applies to. Only spans
+                                originating from the given service will be evaluated against this filter.
+                              type: string
+                          required:
+                          - attribute_key
+                          - condition
+                          - fallback_sampling_ratio
+                          - sampling_ratio
+                          - service_name
+                          type: object
+                        type: array
+                    required:
+                    - attribute_filters
+                    type: object
+                type: object
+              signals:
+                description: Which signals should this action operate on.
+                items:
+                  enum:
+                  - LOGS
+                  - TRACES
+                  - METRICS
+                  type: string
+                type: array
+              spanRenamer:
+                description: SpanRenamer is the config for the SpanRenamer Action.
+                properties:
+                  programmingLanguage:
+                    description: the programming language which the renamed spans
+                      are written in.
+                    enum:
+                    - java
+                    - python
+                    - go
+                    - dotnet
+                    - javascript
+                    - php
+                    - ruby
+                    - rust
+                    - cplusplus
+                    - mysql
+                    - nginx
+                    - redis
+                    - postgres
+                    - unknown
+                    - ignored
+                    type: string
+                  regexReplacements:
+                    description: |-
+                      list of regex replacements to be applied to the span name.
+                      all options are always tried, regardless of whether the previous options have matched or not.
+                    items:
+                      description: configuration for replacing parts of the span name
+                        with a template text based on regular expressions.
+                      properties:
+                        regexPattern:
+                          description: regualr expression that will be used to match
+                            the part of the span name to be replaced.
+                          type: string
+                        templateText:
+                          description: the text to be used for replacing the matched
+                            part of the span name.
+                          type: string
+                      required:
+                      - regexPattern
+                      - templateText
+                      type: object
+                    type: array
+                  scopeName:
+                    description: the name of the opentelemetry intrumentation scope
+                      which is producing the spans to be renamed.
+                    type: string
+                required:
+                - programmingLanguage
+                - scopeName
+                type: object
+              urlTemplatization:
+                description: URLTemplatization is the config for the URLTemplatization
+                  Action.
+                properties:
+                  templatizationRulesGroups:
+                    description: |-
+                      list here all the groups of rules that will be applied to the spans.
+                      each group targets a specific set of spans that share the same filters.
+                      for example, one can set up 3 groups in the action:
+                      1. some rules for java spans
+                      2. some rules for deployment foo in namespace default
+                      3. rules without filters that will be applied to all spans.
+                    items:
+                      description: |-
+                        UrlTemplatizationRulesGroup is a group of rules that share the same target spans.
+                        For examples, all rules for java spans, all rules for deployment foo in namespace default, etc.
+                        Filters, if set, are ANDed together, e.g. for the templatization rules to be applied, all set filters must be true.
+                        If no filters are set, the rules will be applied to all spans.
+                      properties:
+                        filterK8sNamespace:
+                          type: string
+                        filterK8sWorkloadKind:
+                          description: |-
+                            1. the pascal case representation of the workload kind
+                            it is used in k8s api objects as the `Kind` field.
+                          type: string
+                        filterK8sWorkloadName:
+                          type: string
+                        filterProgrammingLanguage:
+                          enum:
+                          - java
+                          - python
+                          - go
+                          - dotnet
+                          - javascript
+                          - php
+                          - ruby
+                          - rust
+                          - cplusplus
+                          - mysql
+                          - nginx
+                          - redis
+                          - postgres
+                          - unknown
+                          - ignored
+                          type: string
+                        notes:
+                          description: |-
+                            user can add notes about this group for future maintenance purposes. not used by the system.
+                            it can record why this group was added and what endpoints it's targeting.
+                          type: string
+                        templatizationRules:
+                          description: the rules that will be applied to the spans
+                            matching the above filters.
+                          items:
+                            properties:
+                              examples:
+                                description: |-
+                                  user can populate examples of the urls that were observed.
+                                  when someone review this rule in the future, this can be helpful to understand and maintain it.
+                                  this field is optional and can be kept empty.
+                                items:
+                                  type: string
+                                type: array
+                              notes:
+                                description: |-
+                                  notes about why this rule was added and what it's purpose is.
+                                  only for human consumption and maintenance purposes. not used by the system.
+                                type: string
+                              template:
+                                description: this is the instructions on how to match
+                                  and templatize a url for this rule.
+                                type: string
+                            required:
+                            - template
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                required:
+                - templatizationRulesGroups
+                type: object
+            required:
+            - signals
+            type: object
+          status:
+            properties:
+              conditions:
+                description: |-
+                  Represents the observations of a action's current state.
+                  Known .status.conditions.type are: "Available", "Progressing"
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
