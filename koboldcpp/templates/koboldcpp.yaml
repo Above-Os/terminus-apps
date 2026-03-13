@@ -1,0 +1,127 @@
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: koboldcpp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: koboldcpp
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: koboldcpp
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: koboldcpp
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      initContainers:
+        - name: init-model-download
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              MODEL_FILE="/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+              if [ ! -f "$MODEL_FILE" ]; then
+                echo "Downloading Qwen2.5-1.5B-Instruct Q4_K_M model..."
+                wget -O "$MODEL_FILE" "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+                echo "Model download complete."
+              else
+                echo "Model already exists, skipping download."
+              fi
+          volumeMounts:
+            - name: model-data
+              mountPath: /models
+      containers:
+        - name: koboldcpp
+          image: docker.io/beclab/koboldai-koboldcpp:latest
+          envFrom:
+            - configMapRef:
+                name: koboldcpp-env
+          resources:
+            limits:
+              cpu: 4
+              memory: 8Gi
+              nvidia.com/gpu: 1
+            requests:
+              cpu: 2
+              memory: 4Gi
+              nvidia.com/gpu: 1
+          ports:
+            - containerPort: 5001
+              protocol: TCP
+          volumeMounts:
+            - name: model-data
+              mountPath: /models
+            - name: koboldcpp-data
+              mountPath: /app/data
+          livenessProbe:
+            tcpSocket:
+              port: 5001
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 5001
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+      restartPolicy: Always
+      volumes:
+        - name: model-data
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Huggingface/koboldcpp"
+            type: DirectoryOrCreate
+        - name: koboldcpp-data
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}'
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: koboldcpp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: koboldcpp
+spec:
+  ports:
+    - name: koboldcpp-port
+      port: 5001
+      targetPort: 5001
+  selector:
+    io.kompose.service: koboldcpp
+status:
+  loadBalancer: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-koboldcpp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: koboldcpp
+spec:
+  ports:
+    - name: "5001"
+      port: 5001
+      targetPort: 5001
+  selector:
+    io.kompose.service: koboldcpp
+status:
+  loadBalancer: {}
