@@ -1,0 +1,166 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- $clipDomainENV := split "," .Values.domain.clipclient -}}
+{{- $clipDomain := index $clipDomainENV "_0" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clip
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: clip
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: clip
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: clip
+    spec:
+      containers:
+        - name: embed
+          image: "docker.io/beclab/jina-clip-v2-onnxcpu-ubuntu22.04:v0.0.1"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              DONE_FILE="/models/onnx/.jina-clip-v2-split-onnx.done"
+              echo "[embed-wait] Waiting for $DONE_FILE ..."
+              while [ ! -f "$DONE_FILE" ]; do
+                echo "[embed-wait] Model not ready, sleeping..."
+                sleep 10
+              done
+              echo "[embed-start] Starting embed server..."
+              exec /usr/local/bin/embed_onnx
+          env:
+            - name: PORT
+              value: "8080"
+            - name: ONNX_MODEL_DIR
+              value: "/models/onnx"
+{{- with .Values.olaresEnv }}
+{{- if .TEXT_IDLE_UNLOAD_SECS }}
+            - name: TEXT_IDLE_UNLOAD_SECS
+              value: "{{ .TEXT_IDLE_UNLOAD_SECS }}"
+{{- end }}
+{{- if .IMAGE_IDLE_UNLOAD_SECS }}
+            - name: IMAGE_IDLE_UNLOAD_SECS
+              value: "{{ .IMAGE_IDLE_UNLOAD_SECS }}"
+{{- end }}
+{{- end }}
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: model
+              mountPath: /models/onnx
+
+        - name: download-model
+          image: "docker.io/beclab/harveyff-hf-downloader:v0.1.0"
+          env:
+            - name: HF_ENDPOINT
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
+            - name: HF_TOKEN
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
+            - name: VLLM_PROXY_TARGET
+              value: http://localhost:8080
+            - name: MODEL_NAME
+              value: /models/onnx
+            - name: APP_URL
+              value: "https://{{ $clipDomain }}"
+          args:
+            - "--repo"
+            - "wangzhong/jina-clip-v2-split-onnx"
+            - "--ref"
+            - "main"
+            - "--outdir"
+            - "/models/onnx"
+            - "--static"
+            - "/app/static"
+            - "--port"
+            - "8090"
+            - "--probe-url"
+            - "/health"
+            - "--done-name"
+            - ".jina-clip-v2-split-onnx.done"
+          ports:
+            - name: http
+              containerPort: 8090
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+            initialDelaySeconds: 5
+            timeoutSeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          volumeMounts:
+            - name: model
+              mountPath: /models/onnx
+          resources:
+            requests:
+              cpu: 100m
+              memory: 500Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      volumes:
+        - name: model
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Huggingface/jina-clip-v2-split-onnx"
+            type: DirectoryOrCreate
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: clip
+spec:
+  selector:
+    io.kompose.service: clip
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: clip
+spec:
+  selector:
+    io.kompose.service: clip
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+{{- end }}

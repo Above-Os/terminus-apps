@@ -1,0 +1,118 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+
+metadata:
+  name: jinaclipv2onnxcpu
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+  description: Jina CLIP v2 embedding service (ONNX CPU).
+  appid: jinaclipv2onnxcpu
+  title: Jina CLIP v2 (ONNX CPU)
+  version: '1.0.0'
+  categories:
+    - AI
+
+sharedEntrances:
+  - name: jinaclipv2onnxcpu
+    host: sharedentrances-api
+    port: 0
+    tile: Jina CLIP v2
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+
+entrances:
+  - authLevel: internal
+    host: clipclient
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+    name: clipclient
+    openMethod: window
+    port: 8080
+    title: Jina CLIP v2
+
+spec:
+  versionName: 'wangzhong/jina-clip-v2-split-onnx'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    ## MODEL ##
+    - Repo: wangzhong/jina-clip-v2-split-onnx
+    - Engine: ONNX Runtime (CPU)
+    - API: POST /api/text/embed, POST /api/image/embed
+
+  developer: Jina AI
+  website: https://jina.ai/
+  sourceCode: https://huggingface.co/wangzhong/jina-clip-v2-split-onnx
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 4000m
+  requiredCpu: 500m
+  requiredDisk: 5Gi
+  limitedDisk: 50Gi
+  limitedMemory: 8Gi
+  requiredMemory: 2Gi
+  requiredGpu: 0
+  limitedGpu: 0
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  subCharts:
+  - name: jinaclipv2onnxcpuserver
+    shared: true
+  - name: jinaclipv2onnxcpu
+
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - jinaclipv2onnxcpu
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.3-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: jinaclipv2onnxcpu
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+envs:
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}
