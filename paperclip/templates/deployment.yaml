@@ -1,0 +1,127 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: paperclip
+  name: paperclip
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: paperclip
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: paperclip
+    spec:
+      initContainers:
+      - name: init-permissions
+        image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        imagePullPolicy: IfNotPresent
+        command:
+          - sh
+          - '-c'
+          - |
+            chown -R 1000:1000 /paperclip
+        resources: {}
+        volumeMounts:
+          - name: data
+            mountPath: /paperclip
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        securityContext:
+          runAsUser: 0
+      - name: wait-for-postgres
+        image: "docker.io/beclab/wait-for:0.1.0"
+        args:
+          - '-it'
+          - >-
+            {{ .Values.postgres.host }}:{{ .Values.postgres.port }}
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+      containers:
+        - name: paperclip
+          image: "beclab/paperclip:v0.0.1"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3100
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3100"
+            - name: SERVE_UI
+              value: "true"
+            - name: PAPERCLIP_HOME
+              value: "/paperclip"
+            - name: PAPERCLIP_DEPLOYMENT_MODE
+              value: "authenticated"
+            - name: PAPERCLIP_DEPLOYMENT_EXPOSURE
+              value: "private"
+            - name: BETTER_AUTH_SECRET
+              value: "{{ .Release.Name }}-{{ .Release.Namespace }}-paperclip-secret"
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          volumeMounts:
+            - mountPath: /paperclip
+              name: data
+          readinessProbe:
+            tcpSocket:
+              port: 3100
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: 3100
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+      volumes:
+        - name: data
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}'
+            {{- end }}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperclip
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paperclip
+spec:
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+  selector:
+    io.kompose.service: paperclip
