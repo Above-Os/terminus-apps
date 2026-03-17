@@ -1,21 +1,35 @@
-olaresManifest.version: '0.10.0'
+---
+olaresManifest.version: '0.11.0'
 olaresManifest.type: app
+apiVersion: 'v2'
 metadata:
   name: falco
   description: Cloud Native Runtime Security tool for detecting abnormal behavior.
   icon: https://app.cdn.olares.com/appstore/falco/icon.png
   appid: falco
-  version: '1.0.1'
+  version: '1.0.2'
   title: Falco
   categories:
   - Developer Tools
   - Utilities
+entrances:
+- authLevel: internal
+  host: falcoclient
+  icon: https://app.cdn.olares.com/appstore/falco/icon.png
+  name: falco
+  openMethod: window
+  port: 2802
+  title: Falco
 permission:
   appData: true
   appCache: true
 spec:
   versionName: '0.43.0'
   fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Only one service will be installed across the entire Olares system. However, every user still needs to install a desktop entry to access and use the service installed by the Olares Admin.
+
+    ## OVERVIEW ##
     Falco is a cloud native runtime security tool for Linux operating systems. It is designed to detect and alert on abnormal behavior and potential security threats in real-time.
 
     At its core, Falco is a kernel monitoring and detection agent that observes events, such as syscalls, based on custom rules. Falco can enhance these events by integrating metadata from the container runtime and Kubernetes.
@@ -59,24 +73,47 @@ spec:
   license:
   - text: Apache-2.0
     url: https://github.com/falcosecurity/falco/blob/master/LICENSE
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   requiredMemory: 512Mi
   limitedMemory: 4Gi
   requiredDisk: 256Mi
   limitedDisk: 2Gi
   requiredCpu: 0.5
   limitedCpu: 4
+  onlyAdmin: true
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 256Mi
+  requiredDisk: 1Mi
+  limitedDisk: 100Mi
+  requiredCpu: 10m
+  limitedCpu: 100m
+  {{- end }}
   supportArch:
   - amd64
   - arm64
+  subCharts:
+  - name: falcoserver
+    shared: true
+  - name: falco
+  runAsUser: true
 options:
   dependencies:
   - name: olares
-    type: system
     version: '>=1.10.1-0'
-entrances:
-- name: falco
-  port: 2802
-  host: falco-webui
-  title: Falco
-  icon: https://app.cdn.olares.com/appstore/falco/icon.png
-  openMethod: window
+    type: system
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- else }}
+  - name: falco
+    type: application
+    version: '>=1.0.2'
+    mandatory: true
+{{- end }}
+  appScope:
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+    - falco
+{{- else }}
+    clusterScoped: false
+{{- end }}
