@@ -1,0 +1,298 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-http-output
+  namespace: {{ .Release.Namespace }}
+data:
+  http_output.yml: |
+    json_output: true
+    json_include_output_property: true
+    http_output:
+      enabled: true
+      url: http://falco-sidekick:2801
+      insecure: true
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: falco
+  name: falco
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: falco
+    spec:
+      containers:
+        - name: falco
+          image: "docker.io/falcosecurity/falco:0.43.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - /usr/bin/falco
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - SYS_ADMIN
+                - SYS_RESOURCE
+                - SYS_PTRACE
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - mountPath: /host/proc
+              name: proc
+              readOnly: true
+            - mountPath: /host/etc
+              name: etc
+              readOnly: true
+            - mountPath: /sys/kernel/debug
+              name: debugfs
+              readOnly: true
+            - mountPath: /dev
+              name: dev
+            - mountPath: /etc/falco/config.d/http_output.yml
+              name: falco-config
+              subPath: http_output.yml
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: etc
+          hostPath:
+            path: /etc
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: falco-config
+          configMap:
+            name: falco-http-output
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: falco-sidekick
+  name: falco-sidekick
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco-sidekick
+  template:
+    metadata:
+      labels:
+        app: falco-sidekick
+    spec:
+      containers:
+        - name: sidekick
+          image: "docker.io/falcosecurity/falcosidekick:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 2801
+          env:
+            - name: WEBUI_URL
+              value: "http://falco-webui:2802"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 2801
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 2801
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: falco-webui
+  name: falco-webui
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco-webui
+  template:
+    metadata:
+      labels:
+        app: falco-webui
+    spec:
+      containers:
+        - name: webui
+          image: "docker.io/falcosecurity/falcosidekick-ui:2.2.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - '-r'
+            - 'falco-redis:6379'
+            - '-d'
+          ports:
+            - containerPort: 2802
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 2802
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 2802
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: falco-redis
+  name: falco-redis
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco-redis
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: falco-redis
+    spec:
+      containers:
+        - name: redis
+          image: "docker.io/redis/redis-stack:7.2.0-v11"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /data
+              name: redis-data
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: redis-data
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/redis'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/redis'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/redis'
+            {{- end }}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-sidekick
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      port: 2801
+      targetPort: 2801
+  selector:
+    app: falco-sidekick
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-webui
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      port: 2802
+      targetPort: 2802
+  selector:
+    app: falco-webui
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-redis
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+  selector:
+    app: falco-redis
