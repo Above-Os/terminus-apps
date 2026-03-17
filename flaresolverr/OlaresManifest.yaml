@@ -1,0 +1,113 @@
+olaresManifest.version: '0.11.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+metadata:
+  name: flaresolverr
+  description: Proxy server to bypass Cloudflare and DDoS-GUARD protection.
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  appid: flaresolverr
+  version: '1.0.0'
+  title: FlareSolverr
+  categories:
+  - Developer Tools
+  - Utilities
+permission:
+  appData: true
+  appCache: true
+sharedEntrances:
+- name: flaresolverr
+  host: sharedentrances-flaresolverr
+  port: 0
+  title: FlareSolverr
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  invisible: true
+  authLevel: internal
+entrances:
+- name: flaresolverrclient
+  port: 8080
+  host: flaresolverrclient
+  title: FlareSolverr
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  authLevel: private
+  invisible: true
+spec:
+  versionName: '3.4.6'
+  fullDescription: |
+    FlareSolverr is a proxy server to bypass Cloudflare and DDoS-GUARD protection.
+
+    # How it works
+    FlareSolverr starts a proxy server, and it waits for user requests in an idle state using few resources. When some request arrives, it uses Selenium with the undetected-chromedriver to create a web browser (Chrome). It opens the URL with user parameters and waits until the Cloudflare challenge is solved (or timeout). The HTML code and the cookies are sent back to the user, and those cookies can be used to bypass Cloudflare using other HTTP clients.
+
+    # Features
+    * Bypass Cloudflare protection automatically
+    * Bypass DDoS-GUARD protection
+    * Support for GET and POST requests
+    * Session management for persistent browser instances
+    * Cookie extraction for reuse with other HTTP clients
+    * Configurable timeout for challenge solving
+    * Proxy support (HTTP, SOCKS4, SOCKS5)
+    * Prometheus metrics endpoint
+    * Low resource usage in idle state
+    * Screenshot capture support
+    * Disable media loading option for bandwidth saving
+  upgradeDescription: |
+    Upgrade to v3.4.6
+
+    Changes:
+    * Add disable image, CSS, fonts option with CDP (#1626)
+
+    Full release notes at: https://github.com/FlareSolverr/FlareSolverr/releases/tag/v3.4.6
+  developer: FlareSolverr
+  website: https://github.com/FlareSolverr/FlareSolverr
+  sourceCode: https://github.com/FlareSolverr/FlareSolverr
+  submitter: Olares
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://github.com/FlareSolverr/FlareSolverr#readme
+  license:
+  - text: MIT
+    url: https://github.com/FlareSolverr/FlareSolverr/blob/master/LICENSE
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  requiredMemory: 200Mi
+  limitedMemory: 1Gi
+  requiredDisk: 128Mi
+  limitedDisk: 512Mi
+  requiredCpu: 0.2
+  limitedCpu: 2
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 256Mi
+  requiredDisk: 1Mi
+  limitedDisk: 100Mi
+  requiredCpu: 10m
+  limitedCpu: 100m
+  {{- end }}
+  supportArch:
+  - amd64
+  - arm64
+  subCharts:
+  - name: flaresolverrserver
+    shared: true
+  - name: flaresolverr
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.3-0'
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- else }}
+  - name: flaresolverr
+    type: application
+    version: '>=1.0.0'
+    mandatory: true
+{{- end }}
+  appScope:
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+    - flaresolverr
+{{- else }}
+    clusterScoped: false
+{{- end }}
