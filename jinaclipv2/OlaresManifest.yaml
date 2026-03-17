@@ -4,17 +4,17 @@ olaresManifest.type: app
 apiVersion: 'v2'
 
 metadata:
-  name: jinaclipv2openvinoigpu
+  name: jinaclipv2
   icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
-  description: Jina CLIP v2 embedding service (OpenVINO iGPU).
-  appid: jinaclipv2openvinoigpu
-  title: Jina CLIP v2 (OpenVINO iGPU)
+  description: Jina CLIP v2 embedding service (auto select OpenVINO iGPU / ONNX CPU).
+  appid: jinaclipv2
+  title: Jina CLIP v2
   version: '1.0.0'
   categories:
     - AI
 
 sharedEntrances:
-  - name: jinaclipv2openvinoigpu
+  - name: jinaclipv2
     host: sharedentrances-api
     port: 0
     tile: Jina CLIP v2
@@ -32,19 +32,26 @@ entrances:
     title: Jina CLIP v2
 
 spec:
-  versionName: 'wangzhong/jina-clip-v2-split-openvino'
+  versionName: 'jina-clip-v2'
   fullDescription: |
     ## IMPORTANT NOTE ##
     This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
 
-    ## MODEL ##
-    - Repo: wangzhong/jina-clip-v2-split-openvino
-    - Engine: OpenVINO (iGPU)
-    - API: POST /api/text/embed, POST /api/image/embed
+    ## ENGINE AUTO SELECT ##
+    - Intel iGPU: OpenVINO IR backend
+    - Others: ONNX Runtime (CPU) backend
+
+    ## MODEL REPOS ##
+    - OpenVINO: wangzhong/jina-clip-v2-split-openvino
+    - ONNX: wangzhong/jina-clip-v2-split-onnx
+
+    ## API ##
+    - POST /api/text/embed
+    - POST /api/image/embed
 
   developer: Jina AI
   website: https://jina.ai/
-  sourceCode: https://huggingface.co/wangzhong/jina-clip-v2-split-openvino
+  sourceCode: https://huggingface.co/wangzhong/jina-clip-v2-split-onnx
   submitter: Olares
   locale:
     - en-US
@@ -72,9 +79,9 @@ spec:
     - amd64
     - arm64
   subCharts:
-  - name: jinaclipv2openvinoigpuserver
+  - name: jinaclipv2server
     shared: true
-  - name: jinaclipv2openvinoigpu
+  - name: jinaclipv2
 
 permission:
   appData: true
@@ -87,7 +94,7 @@ options:
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
     clusterScoped: true
     appRef:
-      - jinaclipv2openvinoigpu
+      - jinaclipv2
   {{- else }}
     clusterScoped: false
   {{- end }}
@@ -97,7 +104,7 @@ options:
       type: system
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   {{- else }}
-    - name: jinaclipv2openvinoigpu
+    - name: jinaclipv2
       type: application
       version: '>=1.0.0'
       mandatory: true
@@ -105,6 +112,17 @@ options:
 
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
+  - envName: DEVICE_TYPE
+    type: string
+    required: true
+    editable: true
+    applyOnChange: true
+    description: "RUN the model on CPU or IntelIgpu"
+    options:
+       - title: "CPU"
+         value: "cpu"
+       - title: "IntelIgpu"
+         value: "IntelIgpu"
   - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: true
     applyOnChange: true
