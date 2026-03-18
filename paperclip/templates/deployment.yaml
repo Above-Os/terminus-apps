@@ -1,0 +1,284 @@
+{{- $paperclipDomainENV := split  ","  .Values.domain.paperclip -}}
+{{- $paperclipDomain := index $paperclipDomainENV "_0" -}}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: paperclip
+  name: paperclip
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: paperclip
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: paperclip
+    spec:
+      initContainers:
+      - name: init-permissions
+        image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        imagePullPolicy: IfNotPresent
+        command:
+          - sh
+          - '-c'
+          - |
+            mkdir -p /paperclip/instances/default/logs
+            mkdir -p /paperclip/instances/default/data/storage
+            mkdir -p /paperclip/instances/default/secrets
+            cat > /paperclip/instances/default/config.json << 'CFGEOF'
+            {
+              "$meta": {
+                "version": 1,
+                "updatedAt": "2026-01-01T00:00:00.000Z",
+                "source": "onboard"
+              },
+              "database": {
+                "mode": "postgres",
+                "connectionString": "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}",
+                "embeddedPostgresDataDir": "/paperclip/instances/default/db",
+                "embeddedPostgresPort": 54329,
+                "backup": {
+                  "enabled": false,
+                  "intervalMinutes": 60,
+                  "retentionDays": 30,
+                  "dir": "/paperclip/instances/default/data/backups"
+                }
+              },
+              "logging": {
+                "mode": "file",
+                "logDir": "/paperclip/instances/default/logs"
+              },
+              "server": {
+                "deploymentMode": "authenticated",
+                "exposure": "private",
+                "host": "0.0.0.0",
+                "port": 3100,
+                "allowedHostnames": ["{{ $paperclipDomain }}"],
+                "serveUi": true
+              },
+              "auth": {
+                "baseUrlMode": "explicit",
+                "disableSignUp": false,
+                "publicBaseUrl": "https://{{ $paperclipDomain }}"
+              },
+              "storage": {
+                "provider": "local_disk",
+                "localDisk": {
+                  "baseDir": "/paperclip/instances/default/data/storage"
+                },
+                "s3": {
+                  "bucket": "paperclip",
+                  "region": "us-east-1",
+                  "prefix": "",
+                  "forcePathStyle": false
+                }
+              },
+              "secrets": {
+                "provider": "local_encrypted",
+                "strictMode": false,
+                "localEncrypted": {
+                  "keyFilePath": "/paperclip/instances/default/secrets/master.key"
+                }
+              }
+            }
+            CFGEOF
+            chown -R 1000:1000 /paperclip
+        resources: {}
+        volumeMounts:
+          - name: data
+            mountPath: /paperclip
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        securityContext:
+          runAsUser: 0
+      - name: wait-for-postgres
+        image: "docker.io/beclab/wait-for:0.1.0"
+        args:
+          - '-it'
+          - >-
+            {{ .Values.postgres.host }}:{{ .Values.postgres.port }}
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+      containers:
+        - name: paperclip
+          image: "beclab/paperclip:v0.0.1"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3100
+          command:
+            - /bin/sh
+            - '-c'
+            - |
+              node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js &
+              SERVER_PID=$!
+
+              echo "Waiting for server to be ready..."
+              for i in $(seq 1 60); do
+                if curl -sf http://127.0.0.1:3100 > /dev/null 2>&1; then
+                  echo "Server is ready."
+                  break
+                fi
+                sleep 2
+              done
+
+              echo "Checking if bootstrap is needed..."
+              BOOTSTRAP_OUTPUT=$(pnpm paperclipai auth bootstrap-ceo \
+                --base-url "https://{{ $paperclipDomain }}" 2>&1) || true
+              echo "$BOOTSTRAP_OUTPUT"
+
+              if echo "$BOOTSTRAP_OUTPUT" | grep -qi "already has an admin"; then
+                echo "Instance admin already exists."
+              else
+                INVITE_TOKEN=$(echo "$BOOTSTRAP_OUTPUT" | grep -oE 'pcp_bootstrap_[a-f0-9]+' | head -1)
+                if [ -z "$INVITE_TOKEN" ]; then
+                  echo "WARNING: Could not extract invite token."
+                else
+                  echo "=== Auto-bootstrapping instance admin ==="
+
+                  echo "Step 1: Registering admin user..."
+                  SIGNUP_RESP=$(curl -s -X POST http://127.0.0.1:3100/api/auth/sign-up/email \
+                    -H "Content-Type: application/json" \
+                    -d '{"name":"Admin","email":"admin@paperclip.local","password":"changeme123!"}' 2>&1) || true
+                  echo "Signup response: $SIGNUP_RESP"
+
+                  USER_ID=$(echo "$SIGNUP_RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).user.id)}catch{}})" 2>/dev/null)
+                  echo "User ID: $USER_ID"
+
+                  if [ -n "$USER_ID" ]; then
+                    echo "Step 2: Promoting user to instance admin via DB..."
+                    export INVITE_TOKEN USER_ID
+
+                    cat > /tmp/_bootstrap_admin.mjs << 'JSEOF'
+              import { createDb, instanceUserRoles, invites } from '@paperclipai/db';
+              import { eq } from 'drizzle-orm';
+              import { createHash } from 'node:crypto';
+              import { writeFileSync } from 'node:fs';
+
+              const db = createDb(process.env.DATABASE_URL);
+              const userId = process.env.USER_ID;
+              const token = process.env.INVITE_TOKEN;
+
+              try {
+                await db.insert(instanceUserRoles).values({
+                  userId: userId,
+                  role: 'instance_admin',
+                });
+                console.log('Inserted instance_admin role for user', userId);
+
+                const tokenHash = createHash('sha256').update(token).digest('hex');
+                const now = new Date();
+                await db.update(invites)
+                  .set({ acceptedAt: now, updatedAt: now })
+                  .where(eq(invites.tokenHash, tokenHash));
+                console.log('Marked invite as accepted');
+
+                writeFileSync('/paperclip/.admin_bootstrapped', 'done');
+                console.log('=== Instance admin created successfully ===');
+                console.log('Login: admin@paperclip.local / changeme123!');
+              } catch (err) {
+                console.error('DB bootstrap error:', err.message);
+              } finally {
+                process.exit(0);
+              }
+              JSEOF
+                    cp /tmp/_bootstrap_admin.mjs /app/cli/_bootstrap_admin.mjs
+                    node --import /app/cli/node_modules/tsx/dist/loader.mjs /app/cli/_bootstrap_admin.mjs 2>&1 || true
+                    rm -f /app/cli/_bootstrap_admin.mjs /tmp/_bootstrap_admin.mjs
+                  else
+                    echo "WARNING: Could not extract user ID from signup response."
+                  fi
+                fi
+              fi
+
+              wait $SERVER_PID
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3100"
+            - name: SERVE_UI
+              value: "true"
+            - name: PAPERCLIP_HOME
+              value: "/paperclip"
+            - name: PAPERCLIP_DEPLOYMENT_MODE
+              value: "authenticated"
+            - name: PAPERCLIP_DEPLOYMENT_EXPOSURE
+              value: "private"
+            - name: PAPERCLIP_PUBLIC_URL
+              value: "https://{{ $paperclipDomain }}"
+            - name: BETTER_AUTH_SECRET
+              value: "{{ .Release.Name }}-{{ .Release.Namespace }}-paperclip-secret"
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}"
+            - name: ANTHROPIC_API_KEY
+              value: ""
+            - name: PAPERCLIP_API_URL
+              value: "http://localhost:3100"
+            - name: PAPERCLIP_INTERNAL_URL
+              value: "http://localhost:3100"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          volumeMounts:
+            - mountPath: /paperclip
+              name: data
+          readinessProbe:
+            tcpSocket:
+              port: 3100
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: 3100
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+      volumes:
+        - name: data
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}'
+            {{- end }}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperclip
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paperclip
+spec:
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+  selector:
+    io.kompose.service: paperclip

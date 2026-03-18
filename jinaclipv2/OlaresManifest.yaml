@@ -1,0 +1,148 @@
+---
+olaresManifest.version: '0.10.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+
+metadata:
+  name: jinaclipv2
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+  description: Jina CLIP v2 embedding service (auto select OpenVINO iGPU / ONNX CPU).
+  appid: jinaclipv2
+  title: Jina CLIP v2
+  version: '1.0.0'
+  categories:
+    - AI
+
+sharedEntrances:
+  - name: jinaclipv2
+    host: sharedentrances-api
+    port: 0
+    tile: Jina CLIP v2
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+
+entrances:
+  - authLevel: internal
+    host: clipclient
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/gemma3-12B.png
+    name: clipclient
+    openMethod: window
+    port: 8080
+    title: Jina CLIP v2
+
+spec:
+  versionName: 'jina-clip-v2'
+  fullDescription: |
+    ## IMPORTANT NOTE ##
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    ## ENGINE AUTO SELECT ##
+    - Intel iGPU: OpenVINO IR backend
+    - Others: ONNX Runtime (CPU) backend
+
+    ## MODEL REPOS ##
+    - OpenVINO: wangzhong/jina-clip-v2-split-openvino
+    - ONNX: wangzhong/jina-clip-v2-split-onnx
+
+    ## API ##
+    - POST /api/text/embed
+    - POST /api/image/embed
+
+  developer: Jina AI
+  website: https://jina.ai/
+  sourceCode: https://huggingface.co/wangzhong/jina-clip-v2-split-onnx
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 6000m
+  requiredCpu: 500m
+  requiredDisk: 5Gi
+  limitedDisk: 50Gi
+  limitedMemory: 12Gi
+  requiredMemory: 3Gi
+  requiredGpu: 0
+  limitedGpu: 0
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  subCharts:
+  - name: jinaclipv2server
+    shared: true
+  - name: jinaclipv2
+
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - jinaclipv2
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.3-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: jinaclipv2
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+envs:
+  - envName: DEVICE_TYPE
+    type: string
+    required: true
+    editable: true
+    applyOnChange: true
+    description: "RUN the model on CPU or IntelIgpu"
+    options:
+       - title: "CPU"
+         value: "cpu"
+       - title: "IntelIgpu"
+         value: "IntelIgpu"
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: OPENVINO_GPU_DEVICE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "GPU.0"
+  - envName: OPENVINO_GPU_QUEUE_THROTTLE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "LOW"
+{{- end }}

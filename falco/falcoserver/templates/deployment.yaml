@@ -1,0 +1,197 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: falcoserver
+  name: falcoserver
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: falcoserver
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: falcoserver
+    spec:
+      containers:
+        - name: falco
+          image: "docker.io/falcosecurity/falco:0.43.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - /usr/bin/falco
+            - -o
+            - json_output=true
+            - -o
+            - json_include_output_property=true
+            - -o
+            - http_output.enabled=true
+            - -o
+            - http_output.url=http://localhost:2801/
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - SYS_ADMIN
+                - SYS_RESOURCE
+                - SYS_PTRACE
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - mountPath: /host/proc
+              name: proc
+              readOnly: true
+            - mountPath: /host/etc
+              name: etc
+              readOnly: true
+            - mountPath: /sys/kernel/debug
+              name: debugfs
+              readOnly: true
+            - mountPath: /dev
+              name: dev
+
+        - name: sidekick
+          image: "docker.io/falcosecurity/falcosidekick:2.33.0"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 2801
+          env:
+            - name: WEBUI_URL
+              value: "http://localhost:2802"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 2801
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 2801
+            initialDelaySeconds: 10
+            periodSeconds: 15
+
+        - name: webui
+          image: "docker.io/falcosecurity/falcosidekick-ui:2.2.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - '-r'
+            - 'localhost:6379'
+            - '-d'
+          ports:
+            - containerPort: 2802
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 2802
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 2802
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+
+        - name: redis
+          image: "docker.io/redis/redis-stack:7.2.0-v11"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /data
+              name: redis-data
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: etc
+          hostPath:
+            path: /etc
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: redis-data
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/redis'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/redis'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/redis'
+            {{- end }}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-webui
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      port: 2802
+      targetPort: 2802
+  selector:
+    io.kompose.service: falcoserver
+{{- end }}

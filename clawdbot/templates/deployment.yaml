@@ -30,69 +30,28 @@ spec:
 
       initContainers:
         - name: init-install-brew
-          image: "beclab/debian:bookworm-slim"
+          image: "beclab/harveyff-openclaw-brew-base:2026.3.1"
           securityContext:
             runAsUser: 0
-          env:
-            - name: HOMEBREW_PREFIX
-              value: /home/linuxbrew/.linuxbrew
-            - name: HOMEBREW_NO_AUTO_UPDATE
-              value: "1"
           command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail
-
-              BREW="${HOMEBREW_PREFIX}/bin/brew"
-
-              if [ -x "$BREW" ]; then
-                echo "[init-brew] brew already installed, skip"
-                chown -R 1000:1000 /home/linuxbrew
-                exit 0
+              if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+                echo "[init-brew] brew already on volume, skip"
+              else
+                echo "[init-brew] copying pre-built brew to volume..."
+                cp -a /brew-staging/.linuxbrew /home/linuxbrew/.linuxbrew
+                echo "[init-brew] done"
               fi
-
-              echo "[init-brew] installing build dependencies..."
-              apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                ca-certificates curl file git build-essential procps
-
-              echo "[init-brew] bootstrapping brew via git clone..."
-              mkdir -p "${HOMEBREW_PREFIX}/Homebrew"
-              BREW_GITHUB="https://github.com/Homebrew/brew"
-              BREW_MIRROR="https://mirrors.ustc.edu.cn/brew.git"
-              git clone --depth=1 "$BREW_GITHUB" "${HOMEBREW_PREFIX}/Homebrew" \
-                || git clone --depth=1 "$BREW_MIRROR" "${HOMEBREW_PREFIX}/Homebrew"
-              mkdir -p "${HOMEBREW_PREFIX}/bin"
-              ln -sf ../Homebrew/bin/brew "${HOMEBREW_PREFIX}/bin/brew"
-              mkdir -p "${HOMEBREW_PREFIX}/etc" \
-                       "${HOMEBREW_PREFIX}/include" \
-                       "${HOMEBREW_PREFIX}/lib" \
-                       "${HOMEBREW_PREFIX}/opt" \
-                       "${HOMEBREW_PREFIX}/sbin" \
-                       "${HOMEBREW_PREFIX}/share" \
-                       "${HOMEBREW_PREFIX}/var/homebrew/linked" \
-                       "${HOMEBREW_PREFIX}/Cellar"
-
-              id -u 1000 &>/dev/null || useradd -m -u 1000 -s /bin/bash brewuser
               chown -R 1000:1000 /home/linuxbrew
-
-              chown -R 1000:1000 /home/linuxbrew
-
-              runuser -u "$(id -nu 1000)" -- bash -c "
-                export PATH=\"${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:\${PATH}\"
-                export HOMEBREW_NO_AUTO_UPDATE=1
-                brew --version
-              "
-
-              echo "[init-brew] done — skills can 'brew install' deps on demand"
           resources: {}
           volumeMounts:
             - mountPath: /home/linuxbrew
-              name: deps-pvc
+              name: brew-volume
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
-
         - name: init-chmod-data
           image: "beclab/aboveos-busybox:1.37.0"
           command:
@@ -187,7 +146,7 @@ spec:
               readOnly: true
 
             - mountPath: /home/linuxbrew
-              name: deps-pvc
+              name: brew-volume
 
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
             - mountPath: /home/userdata/home/
@@ -215,11 +174,9 @@ spec:
             path: "{{ .Values.userspace.appData }}/node"
             type: DirectoryOrCreate
           name: app-data-node
-
-        # Change #3 only: store deps under appData via hostPath (no PVC reference)
-        - name: deps-pvc
+        - name: brew-volume
           hostPath:
-            path: "{{ .Values.userspace.appData }}/deps"
+            path: "{{ .Values.userspace.appData }}/brew"
             type: DirectoryOrCreate
 
         - name: default-openclaw

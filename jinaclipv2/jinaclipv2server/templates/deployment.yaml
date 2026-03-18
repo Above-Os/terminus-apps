@@ -1,0 +1,250 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- $clipDomainENV := split "," .Values.domain.clipclient -}}
+{{- $clipDomain := index $clipDomainENV "_0" -}}
+{{- $deviceType := lower (default "cpu" .Values.olaresEnv.DEVICE_TYPE) -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clip
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: clip
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: clip
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: clip
+    spec:
+      containers:
+        - name: embed
+{{- if eq $deviceType "inteligpu" }}
+          image: "docker.io/beclab/jina-clip-v2-openvinoigpu-ubuntu22.04:v0.0.2"
+{{- else }}
+          image: "docker.io/beclab/jina-clip-v2-onnxcpu-ubuntu22.04:v0.0.2"
+{{- end }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+{{- if eq $deviceType "inteligpu" }}
+              DONE_FILE="/models/openvino/.jina-clip-v2-split-openvino.done"
+{{- else }}
+              DONE_FILE="/models/onnx/.jina-clip-v2-split-onnx.done"
+{{- end }}
+              echo "[embed-wait] Waiting for $DONE_FILE ..."
+              while [ ! -f "$DONE_FILE" ]; do
+                echo "[embed-wait] Model not ready, sleeping..."
+                sleep 10
+              done
+              echo "[embed-start] Starting embed server..."
+{{- if eq $deviceType "inteligpu" }}
+              exec /usr/local/bin/embed_openvino
+{{- else }}
+              exec /usr/local/bin/embed_onnx
+{{- end }}
+          env:
+            - name: PORT
+              value: "8080"
+{{- if eq $deviceType "inteligpu" }}
+            - name: OPENVINO_IR_DIR
+              value: "/models/openvino/openvino"
+            - name: OPENVINO_CACHE_DIR
+              value: "/tmp/ov_cache_embed_api"
+{{- with .Values.olaresEnv }}
+{{- if .OPENVINO_GPU_DEVICE }}
+            - name: OPENVINO_GPU_DEVICE
+              value: "{{ .OPENVINO_GPU_DEVICE }}"
+{{- else }}
+            - name: OPENVINO_GPU_DEVICE
+              value: "GPU.0"
+{{- end }}
+{{- if .OPENVINO_GPU_QUEUE_THROTTLE }}
+            - name: OPENVINO_GPU_QUEUE_THROTTLE
+              value: "{{ .OPENVINO_GPU_QUEUE_THROTTLE }}"
+{{- else }}
+            - name: OPENVINO_GPU_QUEUE_THROTTLE
+              value: "LOW"
+{{- end }}
+{{- if .TEXT_IDLE_UNLOAD_SECS }}
+            - name: TEXT_IDLE_UNLOAD_SECS
+              value: "{{ .TEXT_IDLE_UNLOAD_SECS }}"
+{{- end }}
+{{- if .IMAGE_IDLE_UNLOAD_SECS }}
+            - name: IMAGE_IDLE_UNLOAD_SECS
+              value: "{{ .IMAGE_IDLE_UNLOAD_SECS }}"
+{{- end }}
+{{- else }}
+            - name: OPENVINO_GPU_DEVICE
+              value: "GPU.0"
+            - name: OPENVINO_GPU_QUEUE_THROTTLE
+              value: "LOW"
+{{- end }}
+{{- else }}
+            - name: ONNX_MODEL_DIR
+              value: "/models/onnx/onnx"
+{{- with .Values.olaresEnv }}
+{{- if .TEXT_IDLE_UNLOAD_SECS }}
+            - name: TEXT_IDLE_UNLOAD_SECS
+              value: "{{ .TEXT_IDLE_UNLOAD_SECS }}"
+{{- end }}
+{{- if .IMAGE_IDLE_UNLOAD_SECS }}
+            - name: IMAGE_IDLE_UNLOAD_SECS
+              value: "{{ .IMAGE_IDLE_UNLOAD_SECS }}"
+{{- end }}
+{{- end }}
+{{- end }}
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+{{- if eq $deviceType "inteligpu" }}
+              cpu: "4"
+              memory: 8Gi
+{{- else }}
+              cpu: "2"
+              memory: 4Gi
+{{- end }}
+          volumeMounts:
+            - name: model
+              mountPath: /models
+{{- if eq $deviceType "inteligpu" }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+          securityContext:
+            privileged: true
+{{- end }}
+
+        - name: download-model
+          image: "docker.io/beclab/harveyff-hf-downloader:v0.1.0"
+          env:
+            - name: HF_ENDPOINT
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
+            - name: HF_TOKEN
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
+            - name: VLLM_PROXY_TARGET
+              value: http://localhost:8080
+            - name: MODEL_NAME
+              value: /models
+            - name: APP_URL
+              value: "https://{{ $clipDomain }}"
+          args:
+            - "--repo"
+{{- if eq $deviceType "inteligpu" }}
+            - "wangzhong/jina-clip-v2-split-openvino"
+{{- else }}
+            - "wangzhong/jina-clip-v2-split-onnx"
+{{- end }}
+            - "--ref"
+            - "main"
+            - "--outdir"
+{{- if eq $deviceType "inteligpu" }}
+            - "/models/openvino"
+{{- else }}
+            - "/models/onnx"
+{{- end }}
+            - "--static"
+            - "/app/static"
+            - "--port"
+            - "8090"
+            - "--probe-url"
+            - "/health"
+            - "--done-name"
+{{- if eq $deviceType "inteligpu" }}
+            - ".jina-clip-v2-split-openvino.done"
+{{- else }}
+            - ".jina-clip-v2-split-onnx.done"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: 8090
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+            initialDelaySeconds: 5
+            timeoutSeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          volumeMounts:
+            - name: model
+              mountPath: /models
+          resources:
+            requests:
+              cpu: 100m
+              memory: 500Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      volumes:
+        - name: model
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Huggingface/jina-clip-v2"
+            type: DirectoryOrCreate
+{{- if eq $deviceType "inteligpu" }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+{{- end }}
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: clip
+spec:
+  selector:
+    io.kompose.service: clip
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: clip
+spec:
+  selector:
+    io.kompose.service: clip
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+{{- end }}

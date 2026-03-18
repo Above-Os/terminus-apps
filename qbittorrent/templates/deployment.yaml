@@ -1,4 +1,4 @@
-﻿apiVersion: v1
+apiVersion: v1
 data:
   nginx.conf: |
     stream {
@@ -40,12 +40,16 @@ data:
     mkdir -p "$(dirname "$confFile")"
     touch "$confFile"
 
+    mkdir -p /home/Downloads/qBittorrent
+    chown -R 1000:1000 /home/Downloads/qBittorrent
+
     grep -q "^\[Preferences\]" "$confFile" || echo "[Preferences]" >> "$confFile"
     grep -q "^WebUI\\\\CSRFProtection=" "$confFile" || echo "WebUI\\CSRFProtection=false" >> "$confFile"
     grep -q "^WebUI\\\\HostHeaderValidation=" "$confFile" || echo "WebUI\\HostHeaderValidation=false" >> "$confFile"
     grep -q "^WebUI\\\\Authentication=" "$confFile" || echo "WebUI\\Authentication=false" >> "$confFile"
     grep -q "^WebUI\\\\LocalHostAuth=" "$confFile" || echo "WebUI\\LocalHostAuth=false" >> "$confFile"
-    echo "qBittorrent CSRF and HostHeaderValidation ensured"
+    grep -q "^Downloads\\\\SavePath=" "$confFile" || echo "Downloads\\SavePath=/home/Downloads/qBittorrent" >> "$confFile"
+    echo "qBittorrent config ensured"
 kind: ConfigMap
 metadata:
   name: init-config
@@ -128,6 +132,8 @@ spec:
           volumeMounts:
             - name: appdata
               mountPath: /appData
+            - name: home
+              mountPath: /home
             - name: init-config 
               mountPath: /init.sh
               subPath: init.sh
