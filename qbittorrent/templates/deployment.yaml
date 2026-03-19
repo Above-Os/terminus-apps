@@ -40,15 +40,11 @@ data:
     mkdir -p "$(dirname "$confFile")"
     touch "$confFile"
 
-    mkdir -p /home/Downloads/qBittorrent
-    chown -R 1000:1000 /home/Downloads/qBittorrent
-
     grep -q "^\[Preferences\]" "$confFile" || echo "[Preferences]" >> "$confFile"
     grep -q "^WebUI\\\\CSRFProtection=" "$confFile" || echo "WebUI\\CSRFProtection=false" >> "$confFile"
     grep -q "^WebUI\\\\HostHeaderValidation=" "$confFile" || echo "WebUI\\HostHeaderValidation=false" >> "$confFile"
     grep -q "^WebUI\\\\Authentication=" "$confFile" || echo "WebUI\\Authentication=false" >> "$confFile"
     grep -q "^WebUI\\\\LocalHostAuth=" "$confFile" || echo "WebUI\\LocalHostAuth=false" >> "$confFile"
-    grep -q "^Downloads\\\\SavePath=" "$confFile" || echo "Downloads\\SavePath=/home/Downloads/qBittorrent" >> "$confFile"
     echo "qBittorrent config ensured"
 kind: ConfigMap
 metadata:
@@ -77,6 +73,10 @@ spec:
           hostPath:
             type: Directory
             path: {{ .Values.userspace.userData }}
+        - name: qbt-downloads
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.userData }}/Downloads/qBittorrent
         - name: appdata
           hostPath:
             type: DirectoryOrCreate
@@ -110,7 +110,7 @@ spec:
             - sh
             - '-c'
             - |
-              chown -R 1000:1000 /home; chown -R 1000:1000 /appdata
+              chown -R 1000:1000 /home; chown -R 1000:1000 /appdata; chown -R 1000:1000 /downloads
           resources: {}
           imagePullPolicy: IfNotPresent
           volumeMounts:
@@ -118,6 +118,8 @@ spec:
               mountPath: /home
             - name: appdata
               mountPath: /appdata
+            - name: qbt-downloads
+              mountPath: /downloads
           securityContext:
             runAsUser: 0
         - name: init-qbittorrent-config
@@ -183,6 +185,8 @@ spec:
               mountPath: /home
             - name: appdata
               mountPath: /config/qBittorrent
+            - name: qbt-downloads
+              mountPath: /config/Downloads
           livenessProbe:
             tcpSocket:
               port: 8080
