@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: freqtrade-strategy
+  namespace: {{ .Release.Namespace }}
+data:
+  sample_strategy.py: |
+    # Minimal SampleStrategy for Freqtrade (spot, long only)
+    from pandas import DataFrame
+    from freqtrade.strategy import IStrategy
+
+    class SampleStrategy(IStrategy):
+        INTERFACE_VERSION = 3
+        timeframe = "5m"
+        can_short = False
+        minimal_roi = {"0": 0.04, "30": 0.02, "60": 0.01}
+        stoploss = -0.10
+        startup_candle_count = 30
+
+        def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+            return dataframe
+
+        def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+            dataframe.loc[:, "enter_long"] = 0
+            return dataframe
+
+        def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+            dataframe.loc[:, "exit_long"] = 0
+            return dataframe
