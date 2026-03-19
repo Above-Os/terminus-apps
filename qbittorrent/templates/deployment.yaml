@@ -45,6 +45,9 @@ data:
     grep -q "^WebUI\\\\HostHeaderValidation=" "$confFile" || echo "WebUI\\HostHeaderValidation=false" >> "$confFile"
     grep -q "^WebUI\\\\Authentication=" "$confFile" || echo "WebUI\\Authentication=false" >> "$confFile"
     grep -q "^WebUI\\\\LocalHostAuth=" "$confFile" || echo "WebUI\\LocalHostAuth=false" >> "$confFile"
+
+    grep -q "^Downloads\\\\SavePath=" "$confFile" || echo "Downloads\\SavePath=/downloads/home/Downloads/qBittorrent" >> "$confFile"
+
     echo "qBittorrent config ensured"
 kind: ConfigMap
 metadata:
@@ -69,14 +72,14 @@ spec:
         app: {{ .Release.Name }}
     spec:
       volumes:
-        - name: home
-          hostPath:
-            type: Directory
-            path: {{ .Values.userspace.userData }}
-        - name: qbt-downloads
+        - name: external-downloads
           hostPath:
             type: DirectoryOrCreate
-            path: {{ .Values.userspace.userData }}/Downloads/qBittorrent
+            path: "{{ .Values.sharedlib }}"
+        - name: home-downloads
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.userData }}
         - name: appdata
           hostPath:
             type: DirectoryOrCreate
@@ -110,16 +113,17 @@ spec:
             - sh
             - '-c'
             - |
-              chown -R 1000:1000 /home; chown -R 1000:1000 /appdata; chown -R 1000:1000 /downloads
+              mkdir -p /home-data/Downloads/qBittorrent
+              chown -R 1000:1000 /home-data; chown -R 1000:1000 /appdata; chown -R 1000:1000 /external-data
           resources: {}
           imagePullPolicy: IfNotPresent
           volumeMounts:
-            - name: home
-              mountPath: /home
+            - name: home-downloads
+              mountPath: /home-data
             - name: appdata
               mountPath: /appdata
-            - name: qbt-downloads
-              mountPath: /downloads
+            - name: external-downloads
+              mountPath: /external-data
           securityContext:
             runAsUser: 0
         - name: init-qbittorrent-config
@@ -134,9 +138,7 @@ spec:
           volumeMounts:
             - name: appdata
               mountPath: /appData
-            - name: home
-              mountPath: /home
-            - name: init-config 
+            - name: init-config
               mountPath: /init.sh
               subPath: init.sh
           securityContext:
@@ -181,12 +183,12 @@ spec:
             - name: TZ
               value: UTC
           volumeMounts:
-            - name: home
-              mountPath: /home
+            - name: home-downloads
+              mountPath: /downloads/home
+            - name: external-downloads
+              mountPath: /downloads/external
             - name: appdata
               mountPath: /config/qBittorrent
-            - name: qbt-downloads
-              mountPath: /config/Downloads
           livenessProbe:
             tcpSocket:
               port: 8080
