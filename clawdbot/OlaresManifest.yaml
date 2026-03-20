@@ -6,7 +6,7 @@ metadata:
   description: Personal AI Assistant with Multi-channel Inbox Support
   appid: clawdbot
   title: OpenClaw
-  version: 0.1.10
+  version: 0.1.26
   categories:
   - Productivity_v112
   - Developer Tools
@@ -26,7 +26,7 @@ entrances:
   title: Control UI
   openMethod: window
 spec:
-  versionName: '2026.2.22'
+  versionName: '2026.3.12'
   promoteImage:
   - https://app.cdn.olares.com/appstore/clawdbot/1.webp
   - https://app.cdn.olares.com/appstore/clawdbot/2.webp
@@ -65,29 +65,21 @@ spec:
     Persistent Memory
     - Stores conversation history and context locally as markdown files.
   upgradeDescription: |
-    upgrade to version 2026.2.22
+    Deployment changes: The CLI and Gateway are now deployed in separate containers, ensuring that the CLI remains unaffected when the Gateway restarts.
     
-    New Features & Core Updates
-    Added official support for the Mistral provider, including memory embeddings and voice capabilities.
-    Introduced an optional built-in auto-updater​ for package-based installations (disabled by default).
-    Added a native Synology Chat​ channel plugin with webhook support and configuration controls.
+    Application upgraded to version 2026.3.12
 
-    Enhanced Multilingual Search
-    Improved Full-Text Search (FTS) with stop-word filtering and query expansion for Spanish, Portuguese, Japanese, Korean, and Arabic, leading to better conversational memory recall in these languages.
+    Major changes:
+    Control UI/Dashboard Rewrite: Introduced a new modular interface with a command palette, mobile optimization, and enhanced chat tools.
+    Unified Fast Mode: Added configurable session-level fast toggles for both OpenAI/GPT-5.4 and Anthropic/Claude models.
+    Core Security Hardening:
+    - Device pairing switched to short-lived bootstrap tokens, removing embedded shared credentials.
+    - Disabled implicit auto-loading of workspace plugins, requiring explicit trust for execution.
+    Provider Plugin Architecture Expansion: Migrated Ollama, vLLM, and SGLang to the new provider-plugin architecture for more modular core wiring.
+    New Kubernetes Support: Added a starter installation path for Kubernetes with raw manifests and deployment docs.
+    Enhanced Agent Control: Introduced sessions_yieldfunction, allowing orchestrators to immediately end the current turn and carry a payload to the next.
 
-    Security Hardening & Fixes
-    Multiple security enhancements across command execution, media handling, configuration validation, and authentication to prevent potential bypasses and leaks.
-    Key fixes include: redacting sensitive data in CLI output, hardening shell and environment variable handling for exectools, and improving allowlist matching for various channels (Discord, Feishu, Slack).
-    
-    System Optimizations & Key Fixes
-    Cron (Scheduled Jobs): Improved reliability, concurrency, timeout handling, and status tracking.
-    Gateway & Authentication: Refined device pairing logic, credential resolution, and fixed "pairing required" loops for local clients.
-    WebChat & Control UI: Optimized chat refresh performance, session management, and sanitized display of internal control tags.
-    Channel Improvements: Multiple fixes for Telegram, Slack, and Discord plugins regarding threading, media handling, and stability.
-    Agents & Memory: Better error handling, context management, and fixes for providers like OpenRouter and QMD.
-    General Stability: Numerous fixes for plugins, hooks, configuration loading, and network error recovery.
-
-    Full release note at: https://github.com/openclaw/openclaw/releases/tag/v2026.2.22
+    For detailed updates, please see: https://github.com/openclaw/openclaw/releases/tag/v2026.3.12    
   developer: Peter Steinberger
   website: https://openclaw.ai/
   sourceCode: https://github.com/openclaw/openclaw
@@ -111,6 +103,8 @@ spec:
 permission:
   appData: true
   appCache: true
+  userData:
+    - Home  
 options:
   allowMultipleInstall: true
   apiTimeout: 0
@@ -118,3 +112,18 @@ options:
   - name: olares
     type: system
     version: '>=1.12.3-0'
+envs:
+  - envName: ALLOW_HOME_DIR_ACCESS
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "false"
+    description: "Allow OpenClaw to access Home directory on Olares"
+  - envName: ALLOW_EXTERNAL_DIR_ACCESS
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "false"
+    description: "Allow OpenClaw to access External directory on Olares"
