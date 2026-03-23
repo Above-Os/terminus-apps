@@ -29,11 +29,7 @@ spec:
     spec:
       containers:
         - name: llama
-{{- if eq $deviceType "inteligpu" }}
-          image: "ghcr.io/ggml-org/llama.cpp:server-vulkan"
-{{- else if eq $deviceType "amdigpu" }}
-          image: "ghcr.io/ggml-org/llama.cpp:server-rocm"
-{{- else if eq $deviceType "cuda" }}
+{{- if eq $deviceType "cuda" }}
           image: "ghcr.io/ggml-org/llama.cpp:server-cuda"
 {{- else }}
           image: "ghcr.io/ggml-org/llama.cpp:server"
@@ -49,21 +45,22 @@ spec:
                 sleep 10
               done
               echo "[llama-start] Starting llama-server..."
-{{- if eq $deviceType "cpu" }}
-              exec llama-server \
-                -m /models/PaddleOCR-VL-1.5.gguf \
-                --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
-                --host 0.0.0.0 \
-                --port 8080 \
-                --temp 0
-{{- else }}
-              exec llama-server \
+{{- if eq $deviceType "cuda" }}
+              exec /app/llama-server \
                 -m /models/PaddleOCR-VL-1.5.gguf \
                 --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
                 --host 0.0.0.0 \
                 --port 8080 \
                 --temp 0 \
                 --n-gpu-layers 999
+{{- else }}
+              # 镜像 ENTRYPOINT 为 /app/llama-server；覆盖 command 后 PATH 中无 llama-server，须写绝对路径
+              exec /app/llama-server \
+                -m /models/PaddleOCR-VL-1.5.gguf \
+                --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
+                --host 0.0.0.0 \
+                --port 8080 \
+                --temp 0
 {{- end }}
           env:
 {{- if eq $deviceType "cuda" }}
@@ -71,12 +68,6 @@ spec:
               value: "0"
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: "compute,graphics,utility,video,display"
-{{- end }}
-{{- if eq $deviceType "inteligpu" }}
-            - name: NVIDIA_VISIBLE_DEVICES
-              value: "void"
-            - name: __NV_PRIME_RENDER_OFFLOAD
-              value: "0"
 {{- end }}
           ports:
             - containerPort: 8080
@@ -110,15 +101,9 @@ spec:
               nvidia.com/gpumem: 6000
 {{- end }}
             limits:
-{{- if eq $deviceType "inteligpu" }}
+{{- if eq $deviceType "cuda" }}
               cpu: "4"
-              memory: 8Gi
-{{- else if eq $deviceType "amdigpu" }}
-              cpu: "4"
-              memory: 8Gi
-{{- else if eq $deviceType "cuda" }}
-              cpu: "4"
-              memory: 8Gi
+              memory: 4Gi
               nvidia.com/gpu: 1
               nvidia.com/gpumem: 6000
 {{- else }}
@@ -128,20 +113,6 @@ spec:
           volumeMounts:
             - name: model
               mountPath: /models
-{{- if or (eq $deviceType "inteligpu") (eq $deviceType "amdigpu") }}
-            - name: dri
-              mountPath: /dev/dri
-            - name: drm
-              mountPath: /sys/class/drm
-{{- end }}
-{{- if eq $deviceType "amdigpu" }}
-            - name: kfd
-              mountPath: /dev/kfd
-{{- end }}
-{{- if or (eq $deviceType "inteligpu") (eq $deviceType "amdigpu") }}
-          securityContext:
-            privileged: true
-{{- end }}
 
         - name: download-model
           image: "docker.io/beclab/harveyff-hf-downloader:v0.1.0"
@@ -210,22 +181,6 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/paddleocr-vl-15-gguf"
             type: DirectoryOrCreate
-{{- if or (eq $deviceType "inteligpu") (eq $deviceType "amdigpu") }}
-        - name: dri
-          hostPath:
-            path: /dev/dri
-            type: Directory
-        - name: drm
-          hostPath:
-            path: /sys/class/drm
-            type: Directory
-{{- end }}
-{{- if eq $deviceType "amdigpu" }}
-        - name: kfd
-          hostPath:
-            path: /dev/kfd
-            type: CharDevice
-{{- end }}
       restartPolicy: Always
 ---
 apiVersion: v1
