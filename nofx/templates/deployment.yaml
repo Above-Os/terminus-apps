@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nofx
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: nofx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: nofx
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: nofx
+    spec:
+      initContainers:
+        - name: init-chmod-data
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - "-c"
+            - |
+              mkdir -p /data
+              chown -R 1000:1000 /data
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: nofx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: PORT
+              value: "8080"
+            - name: DB_PATH
+              value: "/app/data/data.db"
+          resources:
+            requests:
+              cpu: 256m
+              memory: 384Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 5
+      volumes:
+        - name: data
+          hostPath:
+            path: '{{ .Values.userspace.appData | default "" }}/{{ .Release.Name }}/nofx'
+            type: DirectoryOrCreate
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nofx
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: nofx
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  selector:
+    io.kompose.service: nofx
