@@ -1,4 +1,281 @@
-﻿apiVersion: apps/v1
+﻿---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: excalidraw-gateway-nginx
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+    events {
+      worker_connections 1024;
+    }
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      sendfile on;
+      keepalive_timeout 65;
+      client_max_body_size 40m;
+
+      server {
+        listen 80;
+        server_name _;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        location ~ ^(/[^/]+)+/api/ {
+          rewrite ^/[^/]+(/api/.*)$ $1 last;
+        }
+
+        location ~ ^(/[^/]+)+/socket\.io/ {
+          rewrite ^/[^/]+(/socket\.io/.*)$ $1 last;
+        }
+
+        location /api/ {
+          proxy_pass http://excalidraw-storage:8081;
+          proxy_http_version 1.1;
+          proxy_connect_timeout 60s;
+          proxy_read_timeout 60s;
+          proxy_send_timeout 60s;
+          proxy_request_buffering off;
+          client_max_body_size 40m;
+        }
+
+        location /socket.io/ {
+          proxy_pass http://excalidraw-room:80;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+        }
+
+        location / {
+          proxy_set_header Accept-Encoding "";
+          proxy_pass http://excalidraw-frontend:80;
+          proxy_connect_timeout 60s;
+          proxy_read_timeout 60s;
+          proxy_send_timeout 60s;
+          sub_filter_types application/javascript application/x-javascript text/javascript text/html application/json;
+          sub_filter_once off;
+          sub_filter 'https://json.excalidraw.com/api/v2/post/' '/api/v2/scenes/';
+          sub_filter 'https://json.excalidraw.com/api/v2/' '/api/v2/scenes/';
+          sub_filter 'https:\/\/json.excalidraw.com\/api\/v2\/post\/' '/api/v2/scenes/';
+          sub_filter 'https:\/\/json.excalidraw.com\/api\/v2\/' '/api/v2/scenes/';
+          sub_filter 'https://oss-collab.excalidraw.com' '';
+          sub_filter 'https:\/\/oss-collab.excalidraw.com' '';
+          sub_filter '</head>' '<script>!function(){var h=location.hostname;function z(u){try{var x=new URL(u,location.origin);if(x.hostname!==h)return u;var p="/"+h+"/";while(x.pathname.indexOf(p)===0)x.pathname=x.pathname.slice(1+h.length);return x.href}catch(e){return u}}var f=fetch;window.fetch=function(i,n){if(typeof i==="string")i=z(i);return f.call(this,i,n)}}();</script></head>';
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-storage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw-storage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: excalidraw-storage
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: excalidraw-storage
+    spec:
+      containers:
+        - name: storage
+          image: alswl/excalidraw-storage-backend:v2023.11.11
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "8081"
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw-storage
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw-storage
+spec:
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+  selector:
+    io.kompose.service: excalidraw-storage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-room
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw-room
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: excalidraw-room
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: excalidraw-room
+    spec:
+      containers:
+        - name: room
+          image: excalidraw/excalidraw-room:sha-49bf529
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw-room
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw-room
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  selector:
+    io.kompose.service: excalidraw-room
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: excalidraw-frontend
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: excalidraw-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: alswl/excalidraw:v0.18.0-fork-b3
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: false
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              set -e
+              apk add --no-cache perl >/dev/null 2>&1 || true
+              if command -v perl >/dev/null 2>&1; then
+                find /usr/share/nginx/html -type f \( -name '*.js' -o -name '*.html' -o -name '*.css' \) ! -name '*.map' | while read -r f; do
+                  [ -f "$f" ] && [ -w "$f" ] || continue
+                  perl -i -0777 -pe '
+                    s|https://json\.excalidraw\.com/api/v2/post/|/api/v2/scenes/|g;
+                    s|https://json\.excalidraw\.com/api/v2/|/api/v2/scenes/|g;
+                    s|https:\\/\\/json\.excalidraw\.com\\/api\\/v2\\/post\\/|/api/v2/scenes/|g;
+                    s|https:\\/\\/json\.excalidraw\.com\\/api\\/v2\\/|/api/v2/scenes/|g;
+                    s|https://oss-collab\.excalidraw\.com||g;
+                    s|https:\\/\\/oss-collab\.excalidraw\.com||g;
+                    1 while s|(https?://)([a-zA-Z0-9][a-zA-Z0-9.-]*)/\2/|$1$2/|g;
+                    1 while s|([a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,})/\1/|$1/|g;
+                  ' "$f" || true
+                done
+              fi
+              exec nginx -g "daemon off;"
+          env:
+            - name: VITE_APP_BACKEND_V2_GET_URL
+              value: /api/v2/scenes/
+            - name: VITE_APP_BACKEND_V2_POST_URL
+              value: /api/v2/scenes/
+            - name: VITE_APP_HTTP_STORAGE_BACKEND_URL
+              value: /api/v2
+            - name: VITE_APP_WS_SERVER_URL
+              value: ""
+            - name: VITE_APP_FIREBASE_CONFIG
+              value: "{}"
+            - name: VITE_APP_STORAGE_BACKEND
+              value: http
+            - name: VITE_APP_DISABLE_TRACKING
+              value: "true"
+            - name: PUBLIC_URL
+              value: /
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: excalidraw-frontend
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  selector:
+    io.kompose.service: excalidraw-frontend
+---
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: excalidraw
@@ -17,29 +294,43 @@ spec:
       labels:
         io.kompose.service: excalidraw
     spec:
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: excalidraw-gateway-nginx
+            defaultMode: 420
+            items:
+              - key: nginx.conf
+                path: nginx.conf
       containers:
-        - name: excalidraw
-          image: "beclab/harveyff-excalidraw-excalidraw:v0.0.1"
-          env:
-            - name: PGID
-              value: "1000"
-            - name: PUID
-              value: "1000"
-            - name: TZ
-              value: Etc/UTC
-            - name: DISPLAY
-              value: ":0"
-          resources:
-            requests:
-              cpu: 500m
-              memory: 512Mi
-            limits:
-              cpu: 1000m
-              memory: 1Gi
+        - name: gateway
+          image: docker.io/beclab/aboveos-nginx:1.27.0
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 80
               protocol: TCP
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -56,5 +347,3 @@ spec:
       targetPort: 80
   selector:
     io.kompose.service: excalidraw
-status:
-  loadBalancer: {}
