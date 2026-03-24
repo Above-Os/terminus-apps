@@ -1,4 +1,4 @@
-﻿---
+---
 olaresManifest.version: '0.10.0'
 olaresManifest.type: app
 apiVersion: 'v2'
@@ -9,7 +9,7 @@ metadata:
   description: The latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models.
   appid: vllmqwen330ba3binstruct4bitv2
   title: Qwen3 30B (vLLM)
-  version: '1.0.13'
+  version: '1.0.14'
   categories:
     - AI
 
@@ -62,13 +62,17 @@ spec:
     - text: Apache-2.0
       url: https://huggingface.co/cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
 
+  upgradeDescription: |
+    Upgrade vLLM to v0.18.0; optimize GPU allocation and injection behavior.
+
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   limitedCpu: 20
   requiredCpu: 1
   requiredDisk: 30Gi
   limitedDisk: 50Gi
-  limitedMemory: 30Gi
-  requiredMemory: 22Gi
+  # Worst case (Spark DGX): vllm 40Gi + download 1Gi + nginx 500Mi + headroom; non-Spark uses lower K8s requests in chart
+  limitedMemory: 46Gi
+  requiredMemory: 31Gi
   requiredGpu: 23.5Gi
   limitedGpu: 30Gi
   {{- else }}

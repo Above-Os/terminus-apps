@@ -1,0 +1,144 @@
+---
+olaresManifest.version: '0.11.0'
+olaresManifest.type: app
+apiVersion: 'v2'
+
+metadata:
+  name: paddleocrgguf
+  icon: https://app.cdn.olares.com/appstore/paddleocr/icon.png
+  description: PaddleOCR-VL 1.5 GGUF via llama.cpp (CPU / CUDA / Vulkan Intel iGPU / ROCm AMD iGPU), shared model cache.
+  appid: paddleocrgguf
+  title: PaddleOCR-VL GGUF
+  version: '1.0.0'
+  categories:
+    - AI
+
+sharedEntrances:
+  - name: paddleocrgguf-dl
+    host: sharedentrances-paddleocrgguf-dl
+    port: 0
+    tile: PaddleOCR-VL GGUF (model download)
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/paddleocr/icon.png
+
+entrances:
+  - authLevel: internal
+    host: paddleocrgguf-client
+    icon: https://app.cdn.olares.com/appstore/paddleocr/icon.png
+    name: paddleocrgguf-client
+    openMethod: window
+    port: 8080
+    title: PaddleOCR-VL GGUF HF
+  - authLevel: internal
+    host: paddleocrgguf-api
+    icon: https://app.cdn.olares.com/appstore/paddleocr/icon.png
+    name: paddleocrgguf-api
+    openMethod: window
+    port: 8080
+    title: PaddleOCR-VL GGUF API
+
+spec:
+  versionName: 'paddleocr-vl-1.5-gguf'
+  fullDescription: |
+    ## Shared cluster app (admin install) ##
+    PaddleOCR-VL 1.5 multimodal GGUF served with **llama.cpp** (OpenAI-compatible HTTP API on port 8080).
+
+    ## Device backends (same HF repo for all) ##
+    - **CPU**: `ghcr.io/ggml-org/llama.cpp:server`
+    - **NVIDIA CUDA**: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+    - **Intel iGPU**: Vulkan — `ghcr.io/ggml-org/llama.cpp:server-vulkan` (same option semantics as Jina CLIP v2 *IntelIgpu*)
+    - **AMD iGPU**: ROCm — `ghcr.io/ggml-org/llama.cpp:server-rocm`
+
+    ## Model ##
+    - Repo: `PaddlePaddle/PaddleOCR-VL-1.5-GGUF` (auto-download via sidecar; one cache dir for every backend)
+    - Files: `PaddleOCR-VL-1.5.gguf`, `PaddleOCR-VL-1.5-mmproj.gguf`
+
+    ## API ##
+    - OpenAI-compatible endpoints on **paddleocrgguf-api** (e.g. `/v1/chat/completions`, vision as supported by llama-server).
+
+  developer: PaddlePaddle / Olares
+  website: https://www.paddleocr.ai/
+  sourceCode: https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: 6000m
+  requiredCpu: 500m
+  requiredDisk: 5Gi
+  limitedDisk: 50Gi
+  limitedMemory: 12Gi
+  requiredMemory: 3Gi
+  requiredGpu: 0
+  limitedGpu: 0
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  subCharts:
+  - name: paddleocrggufserver
+    shared: true
+  - name: paddleocrgguf
+
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+options:
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - paddleocrgguf
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.3-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: paddleocrgguf
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+envs:
+  - envName: DEVICE_TYPE
+    type: string
+    required: true
+    editable: true
+    applyOnChange: true
+    description: "Run llama.cpp on CPU or NVIDIA CUDA; same GGUF for all."
+    options:
+       - title: "CPU"
+         value: "cpu"
+       - title: "CUDA"
+         value: "Cuda"
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+{{- end }}

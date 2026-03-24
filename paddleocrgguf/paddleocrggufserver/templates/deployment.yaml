@@ -1,0 +1,230 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- $clientDomainENV := split "," (index .Values.domain "paddleocrgguf-client") -}}
+{{- $clientDomain := index $clientDomainENV "_0" -}}
+{{- $deviceType := lower (default "cpu" .Values.olaresEnv.DEVICE_TYPE) -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paddleocrgguf-llm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paddleocrgguf-llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: paddleocrgguf-llm
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network.chrome-default: "true"
+        io.kompose.service: paddleocrgguf-llm
+{{- if eq $deviceType "cuda" }}
+      annotations:
+        applications.app.bytetrade.io/gpu-inject: "true"
+{{- end }}
+    spec:
+      containers:
+        - name: llama
+{{- if eq $deviceType "cuda" }}
+          image: "ghcr.io/ggml-org/llama.cpp:server-cuda"
+{{- else }}
+          image: "ghcr.io/ggml-org/llama.cpp:server"
+{{- end }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              DONE_FILE="/models/.paddleocr-vl-15-gguf.done"
+              echo "[llama-wait] Waiting for $DONE_FILE ..."
+              while [ ! -f "$DONE_FILE" ]; do
+                echo "[llama-wait] Model not ready, sleeping..."
+                sleep 10
+              done
+              echo "[llama-start] Starting llama-server..."
+{{- if eq $deviceType "cuda" }}
+              exec /app/llama-server \
+                -m /models/PaddleOCR-VL-1.5.gguf \
+                --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
+                --host 0.0.0.0 \
+                --port 8080 \
+                --temp 0 \
+                --n-gpu-layers 999
+{{- else }}
+              # 镜像 ENTRYPOINT 为 /app/llama-server；覆盖 command 后 PATH 中无 llama-server，须写绝对路径
+              exec /app/llama-server \
+                -m /models/PaddleOCR-VL-1.5.gguf \
+                --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
+                --host 0.0.0.0 \
+                --port 8080 \
+                --temp 0
+{{- end }}
+          env:
+{{- if eq $deviceType "cuda" }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "0"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,graphics,utility,video,display"
+{{- end }}
+          ports:
+            - containerPort: 8080
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+{{- if eq $deviceType "cuda" }}
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 6000
+{{- end }}
+            limits:
+{{- if eq $deviceType "cuda" }}
+              cpu: "4"
+              memory: 4Gi
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 6000
+{{- else }}
+              cpu: "2"
+              memory: 4Gi
+{{- end }}
+          volumeMounts:
+            - name: model
+              mountPath: /models
+
+        - name: download-model
+          image: "docker.io/beclab/harveyff-hf-downloader:v0.1.0"
+          env:
+            - name: HF_ENDPOINT
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
+            - name: HF_TOKEN
+              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
+            - name: VLLM_PROXY_TARGET
+              value: http://localhost:8080
+            - name: MODEL_NAME
+              value: /models
+            - name: APP_URL
+              value: "https://{{ $clientDomain }}"
+          args:
+            - "--repo"
+            - "PaddlePaddle/PaddleOCR-VL-1.5-GGUF"
+            - "--ref"
+            - "main"
+            - "--outdir"
+            - "/models"
+            - "--static"
+            - "/app/static"
+            - "--port"
+            - "8090"
+            - "--probe-url"
+            - "/health"
+            - "--done-name"
+            - ".paddleocr-vl-15-gguf.done"
+          ports:
+            - name: http
+              containerPort: 8090
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+            initialDelaySeconds: 5
+            timeoutSeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8090
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          volumeMounts:
+            - name: model
+              mountPath: /models
+          resources:
+            requests:
+              cpu: 100m
+              memory: 500Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      volumes:
+        - name: model
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Huggingface/paddleocr-vl-15-gguf"
+            type: DirectoryOrCreate
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paddleocrgguf-llm
+spec:
+  selector:
+    io.kompose.service: paddleocrgguf-llm
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-paddleocrgguf-dl
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paddleocrgguf-llm
+spec:
+  selector:
+    io.kompose.service: paddleocrgguf-llm
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paddleocrgguf-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: paddleocrgguf-llm
+spec:
+  selector:
+    io.kompose.service: paddleocrgguf-llm
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+{{- end }}
