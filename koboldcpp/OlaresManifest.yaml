@@ -1,5 +1,7 @@
+---
 olaresManifest.version: '0.11.0'
 olaresManifest.type: app
+apiVersion: 'v2'
 metadata:
   name: koboldcpp
   description: Run AI Models Locally, Free & Open-Source.
@@ -8,13 +10,13 @@ metadata:
   version: '1.0.0'
   title: KoboldCpp
   categories:
-  - Productivity_v112
-  - Utilities
+    - Productivity_v112
+    - Utilities
 permission:
   appData: true
   appCache: true
   userData:
-  - Home
+    - Home
 spec:
   versionName: 'latest'
   promoteImage:
@@ -50,29 +52,72 @@ spec:
   website: https://github.com/LostRuins/koboldcpp
   submitter: Olares
   locale:
-  - en-US
-  - zh-CN
+    - en-US
+    - zh-CN
+  doc: https://github.com/LostRuins/koboldcpp/wiki
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   requiredMemory: 4Gi
   limitedMemory: 8Gi
   requiredDisk: 5Gi
   limitedDisk: 50Gi
   requiredCpu: 2.1
-  limitedCpu: 4.1
-  requiredGpu: 4Gi
+  limitedCpu: 6
+  requiredGpu: 10Gi
   limitedGpu: 24Gi
-  doc: https://github.com/LostRuins/koboldcpp/wiki
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 500Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 500m
+  {{- end }}
   supportArch:
-  - amd64
+    - amd64
+  subCharts:
+    - name: koboldcppserver
+      shared: true
+    - name: koboldcpp
 options:
+  apiTimeout: 0
   dependencies:
-  - name: olares
-    type: system
-    version: '>=1.12.3-0'
+    - name: olares
+      type: system
+      version: '>=1.12.3-0'
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: koboldcpp
+      type: application
+      version: '>=1.0.0'
+      mandatory: true
+  {{- end }}
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - koboldcpp
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+sharedEntrances:
+  - name: koboldcpp
+    host: sharedentrances-koboldcpp
+    port: 0
+    title: KoboldCpp API
+    icon: https://app.cdn.olares.com/appstore/koboldcpp/icon.png
+    invisible: true
+    authLevel: internal
 entrances:
   - authLevel: internal
-    host: koboldcppingress
+    host: koboldcpp-web-svc
     icon: https://app.cdn.olares.com/appstore/koboldcpp/icon.png
     name: koboldcpp
     openMethod: window
     port: 8080
     title: KoboldCpp
+envs:
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
