@@ -1,4 +1,4 @@
-﻿---
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +16,19 @@ spec:
       labels:
         app: nostream
     spec:
+      initContainers:
+      - name: init-nostream-data
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /app/.nostr && \
+          touch /app/.nostr/settings.yaml && \
+          chown -R 1000:1000 /app/.nostr
+        volumeMounts:
+        - name: nostream-config
+          mountPath: /app/.nostr
       containers:
       - name: nostream
         image: "beclab/nostream:v0.0.1"
@@ -29,6 +42,8 @@ spec:
         env:
         - name: RELAY_PORT
           value: "8008"
+        - name: NOSTR_CONFIG_DIR
+          value: "/app/.nostr"
         - name: DB_USER
           value: "{{ .Values.postgres.username }}"  
         - name: DB_PASSWORD
@@ -47,17 +62,18 @@ spec:
           value: ""
         - name: REDIS_PASSWORD
           value: {{ .Values.redis.password }}
-        lifecycle:
-          postStart:
-            exec:  
-              command: 
-              - sh
-              - -c
-              - |
-                cd code && \
-                npx knex migrate:latest      
         ports:
         - containerPort: 8008
+        volumeMounts:
+        - name: nostream-config
+          mountPath: /app/.nostr
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+      volumes:
+      - name: nostream-config
+        emptyDir: {}
 
 ---
 apiVersion: v1
