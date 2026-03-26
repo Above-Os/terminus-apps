@@ -39,12 +39,19 @@ spec:
               echo "[vllm-wait] Detected $DONE_FILE, starting vLLM server."
               
               echo "[vllm-start] Starting vLLM server..."
+              _MEM_UTILS="/usr/local/lib/python3.12/dist-packages/vllm/utils/mem_utils.py"
+              if [ -f "$_MEM_UTILS" ]; then
+                sed -i 's/shared_sysmem_device_mem_sms = .*$/shared_sysmem_device_mem_sms = ()/' "$_MEM_UTILS"
+                echo "[vllm-start] Patched vLLM mem_utils.py (shared_sysmem_device_mem_sms)"
+              else
+                echo "[vllm-start] WARN: $_MEM_UTILS missing, mem_utils patch skipped"
+              fi
               python3 -m vllm.entrypoints.openai.api_server \
                 --model "/models/HY-MT1.5-1.8B" \
 {{- $gpuMemUtil := "0.9" -}}
 {{- $maxModelLen := "auto" -}}
 {{- if eq $isSparkDGX "true" -}}
-{{- $gpuMemUtil = "0.86" -}}
+{{- $gpuMemUtil = "0.88" -}}
 {{- $maxModelLen = "8192" -}}
 {{- end -}}
 {{- with .Values.olaresEnv }}
@@ -78,10 +85,10 @@ spec:
           resources:
             limits:
               cpu: "10"
-              memory: {{ if eq $isSparkDGX "true" }}20Gi{{ else }}8Gi{{ end }}
+              memory: 8Gi
             requests:
               cpu: 500m
-              memory: {{ if eq $isSparkDGX "true" }}8Gi{{ else }}4Gi{{ end }}
+              memory: 2Gi
           volumeMounts:
             - name: data
               mountPath: /models/HY-MT1.5-1.8B

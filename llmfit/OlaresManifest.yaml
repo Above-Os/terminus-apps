@@ -6,7 +6,7 @@ metadata:
   description: Right-sizes LLM models to your system hardware via REST API.
   icon: https://app.cdn.olares.com/appstore/llmfit/icon.png
   appid: llmfit
-  version: '1.0.2'
+  version: '1.0.3'
   title: LLMFit
   categories:
   - Developer Tools
@@ -14,18 +14,10 @@ metadata:
 permission:
   appData: true
   appCache: true
-sharedEntrances:
-- name: llmfit
-  host: sharedentrances-llmfit
-  port: 0
-  title: LLMFit
-  icon: https://app.cdn.olares.com/appstore/llmfit/icon.png
-  invisible: true
-  authLevel: internal
 entrances:
-- name: llmfitclient
-  port: 8080
-  host: llmfitclient
+- name: llmfit-svc
+  port: 8787
+  host: llmfit-svc
   title: LLMFit
   icon: https://app.cdn.olares.com/appstore/llmfit/icon.png
   authLevel: private
@@ -57,7 +49,7 @@ spec:
     * 200+ models from HuggingFace in database
     * Use-case filtering: General, Coding, Reasoning, Chat, Multimodal, Embedding
   upgradeDescription: |
-    Oriented for Web Dashboard: visible app entrance, `openMethod: window`, dashboard-oriented copy. Server image aligned with v0.8.x line where applicable.
+    Simplified deployment from client/server split to a single app service. The dashboard and API are now served directly by one Deployment and one Service.
 
     Upstream release notes: https://github.com/AlexsJones/llmfit/releases
   developer: Alex Jones
@@ -71,46 +63,21 @@ spec:
   license:
   - text: MIT
     url: https://github.com/AlexsJones/llmfit/blob/main/LICENSE
-  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-  requiredMemory: 200Mi
-  limitedMemory: 800Mi
+  requiredMemory: 10Mi
+  limitedMemory: 40Mi
   requiredDisk: 50Mi
-  limitedDisk: 200Mi
-  requiredCpu: 0.2
-  limitedCpu: 1
-  {{- else }}
-  requiredMemory: 100Mi
-  limitedMemory: 500Mi
-  requiredDisk: 50Mi
-  limitedDisk: 200Mi
-  requiredCpu: 100m
-  limitedCpu: 500m
-  {{- end }}
+  limitedDisk: 100Mi
+  requiredCpu: 10m
+  limitedCpu: 40m
+ 
   supportArch:
   - amd64
   - arm64
-  subCharts:
-  - name: llmfitserver
-    shared: true
-  - name: llmfit
 options:
   apiTimeout: 0
   dependencies:
   - name: olares
     type: system
     version: '>=1.12.3-0'
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-{{- else }}
-  - name: llmfit
-    type: application
-    version: '>=1.0.0'
-    mandatory: true
-{{- end }}
   appScope:
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-    clusterScoped: true
-    appRef:
-    - llmfit
-{{- else }}
     clusterScoped: false
-{{- end }}

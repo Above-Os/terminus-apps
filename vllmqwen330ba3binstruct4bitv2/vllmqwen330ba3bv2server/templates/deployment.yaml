@@ -39,14 +39,20 @@ spec:
               echo "[vllm-wait] Detected $DONE_FILE, starting vLLM server."
               
               echo "[vllm-start] Starting vLLM server..."
+              _MEM_UTILS="/usr/local/lib/python3.12/dist-packages/vllm/utils/mem_utils.py"
+              if [ -f "$_MEM_UTILS" ]; then
+                sed -i 's/shared_sysmem_device_mem_sms = .*$/shared_sysmem_device_mem_sms = ()/' "$_MEM_UTILS"
+                echo "[vllm-start] Patched vLLM mem_utils.py (shared_sysmem_device_mem_sms)"
+              else
+                echo "[vllm-start] WARN: $_MEM_UTILS missing, mem_utils patch skipped"
+              fi
               python3 -m vllm.entrypoints.openai.api_server \
                 --model "/models/qwen3-30b" \
 {{- $gpuMemUtil := "0.9" -}}
 {{- $maxModelLen := "auto" -}}
 {{- if eq $isSparkDGX "true" -}}
-{{- /* Spark DGX: use = not := for $maxModelLen. v1 engine + torch.compile + CUDA graphs need headroom; 0.78 left KV pool negative (see gpu_worker Available KV cache memory). */ -}}
-{{- $gpuMemUtil = "0.86" -}}
-{{- $maxModelLen = "3072" -}}
+{{- $gpuMemUtil = "0.88" -}}
+{{- $maxModelLen = "8192" -}}
 {{- end -}}
 {{- with .Values.olaresEnv }}
                 --gpu-memory-utilization {{ .GPU_MEMORY_UTILIZATION | default $gpuMemUtil }} \
@@ -79,10 +85,10 @@ spec:
           resources:
             limits:
               cpu: "18"
-              memory: {{ if eq $isSparkDGX "true" }}40Gi{{ else }}32Gi{{ end }}
+              memory: 36Gi
             requests:
               cpu: 500m
-              memory: {{ if eq $isSparkDGX "true" }}30Gi{{ else }}21Gi{{ end }}
+              memory: 20Gi
           volumeMounts:
             - mountPath: /models/qwen3-30b
               name: data
