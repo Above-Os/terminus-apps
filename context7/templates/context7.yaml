@@ -21,11 +21,33 @@ spec:
         io.kompose.service: context7
         bytetrade.io/terminal: context7
     spec:
+      initContainers:
+        - name: init-tools
+          image: "docker.io/beclab/upstash-context7-mcp:2.1.4"
+          securityContext:
+            runAsUser: 0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              apk add --no-cache bash
+              npm install -g ctx7
+              cp -a /usr/local/* /mnt/tools/
+              cp /bin/bash /mnt/tools/bin/bash
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: usr-local
+              mountPath: /mnt/tools
       containers:
         - name: context7
           image: "docker.io/beclab/upstash-context7-mcp:2.1.4"
           securityContext:
-            runAsUser: 0
+            runAsUser: 1000
           env:
             - name: MCP_TRANSPORT
               value: "http"
@@ -33,10 +55,6 @@ spec:
               value: "8080"
             - name: CONTEXT7_API_KEY
               value: ""
-          lifecycle:
-            postStart:
-              exec:
-                command: ["/bin/sh", "-c", "apk add --no-cache bash >/dev/null 2>&1 || true"]
           resources:
             limits:
               cpu: 500m
@@ -47,18 +65,24 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
+          volumeMounts:
+            - name: usr-local
+              mountPath: /usr/local
           livenessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 15
             timeoutSeconds: 5
           readinessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
+      volumes:
+        - name: usr-local
+          emptyDir: {}
       restartPolicy: Always
 
 ---
