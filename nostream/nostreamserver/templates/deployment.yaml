@@ -1,8 +1,9 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  name: nostream
   namespace: {{ .Release.Namespace }}
   labels:
     app: nostream
@@ -23,15 +24,16 @@ spec:
         - sh
         - -c
         - |
-          mkdir -p /app/.nostr && \
-          touch /app/.nostr/settings.yaml && \
-          chown -R 1000:1000 /app/.nostr
+          mkdir -p /home/node/.nostr && \
+          touch /home/node/.nostr/settings.yaml && \
+          chown -R 1000:1000 /home/node/.nostr
         volumeMounts:
         - name: nostream-config
-          mountPath: /app/.nostr
+          mountPath: /home/node/.nostr
       containers:
       - name: nostream
-        image: "beclab/nostream:v0.0.1"
+        image: "ghcr.io/cameri/nostream:v2.1.0"
+        imagePullPolicy: "IfNotPresent"
         resources:
           requests:
             cpu: 0.1
@@ -40,16 +42,18 @@ spec:
             cpu: 1
             memory: 512Mi
         env:
+        - name: SECRET
+          value: "changeme"
         - name: RELAY_PORT
           value: "8008"
         - name: NOSTR_CONFIG_DIR
-          value: "/app/.nostr"
+          value: "/home/node/.nostr"
         - name: DB_USER
-          value: "{{ .Values.postgres.username }}"  
+          value: "{{ .Values.postgres.username }}"
         - name: DB_PASSWORD
-          value: "{{ .Values.postgres.password }}"  
+          value: "{{ .Values.postgres.password }}"
         - name: DB_NAME
-          value: "{{ .Values.postgres.databases.nostream }}" 
+          value: "{{ .Values.postgres.databases.nostream }}"
         - name: DB_HOST
           value: {{ .Values.postgres.host }}
         - name: DB_PORT
@@ -59,14 +63,14 @@ spec:
         - name: REDIS_PORT
           value: "{{ .Values.redis.port }}"
         - name: REDIS_USER
-          value: ""
+          value: "default"
         - name: REDIS_PASSWORD
           value: {{ .Values.redis.password }}
         ports:
         - containerPort: 8008
         volumeMounts:
         - name: nostream-config
-          mountPath: /app/.nostr
+          mountPath: /home/node/.nostr
         securityContext:
           runAsUser: 1000
           runAsGroup: 1000
@@ -79,13 +83,28 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-svc
+  name: nostream
   namespace: {{ .Release.Namespace }}
 spec:
   type: ClusterIP
   selector:
-    app: {{ .Release.Name }}
+    app: nostream
   ports:
     - protocol: TCP
       port: 8008
       targetPort: 8008
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-nostream
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: ws
+    port: 80
+    targetPort: 8008
+  selector:
+    app: nostream
+{{- end }}

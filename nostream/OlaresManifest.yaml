@@ -5,7 +5,7 @@ metadata:
   description: A Nostr Relay written in TypeScript.
   icon: https://app.cdn.olares.com/appstore/nostream/icon.png
   appid: nostream
-  version: '1.0.9'
+  version: '1.0.10'
   title: Nostream
   categories:
   - Fun
@@ -13,6 +13,14 @@ metadata:
 permission:
   appData: true
   appCache: true
+sharedEntrances:
+- name: nostream
+  host: sharedentrances-nostream
+  port: 0
+  title: Nostream
+  icon: https://app.cdn.olares.com/appstore/nostream/icon.png
+  invisible: true
+  authLevel: internal
 spec:
   versionName: '2.0.0'
   fullDescription: |
@@ -64,15 +72,35 @@ spec:
   limitedCpu: 1
   supportArch:
   - amd64
+  - arm64
+  subCharts:
+  - name: nostreamserver
+    shared: true
+  - name: nostream
 options:
   dependencies:
   - name: olares
     type: system
     version: '>=1.10.1-0'
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- else }}
+  - name: nostream
+    type: application
+    version: '>=1.0.0'
+    mandatory: true
+{{- end }}
+  appScope:
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+    - nostream
+{{- else }}
+    clusterScoped: false
+{{- end }}
 entrances:
-- name: nostream-svc
-  port: 8008
-  host: nostream-svc
+- name: nostreamclient
+  port: 8080
+  host: nostreamclient
   title: Nostream
   icon: https://app.cdn.olares.com/appstore/nostream/icon.png
   authLevel: public
