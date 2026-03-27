@@ -1,18 +1,18 @@
-# Default config for Binance USDT Futures bot (seeded into appData on first run).
+# Default config for Hyperliquid Perpetuals (Futures) bot.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: freqtrade-futures-config
+  name: freqtrade-future-config
   namespace: {{ .Release.Namespace }}
 data:
   config.json: |
     {
-      "max_open_trades": 4,
-      "stake_currency": "USDT",
-      "stake_amount": 20,
-      "dry_run": true,
-      "dry_run_wallet": 100,
-      "timeframe": "15m",
+      "max_open_trades": 10,
+      "stake_currency": "USDC",
+      "stake_amount": 4,
+      "dry_run": false,
+      "dry_run_wallet": 1000,
+      "timeframe": "5m",
       "tradable_balance_ratio": 0.95,
       "cancel_open_orders_on_exit": true,
       "process_throttle_secs": 5,
@@ -36,6 +36,7 @@ data:
         "stoploss_on_exchange": true
       },
       "stoploss_on_exchange_interval": 5,
+      "loglevel": "debug",
       "unfilledtimeout": {
         "entry": 10,
         "exit": 10,
@@ -43,12 +44,18 @@ data:
       },
       "minimal_roi": { "0": 1000 },
       "exchange": {
-        "name": "binance",
-        "key": "",
-        "secret": "",
-        "ccxt_config": { "enableRateLimit": true, "options": { "defaultType": "future" } },
-        "ccxt_async_config": { "enableRateLimit": true, "options": { "defaultType": "future" } },
-        "pair_whitelist": ["BTC/USDT:USDT", "ETH/USDT:USDT", "AVAX/USDT:USDT", "XRP/USDT:USDT"],
+        "name": "hyperliquid",
+        "walletAddress": "",
+        "privateKey": "",
+        "ccxt_config": {
+          "enableRateLimit": true,
+          "options": { "defaultType": "swap" }
+        },
+        "ccxt_async_config": {
+           "enableRateLimit": true,
+          "options": { "defaultType": "swap" }
+        },
+        "pair_whitelist": ["BTC/USDC:USDC", "ETH/USDC:USDC"],
         "pair_blacklist": []
       },
       "pairlists": [
@@ -61,15 +68,15 @@ data:
         "username": "admin",
         "password": "admin",
         "jwt_secret_key": "somethingRandomSomethingRandom123",
-        "CORS_origins": ["*"],
-        "cors_origins": ["*"],
+        "CORS_origins": {{ if .Values.apiServer.corsOrigins }}{{ toJson .Values.apiServer.corsOrigins }}{{ else }}["*"]{{ end }},
+        "cors_origins": {{ if .Values.apiServer.corsOrigins }}{{ toJson .Values.apiServer.corsOrigins }}{{ else }}["*"]{{ end }},
         "verbosity": "error",
         "enable_openapi": true
       },
-      "bot_name": "freqtrade-futures",
+      "bot_name": "freqtrade-future",
       "initial_state": "running",
-      "strategy": "SampleStrategy",
+      "strategy": "DoubleSmaTrend",
       "trading_mode": "futures",
-      "margin_mode": "cross",
-      "leverage": 10
+      "margin_mode": "isolated",
+      "leverage": 5
     }

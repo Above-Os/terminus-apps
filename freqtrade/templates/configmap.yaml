@@ -1,15 +1,15 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: freqtrade-binance-config
+  name: freqtrade-spot-config
   namespace: {{ .Release.Namespace }}
 data:
   config.json: |
     {
-      "max_open_trades": 2,
-      "stake_currency": "USDT",
-      "stake_amount": "unlimited",
-      "dry_run": true,
+      "max_open_trades": 10,
+      "stake_currency": "USDC",
+      "stake_amount": 20,
+      "dry_run": false,
       "dry_run_wallet": 1000,
       "timeframe": "5m",
       "tradable_balance_ratio": 0.95,
@@ -32,9 +32,10 @@ data:
         "entry": "market",
         "exit": "market",
         "stoploss": "market",
-        "stoploss_on_exchange": true
+        "stoploss_on_exchange": false
       },
       "stoploss_on_exchange_interval": 5,
+      "loglevel": "debug",
       "unfilledtimeout": {
         "entry": 10,
         "exit": 10,
@@ -42,12 +43,18 @@ data:
       },
       "minimal_roi": { "0": 1000 },
       "exchange": {
-        "name": "binance",
-        "key": "",
-        "secret": "",
-        "ccxt_config": { "enableRateLimit": true },
-        "ccxt_async_config": { "enableRateLimit": true },
-        "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
+        "name": "hyperliquid",
+        "walletAddress": "",
+        "privateKey": "",
+        "ccxt_config": {
+          "enableRateLimit": true,
+          "options": { "defaultType": "swap" }
+        },
+        "ccxt_async_config": {
+           "enableRateLimit": true,
+          "options": { "defaultType": "swap" }
+        },
+        "pair_whitelist": ["BTC/USDC", "ETH/USDC"],
         "pair_blacklist": []
       },
       "pairlists": [
@@ -65,7 +72,8 @@ data:
         "verbosity": "error",
         "enable_openapi": true
       },
-      "bot_name": "freqtrade-binance",
+      "bot_name": "freqtrade-spot",
       "initial_state": "running",
-      "strategy": "SampleStrategy"
+      "force_entry_enable": true,      
+      "strategy": "DoubleSmaTrend"
     }
