@@ -1,24 +1,25 @@
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   labels:
-    io.kompose.service: falcoserver
-  name: falcoserver
+    app: falco-agent
+  name: falco-agent
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      io.kompose.service: falcoserver
-  strategy:
-    type: Recreate
+      app: falco-agent
+  updateStrategy:
+    type: RollingUpdate
   template:
     metadata:
       labels:
-        io.kompose.service: falcoserver
+        app: falco-agent
     spec:
+      tolerations:
+        - operator: Exists
       containers:
         - name: falco
           image: "docker.io/falcosecurity/falco:0.43.0"
@@ -32,7 +33,7 @@ spec:
             - -o
             - http_output.enabled=true
             - -o
-            - http_output.url=http://localhost:2801/
+            - http_output.url=http://falco-sidekick.{{ .Release.Namespace }}:2801/
           securityContext:
             capabilities:
               drop:
@@ -61,6 +62,56 @@ spec:
             - mountPath: /dev
               name: dev
 
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: etc
+          hostPath:
+            path: /etc
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug
+        - name: dev
+          hostPath:
+            path: /dev
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-sidekick
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      port: 2801
+      targetPort: 2801
+  selector:
+    app: falco-central
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: falco-central
+  name: falco-central
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco-central
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: falco-central
+    spec:
+      containers:
         - name: sidekick
           image: "docker.io/falcosecurity/falcosidekick:2.33.0"
           imagePullPolicy: IfNotPresent
@@ -153,20 +204,7 @@ spec:
                 - ping
             initialDelaySeconds: 5
             periodSeconds: 5
-
       volumes:
-        - name: proc
-          hostPath:
-            path: /proc
-        - name: etc
-          hostPath:
-            path: /etc
-        - name: debugfs
-          hostPath:
-            path: /sys/kernel/debug
-        - name: dev
-          hostPath:
-            path: /dev
         - name: redis-data
           hostPath:
             type: DirectoryOrCreate
@@ -179,7 +217,6 @@ spec:
             {{- else }}
             path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/redis'
             {{- end }}
-      restartPolicy: Always
 
 ---
 apiVersion: v1
@@ -193,5 +230,5 @@ spec:
       port: 2802
       targetPort: 2802
   selector:
-    io.kompose.service: falcoserver
+    app: falco-central
 {{- end }}
