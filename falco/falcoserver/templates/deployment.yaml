@@ -1,4 +1,17 @@
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- if .Values.customRules }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-custom-rules
+  namespace: {{ .Release.Namespace }}
+data:
+{{- range $fileName, $ruleContent := .Values.customRules }}
+  {{ $fileName }}: |
+{{ $ruleContent | indent 4 }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -61,6 +74,14 @@ spec:
               readOnly: true
             - mountPath: /dev
               name: dev
+{{- if .Values.customRules }}
+{{- range $fileName, $_ := .Values.customRules }}
+            - mountPath: /etc/falco/rules.d/{{ $fileName }}
+              name: falco-custom-rules
+              subPath: {{ $fileName }}
+              readOnly: true
+{{- end }}
+{{- end }}
 
       volumes:
         - name: proc
@@ -75,6 +96,11 @@ spec:
         - name: dev
           hostPath:
             path: /dev
+{{- if .Values.customRules }}
+        - name: falco-custom-rules
+          configMap:
+            name: falco-custom-rules
+{{- end }}
       restartPolicy: Always
 
 ---
