@@ -12,6 +12,20 @@ data:
 {{ $ruleContent | indent 4 }}
 {{- end }}
 {{- end }}
+{{- if .Values.disabledRules }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-disable-rules
+  namespace: {{ .Release.Namespace }}
+data:
+  falco_disable_rules.yaml: |
+{{- range $ruleName := .Values.disabledRules }}
+    - rule: {{ $ruleName | quote }}
+      enabled: false
+{{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -82,6 +96,12 @@ spec:
               readOnly: true
 {{- end }}
 {{- end }}
+{{- if .Values.disabledRules }}
+            - mountPath: /etc/falco/rules.d/falco_disable_rules.yaml
+              name: falco-disable-rules
+              subPath: falco_disable_rules.yaml
+              readOnly: true
+{{- end }}
 
       volumes:
         - name: proc
@@ -100,6 +120,11 @@ spec:
         - name: falco-custom-rules
           configMap:
             name: falco-custom-rules
+{{- end }}
+{{- if .Values.disabledRules }}
+        - name: falco-disable-rules
+          configMap:
+            name: falco-disable-rules
 {{- end }}
       restartPolicy: Always
 
