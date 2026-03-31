@@ -26,9 +26,11 @@ spec:
       containers:
         - name: embed
 {{- if eq $deviceType "inteligpu" }}
-          image: "docker.io/beclab/jina-clip-v2-openvinoigpu-ubuntu22.04:v0.0.2"
+          image: "docker.io/beclab/jina-clip-v2-openvinoigpu-ubuntu22.04:v0.0.3"
+{{- else if eq $deviceType "amdigpu" }}
+          image: "docker.io/beclab/jina-clip-v2-onnxrocm-amdigpu-ubuntu22.04:v0.0.3"
 {{- else }}
-          image: "docker.io/beclab/jina-clip-v2-onnxcpu-ubuntu22.04:v0.0.2"
+          image: "docker.io/beclab/jina-clip-v2-onnxcpu-ubuntu22.04:v0.0.3"
 {{- end }}
           command:
             - /bin/bash
@@ -47,6 +49,8 @@ spec:
               echo "[embed-start] Starting embed server..."
 {{- if eq $deviceType "inteligpu" }}
               exec /usr/local/bin/embed_openvino
+{{- else if eq $deviceType "amdigpu" }}
+              exec /usr/local/bin/embed_onnx_amd_igpu
 {{- else }}
               exec /usr/local/bin/embed_onnx
 {{- end }}
@@ -118,11 +122,17 @@ spec:
           volumeMounts:
             - name: model
               mountPath: /models
-{{- if eq $deviceType "inteligpu" }}
+{{- if or (eq $deviceType "inteligpu") (eq $deviceType "amdigpu") }}
             - name: dri
               mountPath: /dev/dri
             - name: drm
               mountPath: /sys/class/drm
+{{- end }}
+{{- if eq $deviceType "amdigpu" }}
+            - name: kfd
+              mountPath: /dev/kfd
+{{- end }}
+{{- if or (eq $deviceType "inteligpu") (eq $deviceType "amdigpu") }}
           securityContext:
             privileged: true
 {{- end }}
@@ -206,7 +216,7 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/jina-clip-v2"
             type: DirectoryOrCreate
-{{- if eq $deviceType "inteligpu" }}
+{{- if or (eq $deviceType "inteligpu") (eq $deviceType "amdigpu") }}
         - name: dri
           hostPath:
             path: /dev/dri
@@ -215,6 +225,12 @@ spec:
           hostPath:
             path: /sys/class/drm
             type: Directory
+{{- end }}
+{{- if eq $deviceType "amdigpu" }}
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+            type: CharDevice
 {{- end }}
       restartPolicy: Always
 ---

@@ -19,9 +19,29 @@ spec:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: jdownloader2
     spec:
+      initContainers:
+        - name: init-chmod-data
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - '-c'
+            - |
+              mkdir -p /home-data/Downloads/jdownloader2
+              chown -R 1000:1000 /home-data /external-data /config-data
+          resources: {}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: home-downloads
+              mountPath: /home-data
+            - name: external-downloads
+              mountPath: /external-data
+            - name: config
+              mountPath: /config-data
+          securityContext:
+            runAsUser: 0
       containers:
         - name: jdownloader2
-          image: "docker.io/jlesage/jdownloader-2:v26.02.3"
+          image: "docker.io/jlesage/jdownloader-2:v26.03.1"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5800
@@ -40,6 +60,8 @@ spec:
               value: "0"
             - name: ENABLE_CJK_FONT
               value: "1"
+            - name: WEB_FILE_MANAGER_ALLOWED_PATHS
+              value: "/downloads/home,/downloads/external,/output"
           resources:
             requests:
               cpu: 250m
@@ -50,8 +72,13 @@ spec:
           volumeMounts:
             - mountPath: /config
               name: config
-            - mountPath: /output
-              name: output
+            - name: home-downloads
+              mountPath: /downloads/home
+            - name: external-downloads
+              mountPath: /downloads/external
+            - name: home-downloads
+              mountPath: /output
+              subPath: Downloads/jdownloader2
           readinessProbe:
             httpGet:
               path: /
@@ -71,6 +98,14 @@ spec:
             successThreshold: 1
             failureThreshold: 3
       volumes:
+        - name: home-downloads
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.userData }}
+        - name: external-downloads
+          hostPath:
+            type: DirectoryOrCreate
+            path: "{{ .Values.sharedlib }}"
         - name: config
           hostPath:
             type: DirectoryOrCreate
@@ -83,10 +118,6 @@ spec:
             {{- else }}
             path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}'
             {{- end }}
-        - name: output
-          hostPath:
-            type: DirectoryOrCreate
-            path: '{{ .Values.userspace.userData }}/Downloads/{{ .Release.Name }}'
       restartPolicy: Always
 
 ---

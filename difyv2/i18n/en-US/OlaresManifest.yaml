@@ -28,43 +28,28 @@ spec:
 
     7. Backend-as-a-Service: All of Dify's offerings come with corresponding APIs, so you could effortlessly integrate Dify into your own business logic.
   upgradeDescription: |
-    Upgrade to Dify v1.13.0 - Human-in-the-Loop and Workflow Execution Upgrades
+    Upgrade to Dify v1.13.3 - Stability and Correctness Improvements
 
     ## New Features
 
-    ### Human-in-the-Loop (HITL)
+    - **Variable-Reference Model Parameters:** Added variable-reference support for model parameters in LLM, Question Classifier, and Variable Extractor nodes, enabling dynamic configuration of model settings within workflows.
 
-    We are introducing the **Human Input** node, a major update that transforms how AI and humans collaborate within Dify workflows.
+    ## Bug Fixes
 
-    **Key Capabilities:**
+    - **Streaming Reliability:** Fixed StreamsBroadcastChannel replay and concurrency issues to keep frontend/backend event delivery stable.
+    - **Workflow Editor:** Fixed pasted nodes retaining Loop/Iteration metadata; prevented HumanInput nodes from being pasted into invalid containers.
+    - **Runtime Execution:** Restored prompt message transformation logic; corrected max_retries=0 handling for executor-driven HTTP Request execution.
+    - **Knowledge Retrieval:** Preserved citation metadata in web responses; fixed crashes when dataset icon metadata is missing; corrected hit-count query filtering; restored indexed document chunk previews.
 
-    - **Native Workflow Pausing:** Insert a "Human Input" node to suspend workflow execution at critical decision points.
-    - **Review & Edit:** The node generates a UI where humans can review AI outputs and modify variables (e.g., editing a draft or correcting data) before the process continues.
-    - **Action-Based Routing:** Configure custom buttons (like "Approve," "Reject," or "Escalate") that determine the subsequent path of the workflow.
-    - **Flexible Delivery Methods:** Human input forms can be delivered via **Webapp** or **Email**. In cloud environments, Email delivery availability may depend on plan/feature settings.
+    ## Olares Packaging Fixes
 
-    ## Architecture Updates
+    - Fixed Worker running as API mode (MODE=api) instead of Celery worker, which caused knowledge base document processing to stay stuck in queued state.
+    - Added WEAVIATE_GRPC_ENDPOINT configuration so Weaviate gRPC batch ingestion works correctly, resolving documents stuck at 0% during embedding.
+    - Reduced database connection pool size (SQLALCHEMY_POOL_SIZE) to fit within Olares shared database connection limits.
 
-    To support the stateful pause/resume mechanism required by HITL and provide event‑subscription APIs, we refactored the execution engine: **Workflow‑based streaming executions and Advanced Chat executions now run in Celery workers**, while non‑streaming **WORKFLOW** runs still execute in the API process. All pause/resume paths (e.g., HITL) are resumed via Celery, and events are streamed back through Redis Pub/Sub.
+    ## Other Improvements
 
-    **For Large Deployments & Self-Hosted Users:**
+    - Sandbox upgraded to 0.2.14, plugin daemon upgraded to 0.5.3
+    - Multiple refactoring and performance optimizations across the platform
 
-    We have introduced a new Celery queue named `workflow_based_app_execution`. While standard setups will work out of the box, high-throughput environments should consider the following optimizations:
-
-    1. **Scale Workers:** Adjust the number of workers consuming the `workflow_based_app_execution` queue based on your specific workload.
-    2. **Dedicated Redis (Optional):** For large-scale deployments, we recommend configuring the new `PUBSUB_REDIS_URL` environment variable to point to a dedicated Redis instance. Using **Redis Cluster mode with Sharded PubSub** is strongly advised to ensure horizontal scalability.
-
-    ## Important Upgrade Note
-
-    **New Celery Queue Required: `workflow_based_app_execution`**
-
-    Please ensure your deployment configuration includes workers listening to the new **`workflow_based_app_execution`** queue. This queue is required for workflow‑based streaming executions and all resume flows (e.g., HITL); otherwise, streaming executions and resume tasks will not be processed.
-
-    ## Additional Updates
-
-    - Enhanced workflow run history management and UI updates
-    - Performance optimizations for API endpoints and database operations
-    - Multiple bug fixes and improvements across the platform
-    - Support for nl-NL language
-    
-    View full release note at: https://github.com/langgenius/dify/releases/tag/1.13.0
+    View full release note at: https://github.com/langgenius/dify/releases/tag/1.13.3
