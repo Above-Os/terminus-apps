@@ -1,5 +1,28 @@
 {{- $paperclipDomainENV := split  ","  .Values.domain.paperclip -}}
 {{- $paperclipDomain := index $paperclipDomainENV "_0" -}}
+{{- $existingApiKeys := lookup "v1" "ConfigMap" .Release.Namespace "paperclip-api-keys" }}
+{{- $openaiKey := "" }}
+{{- $anthropicKey := "" }}
+{{- if and .Values.env .Values.env.OPENAI_API_KEY }}
+{{- $openaiKey = .Values.env.OPENAI_API_KEY }}
+{{- else if $existingApiKeys }}
+{{- $openaiKey = index $existingApiKeys.data "OPENAI_API_KEY" | default "" }}
+{{- end }}
+{{- if and .Values.env .Values.env.ANTHROPIC_API_KEY }}
+{{- $anthropicKey = .Values.env.ANTHROPIC_API_KEY }}
+{{- else if $existingApiKeys }}
+{{- $anthropicKey = index $existingApiKeys.data "ANTHROPIC_API_KEY" | default "" }}
+{{- end }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paperclip-api-keys
+  namespace: {{ .Release.Namespace }}
+data:
+  ANTHROPIC_API_KEY: {{ $anthropicKey | quote }}
+  OPENAI_API_KEY: {{ $openaiKey | quote }}
 
 ---
 apiVersion: apps/v1
@@ -223,9 +246,15 @@ spec:
             - name: DATABASE_URL
               value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}"
             - name: ANTHROPIC_API_KEY
-              value: ""
+              valueFrom:
+                configMapKeyRef:
+                  name: paperclip-api-keys
+                  key: ANTHROPIC_API_KEY
             - name: OPENAI_API_KEY
-              value: ""
+              valueFrom:
+                configMapKeyRef:
+                  name: paperclip-api-keys
+                  key: OPENAI_API_KEY
             - name: PAPERCLIP_API_URL
               value: "http://localhost:3100"
             - name: PAPERCLIP_INTERNAL_URL
