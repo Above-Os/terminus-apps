@@ -56,63 +56,6 @@ spec:
             mkdir -p /paperclip/instances/default/logs
             mkdir -p /paperclip/instances/default/data/storage
             mkdir -p /paperclip/instances/default/secrets
-            cat > /paperclip/instances/default/config.json << 'CFGEOF'
-            {
-              "$meta": {
-                "version": 1,
-                "updatedAt": "2026-01-01T00:00:00.000Z",
-                "source": "onboard"
-              },
-              "database": {
-                "mode": "postgres",
-                "connectionString": "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}",
-                "embeddedPostgresDataDir": "/paperclip/instances/default/db",
-                "embeddedPostgresPort": 54329,
-                "backup": {
-                  "enabled": false,
-                  "intervalMinutes": 60,
-                  "retentionDays": 30,
-                  "dir": "/paperclip/instances/default/data/backups"
-                }
-              },
-              "logging": {
-                "mode": "file",
-                "logDir": "/paperclip/instances/default/logs"
-              },
-              "server": {
-                "deploymentMode": "authenticated",
-                "exposure": "private",
-                "host": "0.0.0.0",
-                "port": 3100,
-                "allowedHostnames": ["{{ $paperclipDomain }}"],
-                "serveUi": true
-              },
-              "auth": {
-                "baseUrlMode": "explicit",
-                "disableSignUp": false,
-                "publicBaseUrl": "https://{{ $paperclipDomain }}"
-              },
-              "storage": {
-                "provider": "local_disk",
-                "localDisk": {
-                  "baseDir": "/paperclip/instances/default/data/storage"
-                },
-                "s3": {
-                  "bucket": "paperclip",
-                  "region": "us-east-1",
-                  "prefix": "",
-                  "forcePathStyle": false
-                }
-              },
-              "secrets": {
-                "provider": "local_encrypted",
-                "strictMode": false,
-                "localEncrypted": {
-                  "keyFilePath": "/paperclip/instances/default/secrets/master.key"
-                }
-              }
-            }
-            CFGEOF
             chown -R 1000:1000 /paperclip
         resources: {}
         volumeMounts:
@@ -134,7 +77,7 @@ spec:
         imagePullPolicy: IfNotPresent
       containers:
         - name: paperclip
-          image: "beclab/paperclip:v0.0.1"
+          image: "ghcr.io/paperclipai/paperclip:v0.3.1"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3100
@@ -142,6 +85,42 @@ spec:
             - /bin/sh
             - '-c'
             - |
+              set -e
+
+              export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+
+              echo "Ensuring local adapter CLIs are available..."
+
+              if ! command -v agent >/dev/null 2>&1; then
+                echo "Installing Cursor Agent CLI..."
+                curl -fsSL https://cursor.com/install | bash || true
+
+                if [ -x "/root/.local/bin/agent" ]; then
+                  ln -sf /root/.local/bin/agent /usr/local/bin/agent
+                fi
+                if [ -x "/paperclip/.local/bin/agent" ]; then
+                  ln -sf /paperclip/.local/bin/agent /usr/local/bin/agent
+                fi
+              fi
+
+              if ! command -v gemini >/dev/null 2>&1; then
+                echo "Installing Gemini CLI..."
+                npm install -g @google/gemini-cli || true
+              fi
+
+              if ! command -v pi >/dev/null 2>&1; then
+                echo "Installing Pi CLI..."
+                npm install -g @mariozechner/pi-coding-agent || true
+              fi
+
+              echo "CLI availability:"
+              command -v agent || true
+              command -v gemini || true
+              command -v pi || true
+              command -v opencode || true
+              command -v codex || true
+              command -v claude || true
+
               node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js &
               SERVER_PID=$!
 
