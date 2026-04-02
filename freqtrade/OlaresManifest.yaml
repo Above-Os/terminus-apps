@@ -26,20 +26,25 @@ spec:
   fullDescription: |
     Freqtrade is a free and open-source crypto trading bot.
 
-    This app runs two bots and FreqUI on one entrance:
+    This app runs two trading bots, an optional backtest webserver, and FreqUI on one entrance:
     - Spot bot API: this page URL + /api-spot (e.g. https://your-app.olares.com/api-spot)
     - Futures bot API: this page URL + /api-future (e.g. https://your-app.olares.com/api-future)
+    - Backtest / download-data API (separate data): this page URL + /api-backtest/
+      (e.g. https://your-app.olares.com/api-backtest). In FreqUI add a bot and set
+      the API URL to that base; use Download data and Backtesting against this instance
+      so K-line files stay under freqtrade-backtest/, not spot or futures.
+    Disable the backtest deployment by setting values.backtest.enabled to false in the chart.
+
     Create secret freqtrade-binance-secret (api-key, api-secret) to enable live
-    trading for both. Both run in dry-run by default.
+    trading for spot and futures. Both run in dry-run by default.
 
     Open this app to get FreqUI, log in with username "admin", password "admin".
-    To connect to the Futures bot, add a bot in FreqUI and set API URL to this
-    page URL + /api-future (no extra port). Backtesting is
-    available from FreqUI (Backtesting tab) using the same config and strategy.
+    To connect a bot, add it in FreqUI and set API URL to /api-spot, /api-future,
+    or /api-backtest as above (no extra port).
 
-    Config and strategy files are stored in app data: each bot has own directory
-    at the app root — freqtrade-spot/ and freqtrade-future/ (each with
-    config/config.json and strategies/*.py). Set "strategy" in config.json to the class name of the
+    Config and strategy files are stored in app data: each instance has its own directory
+    at the app root — freqtrade-spot/, freqtrade-future/, and optionally freqtrade-backtest/
+    (each with config/config.json and strategies/*.py). Set "strategy" in config.json to the class name of the
     strategy file (e.g. DoubleSmaTrend ). You can add
     multiple .py files and switch by editing config; then stop and start the
     bot from FreqUI to apply changes.
@@ -56,12 +61,12 @@ spec:
   license:
     - text: GPL-3.0
       url: https://github.com/freqtrade/freqtrade/blob/develop/LICENSE
-  requiredMemory: 768Mi
-  limitedMemory: 3Gi
+  requiredMemory: 2048Mi
+  limitedMemory: 6144Mi
   requiredDisk: 1Gi
   limitedDisk: 5Gi
-  requiredCpu: 600m
-  limitedCpu: "3"
+  requiredCpu: 1000m
+  limitedCpu: 5000m
   supportArch:
     - amd64
     - arm64
@@ -71,6 +76,7 @@ permission:
   appCache: true
 
 options:
+  allowMultipleInstall: false
   apiTimeout: 0
   dependencies:
     - name: olares
