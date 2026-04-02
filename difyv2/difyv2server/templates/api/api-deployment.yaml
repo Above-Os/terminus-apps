@@ -1,4 +1,4 @@
-﻿{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 
 ---
 # Redis extension ConfigMap
@@ -189,13 +189,19 @@ spec:
             runAsUser: 0
       containers:
         - name: api
-          image: "docker.io/beclab/dify-api:1.13.0"
+          image: "docker.io/beclab/dify-api:1.13.3"
           envFrom:
             - configMapRef:
                 name: dify-api-env
           env:
+            - name: MODE
+              value: "api"
             - name: DB_EXTRAS
               value: "keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=3"
+            - name: SQLALCHEMY_POOL_SIZE
+              value: "5"
+            - name: SQLALCHEMY_MAX_OVERFLOW
+              value: "3"
           ports:
             - containerPort: 5001
               name: http
