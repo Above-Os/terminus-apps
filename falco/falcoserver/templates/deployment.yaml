@@ -27,6 +27,20 @@ data:
 {{- end }}
 {{- end }}
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-plugin-runtime-config
+  namespace: {{ .Release.Namespace }}
+data:
+  plugins.yaml: |
+    plugins:
+      - name: k8saudit
+        library_path: libk8saudit.so
+        init_config: ""
+        open_params: "http://0.0.0.0:8765/k8s-audit"
+    load_plugins: [k8saudit]
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -47,6 +61,21 @@ spec:
     spec:
       tolerations:
         - operator: Exists
+      initContainers:
+        - name: falcoctl-install-plugins
+          image: "docker.io/falcosecurity/falcoctl:main"
+          imagePullPolicy: IfNotPresent
+          command:
+            - falcoctl
+          args:
+            - artifact
+            - install
+            - k8saudit
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: falco-plugins
+              mountPath: /usr/share/falco/plugins
       containers:
         - name: falco
           image: "docker.io/falcosecurity/falco:0.43.0"
@@ -61,6 +90,8 @@ spec:
             - http_output.enabled=true
             - -o
             - http_output.url=http://falco-sidekick.{{ .Release.Namespace }}:2801/
+            - -c
+            - /etc/falco/config.d/plugins.yaml
           securityContext:
             capabilities:
               drop:
@@ -88,6 +119,12 @@ spec:
               readOnly: true
             - mountPath: /dev
               name: dev
+            - mountPath: /usr/share/falco/plugins
+              name: falco-plugins
+            - mountPath: /etc/falco/config.d/plugins.yaml
+              name: falco-plugin-runtime-config
+              subPath: plugins.yaml
+              readOnly: true
 {{- if .Values.customRules }}
 {{- range $fileName, $_ := .Values.customRules }}
             - mountPath: /etc/falco/rules.d/{{ $fileName }}
@@ -116,6 +153,21 @@ spec:
         - name: dev
           hostPath:
             path: /dev
+        - name: falco-plugins
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/plugins'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins'
+            {{- end }}
+        - name: falco-plugin-runtime-config
+          configMap:
+            name: falco-plugin-runtime-config
 {{- if .Values.customRules }}
         - name: falco-custom-rules
           configMap:
