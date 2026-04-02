@@ -3849,7 +3849,12 @@ spec:
         - name: configmaps
           mountPath: /configmaps
         resources:
-          {}
+          requests:
+            cpu: 10m
+            memory: 50Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
       volumes:
       - name: runner-secrets
         emptyDir:
@@ -4079,6 +4084,9 @@ spec:
             requests:
               cpu: 75m
               memory: 100M
+            limits:
+              cpu: 500m
+              memory: 256M
       volumes:
       
       
@@ -4313,8 +4321,11 @@ spec:
             failureThreshold: 2
           resources:
             requests:
-              cpu: 0
-              memory: 6M
+              cpu: 50m
+              memory: 10Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       terminationGracePeriodSeconds: 30
       volumes:
       
@@ -4508,8 +4519,11 @@ spec:
             periodSeconds: 20
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: 50m
+              memory: 10Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           volumeMounts:
             - name: init-etc-kas
               mountPath: /etc/kas
@@ -4849,8 +4863,11 @@ spec:
                 command: ["/bin/bash", "-c", "pkill -f 'sidekiq'"]
           resources:
             requests:
-              cpu: 900m
-              memory: 2G
+              cpu: 50m
+              memory: 1000Mi
+            limits:
+              cpu: 500m
+              memory: 3000Mi
       volumes:
       
       
@@ -5037,6 +5054,10 @@ spec:
           resources:
             requests:
               cpu: 50m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
         - name: configure
           command: ['sh', '/config/configure']
           image: "registry.gitlab.com/gitlab-org/build/cng/gitlab-base:v18.10.1"                    
@@ -5606,6 +5627,9 @@ spec:
             requests:
               cpu: 300m
               memory: 2.5G
+            limits:
+              cpu: 1000m
+              memory: 5G
         - name: gitlab-workhorse
           image: "registry.gitlab.com/gitlab-org/build/cng/gitlab-workhorse-ce:v18.10.1"          
           securityContext:
@@ -5696,7 +5720,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 100M
+              memory: 100Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       volumes:
       
       
@@ -5948,6 +5975,9 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
 ---
 # Source: gitlab/charts/nginx-ingress/templates/controller-deployment.yaml
 apiVersion: apps/v1
@@ -6264,8 +6294,11 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: 50m
-              memory: 32Mi
+              cpu: 10m
+              memory: 20Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           lifecycle:
             preStop:
               exec:
@@ -6516,6 +6549,9 @@ spec:
             requests:
               cpu: 100m
               memory: 200Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       
       volumes:
         
@@ -6721,7 +6757,9 @@ spec:
                 - |
                   exec pg_isready -U "gitlab" -d "dbname=gitlabhq_production" -h 127.0.0.1 -p 5432
           resources:
-            limits: {}
+            limits:
+              cpu: 500m
+              memory: 512Mi
             requests:
               cpu: 250m
               memory: 256Mi
@@ -6939,6 +6977,13 @@ spec:
                 - sh
                 - -c
                 - /health/ping_readiness_local.sh 1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           volumeMounts:
             - name: start-scripts
               mountPath: /opt/bitnami/scripts/start-scripts
@@ -6988,6 +7033,13 @@ spec:
           ports:
             - name: metrics
               containerPort: 9121
+          resources:
+            requests:
+              cpu: 100m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           livenessProbe:
             failureThreshold: 5
             initialDelaySeconds: 10
@@ -7052,7 +7104,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gitlab-migrations-6926325
+  name: gitlab-migrations-1
   namespace: {{ .Release.Namespace }}
   labels:
     app: migrations
@@ -7297,7 +7349,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gitlab-minio-create-buckets-9ec94ef
+  name: gitlab-minio-create-buckets-1
   namespace: {{ .Release.Namespace }}
   labels:
     app: minio
