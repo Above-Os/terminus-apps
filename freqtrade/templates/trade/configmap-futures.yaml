@@ -1,15 +1,16 @@
+# Default config for Hyperliquid Perpetuals (Futures) bot.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: freqtrade-spot-config
+  name: freqtrade-future-config
   namespace: {{ .Release.Namespace }}
 data:
   config.json: |
     {
-      "max_open_trades": 2,
+      "max_open_trades": 10,
       "stake_currency": "USDC",
-      "stake_amount": "20",
-      "dry_run": false,
+      "stake_amount": 4,
+      "dry_run": true,
       "dry_run_wallet": 1000,
       "timeframe": "5m",
       "tradable_balance_ratio": 0.95,
@@ -32,8 +33,10 @@ data:
         "entry": "market",
         "exit": "market",
         "stoploss": "market",
-        "stoploss_on_exchange": false
+        "stoploss_on_exchange": true
       },
+      "stoploss_on_exchange_interval": 5,
+      "loglevel": "debug",
       "unfilledtimeout": {
         "entry": 10,
         "exit": 10,
@@ -42,11 +45,19 @@ data:
       "minimal_roi": { "0": 1000 },
       "exchange": {
         "name": "hyperliquid",
+        "walletAddress": "",
+        "privateKey": "",
         "key": "",
-        "secret": "",
-        "ccxt_config": { "enableRateLimit": true },
-        "ccxt_async_config": { "enableRateLimit": true },
-        "pair_whitelist": ["BTC/USDC", "ETH/USDC"],
+        "secret": "",    
+        "ccxt_config": {
+          "enableRateLimit": true,
+          "options": { "defaultType": "swap" }
+        },
+        "ccxt_async_config": {
+           "enableRateLimit": true,
+          "options": { "defaultType": "swap" }
+        },
+        "pair_whitelist": ["BTC/USDC:USDC", "ETH/USDC:USDC"],
         "pair_blacklist": []
       },
       "pairlists": [
@@ -55,14 +66,19 @@ data:
       "api_server": {
         "enabled": true,
         "listen_ip_address": "0.0.0.0",
-        "listen_port": 8080,
+        "listen_port": 8081,
         "username": "admin",
         "password": "admin",
         "jwt_secret_key": "somethingRandomSomethingRandom123",
-        "cors_origins": ["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+        "CORS_origins": {{ if .Values.apiServer.corsOrigins }}{{ toJson .Values.apiServer.corsOrigins }}{{ else }}["*"]{{ end }},
+        "cors_origins": {{ if .Values.apiServer.corsOrigins }}{{ toJson .Values.apiServer.corsOrigins }}{{ else }}["*"]{{ end }},
         "verbosity": "error",
         "enable_openapi": true
       },
-      "bot_name": "freqtrade-spot",
-      "initial_state": "running"
+      "bot_name": "freqtrade-future",
+      "initial_state": "running",
+      "strategy": "Strategy001",
+      "trading_mode": "futures",
+      "margin_mode": "isolated",
+      "leverage": 5
     }
