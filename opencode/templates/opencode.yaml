@@ -308,13 +308,99 @@ spec:
               PKG_HASH=$(printf '%s' "$FINGERPRINT" | sha256sum | cut -c1-16)
               MARKER="$PKG/.installed-${PKG_HASH}"
 
-              if [ -f "$MARKER" ]; then
+              verify_cache() {
+                [ ! -d "$PKG/bin" ] || [ ! -d "$PKG/usr" ] || [ ! -d "$PKG/lib" ] && return 1
+                for b in \
+                  bin/tar bin/gzip \
+                  usr/bin/python3 usr/bin/pip3 usr/bin/git usr/bin/curl usr/bin/wget \
+                  usr/bin/ssh usr/bin/node usr/bin/npm usr/bin/go usr/bin/rustc usr/bin/cargo \
+                  usr/bin/zip usr/bin/unzip usr/bin/bzip2 usr/bin/xz usr/bin/zstd \
+                  sbin/ss \
+                  usr/local/bin/opencode usr/local/bin/pkg-install; do
+                  if [ ! -e "$PKG/$b" ] && [ ! -L "$PKG/$b" ]; then
+                    echo "=== Cache invalid: $b missing ==="
+                    return 1
+                  fi
+                  if [ -f "$PKG/$b" ] && [ ! -s "$PKG/$b" ]; then
+                    echo "=== Cache invalid: $b is empty ==="
+                    return 1
+                  fi
+                done
+                return 0
+              }
+
+              restore_user_packages() {
+                UPKGS="/home/opencode/.user-packages"
+                [ ! -s "$UPKGS" ] && return 0
+                RESTORE=$(cat "$UPKGS" | tr '\n' ' ')
+                echo "=== Restoring user packages: $RESTORE ==="
+                apk info -q 2>/dev/null | sort > /tmp/.pkgs-before
+                FAILED=""
+                for p in $RESTORE; do
+                  if ! apk add --no-cache "$p" 2>&1; then
+                    echo "=== Warning: failed to restore $p ==="
+                    FAILED="$FAILED $p"
+                  fi
+                done
+                apk info -q 2>/dev/null | sort > /tmp/.pkgs-after
+                NEW_PKGS=$(comm -13 /tmp/.pkgs-before /tmp/.pkgs-after)
+                if [ -z "$NEW_PKGS" ]; then
+                  echo "=== No new packages to snapshot ==="
+                  rm -f /tmp/.pkgs-before /tmp/.pkgs-after
+                  return 0
+                fi
+                echo "=== Snapshotting new packages: $NEW_PKGS ==="
+                for pkg in $NEW_PKGS; do
+                  apk info -qL "$pkg" 2>/dev/null | while IFS= read -r f; do
+                    [ -f "/$f" ] || [ -L "/$f" ] || continue
+                    d=$(dirname "$f")
+                    mkdir -p "$PKG/$d"
+                    cp -a "/$f" "$PKG/$f" 2>/dev/null || true
+                  done
+                done
+                if [ -n "$FAILED" ]; then
+                  echo "=== Failed packages (will retry next restart):$FAILED ==="
+                fi
+                rm -f /tmp/.pkgs-before /tmp/.pkgs-after
+                echo "=== Restore complete ==="
+              }
+
+              echo "=== Setting up home directory (runs every start) ==="
+              mkdir -p /home/opencode/.npm-global/bin /home/opencode/.npm-global/lib
+              chown -R 1000:1000 /home/opencode/.npm-global
+
+              cat > /home/opencode/.profile << 'EOFPROFILE'
+              export VIRTUAL_ENV="/home/opencode/.venv"
+              export NPM_CONFIG_PREFIX="/home/opencode/.npm-global"
+              export GOPATH="/home/opencode/go"
+              export CARGO_HOME="/home/opencode/.cargo"
+              export PATH="/home/opencode/.venv/bin:/home/opencode/.npm-global/bin:/home/opencode/go/bin:/home/opencode/.cargo/bin:/home/opencode/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              EOFPROFILE
+              cp /home/opencode/.profile /home/opencode/.bashrc
+              chown 1000:1000 /home/opencode/.profile /home/opencode/.bashrc
+
+              if [ -f "$MARKER" ] && verify_cache; then
                 echo "=== Package snapshot cached (${PKG_HASH}) ==="
+                restore_user_packages
                 exit 0
               fi
+              rm -f "$MARKER"
 
               echo "=== Installing system packages ==="
-              apk add --no-cache $BASE_PKGS
+              if ! apk add --no-cache $BASE_PKGS; then
+                echo "=== FATAL: base package installation failed, exiting ==="
+                exit 1
+              fi
+
+              echo "=== Removing PEP 668 EXTERNALLY-MANAGED marker ==="
+              rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED
+
+              echo "=== Creating persistent Python venv ==="
+              VENV="/home/opencode/.venv"
+              if [ ! -f "$VENV/bin/activate" ]; then
+                python3 -m venv "$VENV"
+                chown -R 1000:1000 "$VENV"
+              fi
 
               echo "=== Configuring user opencode (uid 1000) ==="
               addgroup -g 1000 opencode 2>/dev/null || true
@@ -327,39 +413,114 @@ spec:
                   -o /etc/apk/keys/sgerrand.rsa.pub
                 curl -sL "https://github.com/sgerrand/alpine-pkg-glibc/releases/download/${GLIBC_VER}/glibc-${GLIBC_VER}.apk" \
                   -o /tmp/glibc.apk
-                apk del libc6-compat gcompat 2>/dev/null || true
-                apk add --no-cache --force-overwrite /tmp/glibc.apk libstdc++ 2>/dev/null
-
-                echo "=== Replacing opencode binary with glibc build ==="
-                curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OC_VER}/opencode-linux-x64.tar.gz" \
-                  | tar -xz -C /usr/local/bin
-                chmod +x /usr/local/bin/opencode
-
-                mkdir -p /lib64
-                ln -sf /usr/glibc-compat/lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+                echo "=== Removing libc6-compat/gcompat before glibc install ==="
+                apk del libc6-compat gcompat 2>&1 || true
+                if apk add --no-cache --force-overwrite /tmp/glibc.apk libstdc++ 2>&1; then
+                  mkdir -p /lib64
+                  ln -sf /usr/glibc-compat/lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+                  echo "=== Replacing opencode binary with glibc build ==="
+                  cp /usr/local/bin/opencode /tmp/opencode.musl.bak 2>/dev/null || true
+                  if curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OC_VER}/opencode-linux-x64.tar.gz" \
+                    -o /tmp/opencode-glibc.tar.gz && \
+                    tar -xzf /tmp/opencode-glibc.tar.gz -C /usr/local/bin; then
+                    chmod +x /usr/local/bin/opencode
+                  else
+                    echo "=== WARNING: glibc binary download failed, restoring musl binary ==="
+                    cp /tmp/opencode.musl.bak /usr/local/bin/opencode 2>/dev/null || true
+                    chmod +x /usr/local/bin/opencode
+                  fi
+                  rm -f /tmp/opencode-glibc.tar.gz /tmp/opencode.musl.bak
+                else
+                  echo "=== WARNING: glibc installation failed, using musl binary ==="
+                fi
               else
                 echo "=== Arch $ARCH: using original musl binary ==="
               fi
+
+              echo "=== Force-reinstalling bash (fix glibc cascade removal) ==="
+              apk del bash 2>/dev/null || true
+              apk add --no-cache bash 2>&1 || echo "=== WARNING: bash reinstall failed in init, pkg-manager will fix ==="
 
               echo "=== Creating pkg-install wrapper ==="
               cat > /usr/local/bin/pkg-install << 'EOFWRAPPER'
               #!/bin/sh
               Q="/home/opencode/.pkg-queue"
+              _LOCKED=0
+              _lock() {
+                _lc=0
+                while true; do
+                  if mkdir "$Q/.lock" 2>/dev/null; then
+                    echo $$ > "$Q/.lock/pid"
+                    _LOCKED=1
+                    return 0
+                  fi
+                  _op=$(cat "$Q/.lock/pid" 2>/dev/null)
+                  if [ -z "$_op" ] || ! kill -0 "$_op" 2>/dev/null; then
+                    rm -rf "$Q/.lock"
+                    continue
+                  fi
+                  _lc=$((_lc + 1))
+                  if [ $_lc -ge 20 ]; then
+                    echo ">> ERROR: Another pkg-install is running (pid $_op). Try again later."
+                    return 1
+                  fi
+                  sleep 0.5
+                done
+              }
+              _unlock() {
+                if [ "$_LOCKED" = "1" ]; then
+                  rm -rf "$Q/.lock" 2>/dev/null || true
+                  _LOCKED=0
+                fi
+              }
+              trap '_unlock; exit 130' INT TERM
               _send() {
+                if [ ! -d "$Q" ]; then
+                  echo ">> ERROR: pkg-manager queue not found. Is the sidecar running?"
+                  return 1
+                fi
+                _lock || return 1
                 rm -f "$Q/result" "$Q/log"
                 echo "$1" > "$Q/request"
-                while [ ! -f "$Q/result" ]; do sleep 0.5; done
+                _c=0
+                while [ ! -f "$Q/result" ]; do
+                  sleep 0.5
+                  _c=$((_c + 1))
+                  if [ $_c -ge 600 ]; then
+                    echo ">> ERROR: pkg-manager did not respond within 300s"
+                    echo ">> The pkg-manager sidecar may be down or busy."
+                    _unlock
+                    return 1
+                  fi
+                done
                 cat "$Q/log" 2>/dev/null
                 EXIT=$(cat "$Q/result")
                 rm -f "$Q/result" "$Q/log"
+                _unlock
+                case "$EXIT" in ''|*[!0-9]*) EXIT=1 ;; esac
                 return "$EXIT"
               }
               _query() {
+                if [ ! -d "$Q" ]; then
+                  echo ">> ERROR: pkg-manager queue not found. Is the sidecar running?"
+                  return 1
+                fi
+                _lock || return 1
                 rm -f "$Q/search-result"
                 echo "$1" > "$Q/request"
-                while [ ! -f "$Q/search-result" ]; do sleep 0.5; done
+                _c=0
+                while [ ! -f "$Q/search-result" ]; do
+                  sleep 0.5
+                  _c=$((_c + 1))
+                  if [ $_c -ge 120 ]; then
+                    echo ">> ERROR: pkg-manager did not respond within 60s"
+                    _unlock
+                    return 1
+                  fi
+                done
                 cat "$Q/search-result"
                 rm -f "$Q/search-result"
+                _unlock
               }
               _help() {
                 cat << 'EOFHELP'
@@ -388,11 +549,12 @@ spec:
 
               NOTES
                 - Packages are from Alpine Linux repositories (apk).
-                - Installed packages are immediately available in PATH.
-                - For Python packages, use: pip install <pkg>
-                - For Node packages, use:   npm install <pkg>
-                - For Go modules, use:      go install <pkg>
-                - For Rust crates, use:     cargo install <pkg>
+                - Installed packages persist across restarts and upgrades.
+                - For language ecosystem packages (persist across restarts AND upgrades):
+                    pip install <pkg>            Python (uses ~/.venv, auto-activated)
+                    npm install -g <pkg>         Node.js global
+                    go install <pkg>@latest      Go (installs to ~/go/bin/)
+                    cargo install <pkg>          Rust (installs to ~/.cargo/bin/)
               EOFHELP
               }
               case "$1" in
@@ -440,39 +602,29 @@ spec:
               rm -rf "$PKG"
               mkdir -p "$PKG" "$PKG/etc" "$PKG/tmp"
 
-              cp -a /bin "$PKG/bin"
-              ln -sf /usr/bin/bash "$PKG/bin/bash"
-
-              cp -a /sbin "$PKG/sbin"
-              cp -a /usr "$PKG/usr"
-
-              cp -a /lib "$PKG/lib"
-
-              cp /etc/passwd "$PKG/etc/passwd"
-              cp /etc/group "$PKG/etc/group"
-              cp -a /etc/apk "$PKG/etc/apk"
-              cp -a /etc/ssl "$PKG/etc/ssl"
-
+              SNAP_OK=true
+              cp -a /bin "$PKG/bin"       || SNAP_OK=false
+              ln -sf ../usr/bin/bash "$PKG/bin/bash"
+              cp -a /sbin "$PKG/sbin"     || SNAP_OK=false
+              cp -a /usr "$PKG/usr"       || SNAP_OK=false
+              cp -a /lib "$PKG/lib"       || SNAP_OK=false
+              cp /etc/passwd "$PKG/etc/passwd"  || SNAP_OK=false
+              cp /etc/group "$PKG/etc/group"    || SNAP_OK=false
+              cp -a /etc/apk "$PKG/etc/apk"    || SNAP_OK=false
+              cp -a /etc/ssl "$PKG/etc/ssl"     || SNAP_OK=false
               mkdir -p "$PKG/lib64"
               [ -d /lib64 ] && cp -a /lib64/* "$PKG/lib64/" 2>/dev/null || true
+
+              if [ "$SNAP_OK" != "true" ]; then
+                echo "=== FATAL: snapshot copy failed (disk full?), cleaning up ==="
+                rm -rf "$PKG"
+                exit 1
+              fi
 
               touch "$MARKER"
               echo "=== Snapshot complete ($(du -sh "$PKG" | cut -f1)) ==="
 
-              UPKGS="/home/opencode/.user-packages"
-              if [ -s "$UPKGS" ]; then
-                echo "=== Restoring user packages ==="
-                RESTORE=$(cat "$UPKGS" | tr '\n' ' ')
-                echo "Packages: $RESTORE"
-                apk add --no-cache $RESTORE 2>&1 || true
-                echo "=== Re-snapshotting after restore ==="
-                cp -a /bin/* "$PKG/bin/" 2>/dev/null || true
-                cp -a /sbin/* "$PKG/sbin/" 2>/dev/null || true
-                cp -a /usr/* "$PKG/usr/" 2>/dev/null || true
-                cp -a /lib/* "$PKG/lib/" 2>/dev/null || true
-                [ -d /lib64 ] && cp -a /lib64/* "$PKG/lib64/" 2>/dev/null || true
-                echo "=== Restore complete ==="
-              fi
+              restore_user_packages
           volumeMounts:
             - name: opencode-home
               mountPath: /home/opencode
@@ -493,6 +645,12 @@ spec:
             - sh
             - "-c"
             - |
+              echo "=== Runtime check ==="
+              [ -x /usr/bin/bash ] && echo "bash OK" || echo "bash: waiting for pkg-manager fix"
+              if [ ! -f "$HOME/.venv/bin/activate" ]; then
+                echo "Creating Python venv..."
+                python3 -m venv "$HOME/.venv"
+              fi
               exec opencode web --hostname 0.0.0.0 --port 3000
           workingDir: /home/opencode/workspace
           securityContext:
@@ -503,6 +661,18 @@ spec:
               value: /home/opencode
             - name: TERM
               value: xterm-256color
+            - name: PATH
+              value: /home/opencode/.venv/bin:/home/opencode/.npm-global/bin:/home/opencode/go/bin:/home/opencode/.cargo/bin:/home/opencode/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            - name: VIRTUAL_ENV
+              value: /home/opencode/.venv
+            - name: NPM_CONFIG_PREFIX
+              value: /home/opencode/.npm-global
+            - name: GOPATH
+              value: /home/opencode/go
+            - name: CARGO_HOME
+              value: /home/opencode/.cargo
+            - name: ENV
+              value: /home/opencode/.profile
             - name: LD_LIBRARY_PATH
               value: /usr/glibc-compat/lib
           resources:
@@ -603,6 +773,7 @@ spec:
               UPKGS="/home/opencode/.user-packages"
               mkdir -p "$QUEUE"
               rm -f "$QUEUE/request" "$QUEUE/result" "$QUEUE/log" "$QUEUE/search-result"
+              rm -rf "$QUEUE/.lock"
               touch "$UPKGS"
 
               rm -f /lib/apk/db/lock 2>/dev/null || true
@@ -616,6 +787,14 @@ spec:
               echo "=== end DB check ==="
 
               apk update 2>&1 || true
+
+              echo "=== Force-reinstalling bash (every start) ==="
+              apk del bash 2>/dev/null || true
+              if apk add --no-cache bash 2>&1; then
+                echo "=== bash reinstalled OK ==="
+              else
+                echo "=== WARNING: bash reinstall failed ==="
+              fi
 
               _add_pkgs() {
                 for p in $@; do
@@ -700,6 +879,10 @@ spec:
               mountPath: /etc/apk
             - name: pkg-etc-ssl
               mountPath: /etc/ssl
+            - name: pkg-etc-passwd
+              mountPath: /etc/passwd
+            - name: pkg-etc-group
+              mountPath: /etc/group
           resources:
             requests:
               cpu: 10m
