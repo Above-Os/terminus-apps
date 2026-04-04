@@ -57,6 +57,9 @@ spec:
             - |
               chown -R 1000:1000 /falco-plugins
               chmod -R 0777 /falco-plugins
+              mkdir -p /falco-rules
+              chown -R 1000:1000 /falco-rules
+              chmod -R 0777 /falco-rules
               if [ ! -f /falco-plugin-config/plugins.local.yaml ]; then
                 printf '%s\n' \
                   '# Falco plugin configuration example.' \
@@ -80,6 +83,8 @@ spec:
           volumeMounts:
             - name: falco-plugins
               mountPath: /falco-plugins
+            - name: falco-rules
+              mountPath: /falco-rules
             - name: falco-plugin-config-file
               mountPath: /falco-plugin-config/plugins.local.yaml
           terminationMessagePath: /dev/termination-log
@@ -96,6 +101,8 @@ spec:
             - /etc/falco/falco_rules.yaml
             - -r
             - /etc/falco/rules.d
+            - -r
+            - /etc/falco/rules.d/managed
             - -o
             - json_output=true
             - -o
@@ -135,6 +142,8 @@ spec:
               name: falco-plugins
             - mountPath: /etc/falco/config.d/plugins.local.yaml
               name: falco-plugin-config-file
+            - mountPath: /etc/falco/rules.d/managed
+              name: falco-rules
 {{- if .Values.customRules }}
 {{- range $fileName, $_ := .Values.customRules }}
             - mountPath: /etc/falco/rules.d/{{ $fileName }}
@@ -186,6 +195,18 @@ spec:
               {{- end }}
             {{- else }}
             path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins.local.yaml'
+            {{- end }}
+        - name: falco-rules
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/rules'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/rules'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/rules'
             {{- end }}
 {{- if .Values.customRules }}
         - name: falco-custom-rules
