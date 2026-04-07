@@ -290,6 +290,14 @@ spec:
               name: app-data-config
             - mountPath: /home/node
               name: app-data-node
+            {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/home/
+              name: olares-home-dir
+            {{ end }}
+            {{- if eq (toString .Values.olaresEnv.ALLOW_EXTERNAL_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/external/
+              name: olares-external-dir
+            {{- end }}              
       restartPolicy: Always
       volumes:
         - hostPath:
@@ -304,7 +312,6 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.appData }}/brew"
             type: DirectoryOrCreate
-
         - name: docker-cli-bin
           emptyDir: {}
         - name: dind-storage
@@ -322,7 +329,6 @@ spec:
           configMap:
             name: clawdbot-openclaw-bin
             defaultMode: 0755
-
         {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
         - name: olares-home-dir
           hostPath:
@@ -335,7 +341,7 @@ spec:
             path: "{{ .Values.sharedlib }}"
             type: DirectoryOrCreate
         {{- end }}
-
+        
 ---
 apiVersion: v1
 kind: Service
