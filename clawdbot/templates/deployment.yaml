@@ -149,6 +149,10 @@ spec:
               name: openclaw-bin
               subPath: openclaw
               readOnly: true
+            - mountPath: /usr/local/bin/docker
+              name: docker-cli-bin
+              subPath: docker
+              readOnly: true              
             - mountPath: /home/linuxbrew
               name: brew-volume
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
@@ -268,7 +272,7 @@ spec:
               DOCKERD_PID=$!
               until docker info >/dev/null 2>&1; do sleep 1; done
               echo "[dind] dockerd ready, pre-pulling sandbox image..."
-              docker pull harveyff/openclaw-sandbox-common:2026.3.27 && echo "[dind] sandbox image ready" || echo "[dind] sandbox image pull failed" &
+              docker pull beclab/harveyff-openclaw-sandbox-common:2026.4.7 && echo "[dind] sandbox image ready" || echo "[dind] sandbox image pull failed" &
               wait $DOCKERD_PID
           ports:
             - containerPort: 2375
@@ -282,7 +286,10 @@ spec:
           volumeMounts:
             - mountPath: /var/lib/docker
               name: dind-storage
-
+            - mountPath: /home/node/.openclaw
+              name: app-data-config
+            - mountPath: /home/node
+              name: app-data-node
       restartPolicy: Always
       volumes:
         - hostPath:
