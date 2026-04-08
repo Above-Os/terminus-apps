@@ -1,4 +1,4 @@
-{{- define "GPU.getGPUInfo" -}}
+{{- define "comfyuisharev2server.GPU.getGPUInfo" -}}
 {{- $gpuModel := "" -}}
 {{- $gpuModelName := "" -}}
 {{- $isSparkDGX := "false" -}}
