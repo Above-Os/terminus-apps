@@ -87,20 +87,16 @@ spec:
             - |
               set -e
 
-              export PATH="/usr/local/bin:/usr/bin:/bin:${PATH}"
+              export HOME="/paperclip"
+              export NPM_CONFIG_PREFIX="/paperclip/.npm-global"
+              export PATH="/paperclip/.local/bin:/paperclip/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+              mkdir -p "/paperclip/.local/bin" "/paperclip/.npm-global/bin"
 
               echo "Ensuring local adapter CLIs are available..."
 
               if ! command -v agent >/dev/null 2>&1; then
                 echo "Installing Cursor Agent CLI..."
                 curl -fsSL https://cursor.com/install | bash || true
-
-                if [ -x "/root/.local/bin/agent" ]; then
-                  ln -sf /root/.local/bin/agent /usr/local/bin/agent
-                fi
-                if [ -x "/paperclip/.local/bin/agent" ]; then
-                  ln -sf /paperclip/.local/bin/agent /usr/local/bin/agent
-                fi
               fi
 
               if ! command -v gemini >/dev/null 2>&1; then
@@ -160,7 +156,12 @@ spec:
                     echo "Step 2: Promoting user to instance admin via DB..."
                     export INVITE_TOKEN USER_ID
 
-                    cat > /tmp/_bootstrap_admin.mjs << 'JSEOF'
+                    # Node resolves bare imports from the script's directory; /tmp has no node_modules.
+                    # Writable /paperclip/.bootstrap + symlink lets @paperclipai/db resolve like /app/cli.
+                    mkdir -p /paperclip/.bootstrap
+                    rm -f /paperclip/.bootstrap/node_modules
+                    ln -sfn /app/cli/node_modules /paperclip/.bootstrap/node_modules
+                    cat > /paperclip/.bootstrap/_bootstrap_admin.mjs << 'JSEOF'
               import { createDb, instanceUserRoles, invites } from '@paperclipai/db';
               import { eq } from 'drizzle-orm';
               import { createHash } from 'node:crypto';
@@ -193,9 +194,8 @@ spec:
                 process.exit(0);
               }
               JSEOF
-                    cp /tmp/_bootstrap_admin.mjs /app/cli/_bootstrap_admin.mjs
-                    node --import /app/cli/node_modules/tsx/dist/loader.mjs /app/cli/_bootstrap_admin.mjs 2>&1 || true
-                    rm -f /app/cli/_bootstrap_admin.mjs /tmp/_bootstrap_admin.mjs
+                    node --import /app/cli/node_modules/tsx/dist/loader.mjs /paperclip/.bootstrap/_bootstrap_admin.mjs 2>&1 || true
+                    rm -rf /paperclip/.bootstrap
                   else
                     echo "WARNING: Could not extract user ID from signup response."
                   fi
@@ -245,6 +245,10 @@ spec:
             limits:
               cpu: 2000m
               memory: 2Gi
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
           volumeMounts:
             - mountPath: /paperclip
               name: data
