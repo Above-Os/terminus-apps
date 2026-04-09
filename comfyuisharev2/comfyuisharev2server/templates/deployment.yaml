@@ -8,9 +8,12 @@
 
 {{- $desktopApiDomain := .Values.domain.comfyuilauncherweb | splitList "." | rest | join "." -}}
 
+{{- $gpuInfo := (include "comfyuisharev2server.GPU.getGPUInfo" . | fromJson) -}}
+{{- $isGb10 := eq (get $gpuInfo "isSparkDGX") "true" -}}
+
 {{ $image := "" }}
 {{ if .Values.GPU }}
-  {{ if eq .Values.GPU.Type "nvidia-gb10" }}  
+  {{ if $isGb10 }}  
     {{ $image = "beclab/comfyui_launcher-arm64:v0.18.2-feunknown-launcher0.2.37-arm64" }}
   {{ else }}
     {{ if ge (float64 .Values.GPU.Cuda) 12.8 }}
