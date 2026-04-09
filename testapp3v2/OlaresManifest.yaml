@@ -1,0 +1,116 @@
+---
+olaresManifest.version: "0.10.0"
+olaresManifest.type: app
+apiVersion: 'v2'
+metadata:
+  name: testapp3v2
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  description: test app3
+  appid: testapp3v2
+  title: TestApp3
+  version: "1.0.0"
+  categories:
+    - Utilities_v112
+    - Productivity
+
+sharedEntrances:
+  - name: testapp3v2
+    host: sharedentrances-testapp3
+    port: 0
+    title: Test App3 API
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    invisible: true
+    authLevel: internal
+entrances:
+  - name: terminal
+    port: 8081
+    host: terminalclient
+    title: TestApp3
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+  - authLevel: internal
+    host: testapp3client
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    name: testapp3client
+    openMethod: window
+    port: 8080
+    title: TestApp3 API
+    invisible: true
+
+spec:
+  versionName: "0.17.5"
+  featuredImage: https://app.cdn.olares.com/appstore/ollama/1.webp
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/ollama/1.webp
+    - https://app.cdn.olares.com/appstore/ollama/2.webp
+    - https://app.cdn.olares.com/appstore/ollama/3.webp
+
+  fullDescription: |
+    Test App3
+
+  upgradeDescription: |
+    Test App3
+
+  developer: test
+  website: https://ollama.com/
+  sourceCode: https://github.com/ollama/ollama
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/ollama/ollama/tree/main/docs
+  license:
+    - text: MIT
+      url: https://github.com/ollama/ollama#MIT-1-ov-file
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  limitedCpu: "7"
+  requiredCpu: 150m
+  requiredDisk: 50Mi
+  limitedDisk: 500Gi
+  limitedMemory: 40Gi
+  requiredMemory: 5Gi
+  requiredGpu: 1Gi
+  limitedGpu: 24Gi
+  {{- else }}
+  requiredMemory: 64Mi
+  limitedMemory: 800Mi
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  requiredCpu: 10m
+  limitedCpu: 800m
+  {{- end }}
+
+  supportArch:
+    - amd64
+    - arm64
+  onlyAdmin: false
+  subCharts:
+  - name: testapp3server
+    shared: true
+  - name: testapp3v2
+permission:
+  appData: true
+  appCache: true
+
+options:
+  allowMultipleInstall: true
+  apiTimeout: 0
+  appScope:
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+    clusterScoped: true
+    appRef:
+      - testapp3v2
+  {{- else }}
+    clusterScoped: false
+  {{- end }}
+  dependencies:
+    - name: olares
+      version: '>=1.12.3-0'
+      type: system
+  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+  {{- else }}
+    - name: testapp3v2
+      type: application
+      version: '>=1.0.1'
+      mandatory: true
+  {{- end }}
