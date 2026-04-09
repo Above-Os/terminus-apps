@@ -90,13 +90,22 @@ spec:
               export HOME="/paperclip"
               export NPM_CONFIG_PREFIX="/paperclip/.npm-global"
               export PATH="/paperclip/.local/bin:/paperclip/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-              mkdir -p "/paperclip/.local/bin" "/paperclip/.npm-global/bin"
+              mkdir -p "/paperclip/.local/bin" "/paperclip/.npm-global/bin" \
+                "/paperclip/.config" "/paperclip/.local/share" "/paperclip/.cache"
 
               echo "Ensuring local adapter CLIs are available..."
 
               if ! command -v agent >/dev/null 2>&1; then
                 echo "Installing Cursor Agent CLI..."
-                curl -fsSL https://cursor.com/install | bash || true
+                if command -v bash >/dev/null 2>&1; then
+                  curl -fsSL https://cursor.com/install | bash || true
+                else
+                  curl -fsSL https://cursor.com/install | sh || true
+                fi
+              fi
+
+              if ! command -v agent >/dev/null 2>&1; then
+                echo "WARNING: Cursor Agent CLI (agent) is still not available after install attempt."
               fi
 
               if ! command -v gemini >/dev/null 2>&1; then
@@ -109,10 +118,25 @@ spec:
                 npm install -g @mariozechner/pi-coding-agent || true
               fi
 
+              if ! command -v hermes >/dev/null 2>&1; then
+                echo "Installing Hermes CLI..."
+                # Prefer official Hermes installer (pip package name is not guaranteed on PyPI).
+                if command -v bash >/dev/null 2>&1; then
+                  curl -fSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
+                else
+                  curl -fSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | sh || true
+                fi
+              fi
+
+              if ! command -v hermes >/dev/null 2>&1; then
+                echo "WARNING: Hermes CLI (hermes) is still not available after install attempt."
+              fi
+
               echo "CLI availability:"
               command -v agent || true
               command -v gemini || true
               command -v pi || true
+              command -v hermes || true
               command -v opencode || true
               command -v codex || true
               command -v claude || true
@@ -214,6 +238,12 @@ spec:
               value: "/paperclip"
             - name: HOME
               value: "/paperclip"
+            - name: XDG_CONFIG_HOME
+              value: "/paperclip/.config"
+            - name: XDG_DATA_HOME
+              value: "/paperclip/.local/share"
+            - name: XDG_CACHE_HOME
+              value: "/paperclip/.cache"
             - name: PAPERCLIP_DEPLOYMENT_MODE
               value: "authenticated"
             - name: PAPERCLIP_DEPLOYMENT_EXPOSURE
