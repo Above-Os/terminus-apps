@@ -61,17 +61,24 @@ spec:
             - sh
             - '-c'
             - |
-              if [ ! -d "$HF_HUB_CACHE/models--Systran--faster-whisper-small/refs" ]; then
-                echo "Downloading STT model (faster-whisper-small)..."
-                uv tool run --from huggingface_hub huggingface-cli download Systran/faster-whisper-small
-              else
+              hf_ok() {
+                local d="$HF_HUB_CACHE/models--$(echo "$1" | tr '/' '--')"
+                [ -d "$d/refs" ] && [ -d "$d/snapshots" ] \
+                  && [ -n "$(ls -A "$d/snapshots/" 2>/dev/null)" ]
+              }
+              export HF_HUB_DISABLE_XET=1
+              uv tool install huggingface-hub
+              if hf_ok "Systran/faster-whisper-small"; then
                 echo "STT model already exists, skipping."
-              fi
-              if [ ! -d "$HF_HUB_CACHE/models--speaches-ai--Kokoro-82M-v1.0-ONNX/refs" ]; then
-                echo "Downloading TTS model (Kokoro-82M)..."
-                uv tool run --from huggingface_hub huggingface-cli download speaches-ai/Kokoro-82M-v1.0-ONNX
               else
+                echo "Downloading STT model (faster-whisper-small)..."
+                hf download Systran/faster-whisper-small
+              fi
+              if hf_ok "speaches-ai/Kokoro-82M-v1.0-ONNX"; then
                 echo "TTS model already exists, skipping."
+              else
+                echo "Downloading TTS model (Kokoro-82M)..."
+                hf download speaches-ai/Kokoro-82M-v1.0-ONNX
               fi
           resources:
             limits:
@@ -141,7 +148,7 @@ spec:
       volumes:
         - name: speaches-hf-cache
           hostPath:
-            path: '{{ .Values.userspace.appData }}'
+            path: '{{ .Values.sharedlib }}/ai/speaches'
             type: DirectoryOrCreate
       restartPolicy: Always
 
