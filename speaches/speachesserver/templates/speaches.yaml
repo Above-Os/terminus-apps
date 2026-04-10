@@ -97,9 +97,17 @@ spec:
           {{- else }}
           image: "docker.io/beclab/speaches-ai-speaches:0.8.2-cpu"
           {{- end }}
+          command:
+            - sh
+            - '-c'
+            - |
+              uv tool install huggingface-hub 2>/dev/null || true
+              exec uvicorn --factory speaches.main:create_app
           env:
             - name: HF_HUB_CACHE
               value: "/home/ubuntu/.cache/huggingface/hub"
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
             - name: LOOPBACK_HOST_URL
               value: "http://localhost:8000"
             - name: CHAT_COMPLETION_BASE_URL
