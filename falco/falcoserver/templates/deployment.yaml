@@ -1,30 +1,107 @@
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- if .Values.customRules }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-custom-rules
+  namespace: {{ .Release.Namespace }}
+data:
+{{- range $fileName, $ruleContent := .Values.customRules }}
+  {{ $fileName }}: |
+{{ $ruleContent | indent 4 }}
+{{- end }}
+{{- end }}
+{{- if .Values.disabledRules }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-disable-rules
+  namespace: {{ .Release.Namespace }}
+data:
+  falco_disable_rules.yaml: |
+{{- range $ruleName := .Values.disabledRules }}
+    - rule: {{ $ruleName | quote }}
+      enabled: false
+{{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   labels:
-    io.kompose.service: falcoserver
-  name: falcoserver
+    app: falco-agent
+  name: falco-agent
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      io.kompose.service: falcoserver
-  strategy:
-    type: Recreate
+      app: falco-agent
+  updateStrategy:
+    type: RollingUpdate
   template:
     metadata:
       labels:
-        io.kompose.service: falcoserver
+        app: falco-agent
     spec:
+      tolerations:
+        - operator: Exists
+      initContainers:
+        - name: init-chmod-falco-plugins
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - '-c'
+            - |
+              chown -R 1000:1000 /falco-plugins
+              chmod -R 0777 /falco-plugins
+              mkdir -p /falco-rules
+              chown -R 1000:1000 /falco-rules
+              chmod -R 0777 /falco-rules
+              if [ ! -f /falco-plugin-config/plugins.local.yaml ]; then
+                printf '%s\n' \
+                  '# Falco plugin configuration example.' \
+                  '# This file is created only once by init container.' \
+                  '# Edit this file manually to enable plugins you installed' \
+                  '#' \
+                  '# Example: enable k8saudit plugin' \
+                  '# plugins:' \
+                  '#   - name: k8saudit' \
+                  '#     library_path: /var/lib/falco/plugins/libk8saudit.so' \
+                  '#     init_config: ""' \
+                  '#     open_params: "http://:9765/k8s-audit"' \
+                  '#' \
+                  '# load_plugins: [k8saudit]' \
+                  > /falco-plugin-config/plugins.local.yaml
+              fi
+              chown 1000:1000 /falco-plugin-config/plugins.local.yaml
+              chmod 0666 /falco-plugin-config/plugins.local.yaml
+          resources: {}
+          volumeMounts:
+            - name: falco-plugins
+              mountPath: /falco-plugins
+            - name: falco-rules
+              mountPath: /falco-rules
+            - name: falco-plugin-config-file
+              mountPath: /falco-plugin-config/plugins.local.yaml
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          securityContext:
+            runAsUser: 0
       containers:
         - name: falco
           image: "docker.io/falcosecurity/falco:0.43.0"
           imagePullPolicy: IfNotPresent
           args:
             - /usr/bin/falco
+            - -r
+            - /etc/falco/falco_rules.yaml
+            - -r
+            - /etc/falco/rules.d
+            - -r
+            - /etc/falco/rules.d/managed
             - -o
             - json_output=true
             - -o
@@ -32,7 +109,7 @@ spec:
             - -o
             - http_output.enabled=true
             - -o
-            - http_output.url=http://localhost:2801/
+            - http_output.url=http://falco-sidekick.{{ .Release.Namespace }}:2801/
           securityContext:
             capabilities:
               drop:
@@ -60,7 +137,123 @@ spec:
               readOnly: true
             - mountPath: /dev
               name: dev
+            - mountPath: /var/lib/falco/plugins
+              name: falco-plugins
+            - mountPath: /etc/falco/config.d/plugins.local.yaml
+              name: falco-plugin-config-file
+            - mountPath: /etc/falco/rules.d/managed
+              name: falco-rules
+{{- if .Values.customRules }}
+{{- range $fileName, $_ := .Values.customRules }}
+            - mountPath: /etc/falco/rules.d/{{ $fileName }}
+              name: falco-custom-rules
+              subPath: {{ $fileName }}
+              readOnly: true
+{{- end }}
+{{- end }}
+{{- if .Values.disabledRules }}
+            - mountPath: /etc/falco/rules.d/falco_disable_rules.yaml
+              name: falco-disable-rules
+              subPath: falco_disable_rules.yaml
+              readOnly: true
+{{- end }}
 
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: etc
+          hostPath:
+            path: /etc
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: falco-plugins
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/plugins'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins'
+            {{- end }}
+        - name: falco-plugin-config-file
+          hostPath:
+            type: FileOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/plugins.local.yaml'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins.local.yaml'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/plugins.local.yaml'
+            {{- end }}
+        - name: falco-rules
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/rules'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/rules'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/rules'
+            {{- end }}
+{{- if .Values.customRules }}
+        - name: falco-custom-rules
+          configMap:
+            name: falco-custom-rules
+{{- end }}
+{{- if .Values.disabledRules }}
+        - name: falco-disable-rules
+          configMap:
+            name: falco-disable-rules
+{{- end }}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-sidekick
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: http
+      port: 2801
+      targetPort: 2801
+  selector:
+    app: falco-central
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: falco-central
+  name: falco-central
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco-central
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: falco-central
+    spec:
+      containers:
         - name: sidekick
           image: "docker.io/falcosecurity/falcosidekick:2.33.0"
           imagePullPolicy: IfNotPresent
@@ -75,7 +268,7 @@ spec:
               memory: 64Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 500Mi
           readinessProbe:
             httpGet:
               path: /ping
@@ -96,6 +289,9 @@ spec:
             - '-r'
             - 'localhost:6379'
             - '-d'
+          env:
+            - name: FALCOSIDEKICK_UI_TTL
+              value: "72h"
           ports:
             - containerPort: 2802
           resources:
@@ -104,7 +300,7 @@ spec:
               memory: 64Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 500Mi
           readinessProbe:
             httpGet:
               path: /
@@ -135,7 +331,7 @@ spec:
               memory: 64Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1.5G
           volumeMounts:
             - mountPath: /data
               name: redis-data
@@ -153,20 +349,7 @@ spec:
                 - ping
             initialDelaySeconds: 5
             periodSeconds: 5
-
       volumes:
-        - name: proc
-          hostPath:
-            path: /proc
-        - name: etc
-          hostPath:
-            path: /etc
-        - name: debugfs
-          hostPath:
-            path: /sys/kernel/debug
-        - name: dev
-          hostPath:
-            path: /dev
         - name: redis-data
           hostPath:
             type: DirectoryOrCreate
@@ -179,7 +362,6 @@ spec:
             {{- else }}
             path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/redis'
             {{- end }}
-      restartPolicy: Always
 
 ---
 apiVersion: v1
@@ -193,5 +375,5 @@ spec:
       port: 2802
       targetPort: 2802
   selector:
-    io.kompose.service: falcoserver
+    app: falco-central
 {{- end }}

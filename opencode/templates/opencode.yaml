@@ -1,5 +1,7 @@
 {{- $opencodeDomainENV := split  ","  .Values.domain.opencode -}}
 {{- $opencodeDomain := index $opencodeDomainENV "_0" -}}
+{{- $env := .Values.olaresEnv | default dict -}}
+{{- $enableOMO := ne (index $env "OPENCODE_OMO" | default "true") "false" }}
 
 ---
 apiVersion: apps/v1
@@ -25,12 +27,16 @@ spec:
     spec:
       initContainers:
         - name: init-setup
-          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          image: "docker.io/beclab/anomalyco-opencode:1.4.0"
           command:
             - sh
             - "-c"
             - |
+              set -e
+              apk add --no-cache python3
               OC_DOMAIN="{{ $opencodeDomain }}"
+              export OLARES_OC_DOMAIN="$OC_DOMAIN"
+              export OLARES_ENABLE_OMO="{{ if $enableOMO }}1{{ else }}0{{ end }}"
               mkdir -p /home/opencode/workspace \
                        /home/opencode/.opencode \
                        /home/opencode/.config/opencode \
@@ -270,14 +276,241 @@ spec:
                 '- NEVER modify ~/.profile or ~/.bashrc for PATH — packages install to standard paths' \
                 '- When unsure about the package name, use `pkg-install --search <keyword>` first' \
                 > "$ADMIN"
+              echo "=== Olares global baseline / plugin + workspace legacy instructions cleanup (python) ==="
+              OLARES_PY=/tmp/olares-init-opencode-cfg.py
               printf '%s\n' \
-                '{' \
-                '  "instructions": [' \
-                '    "CRITICAL: You have special skills. ALWAYS run /skill load web-preview BEFORE any task involving web, server, preview, run, start, serve, build, create, demo, test, launch, deploy, site, app, page, website, frontend, backend, API, port, vite, react, next, vue, flask, go server, python server. ALWAYS run /skill load system-admin BEFORE installing ANY system package.",' \
-                '    "NEVER use sudo, apt, or apk directly. Use pkg-install instead.",' \
-                '    "NEVER show localhost URLs. The domain is '"$OC_DOMAIN"'. Dev server preview URL format: https://'"$OC_DOMAIN"'/__preview/<port>/"' \
-                '  ]' \
-                '}' > /home/opencode/workspace/opencode.json
+                'import json' \
+                'import os' \
+                'from pathlib import Path' \
+                '' \
+                'DOMAIN = os.environ.get("OLARES_OC_DOMAIN", "")' \
+                'ENABLE_OMO = os.environ.get("OLARES_ENABLE_OMO", "1") == "1"' \
+                'BASELINE_MD = Path("/home/opencode/.config/opencode/olares-baseline-instructions.md")' \
+                'GLOBAL_JSON = Path("/home/opencode/.config/opencode/opencode.json")' \
+                'WORKSPACE_JSON = Path("/home/opencode/workspace/opencode.json")' \
+                'OLARES_REF = "/home/opencode/.config/opencode/olares-baseline-instructions.md"' \
+                'PLUGIN_NPM = "oh-my-openagent"' \
+                'STALE_PLUGIN_NPM = "oh-my-opencode"' \
+                '' \
+                'LEGACY_S1 = (' \
+                '    "CRITICAL: You have special skills. ALWAYS run /skill load web-preview BEFORE any task involving "' \
+                '    "web, server, preview, run, start, serve, build, create, demo, test, launch, deploy, site, app, page, "' \
+                '    "website, frontend, backend, API, port, vite, react, next, vue, flask, go server, python server. "' \
+                '    "ALWAYS run /skill load system-admin BEFORE installing ANY system package."' \
+                ')' \
+                'LEGACY_S2 = "NEVER use sudo, apt, or apk directly. Use pkg-install instead."' \
+                'LEGACY_S3 = (' \
+                '    f"NEVER show localhost URLs. The domain is {DOMAIN}. "' \
+                '    f"Dev server preview URL format: https://{DOMAIN}/__preview/<port>/"' \
+                ')' \
+                'LEGACY = {LEGACY_S1, LEGACY_S2, LEGACY_S3}' \
+                '' \
+                'BASELINE_MD.parent.mkdir(parents=True, exist_ok=True)' \
+                'md = (' \
+                '    "<!-- olares-managed: baseline-instructions v1 (rewritten each pod start) -->\\n\\n"' \
+                '    "# Olares environment baseline\\n\\n"' \
+                '    "## Web preview and dev servers\\n\\n"' \
+                '    + LEGACY_S1' \
+                '    + "\\n\\n## System packages\\n\\n"' \
+                '    + LEGACY_S2' \
+                '    + "\\n\\n## URLs and domain\\n\\n"' \
+                '    + LEGACY_S3' \
+                '    + "\\n"' \
+                ')' \
+                'BASELINE_MD.write_text(md, encoding="utf-8")' \
+                '' \
+                'cfg = {}' \
+                'if GLOBAL_JSON.is_file():' \
+                '    try:' \
+                '        cfg = json.loads(GLOBAL_JSON.read_text(encoding="utf-8"))' \
+                '    except json.JSONDecodeError:' \
+                '        cfg = {}' \
+                'instr = cfg.get("instructions")' \
+                'if not isinstance(instr, list):' \
+                '    instr = []' \
+                'if OLARES_REF not in instr:' \
+                '    instr = list(instr) + [OLARES_REF]' \
+                'cfg["instructions"] = instr' \
+                'cfg.setdefault("$schema", "https://opencode.ai/config.json")' \
+                'plugins = cfg.get("plugin")' \
+                'if not isinstance(plugins, list):' \
+                '    plugins = []' \
+                'plugins = [p for p in plugins if isinstance(p, str)]' \
+                'plugins = [p for p in plugins if p != STALE_PLUGIN_NPM]' \
+                'if ENABLE_OMO:' \
+                '    plugins = [p for p in plugins if p != PLUGIN_NPM]' \
+                '    plugins.append(PLUGIN_NPM)' \
+                'else:' \
+                '    plugins = [p for p in plugins if p != PLUGIN_NPM]' \
+                'if plugins:' \
+                '    cfg["plugin"] = plugins' \
+                'else:' \
+                '    cfg.pop("plugin", None)' \
+                'GLOBAL_JSON.parent.mkdir(parents=True, exist_ok=True)' \
+                'GLOBAL_JSON.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")' \
+                '' \
+                '' \
+                'if WORKSPACE_JSON.is_file():' \
+                '    try:' \
+                '        wcfg = json.loads(WORKSPACE_JSON.read_text(encoding="utf-8"))' \
+                '    except json.JSONDecodeError:' \
+                '        wcfg = None' \
+                '    if wcfg is not None:' \
+                '        winst = wcfg.get("instructions")' \
+                '        legacy_changed = False' \
+                '        if isinstance(winst, list):' \
+                '            new_inst = [x for x in winst if x not in LEGACY]' \
+                '            if new_inst != winst:' \
+                '                legacy_changed = True' \
+                '                if new_inst:' \
+                '                    wcfg["instructions"] = new_inst' \
+                '                else:' \
+                '                    wcfg.pop("instructions", None)' \
+                '        only_schema = isinstance(wcfg, dict) and set(wcfg.keys()) == {"$schema"}' \
+                '        if legacy_changed:' \
+                '            if not wcfg or only_schema:' \
+                '                WORKSPACE_JSON.unlink(missing_ok=True)' \
+                '            else:' \
+                '                WORKSPACE_JSON.write_text(json.dumps(wcfg, indent=2, ensure_ascii=False), encoding="utf-8")' \
+                '        elif only_schema:' \
+                '            WORKSPACE_JSON.unlink(missing_ok=True)' \
+                > "$OLARES_PY"
+              python3 "$OLARES_PY"
+              rm -f "$OLARES_PY"
+              {{- if $enableOMO }}
+              OMO_AGENT_CFG="/home/opencode/.config/opencode/oh-my-openagent.json"
+              if [ ! -f "$OMO_AGENT_CFG" ]; then
+                echo "=== Writing default oh-my-openagent.json ==="
+                printf '%s\n' \
+                  '{' \
+                  '  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",' \
+                  '  "runtime_fallback": { "enabled": true, "max_fallback_attempts": 7 },' \
+                  '  "agents": {' \
+                  '    "sisyphus": { "model": "anthropic/claude-opus-4-6", "variant": "max", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "openai/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "hephaestus": { "model": "openai/gpt-5.4", "variant": "medium", "fallback_models": [' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "oracle": { "model": "openai/gpt-5.4", "variant": "high", "fallback_models": [' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "high" },' \
+                  '      { "model": "google/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "anthropic/claude-opus-4-6", "variant": "max" },' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "explore": { "model": "anthropic/claude-haiku-4-5", "fallback_models": [' \
+                  '      { "model": "github-copilot/grok-code-fast-1" },' \
+                  '      { "model": "opencode/gpt-5-nano" }' \
+                  '    ] },' \
+                  '    "multimodal-looker": { "model": "openai/gpt-5.4", "variant": "medium", "fallback_models": [' \
+                  '      { "model": "openai/gpt-5-nano" },' \
+                  '      { "model": "github-copilot/gpt-5-nano" },' \
+                  '      { "model": "opencode/gpt-5-nano" }' \
+                  '    ] },' \
+                  '    "prometheus": { "model": "anthropic/claude-opus-4-6", "variant": "max", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "openai/gpt-5.4", "variant": "high" },' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "high" },' \
+                  '      { "model": "google/gemini-3.1-pro-preview" },' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "metis": { "model": "anthropic/claude-opus-4-6", "variant": "max", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "openai/gpt-5.4", "variant": "high" },' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "high" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "momus": { "model": "openai/gpt-5.4", "variant": "xhigh", "fallback_models": [' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "xhigh" },' \
+                  '      { "model": "anthropic/claude-opus-4-6", "variant": "max" },' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "google/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "atlas": { "model": "anthropic/claude-sonnet-4-6", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-sonnet-4.6" },' \
+                  '      { "model": "openai/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "sisyphus-junior": { "model": "anthropic/claude-sonnet-4-6", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-sonnet-4.6" },' \
+                  '      { "model": "openai/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] }' \
+                  '  },' \
+                  '  "categories": {' \
+                  '    "visual-engineering": { "model": "google/gemini-3.1-pro-preview", "variant": "high", "fallback_models": [' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "anthropic/claude-opus-4-6", "variant": "max" },' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "ultrabrain": { "model": "openai/gpt-5.4", "variant": "xhigh", "fallback_models": [' \
+                  '      { "model": "google/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "anthropic/claude-opus-4-6", "variant": "max" },' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "deep": { "model": "openai/gpt-5.4", "variant": "medium", "fallback_models": [' \
+                  '      { "model": "github-copilot/gpt-5.4", "variant": "medium" },' \
+                  '      { "model": "anthropic/claude-opus-4-6", "variant": "max" },' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "google/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "artistry": { "model": "google/gemini-3.1-pro-preview", "variant": "high", "fallback_models": [' \
+                  '      { "model": "github-copilot/gemini-3.1-pro-preview", "variant": "high" },' \
+                  '      { "model": "anthropic/claude-opus-4-6", "variant": "max" },' \
+                  '      { "model": "github-copilot/claude-opus-4.6", "variant": "max" },' \
+                  '      { "model": "openai/gpt-5.4" },' \
+                  '      { "model": "github-copilot/gpt-5.4" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "quick": { "model": "openai/gpt-5.4-mini", "fallback_models": [' \
+                  '      { "model": "github-copilot/gpt-5.4-mini" },' \
+                  '      { "model": "anthropic/claude-haiku-4-5" },' \
+                  '      { "model": "github-copilot/claude-haiku-4.5" },' \
+                  '      { "model": "google/gemini-3-flash-preview" },' \
+                  '      { "model": "github-copilot/gemini-3-flash-preview" },' \
+                  '      { "model": "opencode/gpt-5-nano" }' \
+                  '    ] },' \
+                  '    "unspecified-low": { "model": "anthropic/claude-sonnet-4-6", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-sonnet-4.6" },' \
+                  '      { "model": "openai/gpt-5.3-codex", "variant": "medium" },' \
+                  '      { "model": "google/gemini-3-flash-preview" },' \
+                  '      { "model": "github-copilot/gemini-3-flash-preview" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "unspecified-high": { "model": "anthropic/claude-sonnet-4-6", "fallback_models": [' \
+                  '      { "model": "github-copilot/claude-sonnet-4.6" },' \
+                  '      { "model": "openai/gpt-5.3-codex", "variant": "medium" },' \
+                  '      { "model": "google/gemini-3-flash-preview" },' \
+                  '      { "model": "github-copilot/gemini-3-flash-preview" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] },' \
+                  '    "writing": { "model": "google/gemini-3-flash-preview", "fallback_models": [' \
+                  '      { "model": "github-copilot/gemini-3-flash-preview" },' \
+                  '      { "model": "anthropic/claude-sonnet-4-6" },' \
+                  '      { "model": "github-copilot/claude-sonnet-4.6" },' \
+                  '      { "model": "opencode/big-pickle" }' \
+                  '    ] }' \
+                  '  }' \
+                  '}' \
+                  > "$OMO_AGENT_CFG"
+              fi
+              {{- end }}
               chown 1000:1000 /home/opencode /home/opencode/workspace
               find /home/opencode -mindepth 1 -maxdepth 1 ! -name '.pkg-root' \
                 -exec chown -R 1000:1000 {} +
@@ -295,16 +528,16 @@ spec:
             runAsUser: 0
 
         - name: init-packages
-          image: "docker.io/beclab/anomalyco-opencode:1.2.27"
+          image: "docker.io/beclab/anomalyco-opencode:1.4.0"
           command:
             - sh
             - "-c"
             - |
               PKG="/home/opencode/.pkg-root"
-              OC_VER="1.2.27"
+              OC_VER="1.4.0"
               GLIBC_VER="2.35-r1"
               BASE_PKGS="python3 py3-pip git curl wget bash openssh-client nodejs npm go rust cargo iproute2 zip unzip gzip bzip2 xz tar zstd"
-              FINGERPRINT="oc=${OC_VER} glibc=${GLIBC_VER} arch=$(uname -m) pkgs=${BASE_PKGS}"
+              FINGERPRINT="oc=${OC_VER} glibc=${GLIBC_VER} arch=$(uname -m) pkgs=${BASE_PKGS} omo={{ if $enableOMO }}yes{{ else }}no{{ end }}"
               PKG_HASH=$(printf '%s' "$FINGERPRINT" | sha256sum | cut -c1-16)
               MARKER="$PKG/.installed-${PKG_HASH}"
 
@@ -379,9 +612,24 @@ spec:
               cp /home/opencode/.profile /home/opencode/.bashrc
               chown 1000:1000 /home/opencode/.profile /home/opencode/.bashrc
 
+              olares_run_omo() {
+              {{- if $enableOMO }}
+                if ! command -v npm >/dev/null 2>&1; then
+                  echo "=== OMO: npm not in PATH (cache-hit fast path), installing nodejs+npm ==="
+                  apk add --no-cache nodejs npm 2>&1 || echo "=== WARNING: apk add nodejs npm failed ==="
+                fi
+                echo "=== Installing oh-my-opencode npm package ==="
+                npm install -g --ignore-scripts oh-my-opencode 2>&1 || echo "=== WARNING: npm install oh-my-opencode failed ==="
+                chown -R 1000:1000 /home/opencode/.local 2>/dev/null || true
+              {{- else }}
+                :
+              {{- end }}
+              }
+
               if [ -f "$MARKER" ] && verify_cache; then
                 echo "=== Package snapshot cached (${PKG_HASH}) ==="
                 restore_user_packages
+                olares_run_omo
                 exit 0
               fi
               rm -f "$MARKER"
@@ -598,6 +846,8 @@ spec:
               EOFWRAPPER
               chmod +x /usr/local/bin/pkg-install
 
+              olares_run_omo
+
               echo "=== Snapshotting filesystem to $PKG ==="
               rm -rf "$PKG"
               mkdir -p "$PKG" "$PKG/etc" "$PKG/tmp"
@@ -628,6 +878,8 @@ spec:
           volumeMounts:
             - name: opencode-home
               mountPath: /home/opencode
+            - name: opencode-workspace
+              mountPath: /home/opencode/workspace
           resources:
             requests:
               cpu: 100m
@@ -640,7 +892,7 @@ spec:
 
       containers:
         - name: opencode
-          image: "docker.io/beclab/anomalyco-opencode:1.2.27"
+          image: "docker.io/beclab/anomalyco-opencode:1.4.0"
           command:
             - sh
             - "-c"
@@ -677,11 +929,11 @@ spec:
               value: /usr/glibc-compat/lib
           resources:
             limits:
-              cpu: "2"
-              memory: 2Gi
+              cpu: "4"
+              memory: 4Gi
             requests:
-              cpu: 100m
-              memory: 512Mi
+              cpu: 200m
+              memory: 1Gi
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -762,7 +1014,7 @@ spec:
               mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
               subPath: nginx.conf
         - name: pkg-manager
-          image: "docker.io/beclab/anomalyco-opencode:1.2.27"
+          image: "docker.io/beclab/anomalyco-opencode:1.4.0"
           securityContext:
             runAsUser: 0
           command:

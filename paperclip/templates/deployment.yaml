@@ -1,5 +1,42 @@
 {{- $paperclipDomainENV := split  ","  .Values.domain.paperclip -}}
 {{- $paperclipDomain := index $paperclipDomainENV "_0" -}}
+{{- $existingApiKeys := lookup "v1" "ConfigMap" .Release.Namespace "paperclip-api-keys" }}
+{{- $openaiKey := "" }}
+{{- $anthropicKey := "" }}
+{{- $geminiKey := "" }}
+{{- $cursorKey := "" }}
+{{- if and .Values.env .Values.env.OPENAI_API_KEY }}
+{{- $openaiKey = .Values.env.OPENAI_API_KEY }}
+{{- else if $existingApiKeys }}
+{{- $openaiKey = index $existingApiKeys.data "OPENAI_API_KEY" | default "" }}
+{{- end }}
+{{- if and .Values.env .Values.env.ANTHROPIC_API_KEY }}
+{{- $anthropicKey = .Values.env.ANTHROPIC_API_KEY }}
+{{- else if $existingApiKeys }}
+{{- $anthropicKey = index $existingApiKeys.data "ANTHROPIC_API_KEY" | default "" }}
+{{- end }}
+{{- if and .Values.env .Values.env.GEMINI_API_KEY }}
+{{- $geminiKey = .Values.env.GEMINI_API_KEY }}
+{{- else if $existingApiKeys }}
+{{- $geminiKey = index $existingApiKeys.data "GEMINI_API_KEY" | default "" }}
+{{- end }}
+{{- if and .Values.env .Values.env.CURSOR_API_KEY }}
+{{- $cursorKey = .Values.env.CURSOR_API_KEY }}
+{{- else if $existingApiKeys }}
+{{- $cursorKey = index $existingApiKeys.data "CURSOR_API_KEY" | default "" }}
+{{- end }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paperclip-api-keys
+  namespace: {{ .Release.Namespace }}
+data:
+  ANTHROPIC_API_KEY: {{ $anthropicKey | quote }}
+  OPENAI_API_KEY: {{ $openaiKey | quote }}
+  GEMINI_API_KEY: {{ $geminiKey | quote }}
+  CURSOR_API_KEY: {{ $cursorKey | quote }}
 
 ---
 apiVersion: apps/v1
@@ -33,63 +70,6 @@ spec:
             mkdir -p /paperclip/instances/default/logs
             mkdir -p /paperclip/instances/default/data/storage
             mkdir -p /paperclip/instances/default/secrets
-            cat > /paperclip/instances/default/config.json << 'CFGEOF'
-            {
-              "$meta": {
-                "version": 1,
-                "updatedAt": "2026-01-01T00:00:00.000Z",
-                "source": "onboard"
-              },
-              "database": {
-                "mode": "postgres",
-                "connectionString": "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}",
-                "embeddedPostgresDataDir": "/paperclip/instances/default/db",
-                "embeddedPostgresPort": 54329,
-                "backup": {
-                  "enabled": false,
-                  "intervalMinutes": 60,
-                  "retentionDays": 30,
-                  "dir": "/paperclip/instances/default/data/backups"
-                }
-              },
-              "logging": {
-                "mode": "file",
-                "logDir": "/paperclip/instances/default/logs"
-              },
-              "server": {
-                "deploymentMode": "authenticated",
-                "exposure": "private",
-                "host": "0.0.0.0",
-                "port": 3100,
-                "allowedHostnames": ["{{ $paperclipDomain }}"],
-                "serveUi": true
-              },
-              "auth": {
-                "baseUrlMode": "explicit",
-                "disableSignUp": false,
-                "publicBaseUrl": "https://{{ $paperclipDomain }}"
-              },
-              "storage": {
-                "provider": "local_disk",
-                "localDisk": {
-                  "baseDir": "/paperclip/instances/default/data/storage"
-                },
-                "s3": {
-                  "bucket": "paperclip",
-                  "region": "us-east-1",
-                  "prefix": "",
-                  "forcePathStyle": false
-                }
-              },
-              "secrets": {
-                "provider": "local_encrypted",
-                "strictMode": false,
-                "localEncrypted": {
-                  "keyFilePath": "/paperclip/instances/default/secrets/master.key"
-                }
-              }
-            }
-            CFGEOF
             chown -R 1000:1000 /paperclip
         resources: {}
         volumeMounts:
@@ -111,7 +91,7 @@ spec:
         imagePullPolicy: IfNotPresent
       containers:
         - name: paperclip
-          image: "beclab/paperclip:v0.0.1"
+          image: beclab/paperclipai-paperclip:sha-2e09570
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3100
@@ -119,6 +99,62 @@ spec:
             - /bin/sh
             - '-c'
             - |
+              set -e
+
+              export HOME="/paperclip"
+              export NPM_CONFIG_PREFIX="/paperclip/.npm-global"
+              export PATH="/paperclip/.local/bin:/paperclip/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+              mkdir -p "/paperclip/.local/bin" "/paperclip/.npm-global/bin" \
+                "/paperclip/.config" "/paperclip/.local/share" "/paperclip/.cache"
+
+              echo "Ensuring local adapter CLIs are available..."
+
+              if ! command -v agent >/dev/null 2>&1; then
+                echo "Installing Cursor Agent CLI..."
+                if command -v bash >/dev/null 2>&1; then
+                  curl -fsSL https://cursor.com/install | bash || true
+                else
+                  curl -fsSL https://cursor.com/install | sh || true
+                fi
+              fi
+
+              if ! command -v agent >/dev/null 2>&1; then
+                echo "WARNING: Cursor Agent CLI (agent) is still not available after install attempt."
+              fi
+
+              if ! command -v gemini >/dev/null 2>&1; then
+                echo "Installing Gemini CLI..."
+                npm install -g @google/gemini-cli || true
+              fi
+
+              if ! command -v pi >/dev/null 2>&1; then
+                echo "Installing Pi CLI..."
+                npm install -g @mariozechner/pi-coding-agent || true
+              fi
+
+              if ! command -v hermes >/dev/null 2>&1; then
+                echo "Installing Hermes CLI..."
+                # Prefer official Hermes installer (pip package name is not guaranteed on PyPI).
+                if command -v bash >/dev/null 2>&1; then
+                  curl -fSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
+                else
+                  curl -fSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | sh || true
+                fi
+              fi
+
+              if ! command -v hermes >/dev/null 2>&1; then
+                echo "WARNING: Hermes CLI (hermes) is still not available after install attempt."
+              fi
+
+              echo "CLI availability:"
+              command -v agent || true
+              command -v gemini || true
+              command -v pi || true
+              command -v hermes || true
+              command -v opencode || true
+              command -v codex || true
+              command -v claude || true
+
               node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js &
               SERVER_PID=$!
 
@@ -158,7 +194,12 @@ spec:
                     echo "Step 2: Promoting user to instance admin via DB..."
                     export INVITE_TOKEN USER_ID
 
-                    cat > /tmp/_bootstrap_admin.mjs << 'JSEOF'
+                    # Node resolves bare imports from the script's directory; /tmp has no node_modules.
+                    # Writable /paperclip/.bootstrap + symlink lets @paperclipai/db resolve like /app/cli.
+                    mkdir -p /paperclip/.bootstrap
+                    rm -f /paperclip/.bootstrap/node_modules
+                    ln -sfn /app/cli/node_modules /paperclip/.bootstrap/node_modules
+                    cat > /paperclip/.bootstrap/_bootstrap_admin.mjs << 'JSEOF'
               import { createDb, instanceUserRoles, invites } from '@paperclipai/db';
               import { eq } from 'drizzle-orm';
               import { createHash } from 'node:crypto';
@@ -191,9 +232,8 @@ spec:
                 process.exit(0);
               }
               JSEOF
-                    cp /tmp/_bootstrap_admin.mjs /app/cli/_bootstrap_admin.mjs
-                    node --import /app/cli/node_modules/tsx/dist/loader.mjs /app/cli/_bootstrap_admin.mjs 2>&1 || true
-                    rm -f /app/cli/_bootstrap_admin.mjs /tmp/_bootstrap_admin.mjs
+                    node --import /app/cli/node_modules/tsx/dist/loader.mjs /paperclip/.bootstrap/_bootstrap_admin.mjs 2>&1 || true
+                    rm -rf /paperclip/.bootstrap
                   else
                     echo "WARNING: Could not extract user ID from signup response."
                   fi
@@ -212,6 +252,12 @@ spec:
               value: "/paperclip"
             - name: HOME
               value: "/paperclip"
+            - name: XDG_CONFIG_HOME
+              value: "/paperclip/.config"
+            - name: XDG_DATA_HOME
+              value: "/paperclip/.local/share"
+            - name: XDG_CACHE_HOME
+              value: "/paperclip/.cache"
             - name: PAPERCLIP_DEPLOYMENT_MODE
               value: "authenticated"
             - name: PAPERCLIP_DEPLOYMENT_EXPOSURE
@@ -223,9 +269,25 @@ spec:
             - name: DATABASE_URL
               value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}"
             - name: ANTHROPIC_API_KEY
-              value: ""
+              valueFrom:
+                configMapKeyRef:
+                  name: paperclip-api-keys
+                  key: ANTHROPIC_API_KEY
             - name: OPENAI_API_KEY
-              value: ""
+              valueFrom:
+                configMapKeyRef:
+                  name: paperclip-api-keys
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: paperclip-api-keys
+                  key: GEMINI_API_KEY
+            - name: CURSOR_API_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: paperclip-api-keys
+                  key: CURSOR_API_KEY
             - name: PAPERCLIP_API_URL
               value: "http://localhost:3100"
             - name: PAPERCLIP_INTERNAL_URL
@@ -237,6 +299,10 @@ spec:
             limits:
               cpu: 2000m
               memory: 2Gi
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
           volumeMounts:
             - mountPath: /paperclip
               name: data
