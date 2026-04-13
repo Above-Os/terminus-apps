@@ -1,3 +1,5 @@
+{{- $trekDomainENV := split  ","  .Values.domain.trek -}}
+{{- $trekDomain := index $trekDomainENV "_0" -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -78,10 +80,24 @@ spec:
           value: "3000"
         - name: FORCE_HTTPS
           value: "false"
+        - name: APP_URL
+          value: "https://{{ $trekDomain }}"
         - name: ADMIN_EMAIL
           value: {{ .Values.olaresEnv.ADMIN_EMAIL | quote }}
         - name: ADMIN_PASSWORD
           value: {{ .Values.olaresEnv.ADMIN_PASSWORD | quote }}
+        {{- if and (eq (toString .Values.olaresEnv.USE_SYSTEM_SMTP_SETTINGS) "true") (eq (toString .Values.olaresEnv.SMTP_ENABLED) "true") }}
+        - name: SMTP_HOST
+          value: "{{ .Values.olaresEnv.SMTP_HOST }}"
+        - name: SMTP_PORT
+          value: "{{ .Values.olaresEnv.SMTP_PORT }}"
+        - name: SMTP_USER
+          value: "{{ .Values.olaresEnv.SMTP_USER }}"
+        - name: SMTP_PASS
+          value: "{{ .Values.olaresEnv.SMTP_PASS }}"
+        - name: SMTP_SKIP_TLS_VERIFY
+          value: "{{ .Values.olaresEnv.SMTP_SKIP_TLS_VERIFY }}"
+        {{- end }}
         image: "docker.io/beclab/mauriceboe-trek:2.9.12"
         name: trek
         ports:
