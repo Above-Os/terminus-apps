@@ -25,7 +25,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: llama
-          image: "docker.io/beclab/ggml-org-llama.cpp:server-cuda-b8445"
+          image: "docker.io/beclab/ggml-org-llama.cpp:server-cuda-b8643"
           command:
             - /bin/sh
             - -c
@@ -95,4 +95,21 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/gptoss120bgguf"
             type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llama
+spec:
+  selector:
+    io.kompose.service: llama
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
 {{- end }}
