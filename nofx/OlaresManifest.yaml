@@ -1,11 +1,11 @@
 ---
 olaresManifest.version: "0.10.0"
 olaresManifest.type: app
-apiVersion: "v2"
+apiVersion: 'v1'
 metadata:
   name: nofx
-  icon: https://raw.githubusercontent.com/leolianger/nofx/main/web/public/icons/nofx.svg
-  description: Personal AI trading assistant — Web UI on port 8080, SQLite under app data.
+  icon: https://app.cdn.olares.com/appstore/dify/icon-new.png
+  description: Open-source AI trading assistant — web UI with Go API; data persisted under app data.
   appid: nofx
   title: NOFX
   version: "1.0.0"
@@ -17,29 +17,34 @@ entrances:
     port: 8080
     host: nofx
     title: NOFX
-    icon: https://raw.githubusercontent.com/leolianger/nofx/main/web/public/icons/nofx.svg
+    icon: https://app.cdn.olares.com/appstore/dify/icon-new.png
     authLevel: private
     openMethod: window
 
 spec:
   versionName: "1.0.0"
   fullDescription: |
-    NOFX is an open-source AI trading assistant with a React dashboard and Go backend
-    (all-in-one image for Olares). Open this app to use the Web UI.
+    NOFX is an open-source AI trading assistant. This Olares package runs the same official
+    container images as upstream: `ghcr.io/nofxaios/nofx/nofx-backend` and
+    `ghcr.io/nofxaios/nofx/nofx-frontend`.
 
-    Database file: /app/data/data.db (persisted via app data). Build and push the image
-    from your fork using scripts/docker-build-push-goai007.sh; set values.yaml image
-    tag to match the tag you pushed.
+    Open this app for the web UI. The API is available under the same origin at `/api/`.
+    SQLite and logs live under `/app/data` (persisted in this app’s Olares app data directory). On first install,
+    JWT and data-encryption keys are in a Kubernetes Secret; the RSA private key is written to
+    app data `.env` by an init container (same pattern as upstream env + data directory).
+
+    Upstream install (Docker): `curl -fsSL https://raw.githubusercontent.com/NoFxAiOS/nofx/main/install.sh | bash`
   upgradeDescription: |
-    Initial Olares package.
-  developer: leolianger
-  sourceCode: https://github.com/leolianger/nofx
+    Switch to official NoFxAiOS images; frontend + backend with generated first-run secrets.
+  developer: NoFxAiOS
+  website: https://vergex.trade/
+  sourceCode: https://github.com/NoFxAiOS/nofx
   submitter: Olares
   locale:
     - en-US
     - zh-CN
-  requiredMemory: 512Mi
-  limitedMemory: 2Gi
+  requiredMemory: 768Mi
+  limitedMemory: 3Gi
   requiredDisk: 512Mi
   limitedDisk: 5Gi
   requiredCpu: 500m
@@ -52,6 +57,7 @@ permission:
   appData: true
 
 options:
+  allowMultipleInstall: true
   apiTimeout: 0
   dependencies:
     - name: olares
