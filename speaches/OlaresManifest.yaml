@@ -7,7 +7,7 @@ metadata:
   description: OpenAI-compatible TTS/STT server
   appid: speaches
   title: Speaches
-  version: '1.0.4'
+  version: '1.0.5'
   categories:
     - Utilities_v112
     - AI
@@ -117,21 +117,6 @@ spec:
     - name: speachesserver
       shared: true
     - name: speaches
-envs:
-  - envName: SPEACHES_GPU
-    required: false
-    applyOnChange: true
-    type: bool
-    editable: true
-    default: "true"
-    description: "GPU acceleration enabled by default. Set to 'false' for CPU-only mode if you don't have an NVIDIA GPU."
-  - envName: SPEACHES_WHISPER_MODEL
-    required: false
-    applyOnChange: true
-    type: string
-    editable: true
-    default: "Systran/faster-whisper-small"
-    description: "Whisper STT model for the whisper-1 alias. Default: Systran/faster-whisper-small (pre-installed). To use a larger model, download it via Terminal first, then set this to e.g. Systran/faster-whisper-large-v3."
 options:
   apiTimeout: 0
   allowedOutboundPorts:
@@ -156,3 +141,28 @@ options:
   {{- else }}
     clusterScoped: false
   {{- end }}
+envs:
+  - envName: SPEACHES_GPU
+    required: false
+    applyOnChange: true
+    type: bool
+    editable: true
+    default: "true"
+    description: "GPU acceleration enabled by default. Set to 'false' for CPU-only mode if you don't have an NVIDIA GPU."
+  - envName: SPEACHES_WHISPER_MODEL
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    default: "Systran/faster-whisper-small"
+    description: "Whisper STT model for the whisper-1 alias. Default: Systran/faster-whisper-small (pre-installed). To use a larger model, download it via Terminal first, then set this to e.g. Systran/faster-whisper-large-v3."
+  - envName: OLLAMA_BASE_URL
+    required: true
+    applyOnChange: true
+    type: url
+    editable: true
+  {{- $speachesDomainENV := split "," .Values.domain.speaches -}}
+  {{- $speachesDomain := index $speachesDomainENV "_0" -}}
+  {{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $speachesDomain "$1" -}}
+    default: "http://d54536a50.shared.{{ $topDomain }}/v1"
+    description: "CHAT_COMPLETION_BASE_URL, enter the ollama api entrance url."
