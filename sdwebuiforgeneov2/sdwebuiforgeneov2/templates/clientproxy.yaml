@@ -9,32 +9,37 @@ data:
     resolver coredns.kube-system.svc.cluster.local valid=10s;
 
     init_worker_by_lua_block {
+      if ngx.worker.id() ~= 0 then return end
+
       local function check_backends(premature)
         if premature then return end
+        local hc = ngx.shared.healthcheck
 
-        local sock = ngx.socket.tcp()
-        sock:settimeout(2000)
-        local ok = sock:connect("sdwebuiforgeneov2.sdwebuiforgeneov2server-shared.svc.cluster.local", 7860)
-        if ok then
-          sock:close()
-          ngx.shared.healthcheck:set("main_ready", true)
-        else
-          ngx.shared.healthcheck:set("main_ready", false)
+        if not hc:get("main_ready") then
+          local sock = ngx.socket.tcp()
+          sock:settimeout(2000)
+          local ok = sock:connect("sdwebuiforgeneov2.sdwebuiforgeneov2server-shared.svc.cluster.local", 7860)
+          if ok then
+            sock:close()
+            hc:set("main_ready", true)
+          end
         end
 
-        local sock2 = ngx.socket.tcp()
-        sock2:settimeout(2000)
-        local ok2 = sock2:connect("download-svc.sdwebuiforgeneov2server-shared.svc.cluster.local", 8090)
-        if ok2 then
-          sock2:close()
-          ngx.shared.healthcheck:set("download_ready", true)
-        else
-          ngx.shared.healthcheck:set("download_ready", false)
+        if not hc:get("main_ready") then
+          local sock2 = ngx.socket.tcp()
+          sock2:settimeout(2000)
+          local ok2 = sock2:connect("download-svc.sdwebuiforgeneov2server-shared.svc.cluster.local", 8090)
+          if ok2 then
+            sock2:close()
+            hc:set("download_ready", true)
+          else
+            hc:set("download_ready", false)
+          end
         end
 
         ngx.timer.at(3, check_backends)
       end
-      ngx.timer.at(0, check_backends)
+      ngx.timer.at(1, check_backends)
     }
 
     server {
@@ -64,6 +69,26 @@ data:
             proxy_set_header Connection "upgrade";
             add_header Access-Control-Allow-Origin *;
             if ($request_method = 'OPTIONS') { return 204; }
+        }
+
+        location = /sdapi/v1/options {
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 5s;
+            proxy_pass http://$main_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_intercept_errors on;
+            error_page 502 504 = @probe_not_ready;
+            log_by_lua_block {
+              if ngx.status == 200 then
+                ngx.shared.healthcheck:set("main_ready", true)
+              end
+            }
+        }
+
+        location @probe_not_ready {
+            default_type application/json;
+            return 503 '{"error":"service not ready"}';
         }
 
         location / {
