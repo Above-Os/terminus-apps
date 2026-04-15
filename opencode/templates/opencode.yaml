@@ -662,19 +662,6 @@ spec:
               chown 1000:1000 /home/opencode/.profile /home/opencode/.bashrc
 
               olares_run_omo() {
-                if ! command -v npm >/dev/null 2>&1; then
-                  if [ -x "$PKG/usr/bin/npm" ] && [ -x "$PKG/usr/bin/node" ]; then
-                    echo "=== OMO: using npm/node from snapshot ==="
-                    export PATH="$PKG/usr/bin:$PKG/usr/local/bin:$PKG/bin:$PATH"
-                    export LD_LIBRARY_PATH="$PKG/usr/lib:$PKG/lib:${LD_LIBRARY_PATH:-}"
-                  else
-                    echo "=== OMO: npm not available, installing nodejs+npm ==="
-                    apk add --no-cache nodejs npm 2>&1 || echo "=== WARNING: apk add nodejs npm failed ==="
-                  fi
-                fi
-                if [ "$USE_CN_MIRROR" = "true" ]; then
-                  npm config set registry https://registry.npmmirror.com 2>/dev/null || true
-                fi
                 OMO_FOUND=false
                 for d in /usr/lib/node_modules/oh-my-opencode \
                          /usr/local/lib/node_modules/oh-my-opencode \
@@ -688,8 +675,22 @@ spec:
                 if [ "$OMO_FOUND" = "true" ]; then
                   echo "=== OMO: oh-my-opencode already installed, skipping ==="
                 else
-                  echo "=== Installing oh-my-opencode npm package ==="
-                  npm install -g --ignore-scripts oh-my-opencode 2>&1 || echo "=== WARNING: npm install oh-my-opencode failed ==="
+                  echo "=== OMO: installing nodejs+npm and oh-my-opencode ==="
+                  apk add --no-cache nodejs npm 2>&1 || { echo "=== WARNING: apk add nodejs npm failed ==="; return; }
+                  if [ "$USE_CN_MIRROR" = "true" ]; then
+                    npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+                  fi
+                  if npm install -g --ignore-scripts oh-my-opencode 2>&1; then
+                    OMO_DIR=$(npm root -g 2>/dev/null)/oh-my-opencode
+                    if [ -d "$OMO_DIR" ] && [ -d "$PKG/usr" ]; then
+                      SNAP_TARGET="$PKG$(npm root -g 2>/dev/null)/oh-my-opencode"
+                      mkdir -p "$(dirname "$SNAP_TARGET")"
+                      cp -a "$OMO_DIR" "$SNAP_TARGET" 2>/dev/null && \
+                        echo "=== OMO: patched into snapshot for next restart ==="
+                    fi
+                  else
+                    echo "=== WARNING: npm install oh-my-opencode failed ==="
+                  fi
                 fi
                 chown -R 1000:1000 /home/opencode/.local 2>/dev/null || true
               }
