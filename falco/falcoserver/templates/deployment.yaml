@@ -151,6 +151,8 @@ spec:
             - http_output.enabled=true
             - -o
             - http_output.url=http://falco-sidekick.{{ .Release.Namespace }}:2801/
+            - -o
+            - stdout_output.enabled=false
           securityContext:
             capabilities:
               drop:
@@ -184,6 +186,8 @@ spec:
               name: falco-plugin-config-file
             - mountPath: /etc/falco/rules.d/managed
               name: falco-rules
+            - mountPath: /var/log/falco
+              name: falco-logs
 
       volumes:
         - name: proc
@@ -233,6 +237,18 @@ spec:
               {{- end }}
             {{- else }}
             path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/rules'
+            {{- end }}
+        - name: falco-logs
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/logs'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/logs'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/logs'
             {{- end }}
         - name: falco-custom-rules
           configMap:
