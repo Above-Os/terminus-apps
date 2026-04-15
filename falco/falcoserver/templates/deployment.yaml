@@ -1,5 +1,6 @@
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-{{- if .Values.customRules }}
+{{- $existingCustomRules := lookup "v1" "ConfigMap" .Release.Namespace "falco-custom-rules" }}
+{{- $existingDisabledRules := lookup "v1" "ConfigMap" .Release.Namespace "falco-disable-rules" }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -7,12 +8,20 @@ metadata:
   name: falco-custom-rules
   namespace: {{ .Release.Namespace }}
 data:
+{{- if .Values.customRules }}
 {{- range $fileName, $ruleContent := .Values.customRules }}
   {{ $fileName }}: |
 {{ $ruleContent | indent 4 }}
 {{- end }}
+{{- else if and $existingCustomRules $existingCustomRules.data }}
+{{- range $fileName, $ruleContent := $existingCustomRules.data }}
+  {{ $fileName }}: |
+{{ $ruleContent | indent 4 }}
 {{- end }}
-{{- if .Values.disabledRules }}
+{{- else }}
+  custom_rules.yaml: |
+
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -20,11 +29,20 @@ metadata:
   name: falco-disable-rules
   namespace: {{ .Release.Namespace }}
 data:
+{{- if .Values.disabledRules }}
   falco_disable_rules.yaml: |
 {{- range $ruleName := .Values.disabledRules }}
     - rule: {{ $ruleName | quote }}
+      override:
+        enabled: replace
       enabled: false
 {{- end }}
+{{- else if and $existingDisabledRules $existingDisabledRules.data (hasKey $existingDisabledRules.data "falco_disable_rules.yaml") }}
+  falco_disable_rules.yaml: |
+{{ index $existingDisabledRules.data "falco_disable_rules.yaml" | indent 4 }}
+{{- else }}
+  falco_disable_rules.yaml: |
+    # no disabled rules configured
 {{- end }}
 ---
 apiVersion: apps/v1
@@ -60,6 +78,23 @@ spec:
               mkdir -p /falco-rules
               chown -R 1000:1000 /falco-rules
               chmod -R 0777 /falco-rules
+              # Sync rule files from ConfigMaps into persistent storage.
+              # Non-empty ConfigMap files overwrite persistent files.
+              if [ -d /bootstrap/custom-rules ]; then
+                for f in /bootstrap/custom-rules/*; do
+                  [ -f "$f" ] || continue
+                  if [ -n "$(grep -v '^[[:space:]]*$' "$f")" ]; then
+                    cp "$f" "/falco-rules/$(basename "$f")"
+                  fi
+                done
+              fi
+              if [ -f /bootstrap/disabled-rules/falco_disable_rules.yaml ]; then
+                if [ -n "$(grep -v '^[[:space:]]*$' /bootstrap/disabled-rules/falco_disable_rules.yaml)" ]; then
+                  cp /bootstrap/disabled-rules/falco_disable_rules.yaml /falco-rules/falco_disable_rules.yaml
+                fi
+              fi
+              chown 1000:1000 /falco-rules/*.yaml 2>/dev/null || true
+              chmod 0666 /falco-rules/*.yaml 2>/dev/null || true
               if [ ! -f /falco-plugin-config/plugins.local.yaml ]; then
                 printf '%s\n' \
                   '# Falco plugin configuration example.' \
@@ -86,6 +121,12 @@ spec:
               mountPath: /falco-rules
             - name: falco-plugin-config-file
               mountPath: /falco-plugin-config/plugins.local.yaml
+            - name: falco-custom-rules
+              mountPath: /bootstrap/custom-rules
+              readOnly: true
+            - name: falco-disable-rules
+              mountPath: /bootstrap/disabled-rules
+              readOnly: true
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           securityContext:
@@ -110,6 +151,8 @@ spec:
             - http_output.enabled=true
             - -o
             - http_output.url=http://falco-sidekick.{{ .Release.Namespace }}:2801/
+            - -o
+            - stdout_output.enabled=false
           securityContext:
             capabilities:
               drop:
@@ -143,20 +186,8 @@ spec:
               name: falco-plugin-config-file
             - mountPath: /etc/falco/rules.d/managed
               name: falco-rules
-{{- if .Values.customRules }}
-{{- range $fileName, $_ := .Values.customRules }}
-            - mountPath: /etc/falco/rules.d/{{ $fileName }}
-              name: falco-custom-rules
-              subPath: {{ $fileName }}
-              readOnly: true
-{{- end }}
-{{- end }}
-{{- if .Values.disabledRules }}
-            - mountPath: /etc/falco/rules.d/falco_disable_rules.yaml
-              name: falco-disable-rules
-              subPath: falco_disable_rules.yaml
-              readOnly: true
-{{- end }}
+            - mountPath: /var/log/falco
+              name: falco-logs
 
       volumes:
         - name: proc
@@ -207,16 +238,24 @@ spec:
             {{- else }}
             path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/rules'
             {{- end }}
-{{- if .Values.customRules }}
+        - name: falco-logs
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: '{{ .Values.userspace.appData }}/logs'
+              {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/logs'
+              {{- end }}
+            {{- else }}
+            path: '{{ .Values.userspace.appData }}/{{ .Release.Name }}/logs'
+            {{- end }}
         - name: falco-custom-rules
           configMap:
             name: falco-custom-rules
-{{- end }}
-{{- if .Values.disabledRules }}
         - name: falco-disable-rules
           configMap:
             name: falco-disable-rules
-{{- end }}
       restartPolicy: Always
 
 ---
