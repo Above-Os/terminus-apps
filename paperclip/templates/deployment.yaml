@@ -91,7 +91,7 @@ spec:
         imagePullPolicy: IfNotPresent
       containers:
         - name: paperclip
-          image: beclab/paperclipai-paperclip:sha-2e09570
+          image: beclab/paperclip:v1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3100
@@ -108,52 +108,15 @@ spec:
                 "/paperclip/.config" "/paperclip/.local/share" "/paperclip/.cache"
 
               echo "Ensuring local adapter CLIs are available..."
-
-              if ! command -v agent >/dev/null 2>&1; then
-                echo "Installing Cursor Agent CLI..."
-                if command -v bash >/dev/null 2>&1; then
-                  curl -fsSL https://cursor.com/install | bash || true
-                else
-                  curl -fsSL https://cursor.com/install | sh || true
-                fi
+              CONFIG_PATH="/paperclip/instances/default/config.json"
+              if [ ! -f "$CONFIG_PATH" ]; then
+                echo "No config found. Creating authenticated config..."
+                mkdir -p "$(dirname "$CONFIG_PATH")"
+                export CONFIG_PATH AUTH_BASE_URL="https://{{ $paperclipDomain }}" DATABASE_URL
+                node -e "const fs=require('fs');const crypto=require('crypto');const path=process.env.CONFIG_PATH;const baseUrl=process.env.AUTH_BASE_URL;const dbUrl=process.env.DATABASE_URL||'';const now=new Date().toISOString();let host='';try{host=new URL(baseUrl).hostname}catch{};const metaKey='$'+'meta';const cfg={database:{mode:dbUrl?'postgres':'embedded-postgres',embeddedPostgresDataDir:'~/.paperclip/instances/default/db',embeddedPostgresPort:54329,backup:{enabled:true,intervalMinutes:60,retentionDays:30,dir:'/paperclip/instances/default/data/backups'}},logging:{mode:'file',logDir:'/paperclip/instances/default/logs'},server:{deploymentMode:'authenticated',exposure:'private',host:'0.0.0.0',port:3100,allowedHostnames:host?[host]:[],serveUi:true},telemetry:{enabled:true},auth:{baseUrlMode:'explicit',publicBaseUrl:baseUrl,disableSignUp:false},storage:{provider:'local_disk',localDisk:{baseDir:'/paperclip/instances/default/data/storage'},s3:{bucket:'paperclip',region:'us-east-1',prefix:'',forcePathStyle:false}},secrets:{provider:'local_encrypted',strictMode:false,localEncrypted:{keyFilePath:'/paperclip/instances/default/secrets/master.key'}}};if(dbUrl){cfg.database.connectionString=dbUrl;}cfg[metaKey]={version:1,updatedAt:now,source:'configure'};fs.writeFileSync(path,JSON.stringify(cfg,null,2)+'\n');const envPath='/paperclip/instances/default/.env';if(!fs.existsSync(envPath)){fs.writeFileSync(envPath,'PAPERCLIP_AGENT_JWT_SECRET='+crypto.randomBytes(32).toString('hex')+'\n');}console.log('Created config:',path);"
               fi
-
-              if ! command -v agent >/dev/null 2>&1; then
-                echo "WARNING: Cursor Agent CLI (agent) is still not available after install attempt."
-              fi
-
-              if ! command -v gemini >/dev/null 2>&1; then
-                echo "Installing Gemini CLI..."
-                npm install -g @google/gemini-cli || true
-              fi
-
-              if ! command -v pi >/dev/null 2>&1; then
-                echo "Installing Pi CLI..."
-                npm install -g @mariozechner/pi-coding-agent || true
-              fi
-
-              if ! command -v hermes >/dev/null 2>&1; then
-                echo "Installing Hermes CLI..."
-                # Prefer official Hermes installer (pip package name is not guaranteed on PyPI).
-                if command -v bash >/dev/null 2>&1; then
-                  curl -fSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash || true
-                else
-                  curl -fSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | sh || true
-                fi
-              fi
-
-              if ! command -v hermes >/dev/null 2>&1; then
-                echo "WARNING: Hermes CLI (hermes) is still not available after install attempt."
-              fi
-
-              echo "CLI availability:"
-              command -v agent || true
-              command -v gemini || true
-              command -v pi || true
-              command -v hermes || true
-              command -v opencode || true
-              command -v codex || true
-              command -v claude || true
+              echo "Manual setup:"
+              echo "pnpm paperclipai auth bootstrap-ceo --base-url \"https://{{ $paperclipDomain }}\""
 
               node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js &
               SERVER_PID=$!
@@ -166,79 +129,6 @@ spec:
                 fi
                 sleep 2
               done
-
-              echo "Checking if bootstrap is needed..."
-              BOOTSTRAP_OUTPUT=$(pnpm paperclipai auth bootstrap-ceo \
-                --base-url "https://{{ $paperclipDomain }}" 2>&1) || true
-              echo "$BOOTSTRAP_OUTPUT"
-
-              if echo "$BOOTSTRAP_OUTPUT" | grep -qi "already has an admin"; then
-                echo "Instance admin already exists."
-              else
-                INVITE_TOKEN=$(echo "$BOOTSTRAP_OUTPUT" | grep -oE 'pcp_bootstrap_[a-f0-9]+' | head -1)
-                if [ -z "$INVITE_TOKEN" ]; then
-                  echo "WARNING: Could not extract invite token."
-                else
-                  echo "=== Auto-bootstrapping instance admin ==="
-
-                  echo "Step 1: Registering admin user..."
-                  SIGNUP_RESP=$(curl -s -X POST http://127.0.0.1:3100/api/auth/sign-up/email \
-                    -H "Content-Type: application/json" \
-                    -d '{"name":"Admin","email":"admin@paperclip.local","password":"changeme123!"}' 2>&1) || true
-                  echo "Signup response: $SIGNUP_RESP"
-
-                  USER_ID=$(echo "$SIGNUP_RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).user.id)}catch{}})" 2>/dev/null)
-                  echo "User ID: $USER_ID"
-
-                  if [ -n "$USER_ID" ]; then
-                    echo "Step 2: Promoting user to instance admin via DB..."
-                    export INVITE_TOKEN USER_ID
-
-                    # Node resolves bare imports from the script's directory; /tmp has no node_modules.
-                    # Writable /paperclip/.bootstrap + symlink lets @paperclipai/db resolve like /app/cli.
-                    mkdir -p /paperclip/.bootstrap
-                    rm -f /paperclip/.bootstrap/node_modules
-                    ln -sfn /app/cli/node_modules /paperclip/.bootstrap/node_modules
-                    cat > /paperclip/.bootstrap/_bootstrap_admin.mjs << 'JSEOF'
-              import { createDb, instanceUserRoles, invites } from '@paperclipai/db';
-              import { eq } from 'drizzle-orm';
-              import { createHash } from 'node:crypto';
-              import { writeFileSync } from 'node:fs';
-
-              const db = createDb(process.env.DATABASE_URL);
-              const userId = process.env.USER_ID;
-              const token = process.env.INVITE_TOKEN;
-
-              try {
-                await db.insert(instanceUserRoles).values({
-                  userId: userId,
-                  role: 'instance_admin',
-                });
-                console.log('Inserted instance_admin role for user', userId);
-
-                const tokenHash = createHash('sha256').update(token).digest('hex');
-                const now = new Date();
-                await db.update(invites)
-                  .set({ acceptedAt: now, updatedAt: now })
-                  .where(eq(invites.tokenHash, tokenHash));
-                console.log('Marked invite as accepted');
-
-                writeFileSync('/paperclip/.admin_bootstrapped', 'done');
-                console.log('=== Instance admin created successfully ===');
-                console.log('Login: admin@paperclip.local / changeme123!');
-              } catch (err) {
-                console.error('DB bootstrap error:', err.message);
-              } finally {
-                process.exit(0);
-              }
-              JSEOF
-                    node --import /app/cli/node_modules/tsx/dist/loader.mjs /paperclip/.bootstrap/_bootstrap_admin.mjs 2>&1 || true
-                    rm -rf /paperclip/.bootstrap
-                  else
-                    echo "WARNING: Could not extract user ID from signup response."
-                  fi
-                fi
-              fi
 
               wait $SERVER_PID
           env:
@@ -266,6 +156,8 @@ spec:
               value: "https://{{ $paperclipDomain }}"
             - name: BETTER_AUTH_SECRET
               value: "{{ .Release.Name }}-{{ .Release.Namespace }}-paperclip-secret"
+            - name: BETTER_AUTH_BASE_URL
+              value: "https://{{ $paperclipDomain }}"
             - name: DATABASE_URL
               value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.paperclip }}"
             - name: ANTHROPIC_API_KEY
