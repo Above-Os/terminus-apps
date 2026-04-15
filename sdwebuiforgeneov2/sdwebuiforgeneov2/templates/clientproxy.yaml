@@ -1,18 +1,24 @@
-﻿apiVersion: v1
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-config
   namespace: {{ .Release.Namespace }}
 data:
   nginx.conf: |
+    upstream app_backend {
+      zone app_backend 64k;
+      server sdwebuiforgeneov2.sdwebuiforgeneov2server-shared:7860 max_fails=1 fail_timeout=2s;
+      server download-svc.sdwebuiforgeneov2server-shared:8090 backup;
+    }
+
     server {
         listen 8080;
         access_log /opt/bitnami/openresty/nginx/logs/access.log;
         error_log /opt/bitnami/openresty/nginx/logs/error.log;
 
-        proxy_connect_timeout 30s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 300s;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 1800s;
         proxy_set_header host $host;
         proxy_set_header x-forwarded-host $http_host;
 
@@ -20,12 +26,35 @@ data:
         proxy_set_header upgrade $http_upgrade;
         proxy_set_header connection "upgrade";
 
+        location /progress {
+            proxy_pass http://download-svc.sdwebuiforgeneov2server-shared:8090;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            add_header Access-Control-Allow-Origin *;
+            if ($request_method = 'OPTIONS') { return 204; }
+        }
+
         location / {
             resolver coredns.kube-system.svc.cluster.local valid=10s;
             add_header X-Frame-Options "";
             proxy_next_upstream error timeout http_502 http_503 http_504 http_403;
             proxy_next_upstream_tries 3;
-            proxy_pass http://sdwebuiforgeneov2.sdwebuiforgeneov2server-shared:7860;
+            proxy_pass http://app_backend;
+            add_header Access-Control-Allow-Origin *;
+            if ($request_method = 'OPTIONS') { return 204; }
+        }
+
+        location @download {
+            proxy_pass http://download-svc.sdwebuiforgeneov2server-shared:8090;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            add_header Access-Control-Allow-Origin *;
         }
     }
 
@@ -189,23 +218,19 @@ spec:
           env:
             - name: OPENRESTY_CONF_FILE
               value: /etc/nginx/nginx.conf
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 30
-            timeoutSeconds: 60
-            periodSeconds: 60
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
+                  [ $http_code -ge 200 ] && [ $http_code -lt 500 ]
+            initialDelaySeconds: 2
+            timeoutSeconds: 3
+            periodSeconds: 3
             successThreshold: 1
-            failureThreshold: 10
-          startupProbe:
-            tcpSocket:
-              port: 8080
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 30
+            failureThreshold: 60
           resources:
             limits:
               cpu: 100m
