@@ -6,10 +6,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   nginx.conf: |
-    upstream backend {
-        server {{ .Values.backend.service }}.{{ .Values.backend.namespace }}.svc.cluster.local:{{ .Values.backend.port }};
-    }
-
     server {
         listen 80;
         server_name _;
@@ -34,7 +30,7 @@ data:
 
         # 与本地 search3-dev.conf 一致：这些前缀走后端 API
         location ~ ^/(search|image|task|document|file|monitorsetting)/ {
-            proxy_pass http://backend;
+            proxy_pass http://search3-proxy:28080;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
