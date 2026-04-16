@@ -153,6 +153,14 @@ spec:
             - http_output.url=http://falco-sidekick.{{ .Release.Namespace }}:2801/
             - -o
             - stdout_output.enabled=false
+{{- if eq (lower (toString (default "false" .Values.olaresEnv.FILE_OUTPUT))) "true" }}
+            - -o
+            - file_output.enabled=true
+            - -o
+            - file_output.filename=/var/log/falco/events.log
+            - -o
+            - file_output.keep_alive=false
+{{- end }}
           securityContext:
             capabilities:
               drop:

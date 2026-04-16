@@ -7,7 +7,7 @@ metadata:
   description: Cloud Native Runtime Security tool for detecting abnormal behavior.
   icon: https://app.cdn.olares.com/appstore/falco/icon.png
   appid: falco
-  version: '1.0.9'
+  version: '1.0.10'
   title: Falco
   categories:
   - Developer Tools
@@ -80,7 +80,6 @@ spec:
   limitedDisk: 2Gi
   requiredCpu: 0.5
   limitedCpu: 2
-  onlyAdmin: true
   {{- else }}
   requiredMemory: 64Mi
   limitedMemory: 256Mi
@@ -97,6 +96,7 @@ spec:
     shared: true
   - name: falco
   runAsUser: true
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
   - envName: FALCOSIDEKICK_UI_TTL
     type: string
@@ -105,6 +105,14 @@ envs:
     editable: true
     default: "72h"
     description: "TTL for keys stored in Redis"
+  - envName: FILE_OUTPUT
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "false"
+    description: "Enable Falco file output"
+{{- end }}
 options:
   dependencies:
   - name: olares
