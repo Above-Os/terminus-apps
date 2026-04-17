@@ -30,18 +30,18 @@ spec:
 
       initContainers:
         - name: init-install-brew
-          image: "beclab/harveyff-openclaw-brew-base:2026.3.1"
+          image: "beclab/harveyff-openclaw-brew-base:2026.4.15-fix3"
           securityContext:
             runAsUser: 0
           command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail
-              if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-                echo "[init-brew] brew already on volume, skip"
+              if cmp -s /brew-staging/.linuxbrew/.brew-base-build /home/linuxbrew/.linuxbrew/.brew-base-build 2>/dev/null; then
+                echo "[init-brew] brew base up to date, skip"
               else
-                echo "[init-brew] copying pre-built brew to volume..."
-                cp -a /brew-staging/.linuxbrew /home/linuxbrew/.linuxbrew
+                echo "[init-brew] updating brew base on volume..."
+                cp -a /brew-staging/.linuxbrew/. /home/linuxbrew/.linuxbrew/
                 echo "[init-brew] done"
               fi
               chown -R 1000:1000 /home/linuxbrew

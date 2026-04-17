@@ -1,6 +1,4 @@
-{{- define "comfyuisharev2server.GPU.getGPUInfo" -}}
-{{- $gpuModel := "" -}}
-{{- $gpuModelName := "" -}}
+{{- define "comfyuisharev2server.GPU.isGb10" -}}
 {{- $isSparkDGX := "false" -}}
 {{- if .Values.nodes -}}
   {{- range $nodeIndex, $node := .Values.nodes -}}
@@ -10,8 +8,6 @@
           {{- range $gpuIndex, $gpu := .GPUS -}}
             {{- if eq $gpuIndex 0 -}}
               {{- with $gpu -}}
-                {{- $gpuModel = .Model -}}
-                {{- $gpuModelName = .ModelName -}}
                 {{- if eq (upper .Model) "GB10" -}}
                   {{- $isSparkDGX = "true" -}}
                 {{- end -}}
@@ -23,5 +19,5 @@
     {{- end -}}
   {{- end -}}
 {{- end -}}
-{{- dict "gpuModel" $gpuModel "gpuModelName" $gpuModelName "isSparkDGX" $isSparkDGX | toJson -}}
+{{- $isSparkDGX -}}
 {{- end -}}
