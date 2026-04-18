@@ -2,27 +2,32 @@ olaresManifest.version: '0.11.0'
 olaresManifest.type: app
 metadata:
   name: trek
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  description: A self-hosted travel/trip planner with real-time collaboration.
+  icon: https://app.cdn.olares.com/appstore/trek/icon.png
+  description: A self-hosted, real-time collaborative travel planner
   appid: trek
   title: TREK
-  version: '1.0.0'
+  version: '1.0.3'
   categories:
-  - Productivity
+  - Lifestyle
+  - Utilities
 entrances:
 - name: trek
   host: trek-svc
   port: 8001
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  icon: https://app.cdn.olares.com/appstore/trek/icon.png
   title: TREK
   openMethod: window
 spec:
   versionName: '2.9.12'
+  featuredImage: https://app.cdn.olares.com/appstore/trek/1.webp
+  promoteImage:
+  - https://app.cdn.olares.com/appstore/trek/1.webp
+  - https://app.cdn.olares.com/appstore/trek/2.webp
+  - https://app.cdn.olares.com/appstore/trek/3.webp
   fullDescription: |
-    ## OVERVIEW ##
-    TREK is a self-hosted, real-time collaborative travel planner with interactive maps, budgets, packing lists, and more.
+    TREK (formerly known as Nomad) is a self-hosted, real-time collaborative travel planner with interactive maps, budgets, packing lists, and more.
 
-    ## FEATURES ##
+    FEATURES
 
     Trip Planning
     - Drag & Drop Planner: Organize places into day plans with reordering and cross-day moves
@@ -61,9 +66,6 @@ spec:
     - Collab: Chat with your group, share notes, create polls
     - Dashboard Widgets: Currency converter and timezone clock, toggleable per user
 
-  upgradeDescription: |
-    Initial release for Olares. Migrated from NOMAD to TREK with version 2.9.12.
-
   developer: mauriceboe
   website: https://github.com/mauriceboe/TREK
   sourceCode: https://github.com/mauriceboe/TREK
@@ -86,6 +88,12 @@ spec:
 permission:
   appData: true
   appCache: true
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    version: '>=1.12.3-0'
+    type: system
 envs:
 - envName: ADMIN_EMAIL
   required: true
@@ -101,9 +109,46 @@ envs:
   applyOnChange: true
   regex: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$'
   description: "Admin password (min 8 chars, must include uppercase, lowercase and number)"
-options:
-  apiTimeout: 0
-  dependencies:
-  - name: olares
-    version: '>=1.12.3-0'
-    type: system
+- envName: USE_SYSTEM_SMTP_SETTINGS
+  required: false
+  applyOnChange: true
+  editable: true
+  type: bool
+  default: "true"
+  description: "Use system SMTP settings (when enabled, SMTP envs are managed by system envs"
+- envName: SMTP_ENABLED
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_USER_SMTP_ENABLED
+- envName: SMTP_HOST
+  required: false
+  valueFrom:
+    envName: OLARES_USER_SMTP_SERVER
+  applyOnChange: true
+- envName: SMTP_PORT
+  required: false
+  valueFrom:
+    envName: OLARES_USER_SMTP_PORT
+  applyOnChange: true
+- envName: SMTP_USER
+  required: false
+  valueFrom:
+    envName: OLARES_USER_SMTP_USERNAME
+  applyOnChange: true
+- envName: SMTP_PASS
+  required: false
+  valueFrom:
+    envName: OLARES_USER_SMTP_PASSWORD
+  applyOnChange: true
+- envName: SMTP_FROM
+  required: false
+  valueFrom:
+    envName: OLARES_USER_SMTP_FROM_ADDRESS
+  applyOnChange: true
+- envName: SMTP_SKIP_TLS_VERIFY
+  required: false
+  type: bool
+  applyOnChange: true
+  default: "false"
+  description: "Skip TLS certificate verification — use for self-signed certificates on local mail servers"
