@@ -30,7 +30,7 @@ spec:
 
       initContainers:
         - name: init-install-brew
-          image: "beclab/harveyff-openclaw-brew-base:2026.4.15-fix3"
+          image: "beclab/harveyff-openclaw-brew-base:2026.4.18"
           securityContext:
             runAsUser: 0
           command: ["/bin/bash", "-c"]
@@ -133,6 +133,26 @@ spec:
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
               value: "YOUR_OLLAMA_API_KEY"
+          # Startup: wait for brew volume Python (readiness below is slow/low-flap).
+          startupProbe:
+            exec:
+              command:
+                - /home/linuxbrew/.linuxbrew/bin/python3
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - /home/linuxbrew/.linuxbrew/bin/python3
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
           resources:
             limits:
               cpu: "2"
@@ -207,20 +227,24 @@ spec:
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
               value: "YOUR_OLLAMA_API_KEY"
+          # Startup: brew Python on volume. Readiness: OpenClaw /readyz (HTTP). No liveness — avoids kubelet restarts on slow/ flaky healthz.
+          startupProbe:
+            exec:
+              command:
+                - /home/linuxbrew/.linuxbrew/bin/python3
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /readyz
               port: 18789
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 18789
-            initialDelaySeconds: 15
-            periodSeconds: 180
-            timeoutSeconds: 10
-            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
           resources:
             limits:
               cpu: "3"
@@ -276,6 +300,25 @@ spec:
               wait $DOCKERD_PID
           ports:
             - containerPort: 2375
+          # Startup: dockerd accepting clients. Readiness: same check, slow period to avoid flapping under load.
+          startupProbe:
+            exec:
+              command:
+                - docker
+                - info
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - docker
+                - info
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 15
+            failureThreshold: 5
           resources:
             limits:
               cpu: "1500m"
