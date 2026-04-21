@@ -133,6 +133,11 @@ spec:
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
               value: "YOUR_OLLAMA_API_KEY"
+            {{- $oe := .Values.olaresEnv | default dict }}
+            - name: GOG_KEYRING_BACKEND
+              value: {{ index $oe "GOG_KEYRING_BACKEND" | default "file" | quote }}
+            - name: GOG_KEYRING_PASSWORD
+              value: {{ index $oe "GOG_KEYRING_PASSWORD" | default "olares" | quote }}
           # Startup: wait for brew volume Python (readiness below is slow/low-flap).
           startupProbe:
             exec:
@@ -227,6 +232,11 @@ spec:
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
               value: "YOUR_OLLAMA_API_KEY"
+            {{- $oe := .Values.olaresEnv | default dict }}
+            - name: GOG_KEYRING_BACKEND
+              value: {{ index $oe "GOG_KEYRING_BACKEND" | default "file" | quote }}
+            - name: GOG_KEYRING_PASSWORD
+              value: {{ index $oe "GOG_KEYRING_PASSWORD" | default "olares" | quote }}
           # Startup: brew Python on volume. Readiness: OpenClaw /readyz (HTTP). No liveness — avoids kubelet restarts on slow/ flaky healthz.
           startupProbe:
             exec:
@@ -398,5 +408,9 @@ spec:
     - name: "18789"
       port: 18789
       targetPort: 18789
+    # gog OAuth callback (workspace container); ingress nginx proxies location = /oauth2/callback here.
+    - name: gog-oauth
+      port: 8080
+      targetPort: 8080
   selector:
     io.kompose.service: clawdbot
