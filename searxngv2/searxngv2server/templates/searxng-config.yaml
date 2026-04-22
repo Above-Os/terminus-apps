@@ -63,16 +63,16 @@ data:
       suspended_times:
         # Engine suspension time after error (in seconds; set to 0 to disable)
         # For error "Access denied" and "HTTP error [402, 403]"
-        SearxEngineAccessDenied: 86400
+        SearxEngineAccessDenied: 3600
         # For error "CAPTCHA"
-        SearxEngineCaptcha: 86400
+        SearxEngineCaptcha: 3600
         # For error "Too many request" and "HTTP error 429"
-        SearxEngineTooManyRequests: 3600
+        SearxEngineTooManyRequests: 600
         # Cloudflare CAPTCHA
-        cf_SearxEngineCaptcha: 1296000
-        cf_SearxEngineAccessDenied: 86400
+        cf_SearxEngineCaptcha: 86400
+        cf_SearxEngineAccessDenied: 3600
         # ReCAPTCHA
-        recaptcha_SearxEngineCaptcha: 604800
+        recaptcha_SearxEngineCaptcha: 86400
 
       # remove format to deny access, use lower case.
       # formats: [html, csv, json, rss]
@@ -113,9 +113,9 @@ data:
         X-Robots-Tag: noindex, nofollow
         Referrer-Policy: no-referrer
 
-    redis:
-      # URL to connect redis database. Is overwritten by ${SEARXNG_REDIS_URL}.
-      # https://docs.searxng.org/admin/settings/settings_redis.html#settings-redis
+    valkey:
+      # URL to connect valkey/redis database. Is overwritten by ${SEARXNG_VALKEY_URL}.
+      # https://docs.searxng.org/admin/settings/settings_valkey.html
       url: redis://:{{ .Values.redis.password }}@{{ .Values.redis.host }}:{{ .Values.redis.port }}/0
 
     ui:
@@ -176,9 +176,11 @@ data:
     #
     outgoing:
       # default timeout in seconds, can be override by engine
-      request_timeout: 5.0
+      request_timeout: 10.0
       # the maximum timeout in seconds
-      # max_request_timeout: 10.0
+      max_request_timeout: 15.0
+      # number of retries when a request fails
+      retries: 1
       # suffix of searx_useragent, could contain information like an email address
       # to the administrator
       useragent_suffix: ""
@@ -343,6 +345,7 @@ data:
 
       - name: annas archive
         engine: annas_archive
+        base_url: https://annas-archive.org
         disabled: true
         shortcut: aa
 
@@ -364,13 +367,6 @@ data:
         engine: apple_app_store
         shortcut: aps
         disabled: true
-
-      # Requires Tor
-      - name: ahmia
-        engine: ahmia
-        categories: onions
-        enable_http: true
-        shortcut: ah
 
       - name: anaconda
         engine: xpath
@@ -497,12 +493,6 @@ data:
       #   shortcut: cor
       #   # get your API key from: https://core.ac.uk/api-keys/register/
       #   api_key: 'unset'
-
-      - name: cppreference
-        engine: cppreference
-        shortcut: cpp
-        paging: false
-        disabled: true
 
       - name: crossref
         engine: crossref
@@ -675,6 +665,10 @@ data:
         display_type: ["infobox"]
         tests: *tests_infobox
         categories: [general]
+        # Disabled: upstream init() fails with KeyError on Wikidata SPARQL response
+        # in SearXNG 2026.4.17. Re-enable once fixed upstream.
+        disabled: true
+        inactive: true
 
       - name: duckduckgo
         engine: duckduckgo
@@ -768,12 +762,14 @@ data:
       - name: flickr
         categories: images
         shortcut: fl
-        # You can use the engine using the official stable API, but you need an API
-        # key, see: https://www.flickr.com/services/apps/create/
-        # engine: flickr
-        # api_key: 'apikey' # required!
-        # Or you can use the html non-stable engine, activated by default
+        # If apiKeys.flickr is provided, use the official stable API for better reliability.
+        # Get your key at https://www.flickr.com/services/apps/create/
+        {{- if .Values.apiKeys.flickr }}
+        engine: flickr
+        api_key: "{{ .Values.apiKeys.flickr }}"
+        {{- else }}
         engine: flickr_noapi
+        {{- end }}
 
       - name: free software directory
         engine: mediawiki
@@ -862,39 +858,33 @@ data:
         timeout: 4.0
         disabled: true
 
+      # Google engines are disabled by default: HTML scraping constantly trips
+      # Google's anti-bot (429 / CAPTCHA / IndexError in parser) from server IPs.
+      # Enable from the Preferences page if your outbound network is clean.
       - name: google
         engine: google
         shortcut: go
-        # additional_tests:
-        #   android: *test_android
+        disabled: true
 
       - name: google images
         engine: google_images
         shortcut: goi
-        # additional_tests:
-        #   android: *test_android
-        #   dali:
-        #     matrix:
-        #       query: ['Dali Christ']
-        #       lang: ['en', 'de', 'fr', 'zh-CN']
-        #     result_container:
-        #       - ['one_title_contains', 'Salvador']
+        disabled: true
 
       - name: google news
         engine: google_news
         shortcut: gon
-        # additional_tests:
-        #   android: *test_android
+        disabled: true
 
       - name: google videos
         engine: google_videos
         shortcut: gov
-        # additional_tests:
-        #   android: *test_android
+        disabled: true
 
       - name: google scholar
         engine: google_scholar
         shortcut: gos
+        disabled: true
 
       - name: google play apps
         engine: google_play
@@ -1387,6 +1377,11 @@ data:
         categories: music
         piped_filter: music_songs
         timeout: 3.0
+        frontend_url: https://srv.piped.video
+        backend_url:
+          - https://pipedapi.kavin.rocks
+          - https://pipedapi-libre.kavin.rocks
+          - https://pipedapi.adminforge.de
 
       - name: piratebay
         engine: piratebay
@@ -1609,23 +1604,27 @@ data:
         shortcut: st
         api_site: 'stackoverflow'
         categories: [it, q&a]
+        {{- if .Values.apiKeys.stackexchange }}
+        api_key: "{{ .Values.apiKeys.stackexchange }}"
+        {{- end }}
 
       - name: askubuntu
         engine: stackexchange
         shortcut: ubuntu
         api_site: 'askubuntu'
         categories: [it, q&a]
-
-      - name: internetarchivescholar
-        engine: internet_archive_scholar
-        shortcut: ias
-        timeout: 15.0
+        {{- if .Values.apiKeys.stackexchange }}
+        api_key: "{{ .Values.apiKeys.stackexchange }}"
+        {{- end }}
 
       - name: superuser
         engine: stackexchange
         shortcut: su
         api_site: 'superuser'
         categories: [it, q&a]
+        {{- if .Values.apiKeys.stackexchange }}
+        api_key: "{{ .Values.apiKeys.stackexchange }}"
+        {{- end }}
 
       - name: discuss.python
         engine: discourse
@@ -1646,11 +1645,6 @@ data:
         shortcut: pi
         categories: [it, q&a]
         base_url: 'https://discourse.pi-hole.net'
-        disabled: true
-
-      - name: searchcode code
-        engine: searchcode_code
-        shortcut: scc
         disabled: true
 
       # - name: searx
@@ -1754,20 +1748,6 @@ data:
         shortcut: tm
         disabled: true
 
-      # Requires Tor
-      - name: torch
-        engine: xpath
-        paging: true
-        search_url:
-          http://xmh57jrknzkhv6y3ls3ubitzfqnkrwxhopf5aygthi7d6rplyvk3noyd.onion/cgi-bin/omega/omega?P={query}&DEFAULTOP=and
-        results_xpath: //table//tr
-        url_xpath: ./td[2]/a
-        title_xpath: ./td[2]/b
-        content_xpath: ./td[2]/small
-        categories: onions
-        enable_http: true
-        shortcut: tch
-
       # torznab engine lets you query any torznab compatible indexer.  Using this
       # engine in combination with Jackett opens the possibility to query a lot of
       # public and private indexers directly from SearXNG. More details at:
@@ -1817,14 +1797,14 @@ data:
 
       - name: youtube
         shortcut: yt
-        # You can use the engine using the official stable API, but you need an API
-        # key See: https://console.developers.google.com/project
-        #
-        # engine: youtube_api
-        # api_key: 'apikey' # required!
-        #
-        # Or you can use the html non-stable engine, activated by default
+        # If apiKeys.youtube is provided, use the official YouTube Data API v3 (much more stable).
+        # Get your key at https://console.developers.google.com/project
+        {{- if .Values.apiKeys.youtube }}
+        engine: youtube_api
+        api_key: "{{ .Values.apiKeys.youtube }}"
+        {{- else }}
         engine: youtube_noapi
+        {{- end }}
 
       - name: dailymotion
         engine: dailymotion
@@ -1974,40 +1954,40 @@ data:
         engine: wikicommons
         shortcut: wc
         categories: images
-        search_type: images
+        wc_search_type: image
         number_of_results: 10
 
       - name: wikicommons.videos
         engine: wikicommons
         shortcut: wcv
         categories: videos
-        search_type: videos
+        wc_search_type: video
         number_of_results: 10
 
       - name: wikicommons.audio
         engine: wikicommons
         shortcut: wca
         categories: music
-        search_type: audio
+        wc_search_type: audio
         number_of_results: 10
 
       - name: wikicommons.files
         engine: wikicommons
         shortcut: wcf
         categories: files
-        search_type: files
+        wc_search_type: file
         number_of_results: 10
 
       - name: wolframalpha
         shortcut: wa
-        # You can use the engine using the official stable API, but you need an API
-        # key.  See: https://products.wolframalpha.com/api/
-        #
-        # engine: wolframalpha_api
-        # api_key: ''
-        #
-        # Or you can use the html non-stable engine, activated by default
+        # If apiKeys.wolframalpha is provided, use the official API.
+        # Get your key at https://products.wolframalpha.com/api/
+        {{- if .Values.apiKeys.wolframalpha }}
+        engine: wolframalpha_api
+        api_key: "{{ .Values.apiKeys.wolframalpha }}"
+        {{- else }}
         engine: wolframalpha_noapi
+        {{- end }}
         timeout: 6.0
         categories: general
 
@@ -2019,9 +1999,11 @@ data:
         engine: translated
         shortcut: tl
         timeout: 5.0
-        # You can use without an API key, but you are limited to 1000 words/day
-        # See: https://mymemory.translated.net/doc/usagelimits.php
-        # api_key: ''
+        # Without an API key, limited to 1000 words/day.
+        # See https://mymemory.translated.net/doc/usagelimits.php
+        {{- if .Values.apiKeys.mymemory }}
+        api_key: "{{ .Values.apiKeys.mymemory }}"
+        {{- end }}
 
       # Required dependency: mysql-connector-python
       #  - name: mysql
@@ -2173,13 +2155,6 @@ data:
         categories: videos
         disabled: true
 
-      - name: livespace
-        engine: livespace
-        shortcut: ls
-        categories: videos
-        disabled: true
-        timeout: 5.0
-
       - name: wordnik
         engine: wordnik
         shortcut: def
@@ -2206,41 +2181,6 @@ data:
           results: HTML
           language: de
 
-      - name: seekr news
-        engine: seekr
-        shortcut: senews
-        categories: news
-        seekr_category: news
-        disabled: true
-
-      - name: seekr images
-        engine: seekr
-        network: seekr news
-        shortcut: seimg
-        categories: images
-        seekr_category: images
-        disabled: true
-
-      - name: seekr videos
-        engine: seekr
-        network: seekr news
-        shortcut: sevid
-        categories: videos
-        seekr_category: videos
-        disabled: true
-
-      - name: sjp.pwn
-        engine: sjp
-        shortcut: sjp
-        base_url: https://sjp.pwn.pl/
-        timeout: 5.0
-        disabled: true
-
-      - name: stract
-        engine: stract
-        shortcut: str
-        disabled: true
-
       - name: svgrepo
         engine: svgrepo
         shortcut: svg
@@ -2258,8 +2198,10 @@ data:
 
       - name: wallhaven
         engine: wallhaven
-        # api_key: abcdefghijklmnopqrstuvwxyz
         shortcut: wh
+        {{- if .Values.apiKeys.wallhaven }}
+        api_key: "{{ .Values.apiKeys.wallhaven }}"
+        {{- end }}
 
         # wikimini: online encyclopedia for children
         # The fulltext and title parameter is necessary for Wikimini because
@@ -2286,11 +2228,9 @@ data:
         shortcut: wttr
         timeout: 9.0
 
-      - name: yummly
-        engine: yummly
-        shortcut: yum
-        disabled: true
-
+      # Brave engines are disabled by default: search.brave.com returns HTTP 429
+      # aggressively for server/datacenter IPs. Enable from Preferences only if
+      # your outbound network is clean or you have an egress proxy.
       - name: brave
         engine: brave
         shortcut: br
@@ -2298,6 +2238,7 @@ data:
         paging: true
         categories: [general, web]
         brave_category: search
+        disabled: true
         # brave_spellcheck: true
 
       - name: brave.images
@@ -2306,6 +2247,7 @@ data:
         shortcut: brimg
         categories: [images, web]
         brave_category: images
+        disabled: true
 
       - name: brave.videos
         engine: brave
@@ -2313,6 +2255,7 @@ data:
         shortcut: brvid
         categories: [videos, web]
         brave_category: videos
+        disabled: true
 
       - name: brave.news
         engine: brave
@@ -2320,6 +2263,7 @@ data:
         shortcut: brnews
         categories: news
         brave_category: news
+        disabled: true
 
       # - name: brave.goggles
       #   engine: brave
@@ -2395,15 +2339,17 @@ data:
 
     default_doi_resolver: 'oadoi.org'
   limiter.toml: |
-    [real_ip]
+    [botdetection]
 
-    # Number of values to trust for X-Forwarded-For.
-
-    x_for = 1
+    # Empty list: SearXNG uses the remote_addr directly and does not expect
+    # an X-Forwarded-For chain. This also silences the kubelet livenessProbe
+    # warning "X-Forwarded-For nor X-Real-IP header is set!".
+    # The main limiter is disabled (server.limiter=false), so this only affects
+    # how bot detection logs the source IP.
+    trusted_proxies = []
 
     # The prefix defines the number of leading bits in an address that are compared
     # to determine whether or not an address is part of a (client) network.
-
     ipv4_prefix = 32
     ipv6_prefix = 48
 
