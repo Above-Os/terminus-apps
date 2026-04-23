@@ -1,0 +1,70 @@
+# Scripts that bridge external chat clients (pod :18790) to OpenClaw's gateway
+# which runs inside the NemoClaw sandbox pod. OpenShell >= 0.0.32 runs the sandbox
+# as a k3s pod inside the `openshell-cluster-nemoclaw` Docker container, so the
+# old `docker ps | grep my-assistant` approach no longer works.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nemoclaw-sandbox-bridge
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: nemoclaw
+data:
+  # Idempotently ensures `openclaw gateway` is running inside the sandbox pod.
+  # HOME=/sandbox is essential: without it, openclaw reads /root/.openclaw
+  # (empty) instead of the NemoClaw-provisioned /sandbox/.openclaw state,
+  # which causes the gateway to fall back to the built-in anthropic default
+  # model instead of the configured `inference/*` provider.
+  sandbox-ensure-gateway.sh: |
+    #!/bin/sh
+    set -u
+    CLUSTER_CTR="${CLUSTER_CTR:-openshell-cluster-nemoclaw}"
+    NS="${NS:-openshell}"
+    SBX="${SBX:-my-assistant}"
+
+    health_ok() {
+      docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+        env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
+    }
+
+    if health_ok; then
+      exit 0
+    fi
+
+    echo "[sandbox-gw] gateway not responding; (re)starting inside ${SBX}..."
+    docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- sh -c '
+      cd /sandbox
+      pkill -f "openclaw gateway" 2>/dev/null; sleep 1
+      HOME=/sandbox nohup openclaw gateway run \
+        --port 18789 --bind loopback --auth none --allow-unconfigured \
+        >/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null &
+      disown 2>/dev/null || true
+      exit 0
+    ' 2>&1 | sed 's/^/[sandbox-gw] /'
+
+    for i in $(seq 1 45); do
+      if health_ok; then
+        echo "[sandbox-gw] up after ${i}s"
+        exit 0
+      fi
+      sleep 1
+    done
+
+    echo "[sandbox-gw] gateway still not responding after 45s; last log tail:"
+    docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+      tail -40 /sandbox/.openclaw-data/gateway.out 2>&1 | sed 's/^/[sandbox-gw] /'
+    exit 1
+
+  # Per-connection stdio<->TCP bridge used as socat EXEC target.
+  # socat pipes the accepted TCP socket to this script's stdin/stdout; node inside
+  # the sandbox opens 127.0.0.1:18789 and pipes both directions. Per-connection
+  # cost is one `docker exec` + `kubectl exec` + `node` startup (~300-800ms), which
+  # is fine for long-lived WebSocket sessions.
+  sandbox-tunnel.sh: |
+    #!/bin/sh
+    CLUSTER_CTR="${CLUSTER_CTR:-openshell-cluster-nemoclaw}"
+    NS="${NS:-openshell}"
+    SBX="${SBX:-my-assistant}"
+    exec docker exec -i "$CLUSTER_CTR" \
+      kubectl -n "$NS" exec -i "$SBX" -c agent -- \
+      node -e 'const s=require("net").connect(18789,"127.0.0.1");s.on("error",()=>process.exit(1));s.on("close",()=>process.exit(0));process.stdin.on("end",()=>s.end());process.stdin.pipe(s);s.pipe(process.stdout);'

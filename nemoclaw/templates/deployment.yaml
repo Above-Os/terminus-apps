@@ -1,0 +1,466 @@
+# NemoClaw deployment: workspace + Docker-in-Docker sidecar.
+# Ported from https://github.com/NVIDIA/NemoClaw/blob/main/k8s/nemoclaw-k8s.yaml
+# Workspace container runs the official NemoClaw installer, then stays alive for
+# terminal access. DinD sidecar provides sandbox isolation for code execution.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: nemoclaw
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: nemoclaw
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: nemoclaw
+        bytetrade.io/terminal: nemoclaw
+    spec:
+      initContainers:
+        - name: init-docker-config
+          image: "beclab/aboveos-busybox:1.37.0"
+          command: ["sh", "-c", "echo '{\"default-cgroupns-mode\":\"host\"}' > /etc/docker/daemon.json"]
+          volumeMounts:
+            - name: docker-config
+              mountPath: /etc/docker
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+
+        - name: init-workspace
+          image: "beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - "-c"
+            - |
+              mkdir -p /home/node /workspace /home/node/.local/bin
+              chown -R 1000:1000 /home/node /workspace || true
+              chmod -R 700 /home/node /workspace || true
+              echo "Workspace directories initialized"
+          volumeMounts:
+            - name: home-data
+              mountPath: /home/node
+            - name: workspace-data
+              mountPath: /workspace
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+
+      containers:
+        # Workspace: runs NemoClaw installer, then stays alive for terminal sessions.
+        - name: nemoclaw
+          image: "beclab/node:22"
+          command:
+            - bash
+            - -c
+            - |
+              set -e
+              export PATH="/home/node/.local/bin:$PATH"
+
+              echo "[1/5] Installing system packages..."
+              # Always run apt: container root FS (including /usr/lib where socat's libwrap.so.0
+              # lives) is ephemeral, but /home/node is a hostPath. Relying on a persisted binary
+              # copy breaks on pod restart because its dynamic deps aren't on the new root FS.
+              # Remove any stale copies under $PATH that might shadow freshly-installed system bins.
+              rm -f /home/node/.local/bin/socat /home/node/.local/bin/docker /home/node/.local/bin/curl 2>/dev/null || true
+              apt-get update -qq
+              apt-get install -y -qq docker.io socat curl python3 libwrap0 >/dev/null 2>&1 || \
+                apt-get install -y -qq docker.io socat curl python3 >/dev/null 2>&1
+              # Verify socat actually loads (catches any residual dynamic-linker issues early).
+              if ! socat -V >/dev/null 2>&1; then
+                echo "ERROR: socat failed runtime check after install:" >&2
+                socat -V 2>&1 | head -5 >&2
+                exit 1
+              fi
+
+              echo "[2/5] Installing OpenShell CLI..."
+              # Pin to NemoClaw's MAX_OPENSHELL_VERSION (see scripts/install-openshell.sh in NVIDIA/NemoClaw).
+              # Without this pin, install.sh resolves /releases/latest and may install a version above NemoClaw's
+              # validated max, causing onboard to fail with "openshell <ver> is above the maximum supported".
+              OPENSHELL_PIN="${NEMOCLAW_OPENSHELL_VERSION:-v0.0.32}"
+              OPENSHELL_PIN_NUM="${OPENSHELL_PIN#v}"
+              install_openshell() {
+                mkdir -p /home/node/.local/bin
+                rm -f /home/node/.local/bin/openshell
+                curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh \
+                  | OPENSHELL_VERSION="$OPENSHELL_PIN" OPENSHELL_INSTALL_DIR=/home/node/.local/bin sh
+              }
+              if command -v openshell &>/dev/null; then
+                INSTALLED_OS_VER="$(openshell --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+                if [ "$INSTALLED_OS_VER" = "$OPENSHELL_PIN_NUM" ]; then
+                  echo "OpenShell already at pinned version: $INSTALLED_OS_VER"
+                else
+                  echo "OpenShell installed ($INSTALLED_OS_VER) != pin ($OPENSHELL_PIN_NUM); reinstalling..."
+                  install_openshell
+                fi
+              else
+                install_openshell
+              fi
+
+              echo "[3/5] Starting socat proxy..."
+              socat TCP-LISTEN:8000,fork,reuseaddr TCP:$DYNAMO_HOST &
+              echo "127.0.0.1 host.openshell.internal" >> /etc/hosts
+              sleep 1
+
+              echo "[4/5] Waiting for Docker daemon..."
+              for i in $(seq 1 30); do
+                if docker info >/dev/null 2>&1; then break; fi
+                sleep 2
+              done
+              docker info >/dev/null 2>&1 || { echo "Docker not ready"; exit 1; }
+              echo "Docker ready"
+
+              SANDBOX_FILTER="${NEMOCLAW_SANDBOX_NAME:-my-assistant}"
+
+              if [ -n "${CHAT_UI_URL:-}" ]; then
+                export CHAT_UI_URL
+                echo "CHAT_UI_URL=${CHAT_UI_URL} (browser origin for OpenClaw web UI allowlist)"
+              else
+                echo "CHAT_UI_URL unset — set app env or Olares domain.webtui (entrance name webtui); else web UI allowlist may default to http://127.0.0.1:18789"
+              fi
+
+              # Chat ingress :18790 (Service :18789). Sandbox now runs as a k3s pod inside
+              # the `openshell-cluster-nemoclaw` Docker container (OpenShell >= 0.0.32), not
+              # as a sibling Docker container. We therefore:
+              #   1) wait for `my-assistant` pod to be Running via cluster-container kubectl
+              #   2) ensure `openclaw gateway` is listening on sandbox :18789 (HOME=/sandbox so
+              #      it picks up NemoClaw-provisioned providers + model, not root defaults)
+              #   3) relay pod :18790 -> sandbox :18789 via `docker exec … kubectl exec … node` pipe
+              CHAT_PUBLISH=18790
+              CLUSTER_CTR="${NEMOCLAW_CLUSTER_CTR:-openshell-cluster-nemoclaw}"
+              SANDBOX_NS="${NEMOCLAW_SANDBOX_NS:-openshell}"
+              export CLUSTER_CTR SBX=${SANDBOX_FILTER} NS=${SANDBOX_NS}
+              (
+                start_placeholder_18790() {
+                  pkill -f "LISTEN:${CHAT_PUBLISH}" 2>/dev/null || true
+                  sleep 1
+                  printf '%s\n' '#!/bin/bash' 'read -t 25 -r _ || true' \
+                    "printf 'HTTP/1.1 503 Service Unavailable\\r\\nContent-Type: text/plain; charset=utf-8\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n'" \
+                    > /tmp/nemoclaw-chat-503.sh
+                  chmod +x /tmp/nemoclaw-chat-503.sh
+                  socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 EXEC:/tmp/nemoclaw-chat-503.sh 2>/dev/null &
+                  echo "[chat-ui-bridge] :${CHAT_PUBLISH} 503 — waiting for sandbox + openclaw gateway"
+                }
+                pod_running() {
+                  docker exec "$CLUSTER_CTR" kubectl -n "$NS" get pod "$SBX" \
+                    -o jsonpath='{.status.phase}' 2>/dev/null | grep -q '^Running$'
+                }
+                gateway_listening() {
+                  docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+                    env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
+                }
+                start_relay_18790() {
+                  pkill -f "LISTEN:${CHAT_PUBLISH}" 2>/dev/null || true
+                  sleep 1
+                  socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 \
+                    EXEC:/opt/nemoclaw/sandbox-tunnel.sh,stderr 2>&1 | \
+                    while read -r ln; do echo "[chat-ui-bridge] tunnel: $ln"; done &
+                  echo "[chat-ui-bridge] :${CHAT_PUBLISH} -> k3s pod ${NS}/${SBX} :18789 via docker+kubectl+node"
+                }
+                start_placeholder_18790
+                echo "[chat-ui-bridge] watching k3s pod ${NS}/${SBX} (Service :18789 -> pod :${CHAT_PUBLISH})"
+                while true; do
+                  if ! pod_running; then
+                    sleep 5
+                    continue
+                  fi
+                  if ! gateway_listening; then
+                    sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1 | \
+                      while read -r ln; do echo "[chat-ui-bridge] $ln"; done
+                    if ! gateway_listening; then
+                      sleep 15
+                      continue
+                    fi
+                  fi
+                  start_relay_18790
+                  while pod_running && gateway_listening; do sleep 30; done
+                  echo "[chat-ui-bridge] sandbox gateway dropped (pod_running=$(pod_running && echo y || echo n) gw=$(gateway_listening && echo y || echo n)); resetting"
+                  start_placeholder_18790
+                  sleep 5
+                done
+              ) &
+
+              (
+                EXPORT_DIR=/openclaw-config
+                mkdir -p "${EXPORT_DIR}" 2>/dev/null || true
+                echo "[openclaw-export] syncing sandbox openclaw.json -> ${EXPORT_DIR}/ every 10m"
+                while true; do
+                  if ! docker exec "$CLUSTER_CTR" kubectl -n "$NS" get pod "$SBX" >/dev/null 2>&1; then
+                    sleep 30
+                    continue
+                  fi
+                  for inpath in /sandbox/.openclaw/openclaw.json /home/node/.openclaw/openclaw.json /root/.openclaw/openclaw.json; do
+                    if docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- test -f "$inpath" 2>/dev/null; then
+                      if docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- cat "$inpath" >"${EXPORT_DIR}/openclaw.json.tmp" 2>/dev/null \
+                         && mv "${EXPORT_DIR}/openclaw.json.tmp" "${EXPORT_DIR}/openclaw.json"; then
+                        echo "[openclaw-export] updated from ${inpath}"
+                      fi
+                      break
+                    fi
+                  done
+                  sleep 600
+                done
+              ) &
+
+              # Marker lives on hostPath (/workspace) but the real `nemoclaw` / `openshell` binaries
+              # live under /usr/local/bin which is ephemeral. If the container FS was reset but marker
+              # survived, the wrapper at /home/node/.local/bin/nemoclaw (also hostPath) still exists but
+              # points to the now-missing /usr/local/bin/nemoclaw. Detect + invalidate the marker so the
+              # installer reruns cleanly.
+              if [ -f /workspace/.nemoclaw-installed ] && [ ! -x /usr/local/bin/nemoclaw ]; then
+                echo "[5/5] marker present but /usr/local/bin/nemoclaw missing — container FS was reset; re-running installer"
+                rm -f /workspace/.nemoclaw-installed
+                rm -f /home/node/.local/bin/nemoclaw 2>/dev/null || true
+              fi
+
+              if [ ! -f /workspace/.nemoclaw-installed ]; then
+                # Onboard [2/8] starts this image; without a pre-pull, failures look like an infinite "Still starting gateway cluster…" loop.
+                if [ "${NEMOCLAW_PREFLIGHT_CLUSTER_PULL:-1}" = "1" ]; then
+                  echo "[5a/5] Pre-pull OpenShell cluster image (matches openshell CLI pin; set NEMOCLAW_PREFLIGHT_CLUSTER_PULL=0 to skip)..."
+                  CLUSTER_IMG="${NEMOCLAW_OPENSHELL_CLUSTER_IMAGE:-ghcr.io/nvidia/openshell/cluster:0.0.32}"
+                  CLUSTER_IMG_MIRROR="${NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR:-}"
+                  # Some regions cannot reach ghcr.io reliably (TLS handshake timeout). Try the official
+                  # registry first; on failure, fall back to a configurable mirror and retag to the
+                  # canonical name so nemoclaw onboard's internal `docker pull` hits the local cache.
+                  if docker pull "$CLUSTER_IMG"; then
+                    echo "[5a/5] pulled $CLUSTER_IMG"
+                  elif [ -n "$CLUSTER_IMG_MIRROR" ] && docker pull "$CLUSTER_IMG_MIRROR"; then
+                    echo "[5a/5] ghcr.io unreachable; pulled mirror $CLUSTER_IMG_MIRROR, retagging as $CLUSTER_IMG"
+                    docker tag "$CLUSTER_IMG_MIRROR" "$CLUSTER_IMG"
+                  else
+                    echo "WARN: cluster image pull failed — fix ghcr.io access, set NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR, or configure HTTP(S)_PROXY before onboard can finish."
+                  fi
+                fi
+                echo "[5b/5] Running NemoClaw installer (to change CHAT_UI_URL later: clear app data / remove .nemoclaw-installed and reinstall)"
+                curl -fsSL https://nvidia.com/nemoclaw.sh | bash
+                touch /workspace/.nemoclaw-installed
+              else
+                echo "[5/5] NemoClaw already installed, skipping installer"
+              fi
+
+              # OpenShell cluster publishes the gateway on the pod at NEMOCLAW_GATEWAY_DOCKER_PORT (default 8080).
+              # Default NEMOCLAW_GATEWAY_SCHEME=http: use --plaintext so nginx can proxy with http:// (no upstream
+              # mTLS / self-signed cert issues). Set scheme=https only if the gateway is TLS and ingress uses
+              # https:// with proxy_ssl_verify off (and optional client certs if required).
+              set +e
+              GW_NAME="${NEMOCLAW_GATEWAY_NAME:-nemoclaw}"
+              GW_DOCKER_PORT="${NEMOCLAW_GATEWAY_DOCKER_PORT:-8080}"
+              GW_SCHEME="${NEMOCLAW_GATEWAY_SCHEME:-http}"
+              PLAINTEXT_FLAG=""
+              [ "${GW_SCHEME}" = "http" ] && PLAINTEXT_FLAG="--plaintext"
+
+              echo "[6/6] Starting OpenShell gateway name=${GW_NAME} port=${GW_DOCKER_PORT} scheme=${GW_SCHEME}..."
+              GW_EXTRA=""
+              [ "${NEMOCLAW_GATEWAY_RECREATE:-0}" = "1" ] && GW_EXTRA="--recreate"
+              openshell gateway start \
+                --name "${GW_NAME}" \
+                --port "${GW_DOCKER_PORT}" \
+                ${PLAINTEXT_FLAG} \
+                ${GW_EXTRA} \
+                -vv 2>&1 | tee /tmp/gateway-start.log || true
+
+              (
+                echo "Waiting for gateway on 127.0.0.1:${GW_DOCKER_PORT} (background, up to ~8m)..."
+                for i in $(seq 1 240); do
+                  if (echo >/dev/tcp/127.0.0.1/${GW_DOCKER_PORT}) 2>/dev/null; then
+                    echo "Gateway reachable on 127.0.0.1:${GW_DOCKER_PORT}"
+                    break
+                  fi
+                  sleep 2
+                done
+              ) &
+
+              set -e
+              echo "NemoClaw ready."
+              exec sleep infinity
+          env:
+            - name: HOME
+              value: /home/node
+            - name: TERM
+              value: xterm-256color
+            - name: PATH
+              value: "/home/node/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            - name: DYNAMO_HOST
+              value: "{{ .Values.olaresEnv.DYNAMO_HOST | default "42726b5b0.shared.olares.com:80" }}"
+            - name: NEMOCLAW_NON_INTERACTIVE
+              value: "1"
+            - name: NEMOCLAW_PROVIDER
+              value: "{{ .Values.olaresEnv.NEMOCLAW_PROVIDER | default "custom" }}"
+            - name: NEMOCLAW_ENDPOINT_URL
+              value: "{{ .Values.olaresEnv.NEMOCLAW_ENDPOINT_URL | default "http://42726b5b0.shared.olares.com/v1" }}"
+            - name: COMPATIBLE_API_KEY
+              value: "{{ .Values.olaresEnv.COMPATIBLE_API_KEY | default "dummy" }}"
+            - name: NEMOCLAW_MODEL
+              value: "{{ .Values.olaresEnv.NEMOCLAW_MODEL | default "gemma4:26b-a4b-it-ud-q4_K_XL" }}"
+            - name: NEMOCLAW_SANDBOX_NAME
+              value: "my-assistant"
+            - name: NEMOCLAW_POLICY_MODE
+              value: "skip"
+            - name: NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE
+              value: "1"
+            - name: NEMOCLAW_GATEWAY_NAME
+              value: "{{ .Release.Name }}"
+            - name: NEMOCLAW_GATEWAY_DOCKER_PORT
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_DOCKER_PORT | default "8080" }}"
+            - name: NEMOCLAW_GATEWAY_SCHEME
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_SCHEME | default "http" }}"
+            - name: NEMOCLAW_GATEWAY_RECREATE
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_RECREATE | default "0" }}"
+            - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
+              value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "ghcr.io/nvidia/openshell/cluster:0.0.32" }}"
+            - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
+              value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR | default "" }}"
+            - name: NEMOCLAW_PREFLIGHT_CLUSTER_PULL
+              value: "{{ .Values.olaresEnv.NEMOCLAW_PREFLIGHT_CLUSTER_PULL | default "1" }}"
+            - name: NEMOCLAW_OPENSHELL_VERSION
+              value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_VERSION | default "v0.0.32" }}"
+            - name: CHAT_UI_URL
+              value: {{ include "nemoclaw.chatUiUrl" . | quote }}
+            - name: OPENCLAW_EXTRA_ALLOWED_ORIGINS
+              value: "{{ .Values.olaresEnv.OPENCLAW_EXTRA_ALLOWED_ORIGINS | default "" }}"
+            - name: OPENCLAW_TRUSTED_PROXIES
+              value: "{{ .Values.olaresEnv.OPENCLAW_TRUSTED_PROXIES | default "" }}"
+          # Probes on :18790 (chat relay / 503 placeholder). TUI and sandbox do not need OpenClaw :18789 or gateway :8080.
+          # Service :8080 may refuse until OpenShell finishes starting; retry port-forward / ingress to gateway.
+          startupProbe:
+            tcpSocket:
+              port: 18790
+            periodSeconds: 15
+            failureThreshold: 120
+          readinessProbe:
+            tcpSocket:
+              port: 18790
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+            requests:
+              cpu: 300m
+              memory: 256Mi
+          volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run
+            - name: docker-config
+              mountPath: /etc/docker
+            - name: workspace-data
+              mountPath: /workspace
+            - name: home-data
+              mountPath: /home/node
+            - name: patch-origins-script
+              mountPath: /opt/nemoclaw/patch_origins.py
+              subPath: patch_origins.py
+              readOnly: true
+            - name: sandbox-bridge-scripts
+              mountPath: /opt/nemoclaw/sandbox-ensure-gateway.sh
+              subPath: sandbox-ensure-gateway.sh
+              readOnly: true
+            - name: sandbox-bridge-scripts
+              mountPath: /opt/nemoclaw/sandbox-tunnel.sh
+              subPath: sandbox-tunnel.sh
+              readOnly: true
+            - name: openclaw-config
+              mountPath: /openclaw-config
+
+        # Docker daemon (DinD): provides sandbox isolation for NemoClaw.
+        - name: dind
+          image: "beclab/docker:24-dind"
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          command: ["dockerd", "--host=unix:///var/run/docker.sock"]
+          resources:
+            limits:
+              cpu: "2"
+              memory: 8Gi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: docker-storage
+              mountPath: /var/lib/docker
+            - name: docker-socket
+              mountPath: /var/run
+            - name: docker-config
+              mountPath: /etc/docker
+            - name: home-data
+              mountPath: /home/node
+            - name: workspace-data
+              mountPath: /workspace
+
+      restartPolicy: Always
+      volumes:
+        - name: docker-storage
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/docker"
+            type: DirectoryOrCreate
+        - name: docker-socket
+          emptyDir: {}
+        - name: docker-config
+          emptyDir: {}
+        - name: workspace-data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/workspace"
+            type: DirectoryOrCreate
+        - name: home-data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/home"
+            type: DirectoryOrCreate
+        - name: patch-origins-script
+          configMap:
+            name: nemoclaw-patch-origins
+            defaultMode: 493
+            items:
+              - key: patch_origins.py
+                path: patch_origins.py
+        - name: sandbox-bridge-scripts
+          configMap:
+            name: nemoclaw-sandbox-bridge
+            defaultMode: 493
+            items:
+              - key: sandbox-ensure-gateway.sh
+                path: sandbox-ensure-gateway.sh
+              - key: sandbox-tunnel.sh
+                path: sandbox-tunnel.sh
+        - name: openclaw-config
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/openclaw-config"
+            type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    io.kompose.service: nemoclaw
+  name: nemoclaw
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  ports:
+    # OpenShell gateway (openshell status); use from terminal / kubectl port-forward if needed.
+    - name: gateway
+      port: 8080
+      targetPort: {{ .Values.olaresEnv.NEMOCLAW_GATEWAY_DOCKER_PORT | default 8080 }}
+    # OpenClaw UI: Service port 18789 -> pod 18790 (relay); 127.0.0.1:18789 may be OpenShell in same netns.
+    - name: chat
+      port: 18789
+      targetPort: 18790
+  selector:
+    io.kompose.service: nemoclaw

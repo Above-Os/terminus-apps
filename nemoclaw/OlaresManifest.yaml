@@ -1,0 +1,196 @@
+olaresManifest.version: '0.11.0'
+olaresManifest.type: app
+metadata:
+  name: nemoclaw
+  icon: https://app.cdn.olares.com/appstore/nemoclaw/icon.png
+  description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
+  appid: nemoclaw
+  title: NemoClaw
+  version: 0.1.3
+  categories:
+  - Developer Tools
+  - Productivity_v112
+entrances:
+- name: terminal
+  port: 80
+  host: terminal
+  title: NemoClaw CLI
+  icon: https://app.cdn.olares.com/appstore/nemoclaw/icon.png
+  openMethod: window
+  authLevel: internal
+- name: webtui
+  host: nemoclawweuiingress
+  port: 8080
+  icon: https://app.cdn.olares.com/appstore/nemoclaw/icon.png
+  title: OpenClaw Web UI
+  openMethod: window
+  authLevel: internal
+spec:
+  versionName: '0.1.0'
+  fullDescription: |
+    # Overview
+    NemoClaw is NVIDIA's AI coding agent that runs on Kubernetes with Docker-in-Docker
+    for secure sandbox isolation. It connects to any OpenAI-compatible LLM endpoint
+    (including NVIDIA Dynamo) to provide an autonomous coding assistant.
+
+    Official docs: [NemoClaw](https://docs.nvidia.com/nemoclaw/latest/index.html), [Remote dashboard / CHAT_UI_URL](https://docs.nvidia.com/nemoclaw/latest/deployment/deploy-to-remote-gpu.html#remote-dashboard-access).
+
+    # Entrances
+    - **NemoClaw CLI** — Terminal; run `nemoclaw my-assistant connect` then `openclaw tui` (see [Quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html)).
+    - **OpenClaw Web UI** — Service **nemoclaw:18789** → pod **18790**. By default **18790** relays to **127.0.0.1:18789** (workspace OpenClaw once the gateway is up). After **`nemoclaw my-assistant connect`** and OpenClaw inside the sandbox, the chart switches **18790** to relay via the sandbox. Set **CHAT_UI_URL** or rely on Olares **domain.webtui** (entrance **name: webtui**); patches **`allowedOrigins`** and **`gateway.trustedProxies`** (reduces **403** behind HTTPS). Optional **OPENCLAW_TRUSTED_PROXIES** if 403 persists.
+
+    # OpenShell gateway
+    No separate browser entry — use the Terminal and `openshell status` / `openshell doctor` on the CLI. Port **8080** remains on Service **nemoclaw** for port-forward or internal use.
+
+    # openclaw.json export
+    The chart mounts **/openclaw-config** on the workspace container and copies the sandbox **openclaw.json** there about every **10 minutes** (read-only mirror for backup/inspection). On disk this is **`openclaw-config/`** next to **home** and **workspace** under the app’s **app data** volume (same PVC as `userspace.appData`). Edits there are **not** auto-applied into the sandbox; use `docker cp` from the Terminal if you need to push changes back.
+
+    # Web UI (CHAT_UI_URL)
+    Per NVIDIA, the browser origin should match **CHAT_UI_URL** or **domain.webtui** (scheme + host, no path). If neither is set, only `http://127.0.0.1:18789` may work inside the sandbox.
+
+    # Key Features
+    Docker-in-Docker Sandbox
+    - Runs code in isolated Docker containers for safety.
+
+    Flexible LLM Backend
+    - Connects to any OpenAI-compatible API endpoint via configurable environment variables.
+
+    NVIDIA Dynamo Integration
+    - First-class support for NVIDIA Dynamo inference endpoints via socat DNS bridge.
+  upgradeDescription: |
+    Initial release of NemoClaw on Olares.
+  developer: NVIDIA
+  website: https://github.com/NVIDIA/NemoClaw
+  sourceCode: https://github.com/NVIDIA/NemoClaw
+  submitter: harveyff
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://github.com/NVIDIA/NemoClaw
+  license:
+  - text: Apache-2.0
+    url: https://github.com/NVIDIA/NemoClaw/blob/main/LICENSE
+  requiredMemory: 4Gi
+  limitedMemory: 14Gi
+  requiredDisk: 256Mi
+  limitedDisk: 20Gi
+  requiredCpu: 2
+  limitedCpu: 6
+  supportArch:
+  - amd64
+  - arm64
+permission:
+  appData: true
+  appCache: true
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.5-0'
+envs:
+  - envName: DYNAMO_HOST
+    type: string
+    required: true
+    applyOnChange: true
+    editable: true
+    default: "42726b5b0.shared.olares.com:80"
+    description: "Backend LLM endpoint as host:port. Used by the in-pod socat proxy (legacy; not on NemoClaw's hot path)."
+  - envName: NEMOCLAW_PROVIDER
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "custom"
+    description: "NemoClaw provider: build|openai|anthropic|anthropicCompatible|gemini|ollama|custom|nim-local|vllm. 'custom' = any OpenAI-compatible /v1 endpoint (works for vLLM, Ollama's /v1, Dynamo, etc.)."
+  - envName: NEMOCLAW_ENDPOINT_URL
+    type: string
+    required: true
+    applyOnChange: true
+    editable: true
+    default: "http://42726b5b0.shared.olares.com/v1"
+    description: "OpenAI-compatible base URL NemoClaw's 'custom' provider calls. Must include /v1 suffix. For Ollama hosts, append /v1 to use its OpenAI-compatibility layer."
+  - envName: NEMOCLAW_MODEL
+    type: string
+    required: true
+    applyOnChange: true
+    editable: true
+    default: "gemma4:26b-a4b-it-ud-q4_K_XL"
+    description: "LLM model name (must match an id returned by GET {NEMOCLAW_ENDPOINT_URL}/models)."
+  - envName: COMPATIBLE_API_KEY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "dummy"
+    description: "API key for the LLM endpoint (Ollama/Dynamo usually accept any non-empty string)."
+  - envName: CHAT_UI_URL
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "HTTPS origin for Web UI (must match browser address bar). Empty = https:// + first host from domain.webtui (Olares entrance name webtui). Patches gateway.controlUi.allowedOrigins."
+  - envName: OPENCLAW_EXTRA_ALLOWED_ORIGINS
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Comma-separated extra origins for gateway.controlUi.allowedOrigins (e.g. alternate Olares URLs)."
+  - envName: OPENCLAW_TRUSTED_PROXIES
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Optional comma-separated extra IPs/CIDRs for gateway.trustedProxies if Web UI returns 403 behind Olares (e.g. Pod CIDR). Defaults add 127.0.0.1 and ::1."
+  - envName: NEMOCLAW_GATEWAY_DOCKER_PORT
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "8080"
+    description: "Docker host port for OpenShell gateway (docker ps). Cluster Service port 8080 targets this."
+  - envName: NEMOCLAW_GATEWAY_SCHEME
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "http"
+    description: "Ingress to gateway: http + openshell --plaintext (default, works behind nginx). Use https if gateway stays TLS."
+  - envName: NEMOCLAW_GATEWAY_RECREATE
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "0"
+    description: "Set to 1 to pass --recreate on openshell gateway start (fresh cluster)."
+  - envName: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "ghcr.io/nvidia/openshell/cluster:0.0.32"
+    description: "Image nemoclaw onboard pulls for OpenShell gateway cluster; override if you mirror ghcr.io."
+  - envName: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Fallback image ref pulled when ghcr.io is unreachable; retagged locally as NEMOCLAW_OPENSHELL_CLUSTER_IMAGE so onboard's internal docker pull hits cache. Example: ghcr.nju.edu.cn/nvidia/openshell/cluster:0.0.32"
+  - envName: NEMOCLAW_PREFLIGHT_CLUSTER_PULL
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "1"
+    description: "Set to 0 to skip docker pull before first install (not recommended if ghcr.io is slow)."
+  - envName: NEMOCLAW_OPENSHELL_VERSION
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "v0.0.32"
+    description: "OpenShell CLI release tag installed by NVIDIA/OpenShell install.sh. Must satisfy NemoClaw's MIN_VERSION..MAX_VERSION (currently 0.0.32). Bump this together with NEMOCLAW_OPENSHELL_CLUSTER_IMAGE."
