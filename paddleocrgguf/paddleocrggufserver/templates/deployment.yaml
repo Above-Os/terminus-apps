@@ -1,27 +1,25 @@
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-{{- $clientDomainENV := split "," (index .Values.domain "paddleocrgguf-client") -}}
-{{- $clientDomain := index $clientDomainENV "_0" -}}
 {{- $deviceType := lower (default "cpu" .Values.olaresEnv.DEVICE_TYPE) -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: paddleocrgguf-llm
+  name: llama
   namespace: {{ .Release.Namespace }}
   labels:
-    io.kompose.service: paddleocrgguf-llm
+    io.kompose.service: llama
 spec:
   replicas: 1
   selector:
     matchLabels:
-      io.kompose.service: paddleocrgguf-llm
+      io.kompose.service: llama
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
         io.kompose.network.chrome-default: "true"
-        io.kompose.service: paddleocrgguf-llm
+        io.kompose.service: llama
 {{- if eq $deviceType "cuda" }}
       annotations:
         applications.app.bytetrade.io/gpu-inject: "true"
@@ -101,73 +99,10 @@ spec:
               memory: 4Gi
 
           volumeMounts:
-            - name: model
+            - name: data
               mountPath: /models
-
-        - name: download-model
-          image: "docker.io/beclab/harveyff-hf-downloader:v0.1.0"
-          env:
-            - name: HF_ENDPOINT
-              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
-            - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
-            - name: VLLM_PROXY_TARGET
-              value: http://localhost:8080
-            - name: MODEL_NAME
-              value: /models
-            - name: APP_URL
-              value: "https://{{ $clientDomain }}"
-          args:
-            - "--repo"
-            - "PaddlePaddle/PaddleOCR-VL-1.5-GGUF"
-            - "--ref"
-            - "main"
-            - "--outdir"
-            - "/models"
-            - "--static"
-            - "/app/static"
-            - "--port"
-            - "8090"
-            - "--probe-url"
-            - "/health"
-            - "--done-name"
-            - ".paddleocr-vl-15-gguf.done"
-          ports:
-            - name: http
-              containerPort: 8090
-          startupProbe:
-            httpGet:
-              path: /ping
-              port: 8090
-            initialDelaySeconds: 5
-            timeoutSeconds: 10
-            periodSeconds: 10
-            failureThreshold: 10
-          livenessProbe:
-            httpGet:
-              path: /ping
-              port: 8090
-              scheme: HTTP
-            initialDelaySeconds: 10
-            timeoutSeconds: 60
-            periodSeconds: 60
-            successThreshold: 1
-            failureThreshold: 10
-          volumeMounts:
-            - name: model
-              mountPath: /models
-          resources:
-            requests:
-              cpu: 100m
-              memory: 500Mi
-            limits:
-              cpu: "1"
-              memory: 1Gi
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          imagePullPolicy: IfNotPresent
       volumes:
-        - name: model
+        - name: data
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/paddleocr-vl-15-gguf"
             type: DirectoryOrCreate
@@ -176,45 +111,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: download-svc
+  name: llama-svc
   namespace: {{ .Release.Namespace }}
   labels:
-    io.kompose.service: paddleocrgguf-llm
+    io.kompose.service: llama
 spec:
   selector:
-    io.kompose.service: paddleocrgguf-llm
-  ports:
-    - name: http
-      port: 8090
-      targetPort: 8090
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: sharedentrances-paddleocrgguf-dl
-  namespace: {{ .Release.Namespace }}
-  labels:
-    io.kompose.service: paddleocrgguf-llm
-spec:
-  selector:
-    io.kompose.service: paddleocrgguf-llm
-  ports:
-    - name: http
-      port: 80
-      targetPort: 8090
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: paddleocrgguf-api
-  namespace: {{ .Release.Namespace }}
-  labels:
-    io.kompose.service: paddleocrgguf-llm
-spec:
-  selector:
-    io.kompose.service: paddleocrgguf-llm
+    io.kompose.service: llama
   ports:
     - name: http
       port: 8080
       targetPort: 8080
+  type: ClusterIP
 {{- end }}
