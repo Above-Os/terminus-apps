@@ -1,0 +1,234 @@
+# Hermes Agent on Olares
+#
+# Data lifecycle:
+#   - /opt/data inside the container is the single source of truth
+#     (config, API keys, sessions, skills, memories, cron, logs).
+#   - We persist it on the host via app-data-home (userspace.appData/home).
+#   - All containers in this pod share the same /opt/data volume.
+#   - `gateway run` is the long-lived sidecar process.
+#   - The `workspace` container (sleep infinity) exists so the terminal
+#     entrance can `kubectl exec` into it and run `hermes setup` / `hermes`
+#     as an interactive TUI against the same data directory.
+#   - The `dashboard` sidecar renders the web UI on port 9119 and talks to
+#     the gateway via http://localhost:8642.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: hermesagent
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: hermesagent
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: hermesagent
+        bytetrade.io/terminal: hermesagent
+    spec:
+      securityContext:
+        fsGroup: 0
+
+      initContainers:
+        - name: init-chmod-data
+          image: "beclab/aboveos-busybox:1.37.0"
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - "-c"
+            - |
+              mkdir -p /opt/data
+              chmod -R 0755 /opt/data || true
+              echo "[init] /opt/data ready"
+          resources: {}
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+
+      containers:
+        # Gateway sidecar: long-lived messaging gateway + OpenAI-compat API.
+        - name: gateway
+          image: "beclab/nousresearch-hermes-agent:v2026.4.16"
+          imagePullPolicy: IfNotPresent
+          args: ["gateway", "run"]
+          ports:
+            - name: gateway
+              containerPort: 8642
+              protocol: TCP
+          env:
+            - name: TZ
+              value: Etc/UTC
+          startupProbe:
+            tcpSocket:
+              port: 8642
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: 8642
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            limits:
+              cpu: "2"
+              memory: 8Gi
+            requests:
+              cpu: 300m
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+            - mountPath: /dev/shm
+              name: dshm
+            {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/home/
+              name: olares-home-dir
+            {{- end }}
+            {{- if eq (toString .Values.olaresEnv.ALLOW_EXTERNAL_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/external/
+              name: olares-external-dir
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+
+        # Dashboard sidecar: web UI on 9119, reads gateway health on localhost.
+        - name: dashboard
+          image: "beclab/nousresearch-hermes-agent:v2026.4.16"
+          imagePullPolicy: IfNotPresent
+          args: ["dashboard", "--host", "0.0.0.0", "--insecure"]
+          ports:
+            - name: dashboard
+              containerPort: 9119
+              protocol: TCP
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: GATEWAY_HEALTH_URL
+              value: "http://localhost:8642"
+          startupProbe:
+            tcpSocket:
+              port: 9119
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: 9119
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            limits:
+              cpu: "500m"
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+          securityContext:
+            allowPrivilegeEscalation: false
+
+        # Workspace container for TUI: kept alive so the terminal entrance can
+        # `kubectl exec` into it and run `hermes setup` / `hermes`.
+        # - HERMES_HOME points at the shared /opt/data volume (same as the
+        #   gateway/dashboard containers) so the TUI sees the same config,
+        #   sessions, skills and memories.
+        # - PATH prepends /opt/hermes/.venv/bin so `hermes` is on PATH without
+        #   needing to `source activate` the venv first.
+        - name: hermesagent
+          image: "beclab/nousresearch-hermes-agent:v2026.4.16"
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "infinity"]
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: TERM
+              value: xterm-256color
+            - name: HERMES_HOME
+              value: /opt/data
+            - name: PATH
+              value: "/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+            {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/home/
+              name: olares-home-dir
+            {{- end }}
+            {{- if eq (toString .Values.olaresEnv.ALLOW_EXTERNAL_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/external/
+              name: olares-external-dir
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+
+      restartPolicy: Always
+      volumes:
+        - name: app-data-home
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/home"
+            type: DirectoryOrCreate
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+        {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+        - name: olares-home-dir
+          hostPath:
+            path: "{{ .Values.userspace.userData }}"
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if eq (toString .Values.olaresEnv.ALLOW_EXTERNAL_DIR_ACCESS) "true" }}
+        - name: olares-external-dir
+          hostPath:
+            path: "{{ .Values.sharedlib }}"
+            type: DirectoryOrCreate
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    io.kompose.service: hermesagent
+  name: sharedentrances-hermesgateway
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8642
+  selector:
+    io.kompose.service: hermesagent
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    io.kompose.service: hermesagent
+  name: hermesdashboard
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  ports:
+    - name: "9119"
+      port: 9119
+      targetPort: 9119
+  selector:
+    io.kompose.service: hermesagent
