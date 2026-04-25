@@ -104,7 +104,17 @@ spec:
             {{- end }}
             type: DirectoryOrCreate
         - name: dind-storage
-          emptyDir: {}
+          hostPath:
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: {{ .Values.userspace.appData }}/dind-storage
+              {{- else }}
+            path: {{ .Values.userspace.appData }}/coder/dind-storage
+              {{- end }}
+            {{- else }}
+            path: {{ .Values.userspace.appData }}/coder/dind-storage
+            {{- end }}
+            type: DirectoryOrCreate
 
 ---
 apiVersion: v1
