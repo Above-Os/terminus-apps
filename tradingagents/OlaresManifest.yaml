@@ -1,0 +1,129 @@
+---
+olaresManifest.version: "0.10.0"
+olaresManifest.type: app
+apiVersion: "v1"
+metadata:
+  name: tradingagents
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  description: Multi-Agents LLM Financial Trading Framework (CLI + info entrance).
+  appid: tradingagents
+  title: TradingAgents
+  version: "1.0.0"
+  categories:
+    - Utilities
+
+# Terminal first so the app icon opens the web terminal by default; info page kept for probes (invisible in launcher).
+entrances:
+  - name: tradingagentsTerminal
+    port: 8081
+    host: tradingagentsingress
+    title: TradingAgents
+    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    authLevel: private
+    openMethod: window
+  - name: tradingagents
+    port: 8080
+    host: tradingagentsingress
+    title: TradingAgents Info
+    invisible: true
+    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    authLevel: private
+    openMethod: window
+
+spec:
+  versionName: "0.2.3"
+  fullDescription: |
+    TradingAgents is a multi-agent LLM financial trading framework.
+
+    - Default entrance: **web terminal** (port 8081) — interactive shell; run `cd /home/appuser/app && python -m cli.main`
+      for the CLI (keys load via **`load_dotenv()`** from the mounted **`.env`**).
+    - Port 8080: static info page (invisible in launcher); used for HTTP health checks.
+    - Reports are saved under **`/home/appuser/app/reports`** and persisted to app data at
+      **`/app/data/reports`** (visible in Olares Files under `Data/tradingagents/reports`).
+
+    Configure API keys in the app **Settings / Environment** on Olares. For **DeepSeek**, set
+    **DEEPSEEK_API_KEY** (not OPENAI_API_KEY). Optional **ALPHA_VANTAGE_API_KEY** for market data.
+  upgradeDescription: |
+    Reports are persisted: /home/appuser/app/reports now maps to /app/data/reports.
+  developer: TauricResearch
+  sourceCode: https://github.com/TauricResearch/TradingAgents
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  requiredMemory: 1Gi
+  limitedMemory: 4Gi
+  requiredDisk: 256Mi
+  limitedDisk: 2Gi
+  requiredCpu: 500m
+  limitedCpu: "3"
+  supportArch:
+    - amd64
+    - arm64
+
+permission:
+  appData: true
+
+# Set keys for the provider you use in the CLI (DeepSeek -> DEEPSEEK_API_KEY, OpenAI -> OPENAI_API_KEY, etc.).
+envs:
+  - envName: DEEPSEEK_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: DeepSeek API key when using provider DeepSeek
+  - envName: OPENAI_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: OpenAI API key when using provider OpenAI
+  - envName: ANTHROPIC_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: Anthropic API key when using Claude
+  - envName: GOOGLE_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: Google AI API key for Gemini
+  - envName: DASHSCOPE_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: Alibaba DashScope for Qwen
+  - envName: ZHIPU_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: Zhipu GLM API key
+  - envName: OPENROUTER_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: OpenRouter API key
+  - envName: XAI_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: xAI API key
+  - envName: ALPHA_VANTAGE_API_KEY
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    description: Optional Alpha Vantage key for market data
+
+options:
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      type: system
+      version: ">=1.12.2-0"
