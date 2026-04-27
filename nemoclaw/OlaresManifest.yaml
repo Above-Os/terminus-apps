@@ -6,7 +6,7 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 0.1.3
+  version: 0.1.5
   categories:
   - Developer Tools
   - Productivity_v112
@@ -91,39 +91,39 @@ options:
 envs:
   - envName: DYNAMO_HOST
     type: string
-    required: true
-    applyOnChange: true
-    editable: true
-    default: "42726b5b0.shared.olares.com:80"
-    description: "Backend LLM endpoint as host:port. Used by the in-pod socat proxy (legacy; not on NemoClaw's hot path)."
-  - envName: NEMOCLAW_PROVIDER
-    type: string
     required: false
     applyOnChange: true
     editable: true
+    default: ""
+    description: "Backend LLM endpoint as host:port. Only used by the legacy in-pod socat proxy on :8000; leave empty to skip (NemoClaw's modern path goes via OpenShell's inference.local). Example: 42726b5b0.shared.olares.com:80"
+  - envName: NEMOCLAW_PROVIDER
+    type: string
+    required: true
+    applyOnChange: true
+    editable: true
     default: "custom"
-    description: "NemoClaw provider: build|openai|anthropic|anthropicCompatible|gemini|ollama|custom|nim-local|vllm. 'custom' = any OpenAI-compatible /v1 endpoint (works for vLLM, Ollama's /v1, Dynamo, etc.)."
+    description: "NemoClaw provider: build|openai|anthropic|anthropicCompatible|gemini|ollama|custom|nim-local|vllm. Use `custom` for any OpenAI-compatible /v1 endpoint (vLLM / Ollama's /v1 / Dynamo). NemoClaw's non-interactive onboard curl-validates the endpoint, so you MUST supply a reachable provider + URL + model at install time."
   - envName: NEMOCLAW_ENDPOINT_URL
     type: string
     required: true
     applyOnChange: true
     editable: true
-    default: "http://42726b5b0.shared.olares.com/v1"
-    description: "OpenAI-compatible base URL NemoClaw's 'custom' provider calls. Must include /v1 suffix. For Ollama hosts, append /v1 to use its OpenAI-compatibility layer."
+    default: ""
+    description: "REQUIRED. OpenAI-compatible base URL including /v1 suffix (e.g. http://<ollama-host>/v1 or https://api.openai.com/v1). Must be reachable from this pod at install time — onboard curl-probes both Responses and Chat Completions APIs. Post-install you can rewire the sandbox to go through OpenShell's inference.local via `openclaw config --section model`."
   - envName: NEMOCLAW_MODEL
     type: string
     required: true
     applyOnChange: true
     editable: true
-    default: "gemma4:26b-a4b-it-ud-q4_K_XL"
-    description: "LLM model name (must match an id returned by GET {NEMOCLAW_ENDPOINT_URL}/models)."
+    default: ""
+    description: "REQUIRED. LLM model id (must appear in GET {NEMOCLAW_ENDPOINT_URL}/models). Examples: gemma4:26b-a4b-it-ud-q4_K_XL, llama3.1:8b, gpt-4o-mini."
   - envName: COMPATIBLE_API_KEY
     type: string
     required: false
     applyOnChange: true
     editable: true
-    default: "dummy"
-    description: "API key for the LLM endpoint (Ollama/Dynamo usually accept any non-empty string)."
+    default: "unused"
+    description: "API key for the LLM endpoint. Defaults to `unused` (fine for Ollama/Dynamo which don't check auth); replace with a real key for OpenAI/Anthropic/etc."
   - envName: CHAT_UI_URL
     type: string
     required: false
@@ -145,6 +145,20 @@ envs:
     editable: true
     default: ""
     description: "Optional comma-separated extra IPs/CIDRs for gateway.trustedProxies if Web UI returns 403 behind Olares (e.g. Pod CIDR). Defaults add 127.0.0.1 and ::1."
+  - envName: NEMOCLAW_OPENCLAW_INFERENCE_API
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Optional override for OpenClaw `models.providers.inference.api` inside the sandbox (rewritten on every gateway ensure loop). Empty = do not change OpenClaw's onboard value. If chat/completions negotiation mismatches your stack, try `openai-completions` or `openai-chat-completions` (exact strings depend on backend). Does not change NEMOCLAW_MODEL."
+  - envName: NEMOCLAW_OPENCLAW_MAX_AGENT_TIMEOUT
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Optional max value (seconds) for `agents.defaults.timeoutSeconds` when NemoClaw rewrites `/sandbox/.openclaw/openclaw.json` on every gateway ensure loop. Empty = 300. Local large quants (e.g. 27B+) often need 600-1200+ to avoid OpenClaw surfacing `reason=timeout` / generic `network connection error` while `curl` to https://inference.local/v1/models still returns 200. Must be 60-3600 if set."
   - envName: NEMOCLAW_GATEWAY_DOCKER_PORT
     type: string
     required: false
@@ -194,3 +208,52 @@ envs:
     editable: true
     default: "v0.0.32"
     description: "OpenShell CLI release tag installed by NVIDIA/OpenShell install.sh. Must satisfy NemoClaw's MIN_VERSION..MAX_VERSION (currently 0.0.32). Bump this together with NEMOCLAW_OPENSHELL_CLUSTER_IMAGE."
+  - envName: NEMOCLAW_INSTALL_HOMEBREW
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "1"
+    description: "Pre-install Linuxbrew into /sandbox/.linuxbrew for skills that need `brew install`. The chart clones Homebrew in the workspace pod (better egress), caches under /workspace/.nemoclaw-homebrew-cache, then tar-streams into the k3s sandbox — avoids sandbox GitHub blocks. Set to 0 to disable. ~130MB first run."
+  - envName: NEMOCLAW_HOMEBREW_GIT_URL
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Optional. Git clone URL for Homebrew/brew (default https://github.com/Homebrew/brew.git). Set to an internal mirror if the sandbox cannot reach GitHub; otherwise cold-reset leaves brew missing and `brew: command not found`."
+  - envName: NEMOCLAW_TRUST_OPENSHELL_CA
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "1"
+    description: "Set NODE_EXTRA_CA_CERTS=/etc/openshell-tls/client/ca.crt for `openclaw gateway` so OpenClaw trusts OpenShell's self-signed cert when talking to https://inference.local/v1 (the default NemoClaw LLM route). Set to 0 if you use a CA-signed LLM endpoint that's already on the proxy allowlist."
+  - envName: NEMOCLAW_APPLY_POLICY_EXTRAS
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "1"
+    description: "When 1 (default), NemoClaw merges `brew_github`, `google_apis`, `skill_common` (weather, geocoding, DuckDuckGo, major LLM API hosts, etc.), and optional `user_extras` into the sandbox OpenShell policy via `openshell policy set` so Homebrew, gog/Google Workspace, and typical skills egress without per-host setup. Set to 0 to skip patching (manual policy or non-OpenShell installs). Idempotent; does not remove existing policies."
+  - envName: NEMOCLAW_EXTRA_ALLOWED_HOSTS
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Comma-separated hostnames appended to a `user_extras` named policy when NEMOCLAW_APPLY_POLICY_EXTRAS=1 (TLS terminate, binaries restricted to curl/git + the sandbox-owned wrappers). Use for skills outside the default Homebrew/Google set — e.g. `api.notion.com,api.openai.com,api.anthropic.com`. Domains only (no scheme or path); each entry allows HTTPS/443 GET/HEAD/POST/PUT/PATCH/DELETE to /**. Ignored when policy extras are disabled."
+  - envName: ALLOW_EXTERNAL_DIR_ACCESS
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "false"
+    description: "Mount Olares' External shared library (userspace.sharedlib) into the workspace container at /home/userdata/external so skills that run inside `nemoclaw my-assistant connect` can read/write shared media via OpenShell's workspace bind. Leave disabled unless a skill explicitly needs it."
+  - envName: GOG_KEYRING_PASSWORD
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Passphrase for the gog CLI keyring (GOG_KEYRING_BACKEND=file). Leave EMPTY (recommended) to auto-generate a unique 8-char random value on first install — the chart stores it in the Helm-managed `nemoclaw-gog-keyring` Secret so it survives `helm upgrade` and pod restarts; uninstalling keeps the Secret (resource-policy: keep) so a later reinstall can still decrypt an existing keyring. Set a custom value here only if you want to pin it explicitly (changing it invalidates any already-authenticated `gog` session — re-run `gog auth add`)."
