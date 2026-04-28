@@ -39,6 +39,8 @@ RUN apt-get update \
         xz-utils \
  && rm -rf /var/lib/apt/lists/* \
  && locale-gen C.UTF-8 \
+ && (userdel -r ubuntu 2>/dev/null || true) \
+ && (groupdel ubuntu 2>/dev/null || true) \
  && useradd --create-home --uid 1000 --shell /bin/bash claude \
  && mkdir -p /opt/data \
  && chown -R 1000:1000 /opt/data

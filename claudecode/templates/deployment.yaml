@@ -89,24 +89,40 @@ spec:
             - bash
             - -c
             - |
-              set -e
+              set -euo pipefail
               SENTINEL="$HOME/.install-state/install-complete"
-              mkdir -p "$HOME/.install-state"
+              mkdir -p "$HOME/.install-state" "$HOME/.local/bin"
 
-              if [ ! -x "$HOME/.local/bin/claude" ] || [ ! -f "$SENTINEL" ]; then
-                echo "[init-install-claude] downloading Claude Code..."
-                curl -fsSL https://claude.ai/install.sh | bash
-                date -u +%Y-%m-%dT%H:%M:%SZ > "$SENTINEL"
-                echo "[init-install-claude] installed"
-              else
+              if [ -x "$HOME/.local/bin/claude" ] && [ -f "$SENTINEL" ]; then
                 echo "[init-install-claude] cached binary found (installed $(cat "$SENTINEL"))"
+                "$HOME/.local/bin/claude" --version
+                exit 0
               fi
 
+              INSTALLER="$(mktemp --suffix=.sh)"
+              trap 'rm -f "$INSTALLER"' EXIT
+
+              echo "[init-install-claude] fetching installer script..."
+              curl -fSL --retry 5 --retry-delay 3 \
+                https://claude.ai/install.sh -o "$INSTALLER"
+              echo "[init-install-claude] installer downloaded ($(wc -c < "$INSTALLER") bytes)"
+
+              echo "[init-install-claude] running installer..."
+              bash "$INSTALLER"
+
+              if [ ! -x "$HOME/.local/bin/claude" ]; then
+                echo "[init-install-claude] installer completed but binary not found at $HOME/.local/bin/claude" >&2
+                ls -la "$HOME/.local/bin" "$HOME/.local/share" 2>/dev/null >&2 || true
+                exit 1
+              fi
+
+              date -u +%Y-%m-%dT%H:%M:%SZ > "$SENTINEL"
+              echo "[init-install-claude] installed"
               "$HOME/.local/bin/claude" --version
           resources:
             limits:
-              cpu: "1"
-              memory: 1Gi
+              cpu: "2"
+              memory: 6Gi
             requests:
               cpu: 50m
               memory: 128Mi
