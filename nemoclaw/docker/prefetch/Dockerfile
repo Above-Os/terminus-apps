@@ -4,20 +4,16 @@
 # the sandbox. Current contents:
 #   busybox, micro, rg, fd          -> sandbox ~/.local/bin/<name>     (single-file static)
 #   homebrew.tar.gz                 -> sandbox /sandbox/.linuxbrew/Homebrew (Homebrew tree
-#                                     with portable-ruby pre-vendored, no ghcr.io fetch needed)
+#                                     with portable-ruby pre-vendored)
 #
-# Why ship Homebrew prebuilt: a fresh sandbox previously had to (1) git clone Homebrew/brew,
-# (2) `brew vendor-install ruby` which fetches portable-ruby from ghcr.io as an OCI blob,
-# and (3) source-build any formula the user installs. Step (2) routes through the OpenShell
-# egress proxy and ghcr.io's anti-abuse layer 403s anonymous OCI blob requests
-# unpredictably, which used to stall every cold boot. Baking a ready-to-use Homebrew tree
-# (~70MB compressed) eliminates steps (1) and (2). Source compilation (3) still happens at
-# install time but only needs gcc, which the chart's skill-env apt-installs in-sandbox.
+# Why ship Homebrew prebuilt: baking a ready-to-use tree (~70MB compressed) skips both
+# the initial `git clone Homebrew/brew` and the `brew vendor-install ruby` OCI-blob
+# fetch on every cold boot. Source compilation of individual formulae still happens
+# at install time but only needs gcc, which skill-env apt-installs in-sandbox.
 #
-# gog (gogcli) is intentionally NOT shipped in this image. Operators install it
-# in-sandbox via `openclaw config --section skills` -> brew install steipete/tap/gog
-# so the version, auth flow, and OAuth callback host stay under their control. Pairs
-# with the disabled gog-prefetch block in templates/configmap-sandbox-bridge.yaml.
+# gog (gogcli) is intentionally NOT shipped in this image. Users install it in-sandbox
+# via `openclaw config --section skills` -> brew install steipete/tap/gog so version,
+# auth flow, and OAuth callback host stay under their control.
 #
 # Build (linux/amd64, matches typical sandbox):
 #   docker build --platform linux/amd64 \

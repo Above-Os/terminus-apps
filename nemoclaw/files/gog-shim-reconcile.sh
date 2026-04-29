@@ -7,25 +7,19 @@
 # under ~/.linuxbrew or manual `brew install` outside that flow.
 # Installed into the sandbox as /sandbox/.nemoclaw-reconcile-gog-shim.sh by skill-env + bridge.
 set -u
-SHIM_MAGIC="# nemoclaw-gog-shim:v15"
+SHIM_MAGIC="# nemoclaw-gog-shim:v17"
 SHIM_TMP="$(mktemp /tmp/.gog-shim.XXXXXX)"
 cat > "$SHIM_TMP" <<'SHIM'
 #!/bin/sh
-# nemoclaw-gog-shim:v15
+# nemoclaw-gog-shim:v17
 # Counteracts openclaw skill-spawn sanitization (XDG override + GOG_* env filter)
 # and exec's the real gog via a path on the OpenShell GOOGLE_BINS allowlist.
 #
 # NemoClaw pins Homebrew to /sandbox/.linuxbrew (see /etc/environment + profile.d).
 # Install gogcli only through: openclaw config --section skills
 #
-# v7: always export OpenShell CA bundle vars when ca file exists.
-# v8: never set REAL=/sandbox/.local/bin/gog (shim slot only).
-# v9-v11: unset *_proxy on `auth` or when KEEP unset (token POST needs CONNECT when KEEP_PROXY=1).
-# v12: with NEMOCLAW_GOG_SHIM_KEEP_PROXY=1 (default), never strip *_proxy (incl. during `gog auth add`).
-# v13: if *_proxy still empty (OpenClaw tool spawn), backfill from /etc/environment so Go uses CONNECT.
-# v14: read NEMOCLAW_GOG_SHIM_KEEP_PROXY from /etc/environment (interactive shells skip PAM export);
-#      strip CR from parsed proxy lines (bad line endings break CONNECT).
-# v15: resolve REAL under /sandbox/.local/opt|Cellar when brew prefix is relocatable (.local), not only .linuxbrew.
+# v17: no-proxy OpenShell fork — all proxy/CA handling removed; shim only fixes
+#      HOME/XDG and injects keyring password, then exec's the real gog.
 export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/sandbox/.linuxbrew}"
 export HOMEBREW_REPOSITORY="${HOMEBREW_REPOSITORY:-/sandbox/.linuxbrew/Homebrew}"
 export HOMEBREW_CELLAR="${HOMEBREW_CELLAR:-/sandbox/.linuxbrew/Cellar}"
@@ -93,30 +87,6 @@ if [ -z "$REAL" ]; then
   echo "[gog-shim] Install via: openclaw config --section skills (not manual brew)." >&2
   exit 127
 fi
-_keep_wanted=0
-if [ -r /sandbox/.nemoclaw-gog-shim-keep-proxy ] \
-   || [ "${NEMOCLAW_GOG_SHIM_KEEP_PROXY:-}" = "1" ]; then
-  _keep_wanted=1
-fi
-if [ "$_keep_wanted" != "1" ] && [ -r /etc/environment ]; then
-  _gk=$(grep -E '^[[:space:]]*NEMOCLAW_GOG_SHIM_KEEP_PROXY=' /etc/environment 2>/dev/null | head -1) || true
-  if [ -n "$_gk" ]; then
-    _gkv=${_gk#*=}
-    _gkv=$(printf '%s' "$_gkv" | sed 's/^"//;s/"$//' | tr -d '\r')
-    [ "$_gkv" = "1" ] && _keep_wanted=1
-  fi
-fi
-unset _gk _gkv 2>/dev/null || true
-_auth_oauth=0
-for __x in "$@"; do
-  [ "$__x" = "auth" ] && { _auth_oauth=1; break; }
-done
-unset __x 2>/dev/null || true
-if [ "$_keep_wanted" != "1" ]; then
-  unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY 2>/dev/null
-fi
-_keep_log=$_keep_wanted
-[ "$_auth_oauth" = "1" ] && _keep_log=0
 if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ] || [ "$HOME" = "/root" ] || [ "$HOME" = "/tmp" ]; then
   export HOME=/sandbox
 fi
@@ -125,52 +95,11 @@ if [ -z "${GOG_KEYRING_PASSWORD:-}" ] && [ -r /sandbox/.gog-keyring-password ]; 
   export GOG_KEYRING_BACKEND=file
   export GOG_KEYRING_PASSWORD="$(cat /sandbox/.gog-keyring-password)"
 fi
-for __ca in /etc/openshell-tls/ca-bundle.pem /etc/openshell-tls/openshell-ca.pem /etc/openshell-tls/client/ca.crt; do
-  if [ -r "$__ca" ]; then
-    export SSL_CERT_FILE="$__ca"
-    unset SSL_CERT_DIR 2>/dev/null || true
-    export REQUESTS_CA_BUNDLE="$__ca"
-    export NODE_EXTRA_CA_CERTS="$__ca"
-    export CURL_CA_BUNDLE="$__ca"
-    export GIT_SSL_CAINFO="$__ca"
-    break
-  fi
-done
-unset __ca
-# OpenClaw may start gog with no https_proxy; Go then dials oauth2.googleapis.com:443 directly
-# and hits "connection refused" (OpenShell egress requires HTTP CONNECT via cluster proxy).
-if [ -r /etc/environment ]; then
-  if [ -z "${HTTPS_PROXY:-}" ] && [ -z "${https_proxy:-}" ]; then
-    _line=$(grep -E '^[[:space:]]*(HTTPS_PROXY|https_proxy)[[:space:]]*=' /etc/environment 2>/dev/null | head -1) || true
-    if [ -n "$_line" ]; then
-      _v=${_line#*=}
-      _v=$(printf '%s' "$_v" | sed 's/^"//;s/"$//' | tr -d '\r')
-      [ -n "$_v" ] && export HTTPS_PROXY="$_v" https_proxy="$_v"
-    fi
-  fi
-  if [ -z "${HTTP_PROXY:-}" ] && [ -z "${http_proxy:-}" ]; then
-    _line=$(grep -E '^[[:space:]]*(HTTP_PROXY|http_proxy)[[:space:]]*=' /etc/environment 2>/dev/null | head -1) || true
-    if [ -n "$_line" ]; then
-      _v=${_line#*=}
-      _v=$(printf '%s' "$_v" | sed 's/^"//;s/"$//' | tr -d '\r')
-      [ -n "$_v" ] && export HTTP_PROXY="$_v" http_proxy="$_v"
-    fi
-  fi
-  if [ -z "${NO_PROXY:-}" ] && [ -z "${no_proxy:-}" ]; then
-    _line=$(grep -E '^[[:space:]]*(NO_PROXY|no_proxy)[[:space:]]*=' /etc/environment 2>/dev/null | head -1) || true
-    if [ -n "$_line" ]; then
-      _v=${_line#*=}
-      _v=$(printf '%s' "$_v" | sed 's/^"//;s/"$//' | tr -d '\r')
-      [ -n "$_v" ] && export NO_PROXY="$_v" no_proxy="$_v"
-    fi
-  fi
-fi
-unset _line _v 2>/dev/null || true
 {
   echo "=== $(date -Is 2>/dev/null) pid=$$ ppid=$PPID ==="
   echo "argv: $*"
   echo "real: $REAL"
-  echo "XDG=${XDG_CONFIG_HOME:-unset}  HOME=$HOME  PW_LEN=${#GOG_KEYRING_PASSWORD}  SSL=${SSL_CERT_FILE:-unset}  keep_wanted=$_keep_wanted auth_unset=$_auth_oauth eff_keep=$_keep_log  https_proxy=${https_proxy:-unset}"
+  echo "XDG=${XDG_CONFIG_HOME:-unset}  HOME=$HOME  PW_LEN=${#GOG_KEYRING_PASSWORD}"
 } | tee -a /tmp/gog-shim.log /var/log/nemoclaw-gog-shim.log >/dev/null 2>&1 || true
 exec "$REAL" "$@"
 SHIM

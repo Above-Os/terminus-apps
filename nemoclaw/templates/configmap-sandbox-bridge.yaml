@@ -1,5 +1,5 @@
 # Scripts that bridge external chat clients (pod :18790) to OpenClaw's gateway
-# which runs inside the NemoClaw sandbox pod. OpenShell >= 0.0.32 runs the sandbox
+# which runs inside the NemoClaw sandbox pod. OpenShell >= 0.0.36 runs the sandbox
 # as a k3s pod inside the `openshell-cluster-nemoclaw` Docker container, so the
 # old `docker ps | grep my-assistant` approach no longer works.
 apiVersion: v1
@@ -50,105 +50,16 @@ data:
     # Single-quoted remote body: avoids the host re-parsing a double-quoted string (where backticks
     # in comments became command substitution and destroyed runuser / LAUNCH).
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      env "SBX_USER=${SBX_USER:-sandbox}" "GOG_KEYRING_PASSWORD=${GKP}" "GOG_KEYRING_BACKEND=file" \
-        "NEMOCLAW_PROXY_HOST=${NEMOCLAW_PROXY_HOST:-}" "NEMOCLAW_PROXY_PORT=${NEMOCLAW_PROXY_PORT:-}" sh -c '
+      env "SBX_USER=${SBX_USER:-sandbox}" "GOG_KEYRING_PASSWORD=${GKP}" "GOG_KEYRING_BACKEND=file" sh -c '
       set -u
       cd /sandbox || exit 1
       mkdir -p /sandbox /sandbox/.openclaw /sandbox/.openclaw-data /sandbox/.nemoclaw /sandbox/.config /sandbox/inbox /sandbox/.local/bin /sandbox/.openclaw/tasks 2>/dev/null || true
       touch /sandbox/.openclaw-data/gateway.out 2>/dev/null || true
       chown -R "$SBX_USER:$SBX_USER" /sandbox/.openclaw /sandbox/.openclaw-data /sandbox/.nemoclaw /sandbox/.config /sandbox/inbox /sandbox/.local/bin /sandbox/.openclaw/tasks 2>/dev/null || true
       # Self-heal stuck session locks (common cause of "agent卡住/不返回").
-      # Web UI and embedded runs both write session jsonl; a crash can leave *.lock behind.
       find /sandbox/.openclaw-data/agents -type f -name "*.jsonl.lock" -delete 2>/dev/null || true
       # Optional: tune OpenClaw inference provider API + token limits.
-      # IMPORTANT: not all inference backends accept every OpenClaw api mode. If you see
-      # persistent network connection errors after changing this, set
-      # NEMOCLAW_OPENCLAW_INFERENCE_API back to empty (default) or to a known-good value for
-      # your backend (commonly openai-completions vs openai-chat-completions).
-      # For slow local quants, raise NEMOCLAW_OPENCLAW_MAX_AGENT_TIMEOUT (e.g. 900); empty = 300.
-      # NOTE: the clamp body MUST live in a separate file (clamp-openclaw-config.py).
-      # Inlining python3 -c here is a footgun because the entire script body is
-      # passed through a single-quoted sh -c invocation; ANY apostrophe inside the
-      # inline python (string literals, contractions in comments, etc.) silently
-      # closes the outer quote. The corruption surfaces 50+ lines later as a
-      # misleading "Syntax error: fi unexpected" and the run aborts.
-      # All comments below also avoid apostrophes for the same reason.
-      # Build PROXY_ENV + persist proxy lines to /etc/environment BEFORE clamp. The healthy-gateway
-      # exit path below skips the legacy block that used to run only on restart; without an early
-      # persist, clamp sees no https_proxy in /etc/environment and openclaw env.vars stays empty
-      # for proxies -> WebUI gog token POST Forbidden while CLI shells still work.
-      PROXY_ENV=""
-      for _k in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY; do
-        _v=""
-        case "$_k" in
-          http_proxy)   _v="${http_proxy-}" ;;
-          https_proxy)  _v="${https_proxy-}" ;;
-          HTTP_PROXY)   _v="${HTTP_PROXY-}" ;;
-          HTTPS_PROXY)  _v="${HTTPS_PROXY-}" ;;
-          all_proxy)    _v="${all_proxy-}" ;;
-          ALL_PROXY)    _v="${ALL_PROXY-}" ;;
-          no_proxy)     _v="${no_proxy-}" ;;
-          NO_PROXY)     _v="${NO_PROXY-}" ;;
-        esac
-        if [ -z "$_v" ] && [ -r /etc/environment ]; then
-          _line=$(grep -E "^[[:space:]]*${_k}=" /etc/environment 2>/dev/null | head -1) || true
-          if [ -n "$_line" ]; then
-            _v="${_line#*=}"
-            _v=$(printf "%s" "$_v" | sed "s/^\"//;s/\"\$//")
-          fi
-        fi
-        if [ -n "$_v" ]; then
-          PROXY_ENV="${PROXY_ENV} ${_k}=${_v}"
-        fi
-      done
-      if [ -z "$PROXY_ENV" ]; then
-        _gp="${grpc_proxy:-}"
-        [ -z "$_gp" ] && _gp="${GRPC_PROXY:-}"
-        if [ -n "$_gp" ]; then
-          _proxy_url="$_gp"
-          _no_proxy_list="localhost,127.0.0.1,::1"
-          case "$_proxy_url" in
-            http://*)
-              _gh="${_proxy_url#http://}"
-              _gh="${_gh%%/*}"
-              _gh="${_gh%%:*}"
-              [ -n "$_gh" ] && _no_proxy_list="${_no_proxy_list},${_gh}"
-            ;;
-          esac
-          PROXY_ENV="https_proxy=${_proxy_url} HTTPS_PROXY=${_proxy_url} http_proxy=${_proxy_url} HTTP_PROXY=${_proxy_url} no_proxy=${_no_proxy_list} NO_PROXY=${_no_proxy_list}"
-          echo "[sandbox-gw] synthesized proxy env (pre-clamp) from grpc_proxy -> ${_proxy_url}"
-          if [ -w /etc/environment ] || ([ ! -e /etc/environment ] && touch /etc/environment 2>/dev/null); then
-            for _kv in $PROXY_ENV; do
-              _ek="${_kv%%=*}"
-              _ev="${_kv#*=}"
-              if grep -qE "^[[:space:]]*${_ek}=" /etc/environment 2>/dev/null; then
-                sed -i "s|^[[:space:]]*${_ek}=.*|${_ek}=\"${_ev}\"|" /etc/environment 2>/dev/null || true
-              else
-                printf "%s=\"%s\"\n" "$_ek" "$_ev" >> /etc/environment 2>/dev/null || true
-              fi
-            done
-          fi
-        fi
-      fi
-      if [ -z "$PROXY_ENV" ] \
-         && [ -n "${NEMOCLAW_PROXY_HOST:-}" ] \
-         && [ -n "${NEMOCLAW_PROXY_PORT:-}" ]; then
-        _proxy_url="http://${NEMOCLAW_PROXY_HOST}:${NEMOCLAW_PROXY_PORT}"
-        _no_proxy_list="localhost,127.0.0.1,::1,${NEMOCLAW_PROXY_HOST}"
-        PROXY_ENV="https_proxy=${_proxy_url} HTTPS_PROXY=${_proxy_url} http_proxy=${_proxy_url} HTTP_PROXY=${_proxy_url} no_proxy=${_no_proxy_list} NO_PROXY=${_no_proxy_list}"
-        echo "[sandbox-gw] synthesized proxy env (pre-clamp) from NEMOCLAW_PROXY_HOST/PORT -> ${_proxy_url}"
-        if [ -w /etc/environment ] || ([ ! -e /etc/environment ] && touch /etc/environment 2>/dev/null); then
-          for _kv in $PROXY_ENV; do
-            _ek="${_kv%%=*}"
-            _ev="${_kv#*=}"
-            if grep -qE "^[[:space:]]*${_ek}=" /etc/environment 2>/dev/null; then
-              sed -i "s|^[[:space:]]*${_ek}=.*|${_ek}=\"${_ev}\"|" /etc/environment 2>/dev/null || true
-            else
-              printf "%s=\"%s\"\n" "$_ek" "$_ev" >> /etc/environment 2>/dev/null || true
-            fi
-          done
-        fi
-      fi
+      # NOTE: clamp body lives in clamp-openclaw-config.py to avoid single-quote pitfalls in sh -c.
       if [ -f /sandbox/.openclaw/openclaw.json ]; then
         mkdir -p /sandbox/.nemoclaw 2>/dev/null || true
         # clamp lives on the workspace pod at /opt/nemoclaw — NOT mounted inside the sandbox.
@@ -159,19 +70,21 @@ data:
         chown "$SBX_USER:$SBX_USER" /sandbox/.openclaw/openclaw.json 2>/dev/null || true
       fi
       # Always sync PATH hooks first (idempotent). Runs even when gateway is already healthy.
+      # /sandbox/.local/bin wins over Homebrew/bin/gog so the nemoclaw gog shim is used
+      # (brew link would otherwise keep recreating its own symlink under Homebrew/bin).
       for _bf in /sandbox/.bashrc /sandbox/.profile /sandbox/.bash_profile; do
         touch "$_bf" 2>/dev/null || true
         chown "$SBX_USER:$SBX_USER" "$_bf" 2>/dev/null || true
-        grep -q nemoclaw-linuxbrew-path "$_bf" 2>/dev/null || printf "%s\n" "# nemoclaw-linuxbrew-path" "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin:\$PATH" >> "$_bf"
-        # Prepend /sandbox/.local/bin so nemoclaw gog shim wins over brew symlink at
-        # Homebrew/bin/gog (skills often resolve gog from PATH; brew link recreates symlink).
-        grep -q nemoclaw-gog-prepend-localbin "$_bf" 2>/dev/null || printf "%s\n" "# nemoclaw-gog-prepend-localbin" "export PATH=\"/sandbox/.local/bin:\$PATH\"" >> "$_bf"
-        # v3: legacy nemoclaw-linuxbrew-path put Homebrew/bin before .local — `which gog`
-        # then skipped the shim (no proxy/XDG backfill). One definitive PATH for old rc.
-        grep -q nemoclaw-linuxbrew-path-v3 "$_bf" 2>/dev/null || printf "%s\n" "# nemoclaw-linuxbrew-path-v3" "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin:\$PATH" >> "$_bf"
-        grep -q nemoclaw-xdg-gogcli "$_bf" 2>/dev/null || printf "%s\n" "# nemoclaw-xdg-gogcli" "export XDG_CONFIG_HOME=/sandbox/.config" >> "$_bf"
+        grep -q nemoclaw-linuxbrew-path-v3 "$_bf" 2>/dev/null || printf "%s\n" \
+          "# nemoclaw-linuxbrew-path-v3" \
+          "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin:\$PATH" >> "$_bf"
+        grep -q nemoclaw-xdg-gogcli "$_bf" 2>/dev/null || printf "%s\n" \
+          "# nemoclaw-xdg-gogcli" \
+          "export XDG_CONFIG_HOME=/sandbox/.config" >> "$_bf"
         if [ -f /etc/profile.d/nemoclaw-linuxbrew.sh ]; then
-          grep -q nemoclaw-linuxbrew-rc "$_bf" 2>/dev/null || printf "%s\n" "# nemoclaw-linuxbrew-rc" "[ -f /etc/profile.d/nemoclaw-linuxbrew.sh ] && . /etc/profile.d/nemoclaw-linuxbrew.sh" >> "$_bf"
+          grep -q nemoclaw-linuxbrew-rc "$_bf" 2>/dev/null || printf "%s\n" \
+            "# nemoclaw-linuxbrew-rc" \
+            "[ -f /etc/profile.d/nemoclaw-linuxbrew.sh ] && . /etc/profile.d/nemoclaw-linuxbrew.sh" >> "$_bf"
         fi
       done
       if [ -x /sandbox/.linuxbrew/Homebrew/bin/brew ]; then
@@ -210,16 +123,8 @@ data:
         find /var/tmp -mindepth 1 -maxdepth 1 ! -user "$SBX_USER" -print \
           -exec rm -rf {} + 2>/dev/null || true
       fi
-      # Health-only gating used to be enough, but a chart upgrade can leave the
-      # gateway running with a STALE environ (e.g. missing https_proxy synthesized
-      # from NEMOCLAW_PROXY_HOST/PORT). In that state /health returns 200, the
-      # script bails, and every chat request fails with "Connection error".
-      # Detect the stale case and force a restart exactly when needed; otherwise
-      # keep the original fast-path early-exit.
-      # Match BOTH the CLI dispatcher (`openclaw gateway run --port`) AND the
-      # daemon binary (`openclaw-gateway`). The daemon comm name is 17 chars,
-      # exceeding pgrep -x 15-char limit, so use -f against the full cmdline
-      # plus a ps fallback that scans argv[0] for `openclaw[- ]gateway`.
+      # Staleness criterion: XDG_CONFIG_HOME absent -> gog/openclaw skill subprocesses
+      # would be sanitized to /tmp/.config and miss keyring tokens. Force restart.
       _gw_pid=""
       _gw_pid=$(pgrep -f "openclaw[- ]gateway" 2>/dev/null | head -1) || true
       if [ -z "$_gw_pid" ]; then
@@ -228,64 +133,10 @@ data:
       fi
       _gw_stale=0
       if [ -n "$_gw_pid" ] && [ -r "/proc/$_gw_pid/environ" ]; then
-        # Stale criteria: NEMOCLAW_PROXY_HOST IS visible to this script (so the
-        # cluster wants us to use a proxy) but the running gateway environ
-        # does NOT carry https_proxy / HTTPS_PROXY. /proc/<pid>/environ uses
-        # NUL separators; tr to newlines, then case-insensitive grep.
-        # NOTE: no apostrophes in this comment block -- outer body uses single-quoted sh -c.
-        if [ -n "${NEMOCLAW_PROXY_HOST:-}" ] \
-           && ! tr "\0" "\n" < "/proc/$_gw_pid/environ" 2>/dev/null \
-                | grep -qiE "^(https?_proxy)="; then
-          _gw_stale=1
-          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks https_proxy env (NEMOCLAW_PROXY_HOST=${NEMOCLAW_PROXY_HOST}); forcing restart"
-        fi
-        # gogcli WebUI Exec: children inherit gateway env; without XDG_CONFIG_HOME
-        # pointing at /sandbox/.config, openclaw may sanitize to /tmp/.config and
-        # gog sees zero tokens (missing --account). Force restart when LAUNCH added it
-        # but this process predates the chart upgrade.
         if ! tr "\0" "\n" < "/proc/$_gw_pid/environ" 2>/dev/null \
              | grep -qiE "^XDG_CONFIG_HOME=/sandbox"; then
           _gw_stale=1
-          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks XDG_CONFIG_HOME under /sandbox; forcing restart (gog WebUI token path)"
-        fi
-        # CHAT_DIRECT_HOSTS / SKILL_DIRECT_HOSTS bypass: clamp-openclaw-config.py
-        # merges discord.com + wttr.in into no_proxy so undici/curl skip the
-        # OpenShell MITM proxy for those hosts (OPA literal-path matching on
-        # /sandbox/.local/bin/curl is unreliable for sandbox-uid processes -- see
-        # clamp script docstring). A chart upgrade that ships a new clamp but
-        # leaves the old gateway running keeps hitting 403 on tool calls. Detect
-        # both canary hosts missing from the live gateway environ and force a
-        # restart so env.vars propagates to process env.
-        if [ -n "${NEMOCLAW_PROXY_HOST:-}" ] \
-           && ! tr "\0" "\n" < "/proc/$_gw_pid/environ" 2>/dev/null \
-                | grep -iE "^(NO_PROXY|no_proxy)=" \
-                | grep -qi "discord\.com"; then
-          _gw_stale=1
-          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks discord.com in no_proxy (CHAT_DIRECT_HOSTS bypass); forcing restart"
-        fi
-        if [ -n "${NEMOCLAW_PROXY_HOST:-}" ] \
-           && ! tr "\0" "\n" < "/proc/$_gw_pid/environ" 2>/dev/null \
-                | grep -iE "^(NO_PROXY|no_proxy)=" \
-                | grep -qi "wttr\.in"; then
-          _gw_stale=1
-          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks wttr.in in no_proxy (SKILL_DIRECT_HOSTS bypass); forcing restart"
-        fi
-        # GOG_DIRECT_HOSTS bypass: oauth2.googleapis.com must appear in no_proxy
-        # so gog-shim + gogcli subprocesses skip the OpenShell MITM proxy for
-        # Google OAuth + API calls. Same root cause as the wttr/discord
-        # checks above (OPA literal-path matching on sandbox-uid binaries
-        # returns Forbidden even when the binary is whitelisted). Without
-        # this restart a chart upgrade that ships the new clamp keeps failing
-        # `gog gmail search` with `Post "https://oauth2.googleapis.com/token":
-        # Forbidden` because the live gateway process env still lacks the
-        # bypass entry, so openclaw propagates the old NO_PROXY to skill
-        # subprocesses (including the gog shim).
-        if [ -n "${NEMOCLAW_PROXY_HOST:-}" ] \
-           && ! tr "\0" "\n" < "/proc/$_gw_pid/environ" 2>/dev/null \
-                | grep -iE "^(NO_PROXY|no_proxy)=" \
-                | grep -qi "oauth2\.googleapis\.com"; then
-          _gw_stale=1
-          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks oauth2.googleapis.com in no_proxy (GOG_DIRECT_HOSTS bypass); forcing restart"
+          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks XDG_CONFIG_HOME under /sandbox; forcing restart"
         fi
       fi
       if [ "$_gw_stale" = "0" ] && env HOME=/sandbox openclaw gateway health >/dev/null 2>&1; then
@@ -294,38 +145,18 @@ data:
       fi
       [ "$_gw_stale" = "1" ] || echo "[sandbox-gw] gateway not responding; restarting..."
       openclaw gateway stop 2>/dev/null || true
-      # Match BOTH `openclaw gateway run` (CLI dispatcher, w/ space) AND the
-      # daemon `openclaw-gateway` (with hyphen, comm-name truncated to 16ch).
-      # Without the hyphen alternative the daemon survives our restart and
-      # the freshly launched CLI bombs with "Port 18789 is already in use".
       ps -eo pid,command 2>/dev/null | awk '"'"'/openclaw[- ]gateway/ && !/awk/ {print $1}'"'"' | while read -r _pid; do
         kill -9 "$_pid" 2>/dev/null || true
       done
       sleep 1
-      CA_ENV=""
-      for __ca in /etc/openshell-tls/ca-bundle.pem /etc/openshell-tls/openshell-ca.pem /etc/openshell-tls/client/ca.crt /etc/openshell-tls/ca.crt; do
-        if [ -r "$__ca" ]; then
-          CA_ENV="NODE_EXTRA_CA_CERTS=$__ca REQUESTS_CA_BUNDLE=$__ca SSL_CERT_FILE=$__ca"
-          break
-        fi
-      done
-      # PROXY_ENV + /etc/environment proxy lines were built at start of this script (pre-clamp).
-      # No trailing & on LAUNCH: dash rejects "... &; sleep" when merged with "; sleep".
       # GOG_KEYRING_BACKEND + GOG_KEYRING_PASSWORD MUST be in openclaw gateway process
-      # env so its skill subprocesses (which run with sanitized HOME and do not source
-      # ~/.bash_profile) inherit them; otherwise gog prompts for the passphrase
-      # interactively, which fails in the non-TTY agent context.
+      # env so its skill subprocesses (sanitized HOME) inherit them; otherwise gog
+      # prompts for the passphrase interactively, which fails in non-TTY agent context.
       GOG_ENV=""
       if [ -n "${GOG_KEYRING_PASSWORD:-}" ]; then
         GOG_ENV="GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}"
       fi
-      # PATH: system compilers MUST precede Linuxbrew shims. If brew shims appear first,
-      # `brew install` for bottle-less formulae (gogcli) can falsely report no gcc/clang.
-      # XDG_CONFIG_HOME: gogcli stores OAuth under $XDG_CONFIG_HOME/gogcli. OpenClaw WebUI
-      # Exec often sanitizes children to /tmp/.config unless the gateway parent already
-      # exports /sandbox/.config (shim alone is skipped when a skill resolves the Cellar
-      # gog path). Pin it on the gateway process so inherited tool env matches CLI shells.
-      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${PROXY_ENV} ${GOG_ENV} PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin ${CA_ENV} nohup openclaw gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup openclaw gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
       if command -v runuser >/dev/null 2>&1; then
         runuser -u "$SBX_USER" -- sh -c "$LAUNCH & sleep 2; exit 0"
       else
@@ -356,7 +187,7 @@ data:
   # Per-connection cost is one `docker exec` + `kubectl exec` + `node` startup
   # (~300-800ms), fine for long-lived WebSocket sessions and one-shot OAuth callbacks.
   #
-  # OpenShell >= 0.0.32 places processes started via `nemoclaw my-assistant connect`
+  # OpenShell >= 0.0.36 places processes started via `nemoclaw my-assistant connect`
   # (e.g. `gog auth add`) in a SEPARATE network namespace from processes started via
   # `kubectl exec -c agent` (where openclaw gateway runs). So a naive TCP connect on
   # the port inside the agent netns fails with ECONNREFUSED even though `ss` in the
@@ -424,127 +255,20 @@ data:
         exit 1
       '
 
-  # Wrapper placed in the sandbox at ~/.local/bin/curl. It forces the OpenShell CA
-  # bundle to be the LAST --cacert on the command line so that any earlier --cacert
-  # injected by Homebrew (HOMEBREW_CURL_PATH) is overridden. Dropped into the sandbox
-  # by cold-reset via `kubectl exec -i ... -- tee ...`, which avoids embedding the
-  # contents inside deployment.yaml (YAML block scalar + bash heredoc = pain).
-  sandbox-curl-wrapper.sh: |
-    #!/bin/sh
-    CA=""
-    for c in /etc/openshell-tls/ca-bundle.pem /etc/openshell-tls/openshell-ca.pem /etc/openshell-tls/client/ca.crt; do
-      [ -r "$c" ] && CA="$c" && break
-    done
-    if [ -n "$CA" ]; then
-      exec /usr/bin/curl "$@" --cacert "$CA"
-    else
-      exec /usr/bin/curl "$@"
-    fi
-
-  # Wrapper placed in the sandbox at ~/.local/bin/git. Exports GIT_SSL_CAINFO so
-  # `brew install` and direct `git clone` against OpenShell-proxied GitHub domains
-  # trust the MITM CA. Harmless if OpenShell is in passthrough mode (external CA).
-  sandbox-git-wrapper.sh: |
-    #!/bin/sh
-    CA=""
-    for c in /etc/openshell-tls/ca-bundle.pem /etc/openshell-tls/openshell-ca.pem /etc/openshell-tls/client/ca.crt; do
-      [ -r "$c" ] && CA="$c" && break
-    done
-    [ -n "$CA" ] && export GIT_SSL_CAINFO="$CA"
-    exec /usr/bin/git "$@"
-
   # Template for the sandbox's ~/.bash_profile. `__GOG_KEYRING_PASSWORD__` is the
   # only placeholder — cold-reset substitutes it at render time with the Olares-
-  # provided password (persisted in the `nemoclaw-gog-keyring` Secret). All other
-  # expansions (PATH, HOME, HOMEBREW_*, ${__ca}) stay literal so they resolve when
-  # the user's interactive shell actually sources the file.
+  # provided password (persisted in the `nemoclaw-gog-keyring` Secret). Everything
+  # else that used to live here (HOMEBREW_*, HOMEBREW_CC/CXX detection) is now
+  # written to /etc/environment + /etc/profile.d/nemoclaw-*.sh by skill-env, so
+  # both login + non-login shells get it without duplicating the logic.
   sandbox-bash-profile.tpl: |
     # nemoclaw-skill-env (managed; do not edit)
-    # System gcc/clang before brew shims (same rationale as sandbox-ensure-gateway LAUNCH).
+    # HOMEBREW_* knobs + HOMEBREW_CC/HOMEBREW_CXX/CC/CXX are written to /etc/environment
+    # and /etc/profile.d/nemoclaw-*.sh by sandbox-install-skill-env.sh, so this file
+    # only needs to carry the per-user PATH prepend + gog keyring bits.
     export PATH="/sandbox/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin:$PATH"
-    export HOMEBREW_CURL_PATH="$HOME/.local/bin/curl"
-    export HOMEBREW_GIT_PATH="$HOME/.local/bin/git"
-    export HOMEBREW_SYSTEM_CA_CERTIFICATES=1
-    export HOMEBREW_CURLRC=1
-    export HOMEBREW_NO_AUTO_UPDATE=1
-    export HOMEBREW_NO_ENV_HINTS=1
-    export HOMEBREW_NO_ANALYTICS=1
-    # Let HOMEBREW_CC / CC survive into brew child processes (openclaw may otherwise
-    # use a filtered superenv where compiler detection fails).
-    export HOMEBREW_NO_ENV_FILTERING=1
-    export HOMEBREW_TEMP=/tmp/homebrew-tmp
-    export HOMEBREW_CACHE=/tmp/homebrew-cache
-    export HOMEBREW_LOGS=/tmp/homebrew-logs
-    # gogcli builds from source; Homebrew superenv can miss gcc even when shims exist
-    # because openclaw spawns brew with a stripped env. HOMEBREW_CC / HOMEBREW_CXX are
-    # the supported overrides (see brew manpage) BUT they must be a compiler *name*
-    # (e.g. "gcc", "gcc-11", "clang") — a path like /usr/bin/gcc makes brew bail with
-    # "Invalid value for HOMEBREW_CC". CC / CXX are free-form and can hold paths.
-    _HB=/sandbox/.linuxbrew/Homebrew/bin
-    if [ -z "${HOMEBREW_CC:-}" ]; then
-      _gc=""; _gc_name=""
-      _gcv=$(ls -1 "${_HB}"/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
-      if [ -n "${_gcv}" ] && [ -x "${_gcv}" ]; then
-        _gc="${_gcv}"
-        _gc_name=$(basename "${_gcv}")
-      else
-        for _cand in "${_HB}"/gcc /usr/local/bin/gcc /usr/bin/gcc; do
-          if [ -x "${_cand}" ]; then
-            _gc="${_cand}"
-            _gc_name="gcc"
-            break
-          fi
-        done
-      fi
-      if [ -n "${_gc}" ] && [ -x "${_gc}" ]; then
-        export HOMEBREW_CC="${_gc_name}"
-        export CC="${_gc}"
-      elif [ -z "${HOMEBREW_CC:-}" ] && [ -x /usr/bin/clang ]; then
-        export HOMEBREW_CC=clang
-        export CC=/usr/bin/clang
-      fi
-      if [ -z "${HOMEBREW_CXX:-}" ] && [ -n "${HOMEBREW_CC:-}" ]; then
-        _gx=""; _gx_name=""
-        _gxv=$(ls -1 "${_HB}"/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
-        if [ -n "${_gxv}" ] && [ -x "${_gxv}" ]; then
-          _gx="${_gxv}"
-          _gx_name=$(basename "${_gxv}")
-        else
-          for _cand in "${_HB}"/g++ /usr/local/bin/g++ /usr/bin/g++; do
-            if [ -x "${_cand}" ]; then
-              _gx="${_cand}"
-              _gx_name="g++"
-              break
-            fi
-          done
-        fi
-        if [ -n "${_gx}" ] && [ -x "${_gx}" ]; then
-          export HOMEBREW_CXX="${_gx_name}"
-          export CXX="${_gx}"
-        fi
-        unset _gx _gxv _gx_name
-      fi
-      unset _gc _gcv _gc_name _cand
-    fi
-    unset _HB
-    mkdir -p "$HOMEBREW_TEMP" "$HOMEBREW_CACHE" "$HOMEBREW_LOGS" 2>/dev/null
-    # Sticky + world-writable so openclaw (uid 998) can mkdir $TMPDIR/openclaw-998 even
-    # when these dirs were first created by root (skill-env install via `kubectl exec`).
-    chmod 1777 "$HOMEBREW_TEMP" "$HOMEBREW_CACHE" "$HOMEBREW_LOGS" 2>/dev/null || true
     export GOG_KEYRING_BACKEND=file
     export GOG_KEYRING_PASSWORD='__GOG_KEYRING_PASSWORD__'
-    for __ca in /etc/openshell-tls/ca-bundle.pem /etc/openshell-tls/openshell-ca.pem /etc/openshell-tls/client/ca.crt; do
-      if [ -r "$__ca" ]; then
-        export CURL_CA_BUNDLE="$__ca"
-        export SSL_CERT_FILE="$__ca"
-        export SSL_CERT_DIR=""
-        export REQUESTS_CA_BUNDLE="$__ca"
-        export GIT_SSL_CAINFO="$__ca"
-        export NODE_EXTRA_CA_CERTS="$__ca"
-        break
-      fi
-    done
-    unset __ca
     # end-nemoclaw-skill-env
 
   # Gog shim installer (shell at /sandbox/.local/bin/gog -> exec Cellar binary).
@@ -560,35 +284,20 @@ data:
     # under ~/.linuxbrew or manual `brew install` outside that flow.
     # Installed into the sandbox as /sandbox/.nemoclaw-reconcile-gog-shim.sh by skill-env + bridge.
     set -u
-    SHIM_MAGIC="# nemoclaw-gog-shim:v16"
+    SHIM_MAGIC="# nemoclaw-gog-shim:v17"
     SHIM_TMP="$(mktemp /tmp/.gog-shim.XXXXXX)"
     cat > "$SHIM_TMP" <<'SHIM'
     #!/bin/sh
-    # nemoclaw-gog-shim:v16
+    # nemoclaw-gog-shim:v17
     # Counteracts openclaw skill-spawn sanitization (XDG override + GOG_* env filter)
-    # and exec's the real gog via a path on the OpenShell GOOGLE_BINS allowlist.
+    # and exec's the real gog via the Homebrew Cellar/opt path.
     #
     # NemoClaw pins Homebrew to /sandbox/.linuxbrew (see /etc/environment + profile.d).
     # Install gogcli only through: openclaw config --section skills
     #
-    # v7: always export OpenShell CA bundle vars when ca file exists.
     # v8: never set REAL=/sandbox/.local/bin/gog (shim slot only).
-    # v9-v11: unset *_proxy on `auth` or when KEEP unset (token POST needs CONNECT when KEEP_PROXY=1).
-    # v12: with NEMOCLAW_GOG_SHIM_KEEP_PROXY=1 (default), never strip *_proxy (incl. during `gog auth add`).
-    # v13: if *_proxy still empty (OpenClaw tool spawn), backfill from /etc/environment so Go uses CONNECT.
-    # v14: read NEMOCLAW_GOG_SHIM_KEEP_PROXY from /etc/environment (interactive shells skip PAM export);
-    #      strip CR from parsed proxy lines (bad line endings break CONNECT).
     # v15: resolve REAL under /sandbox/.local/opt|Cellar when brew prefix is relocatable (.local), not only .linuxbrew.
-    # v16: NO_PROXY is now unconditionally re-read from /etc/environment on every
-    #      invocation (was: only when both NO_PROXY and no_proxy unset). openclaw-gateway
-    #      captures /etc/environment at daemon start; later chart upgrades appending
-    #      GOG_DIRECT_HOSTS (oauth2/gmail/sheets/drive.googleapis.com ...) do not
-    #      propagate to existing gateway children, leaving gog subprocesses with a
-    #      stale NO_PROXY and routing Google OAuth through the MITM proxy where
-    #      OpenShell OPA denies sandbox-uid CONNECTs (403 Forbidden). Re-reading
-    #      the file guarantees the shim's NO_PROXY always reflects the latest
-    #      clamp-openclaw-config.py merge, even when the gateway itself predates
-    #      the chart upgrade. No pod restart required to pick up a new host list.
+    # v17: drop all proxy / CA / KEEP_PROXY logic (fork runs without OpenShell MITM proxy).
     export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/sandbox/.linuxbrew}"
     export HOMEBREW_REPOSITORY="${HOMEBREW_REPOSITORY:-/sandbox/.linuxbrew/Homebrew}"
     export HOMEBREW_CELLAR="${HOMEBREW_CELLAR:-/sandbox/.linuxbrew/Cellar}"
@@ -656,30 +365,6 @@ data:
       echo "[gog-shim] Install via: openclaw config --section skills (not manual brew)." >&2
       exit 127
     fi
-    _keep_wanted=0
-    if [ -r /sandbox/.nemoclaw-gog-shim-keep-proxy ] \
-       || [ "${NEMOCLAW_GOG_SHIM_KEEP_PROXY:-}" = "1" ]; then
-      _keep_wanted=1
-    fi
-    if [ "$_keep_wanted" != "1" ] && [ -r /etc/environment ]; then
-      _gk=$(grep -E '^[[:space:]]*NEMOCLAW_GOG_SHIM_KEEP_PROXY=' /etc/environment 2>/dev/null | head -1) || true
-      if [ -n "$_gk" ]; then
-        _gkv=${_gk#*=}
-        _gkv=$(printf '%s' "$_gkv" | sed 's/^"//;s/"$//' | tr -d '\r')
-        [ "$_gkv" = "1" ] && _keep_wanted=1
-      fi
-    fi
-    unset _gk _gkv 2>/dev/null || true
-    _auth_oauth=0
-    for __x in "$@"; do
-      [ "$__x" = "auth" ] && { _auth_oauth=1; break; }
-    done
-    unset __x 2>/dev/null || true
-    if [ "$_keep_wanted" != "1" ]; then
-      unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY 2>/dev/null
-    fi
-    _keep_log=$_keep_wanted
-    [ "$_auth_oauth" = "1" ] && _keep_log=0
     if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ] || [ "$HOME" = "/root" ] || [ "$HOME" = "/tmp" ]; then
       export HOME=/sandbox
     fi
@@ -688,69 +373,11 @@ data:
       export GOG_KEYRING_BACKEND=file
       export GOG_KEYRING_PASSWORD="$(cat /sandbox/.gog-keyring-password)"
     fi
-    for __ca in /etc/openshell-tls/ca-bundle.pem /etc/openshell-tls/openshell-ca.pem /etc/openshell-tls/client/ca.crt; do
-      if [ -r "$__ca" ]; then
-        export SSL_CERT_FILE="$__ca"
-        unset SSL_CERT_DIR 2>/dev/null || true
-        export REQUESTS_CA_BUNDLE="$__ca"
-        export NODE_EXTRA_CA_CERTS="$__ca"
-        export CURL_CA_BUNDLE="$__ca"
-        export GIT_SSL_CAINFO="$__ca"
-        break
-      fi
-    done
-    unset __ca
-    # OpenClaw may start gog with no https_proxy; Go then dials oauth2.googleapis.com:443 directly
-    # and hits "connection refused" (OpenShell egress requires HTTP CONNECT via cluster proxy).
-    if [ -r /etc/environment ]; then
-      if [ -z "${HTTPS_PROXY:-}" ] && [ -z "${https_proxy:-}" ]; then
-        _line=$(grep -E '^[[:space:]]*(HTTPS_PROXY|https_proxy)[[:space:]]*=' /etc/environment 2>/dev/null | head -1) || true
-        if [ -n "$_line" ]; then
-          _v=${_line#*=}
-          _v=$(printf '%s' "$_v" | sed 's/^"//;s/"$//' | tr -d '\r')
-          [ -n "$_v" ] && export HTTPS_PROXY="$_v" https_proxy="$_v"
-        fi
-      fi
-      if [ -z "${HTTP_PROXY:-}" ] && [ -z "${http_proxy:-}" ]; then
-        _line=$(grep -E '^[[:space:]]*(HTTP_PROXY|http_proxy)[[:space:]]*=' /etc/environment 2>/dev/null | head -1) || true
-        if [ -n "$_line" ]; then
-          _v=${_line#*=}
-          _v=$(printf '%s' "$_v" | sed 's/^"//;s/"$//' | tr -d '\r')
-          [ -n "$_v" ] && export HTTP_PROXY="$_v" http_proxy="$_v"
-        fi
-      fi
-      # v16: unconditional NO_PROXY refresh from /etc/environment. Earlier versions
-      # only backfilled when both NO_PROXY and no_proxy were unset, but that leaves
-      # us exposed to a stale inherited value: openclaw-gateway is a long-lived
-      # daemon that captures /etc/environment into its own env at startup; when a
-      # chart upgrade (or hot-patch) appends new hosts to /etc/environment
-      # (e.g. oauth2.googleapis.com via GOG_DIRECT_HOSTS in clamp-openclaw-config.py),
-      # existing gateway children still spawn gog with the pre-upgrade NO_PROXY,
-      # and Go's http client routes oauth2.googleapis.com through the MITM proxy
-      # -> CONNECT 403 -> `Post "https://oauth2.googleapis.com/token": Forbidden`.
-      # OpenShell OPA cannot reliably identify sandbox-uid binaries via
-      # /proc/<tracer-pid>/exe without CAP_SYS_PTRACE, so even whitelisted gog
-      # paths (see GOOGLE_BINS in policy-patch.py) are denied; NO_PROXY bypass
-      # is the only working path. Re-reading /etc/environment on every shim
-      # invocation guarantees the current file content wins over whatever the
-      # caller (openclaw gateway, interactive shell, skill subprocess) had
-      # captured. This matches the hot-patch that fixed the WebUI gog flow
-      # in production without a pod restart. The proxy host+port still come
-      # from the earlier HTTPS_PROXY/HTTP_PROXY blocks so TLS CONNECT still
-      # flows through OpenShell for all non-bypassed hosts.
-      _line=$(grep -E '^[[:space:]]*(NO_PROXY|no_proxy)[[:space:]]*=' /etc/environment 2>/dev/null | head -1) || true
-      if [ -n "$_line" ]; then
-        _v=${_line#*=}
-        _v=$(printf '%s' "$_v" | sed 's/^"//;s/"$//' | tr -d '\r')
-        [ -n "$_v" ] && export NO_PROXY="$_v" no_proxy="$_v"
-      fi
-    fi
-    unset _line _v 2>/dev/null || true
     {
       echo "=== $(date -Is 2>/dev/null) pid=$$ ppid=$PPID ==="
       echo "argv: $*"
       echo "real: $REAL"
-      echo "XDG=${XDG_CONFIG_HOME:-unset}  HOME=$HOME  PW_LEN=${#GOG_KEYRING_PASSWORD}  SSL=${SSL_CERT_FILE:-unset}  keep_wanted=$_keep_wanted auth_unset=$_auth_oauth eff_keep=$_keep_log  https_proxy=${https_proxy:-unset}"
+      echo "XDG=${XDG_CONFIG_HOME:-unset}  HOME=$HOME  PW_LEN=${#GOG_KEYRING_PASSWORD}"
     } | tee -a /tmp/gog-shim.log /var/log/nemoclaw-gog-shim.log >/dev/null 2>&1 || true
     exec "$REAL" "$@"
     SHIM
@@ -822,18 +449,10 @@ data:
     : "${GOG_KEYRING_PASSWORD:?GOG_KEYRING_PASSWORD must be set}"
 
     # ------------------------------------------------------------------
-    # Mutex: serialise cold-reset and chat-ui-bridge from racing each other.
-    # Both code paths call this same script; without a lock they fight over
-    #   - the outer dpkg/apt lock in the sandbox (process X holds /var/lib/apt/lists/lock)
-    #   - the /var/lib/apt/lists/partial tree that both older versions of this
-    #     script would `rm -rf` at startup, shredding the peer's in-flight download
-    #     (surfaces as `rename failed, No such file or directory` in apt logs)
-    # The lock file lives on the hostPath-backed /workspace so it survives pod
-    # restarts. flock -n returns fast if another instance is active; we emit a
-    # single line and exit 0 so the caller treats this as "nothing to do right now"
-    # and the next loop iteration (or chat-ui-bridge tick) retries. exit 0 is
-    # critical — callers only write the sentinel when we exit 0, and a contended
-    # run legitimately did no work.
+    # Mutex: serialise cold-reset vs chat-ui-bridge (both invoke this script).
+    # Without it they race the sandbox dpkg/apt lock. flock -n + exit 0 lets
+    # the loser no-op cleanly; callers only write the skill-env sentinel on
+    # exit 0, and the bridge re-ticks shortly afterwards.
     _SKILLENV_LOCK=/workspace/.nemoclaw-skillenv-install.lock
     mkdir -p /workspace 2>/dev/null || true
     if command -v flock >/dev/null 2>&1; then
@@ -885,36 +504,18 @@ data:
       fi
     '
 
-    copy_to_sandbox "$SCRIPT_DIR/sandbox-curl-wrapper.sh" "$SBX_HOME/.local/bin/curl" 755
-    copy_to_sandbox "$SCRIPT_DIR/sandbox-git-wrapper.sh"  "$SBX_HOME/.local/bin/git"  755
-
     # Static binaries from the init-prefetch image land in /workspace/.nemoclaw-prefetch/.
     # Installed before bash_profile so PATH ($SBX_HOME/.local/bin) picks them up.
     # OpenClaw skill UI may still run brew install (e.g. gogcli); that path needs gcc — distro
     # build-essential in skill-env covers it.
     PREF_DIR="${NEMOCLAW_PREFETCH_DIR:-/workspace/.nemoclaw-prefetch}"
 
-    # --- gog (gogcli) ---
-    # gog is intentionally NOT prefetched. Operators install it from inside the sandbox
-    # via `openclaw config --section skills` (which runs `brew install steipete/tap/gog`)
-    # so they control the version, auth flow, and OAuth callback host. The brew install
-    # produces /sandbox/.linuxbrew/Homebrew/Cellar/gogcli/<ver>/bin/gog and a sibling
-    # symlink at .../Homebrew/bin/gog; install_gog_shim further down replaces the
-    # symlink with our env-injecting shim that exec's the Cellar binary.
-    #
-    # Re-enable the block below ONLY if you bake a `gog` binary into the prefetch image
-    # (would require adding a Go builder stage to docker/prefetch/Dockerfile that
-    # `git clone steipete/gogcli && go build -o /out/gog ./cmd/gog` and COPY's the
-    # result into /prefetch/gog).
-    # if [ -n "${NEMOCLAW_PREFETCH_GOG_PATH:-}" ]; then
-    #   PREF_GOG="${NEMOCLAW_PREFETCH_GOG_PATH}"
-    # else
-    #   PREF_GOG="$PREF_DIR/gog"
-    # fi
-    # if [ -f "$PREF_GOG" ]; then
-    #   echo "[skill-env] installing prefetched gog from $PREF_GOG -> $SBX_HOME/.local/bin/gog"
-    #   copy_to_sandbox "$PREF_GOG" "$SBX_HOME/.local/bin/gog" 755
-    # fi
+    # gog (gogcli) is intentionally NOT prefetched. Users install it in-sandbox via
+    # `openclaw config --section skills` -> brew install steipete/tap/gog so version,
+    # auth flow, and OAuth callback host stay under their control. The brew install
+    # produces /sandbox/.linuxbrew/Homebrew/Cellar/gogcli/<ver>/bin/gog; the shim
+    # reconcile below replaces the sibling Homebrew/bin/gog symlink with our
+    # env-injecting wrapper.
 
     # --- editors: busybox (static) provides `vi`; micro is a modern TUI ---
     # Both are single static files with no runtime dependencies — safe to drop into
@@ -949,29 +550,12 @@ data:
     docker exec -i "$CLUSTER_CTR" kubectl -n "$NS" exec -i "$SBX" -c agent -- \
       sh -c 'printf "\n" >> "$1"; cat >> "$1"' _ "$SBX_HOME/.bash_profile" < "$rendered_bp"
 
-    # ~/.curlrc fallback (honoured with HOMEBREW_CURLRC=1) + permissions
-    # self-heal for Homebrew. `brew vendor-install ruby` needs to mkdir
-    # var/homebrew/locks and friends as the sandbox user; if either:
-    #   - the initial tar sync left files root-owned, or
-    #   - the sandbox user id changed across image updates,
-    # the recursive chown below fixes it without rebuilding the tree. Also
-    # runs on every ensure-gateway loop (see sandbox-ensure-gateway.sh) so
-    # future brew upgrades self-repair without a full redeploy.
-    # Resolve the OAuth redirect host: there is no chart-level (olaresEnv)
-    # knob for this on purpose — `ingress-weui.yaml` is host-agnostic but
-    # Olares only exposes the chart through entrance `webtui`, so the only
-    # externally reachable host is the one in CHAT_UI_URL. We strip
-    # scheme/port/path off CHAT_UI_URL and pre-export the result in the
-    # sandbox shell rc so users can do
-    #   gog auth add ... --redirect-host "$NEMOCLAW_GOG_OAUTH_REDIRECT_HOST"
-    # without copy/pasting the dynamic per-user Olares hostname.
-    # The NEMOCLAW_GOG_OAUTH_REDIRECT_HOST env-var read below is a manual
-    # escape hatch only (e.g. an operator running this script by hand with
-    #   env NEMOCLAW_GOG_OAUTH_REDIRECT_HOST=foo sh /opt/nemoclaw/sandbox-install-skill-env.sh
-    # to test); it is never set by the chart itself.
+    # Derive the OAuth redirect host from CHAT_UI_URL (strip scheme/port/path).
+    # Pre-exported in the sandbox shell rc as NEMOCLAW_GOG_OAUTH_REDIRECT_HOST so
+    # users can do `gog auth add ... --redirect-host "$NEMOCLAW_GOG_OAUTH_REDIRECT_HOST"`
+    # without copy/pasting the per-user Olares hostname.
     GOAUTH_REDIRECT_HOST="${NEMOCLAW_GOG_OAUTH_REDIRECT_HOST:-}"
     if [ -z "$GOAUTH_REDIRECT_HOST" ] && [ -n "${CHAT_UI_URL:-}" ]; then
-      # Strip scheme + port + trailing path: https://host[:port]/whatever -> host
       GOAUTH_REDIRECT_HOST=$(printf "%s" "$CHAT_UI_URL" \
         | sed -e 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##' \
               -e 's#/.*$##' \
@@ -983,7 +567,6 @@ data:
       SBX_USER="'"$SBX_USER"'"
       GKP="'"$GOG_KEYRING_PASSWORD"'"
       GOAUTH_REDIRECT_HOST="'"$GOAUTH_REDIRECT_HOST"'"
-      GKP_KEEP="'"${NEMOCLAW_GOG_SHIM_KEEP_PROXY:-}"'"
       # kubectl exec runs as root here. Prefer runuser over su for brew/gcc: su can
       # prompt for a password when PAM is strict, which fails non-interactively and
       # leaves gcc uninstalled while the rest of skill-env appears to succeed.
@@ -994,12 +577,8 @@ data:
           su - "$SBX_USER" -c "$1"
         fi
       }
-      if [ ! -f "$SBX_HOME/.curlrc" ] || ! grep -q cacert "$SBX_HOME/.curlrc" 2>/dev/null; then
-        echo "cacert = /etc/openshell-tls/ca-bundle.pem" > "$SBX_HOME/.curlrc"
-      fi
       for f in "$SBX_HOME/.bashrc" "$SBX_HOME/.profile" "$SBX_HOME/.bash_profile" \
-               "$SBX_HOME/.curlrc" "$SBX_HOME/.local" "$SBX_HOME/.local/bin" \
-               "$SBX_HOME/.local/bin/curl" "$SBX_HOME/.local/bin/git"; do
+               "$SBX_HOME/.local" "$SBX_HOME/.local/bin"; do
         [ -e "$f" ] && chown -R "$SBX_USER":"$SBX_USER" "$f" 2>/dev/null || true
       done
 
@@ -1013,11 +592,8 @@ data:
                  "$BREW_REPO/Library/Caches/Homebrew" \
                  "$BREW_REPO/Library/Homebrew/vendor/portable-ruby" 2>/dev/null || true
         # Brew vendor-install looks for a `current` symlink to decide whether
-        # portable-ruby is already installed. When we tar-sync the workspace
-        # cache into the sandbox the symlink sometimes gets dropped (older tar
-        # vs docker exec stdin), leaving only portable-ruby/<ver>/. Recreate
-        # the symlink pointing at the single version directory we find, so
-        # brew does not re-download from ghcr.io (which the proxy 403s).
+        # portable-ruby is already installed. Recreate it pointing at the
+        # single version directory present so brew does not re-fetch.
         VDIR="$BREW_REPO/Library/Homebrew/vendor/portable-ruby"
         if [ -d "$VDIR" ] && [ ! -e "$VDIR/current" ]; then
           RUBY_VER=$(ls -1 "$VDIR" 2>/dev/null \
@@ -1079,9 +655,6 @@ data:
             echo "GOG_KEYRING_BACKEND=file"
             if [ -n "$GKP" ]; then
               echo "GOG_KEYRING_PASSWORD=$GKP"
-            fi
-            if [ "$GKP_KEEP" = "1" ]; then
-              echo "NEMOCLAW_GOG_SHIM_KEEP_PROXY=1"
             fi
             echo "XDG_CONFIG_HOME=/sandbox/.config"
             echo "# end-nemoclaw-skill-env"
@@ -1150,34 +723,6 @@ data:
         } >> "$BB" 2>/dev/null || true
       fi
 
-      # OpenShell proxies all https: traffic and re-signs with its own self-
-      # signed CA. Per-tool env (CURL_CA_BUNDLE / GIT_SSL_CAINFO / ...) covers
-      # shell use, but brew vendor Ruby + the Ruby HTTP library in bottle
-      # processing use the SYSTEM trust store and error with "SSL certificate
-      # problem: self-signed certificate in certificate chain". Install the
-      # OpenShell CA into /usr/local/share/ca-certificates so update-ca-
-      # certificates adds it to /etc/ssl/certs/ca-certificates.crt (the system
-      # default). Idempotent: update-ca-certificates will no-op if the hash
-      # matches.
-      OPENSHELL_CA=""
-      for c in /etc/openshell-tls/ca-bundle.pem \
-               /etc/openshell-tls/openshell-ca.pem \
-               /etc/openshell-tls/client/ca.crt \
-               /etc/openshell-tls/ca.crt; do
-        if [ -r "$c" ]; then OPENSHELL_CA="$c"; break; fi
-      done
-      if [ -n "$OPENSHELL_CA" ] && [ -w /usr/local/share/ca-certificates ]; then
-        TARGET=/usr/local/share/ca-certificates/openshell.crt
-        if [ ! -f "$TARGET" ] || ! cmp -s "$OPENSHELL_CA" "$TARGET" 2>/dev/null; then
-          cp -f "$OPENSHELL_CA" "$TARGET" 2>/dev/null || true
-          chmod 0644 "$TARGET" 2>/dev/null || true
-          if command -v update-ca-certificates >/dev/null 2>&1; then
-            update-ca-certificates >/dev/null 2>&1 || true
-            echo "[skill-env] OpenShell CA installed in system trust store"
-          fi
-        fi
-      fi
-
       # gogcli has no Linux Homebrew bottle — brew falls back to source builds, which
       # need a C compiler Homebrew can discover. DevelopmentTools.installed (Homebrew)
       # on Linux looks for FIXED paths (/usr/bin/gcc, /usr/bin/clang) — not PATH — see
@@ -1206,14 +751,8 @@ data:
         _log()  { printf "%s\n" "[skill-env] $*"; printf "%s\n" "$*" >>"$_LOG" 2>/dev/null || true; }
         _warn() { printf "%s\n" "[skill-env] WARN: $*" >&2; printf "WARN: %s\n" "$*" >>"$_LOG" 2>/dev/null || true; }
 
-        # Wait for any concurrent dpkg/apt holder to release before we touch apt.
-        # An older version of this script used `rm -rf /var/lib/apt/lists/partial`
-        # at the top, which — combined with the cold-reset / chat-ui-bridge race —
-        # shredded the peer`s partial downloads mid-rename (manifests as
-        # `rename failed, No such file or directory` in the apt log). The outer
-        # flock in the caller serialises our instances on /workspace, but anything
-        # else in the sandbox (e.g. openclaw skills installer triggered by the UI)
-        # can still hold the dpkg lock. Poll every 2s for up to 60s.
+        # Wait for any concurrent dpkg/apt holder (e.g. openclaw skills installer
+        # triggered by the UI) to release before we touch apt. Poll up to 60s.
         _apt_wait_lock() {
           _timeout=60
           _elapsed=0
@@ -1242,10 +781,6 @@ data:
 
         if command -v apt-get >/dev/null 2>&1; then
           _apt_wait_lock
-          # NOTE: we intentionally do NOT `rm -rf /var/lib/apt/lists/partial` here.
-          # That was the source of the classic race (concurrent run deletes the
-          # peer`s in-flight download). `apt-get clean` + `apt-get update` handle
-          # stale state correctly on their own.
           DEBIAN_FRONTEND=noninteractive apt-get clean >>"$_APT_LOG" 2>&1 || true
           if DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Retries=3 -qq >>"$_APT_LOG" 2>&1; then
             _log "apt update OK (Stage 0 precondition)"
@@ -1542,9 +1077,9 @@ data:
             ' 2>&1 || echo "[skill-env] could not exec diagnostic probe"
           echo "----------------------------------------------------------------"
           echo "[skill-env] Typical root causes:"
-          echo "[skill-env]   - apt egress blocked (OpenShell policy missing deb.debian.org)"
-          echo "[skill-env]   - ghcr.io/objects.githubusercontent.com egress blocked (brew fallback)"
-          echo "[skill-env]   - /var/lib/dpkg/lock held by init container (rare)"
+          echo "[skill-env]   - apt egress blocked (check mirror / cluster DNS)"
+          echo "[skill-env]   - ghcr.io/objects.githubusercontent.com unreachable (brew fallback)"
+          echo "[skill-env]   - /var/lib/dpkg/lock held by another process (rare)"
           echo "[skill-env] Bridge will retry every loop iteration until gcc appears."
           echo "================================================================"
           echo ""
@@ -1559,7 +1094,7 @@ data:
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
       /sandbox/.nemoclaw-reconcile-gog-shim.sh >>/var/log/nemoclaw-skill-env.log 2>&1 || true
 
-    # OpenClaw WebUI tool runs need env.vars (XDG_CONFIG_HOME + proxy) merged by clamp;
+    # OpenClaw WebUI tool runs need env.vars (XDG_CONFIG_HOME etc.) merged by clamp;
     # sandbox-ensure-gateway calls it from /sandbox/.nemoclaw (agent has no /opt/nemoclaw).
     copy_to_sandbox "$SCRIPT_DIR/clamp-openclaw-config.py" /sandbox/.nemoclaw/clamp-openclaw-config.py 644
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
@@ -1572,407 +1107,10 @@ data:
     # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
     # and invalidates the sentinel on mismatch.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-28-gog-shim-v16-unconditional-no-proxy > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-28-no-proxy-clean-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"
-
-  # Python helper for cold-reset: reads the current OpenShell policy for
-  # `my-assistant` on stdin, injects `brew_github` + `google_apis` + `skill_common`
-  # (Homebrew/GitHub/apt, gog + Workspace Google hosts, weather + DDG + common APIs),
-  # and optionally appends `user_extras` from EXTRA_HOSTS_CSV. Writes the patched
-  # policy YAML to stdout; the caller (deployment.yaml) pipes it into
-  # `openshell policy set` only when something changed. Idempotent: leaves existing
-  # named policies untouched; merges new hosts into existing named policies.
-  policy-patch.py: |
-    import sys, os, yaml, pathlib
-
-    raw_path = os.environ.get("POLICY_INPUT", "/tmp/nemoclaw-policy/current.txt")
-    raw = pathlib.Path(raw_path).read_text()
-    docs = [d for d in yaml.safe_load_all(raw) if isinstance(d, dict)]
-    policy = next((d for d in docs if "filesystem_policy" in d or "network_policies" in d), None)
-    if policy is None:
-        print("cannot locate policy body; skipping", file=sys.stderr)
-        raise SystemExit(0)
-
-    nps = policy.setdefault("network_policies", {})
-
-    def ep(host, methods=("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")):
-        return {
-            "host": host, "port": 443, "protocol": "rest",
-            "tls": "terminate", "enforcement": "enforce",
-            "rules": [{"allow": {"method": m, "path": "/**"}} for m in methods],
-        }
-
-    BREW_HOSTS = [
-        "ghcr.io",
-        "pkg-containers.githubusercontent.com",
-        "objects.githubusercontent.com",
-        "codeload.github.com",
-        "github.com",
-        "api.github.com",
-        "uploads.github.com",
-        "raw.githubusercontent.com",
-        "formulae.brew.sh",
-        "github-releases.githubusercontent.com",
-        "release-assets.githubusercontent.com",
-        "github-cloud.githubusercontent.com",
-        "avatars.githubusercontent.com",
-        "user-images.githubusercontent.com",
-    ]
-    # Debian apt mirrors used by skill-env to install build-essential inside the sandbox.
-    # Without explicit allowlisting, OpenShell egress can block apt HTTPS and the gcc bootstrap fails.
-    APT_HOSTS = [
-        "deb.debian.org",
-        "security.debian.org",
-        "ftp.debian.org",
-        "cdn-fastly.deb.debian.org",
-    ]
-    # gog / Google Workspace CLI + OAuth flows hit more than the core *.googleapis.com set.
-    GOOGLE_HOSTS = [
-        "oauth2.googleapis.com",
-        "oauthaccounts.googleapis.com",
-        "accounts.google.com",
-        "www.google.com",
-        "www.gstatic.com",
-        "ssl.gstatic.com",
-        "fonts.googleapis.com",
-        "fonts.gstatic.com",
-        "www.googleapis.com",
-        "apis.google.com",
-        "openidconnect.googleapis.com",
-        "people.googleapis.com",
-        "gmail.googleapis.com",
-        "drive.googleapis.com",
-        "docs.googleapis.com",
-        "sheets.googleapis.com",
-        "calendar.googleapis.com",
-        "calendar-json.googleapis.com",
-        "tasks.googleapis.com",
-        "meet.googleapis.com",
-        "chat.googleapis.com",
-        "groups.googleapis.com",
-        "admin.googleapis.com",
-        "cloudidentity.googleapis.com",
-        "iam.googleapis.com",
-        "iamcredentials.googleapis.com",
-        "cloudresourcemanager.googleapis.com",
-        "servicemanagement.googleapis.com",
-        "storage.googleapis.com",
-        "bigquery.googleapis.com",
-        "logging.googleapis.com",
-        "monitoring.googleapis.com",
-        "android.googleapis.com",
-        "securetoken.googleapis.com",
-        "www.googleusercontent.com",
-        "content.googleapis.com",
-    ]
-    # Same hosts as skill_common weather shortcuts — duplicated under google_apis so
-    # egress can match (node, wttr.in) when OpenShell evaluates google_apis alongside
-    # gog; some clusters still 403 undici CONNECT if wttr only lived under skill_common.
-    GOOGLE_HOSTS_WTTR = [
-        "wttr.in",
-        "v2.wttr.in",
-    ]
-    # Common third-party APIs frequently used by OpenClaw skills/tools.
-    # Keep this list conservative (public, broadly useful, HTTPS-only).
-    SKILL_COMMON_HOSTS = [
-        # Weather / forecasts (wttr + Open-Meteo family + common providers)
-        "wttr.in",
-        "v2.wttr.in",
-        "api.open-meteo.com",
-        "geocoding-api.open-meteo.com",
-        "air-quality-api.open-meteo.com",
-        "ensemble-api.open-meteo.com",
-        "marine-api.open-meteo.com",
-        "historical-forecast-api.open-meteo.com",
-        "climate-api.open-meteo.com",
-        "api.weather.gov",
-        "api.met.no",
-        "api.weatherapi.com",
-        "api.openweathermap.org",
-        "tile.openweathermap.org",
-        # Geocoding / maps (often used together with weather)
-        "nominatim.openstreetmap.org",
-        "overpass-api.de",
-        "router.project-osrm.org",
-        # Time
-        "worldtimeapi.org",
-        # Lightweight search / fetch fallbacks (no Brave key still needs host allow)
-        "duckduckgo.com",
-        "www.duckduckgo.com",
-        "html.duckduckgo.com",
-        "lite.duckduckgo.com",
-        "links.duckduckgo.com",
-        "external-content.duckduckgo.com",
-        "improving.duckduckgo.com",
-        "api.search.brave.com",
-        # Common LLM / tool APIs (skills often call these directly)
-        "api.openai.com",
-        "api.anthropic.com",
-        "generativelanguage.googleapis.com",
-        # Package indexes (skill installs)
-        "registry.npmjs.org",
-        "registry-1.npmjs.org",          # npm CDN alias; npm sometimes redirects here
-        "pypi.org",
-        "files.pythonhosted.org",
-        # GitHub family — needed by openclaw's embedded ACP runtime
-        # (`npx @zed-industries/codex-acp`) and by many skills that pip-install
-        # from git+https://github.com/... or fetch release tarballs.
-        # Without these, openclaw startup logs show:
-        #   [plugins] embedded acpx runtime backend probe failed:
-        #   npm error 403 ... GET https://registry.npmjs.org/... policy_denied
-        # Even when the npm 403 is technically about the registry, codex-acp's
-        # postinstall (and many transitive deps) reach out to github raw + api,
-        # so listing all four github family hosts up front prevents secondary
-        # 403s on the next install.
-        "github.com",
-        "api.github.com",
-        "codeload.github.com",           # `npm install <tarball-url>` lands here
-        "objects.githubusercontent.com", # release artifacts (LFS, large blobs)
-        "raw.githubusercontent.com",     # raw file fetches by some npm postinstalls
-        "uploads.github.com",
-    ]
-    # OpenClaw web_fetch / LLM HTTP use Node (undici), not curl — OpenShell matches
-    # CONNECT by binary path; wttr.in etc. must allow node alongside curl/git.
-    # npm / npx are also enumerated explicitly: although `npm install` ultimately
-    # runs through node and the kernel sees `node` as the exec'd binary in most
-    # cases, some clusters' OpenShell variants resolve the entry-point shim path
-    # (e.g. /sandbox/.linuxbrew/Homebrew/bin/npx -> ../lib/node_modules/npm/bin/npx-cli.js)
-    # before re-resolving to node, and the policy lookup happens against the
-    # entry-point. Listing both is cheap and removes a class of intermittent
-    # `npm error 403 ... policy_denied` surprises during embedded ACP probe.
-    SKILL_COMMON_BIN_PATHS = [
-        "/usr/bin/curl",
-        "/bin/curl",
-        "/usr/bin/git",
-        "/bin/git",
-        "/sandbox/.local/bin/curl",
-        "/sandbox/.local/bin/git",
-        "/usr/bin/node",
-        "/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/nodejs",
-        "/bin/nodejs",
-        "/usr/local/openclaw/bin/node",
-        "/usr/local/bin/openclaw",
-        "/sandbox/.local/bin/openclaw",
-        "/sandbox/.linuxbrew/bin/node",
-        "/sandbox/.linuxbrew/Homebrew/bin/node",
-        # npm / npx (used by openclaw embedded acpx runtime probe + skill installs)
-        "/usr/bin/npm",
-        "/bin/npm",
-        "/usr/local/bin/npm",
-        "/usr/bin/npx",
-        "/bin/npx",
-        "/usr/local/bin/npx",
-        "/sandbox/.local/bin/npm",
-        "/sandbox/.local/bin/npx",
-        "/sandbox/.linuxbrew/bin/npm",
-        "/sandbox/.linuxbrew/bin/npx",
-        "/sandbox/.linuxbrew/Homebrew/bin/npm",
-        "/sandbox/.linuxbrew/Homebrew/bin/npx",
-        # NOTE: not enumerating Cellar/node/<ver>/... explicitly — `npm-cli.js`
-        # carries `#!/usr/bin/env node`, so the kernel exec'd binary resolves
-        # back to `node` (already covered above). If a stricter OpenShell
-        # variant matches against the JS entrypoint instead, surface an issue
-        # rather than version-pinning Cellar node here, which churns on every
-        # node minor bump.
-    ]
-    # Homebrew inside the sandbox lives at /sandbox/.linuxbrew/Homebrew/ (one nested
-    # directory, not the macOS /opt/homebrew layout). Real brew tree + the wrapper
-    # shims it uses for network-capable tools both need to be on the allowlist,
-    # otherwise the egress proxy refuses CONNECT for them. See the brew_github
-    # commit history for why curl/git shim paths are listed explicitly.
-    BREW_BINS = [
-        "/sandbox/.linuxbrew/Homebrew/bin/brew",
-        "/sandbox/.linuxbrew/bin/brew",
-        "/sandbox/.local/bin/brew",
-        "/home/sandbox/.local/bin/brew",
-        "/usr/bin/curl", "/bin/curl",
-        "/usr/bin/git", "/bin/git",
-        "/usr/bin/apt-get", "/bin/apt-get",
-        "/usr/bin/apt", "/bin/apt",
-        "/sandbox/.local/bin/curl", "/home/sandbox/.local/bin/curl",
-        "/sandbox/.local/bin/git", "/home/sandbox/.local/bin/git",
-        "/sandbox/.linuxbrew/Homebrew/Library/Homebrew/shims/shared/curl",
-        "/sandbox/.linuxbrew/Homebrew/Library/Homebrew/shims/shared/git",
-        "/sandbox/.linuxbrew/Homebrew/Library/Homebrew/shims/shared/curl-config",
-    ]
-    # gog is installed by `brew install steipete/tap/gog` which drops the binary
-    # under Homebrew/Cellar/gogcli/<ver>/bin/gog with opt/bin/Homebrew/bin
-    # symlinks into it. The egress proxy matches by realpath AND the symlink
-    # paths, so list both layouts + common Cellar versions.
-    #
-    # The `.real` siblings exist because `install_gog_shim` (sandbox-install-
-    # skill-env.sh) drops a thin wrapper at Homebrew/bin/gog that exec's the
-    # original binary; if any future variant of that wrapper falls back to a
-    # `gog.real` neighbour (older revisions did), the proxy must still match.
-    # Keeping them here is cheap and prevents a recurring 403 on token
-    # exchange / API calls during gog auth.
-    # Bump Cellar minor paths when steipete/tap/gogcli ships new releases — OpenShell
-    # matches the real exec path; a missing version surfaces as Forbidden on token POST.
-    GOOGLE_BINS = [
-        "/sandbox/.local/bin/gog",
-        "/sandbox/.local/bin/gog.real",
-        "/home/sandbox/.local/bin/gog",
-        "/home/sandbox/.local/bin/gog.real",
-        "/sandbox/.local/opt/gogcli/bin/gog",
-        "/sandbox/.local/opt/gogcli/bin/gog.real",
-        "/sandbox/.local/Cellar/gogcli/0.13.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.14.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.15.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.16.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.17.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.18.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.19.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.20.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.21.0/bin/gog",
-        "/sandbox/.local/Cellar/gogcli/0.22.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/bin/gog.real",
-        "/sandbox/.linuxbrew/Homebrew/opt/gogcli/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/opt/gogcli/bin/gog.real",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.13.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.14.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.15.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.16.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.17.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.18.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.19.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.20.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.21.0/bin/gog",
-        "/sandbox/.linuxbrew/Homebrew/Cellar/gogcli/0.22.0/bin/gog",
-        "/sandbox/.linuxbrew/bin/gog",
-        "/sandbox/.linuxbrew/bin/gog.real",
-        "/sandbox/.linuxbrew/opt/gogcli/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.13.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.14.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.15.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.16.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.17.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.18.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.19.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.20.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.21.0/bin/gog",
-        "/sandbox/.linuxbrew/Cellar/gogcli/0.22.0/bin/gog",
-        "/usr/bin/curl", "/usr/bin/git",
-    ]
-
-    def _union_bins(existing, wanted):
-        """Merge {path: p} entries without duplicates, preserving prior order."""
-        have = {e.get("path") for e in existing if isinstance(e, dict)}
-        added = False
-        for p in wanted:
-            if p in have:
-                continue
-            existing.append({"path": p})
-            have.add(p)
-            added = True
-        return added
-
-    def _union_endpoints(existing, wanted_hosts):
-        """Merge host endpoints without duplicates, preserving prior order."""
-        have = {e.get("host") for e in existing if isinstance(e, dict)}
-        added = False
-        for h in wanted_hosts:
-            if h in have:
-                continue
-            existing.append(ep(h))
-            have.add(h)
-            added = True
-        return added
-
-    def _ensure_list(container, key):
-        """setdefault replacement that also replaces None-valued keys with []."""
-        if not isinstance(container.get(key), list):
-            container[key] = []
-        return container[key]
-
-    changed = False
-    bg = nps.get("brew_github")
-    if not isinstance(bg, dict):
-        nps["brew_github"] = {
-            "name": "brew_github",
-            "endpoints": [ep(h) for h in (BREW_HOSTS + APT_HOSTS)],
-            "binaries": [{"path": p} for p in BREW_BINS],
-        }
-        changed = True
-    else:
-        # Older clusters may already have brew_github but miss newer Homebrew API hosts
-        # (e.g. formulae.brew.sh). Merge endpoints + binaries so upgrades self-heal.
-        if _union_endpoints(_ensure_list(bg, "endpoints"), (BREW_HOSTS + APT_HOSTS)):
-            changed = True
-        if _union_bins(_ensure_list(bg, "binaries"), BREW_BINS):
-            changed = True
-
-    # google_apis: gog + curl/git; also merge Node/OpenClaw paths + wttr so CONNECT
-    # (undici) matches the same policy family as Google tools on strict clusters.
-    _GA_BIN_MERGED = list(dict.fromkeys(list(GOOGLE_BINS) + list(SKILL_COMMON_BIN_PATHS)))
-
-    ga = nps.get("google_apis")
-    if not isinstance(ga, dict):
-        nps["google_apis"] = {
-            "name": "google_apis",
-            "endpoints": [ep(h) for h in (GOOGLE_HOSTS + GOOGLE_HOSTS_WTTR)],
-            "binaries": [{"path": p} for p in _GA_BIN_MERGED],
-        }
-        changed = True
-    else:
-        if _union_endpoints(_ensure_list(ga, "endpoints"), (GOOGLE_HOSTS + GOOGLE_HOSTS_WTTR)):
-            changed = True
-        if _union_bins(_ensure_list(ga, "binaries"), _GA_BIN_MERGED):
-            changed = True
-
-    sc = nps.get("skill_common")
-    if not isinstance(sc, dict):
-        nps["skill_common"] = {
-            "name": "skill_common",
-            "endpoints": [ep(h) for h in SKILL_COMMON_HOSTS],
-            "binaries": [{"path": p} for p in SKILL_COMMON_BIN_PATHS],
-        }
-        changed = True
-    else:
-        if _union_endpoints(_ensure_list(sc, "endpoints"), SKILL_COMMON_HOSTS):
-            changed = True
-        if _union_bins(_ensure_list(sc, "binaries"), SKILL_COMMON_BIN_PATHS):
-            changed = True
-
-    extras_csv = os.environ.get("EXTRA_HOSTS_CSV", "").strip()
-    if extras_csv:
-        extra_hosts = [h.strip() for h in extras_csv.split(",") if h.strip()]
-        target = nps.setdefault("user_extras", {
-            "name": "user_extras", "endpoints": [],
-            "binaries": [{"path": p} for p in SKILL_COMMON_BIN_PATHS],
-        })
-        existing = {e["host"] for e in target.get("endpoints", [])}
-        for h in extra_hosts:
-            if h not in existing:
-                target.setdefault("endpoints", []).append(ep(h))
-                changed = True
-
-    ue = nps.get("user_extras")
-    if isinstance(ue, dict) and _union_bins(_ensure_list(ue, "binaries"), SKILL_COMMON_BIN_PATHS):
-        changed = True
-
-    # `openshell policy get --full` includes a top-level `Version:` key (the
-    # store revision counter). `openshell policy set --policy ...` rejects it
-    # with `unknown field 'Version', expected one of 'version', ...`. Strip
-    # any case-variant before writing the patched policy back. Idempotent:
-    # if a future openshell version starts accepting it, this is a no-op.
-    for _vk in ("Version", "VERSION"):
-        if _vk in policy:
-            policy.pop(_vk, None)
-            changed = True
-
-    out_path = os.environ.get("POLICY_OUTPUT", "/tmp/nemoclaw-policy/new.yaml")
-    if changed:
-        pathlib.Path(out_path).write_text(
-            yaml.safe_dump(policy, sort_keys=False, default_flow_style=False))
-        print("wrote {}; network_policies now: {}".format(
-            out_path, ", ".join(sorted(nps.keys()))), file=sys.stderr)
-    else:
-        print("no extras needed (brew_github + google_apis + skill_common + user_extras up to date)", file=sys.stderr)
 
   # Clamp OpenClaw runtime config (agents.defaults.timeoutSeconds, provider models maxTokens,
   # optional inference api override). Lives in a separate file because the inline
@@ -1996,28 +1134,6 @@ data:
         openclaw.json by hand.
       * Ensures env.vars.XDG_CONFIG_HOME=/sandbox/.config when unset so gogcli finds
         OAuth tokens for `openclaw agent` tool runs (same path as `gog auth add`).
-      * Copies https_proxy / NO_PROXY (etc.) from /etc/environment into env.vars when
-        unset so tool subprocesses can reach Google APIs (avoids connection refused).
-      * If still unset, also pulls from process env (grpc_proxy, NEMOCLAW_PROXY_HOST/PORT).
-      * Expands no_proxy / NO_PROXY with CHAT_DIRECT_HOSTS + SKILL_DIRECT_HOSTS
-        + GOG_DIRECT_HOSTS so openclaw gateway's undici ProxyAgent + the
-        `gog-shim` wrapped gogcli subprocesses bypass the OpenShell egress
-        proxy for Discord / Telegram / Slack REST APIs, common skill hosts
-        (wttr, open-meteo, duckduckgo, openai, anthropic, etc.), AND Google
-        OAuth / Gmail / Sheets / Drive API endpoints. Required because
-        OpenShell literal-path binary matching against /sandbox/.local/bin/
-        binaries is unreliable for sandbox-uid processes (OPA symlink
-        resolution via /proc/<tracer-pid>/root/ fails without
-        CAP_SYS_PTRACE), causing CONNECT tunnel 403 even when the host+binary
-        pair is enumerated in a named policy block -- verified against both
-        `/sandbox/.linuxbrew/Homebrew/opt/gogcli/bin/gog` AND /usr/bin/curl
-        from sandbox uid. Direct egress exists and the pod's network policy
-        permits it, so routing these hosts around the MITM proxy is the
-        pragmatic unblocker while the proxy still enforces everything else
-        (npm/pypi tarballs, arbitrary skill CONNECTs, etc.). Updates
-        /etc/environment so login shells + bridge-restarted gateways + the
-        gog-shim fallback loader pick up the merged list, AND updates
-        openclaw.json env.vars so openclaw's own ProxyAgent config sees it.
 
     All operations are best-effort: malformed JSON, missing keys, non-writable files
     just exit 0 silently so the bridge loop never wedges.
@@ -2025,133 +1141,6 @@ data:
     import json
     import os
     import sys
-
-
-    # Hosts we want openclaw + sandbox tools to reach DIRECTLY (skipping OpenShell
-    # MITM proxy) for the reasons above. Entries are plain hostnames; callers that
-    # honor no_proxy glob/suffix semantics still treat them correctly. Leading-dot
-    # wildcard forms (e.g. ".discordapp.com") are included for undici/curl which
-    # honor them as suffix matches.
-    CHAT_DIRECT_HOSTS = (
-        # Discord core API + CDN + gateway websocket
-        "discord.com",
-        ".discord.com",
-        "cdn.discordapp.com",
-        "media.discordapp.net",
-        "images-ext-1.discordapp.net",
-        "images-ext-2.discordapp.net",
-        ".discordapp.com",
-        ".discordapp.net",
-        "gateway.discord.gg",
-        # Telegram
-        "api.telegram.org",
-        "core.telegram.org",
-        # Slack
-        "slack.com",
-        "api.slack.com",
-        "files.slack.com",
-        "wss-primary.slack.com",
-        "wss-backup.slack.com",
-        "edgeapi.slack.com",
-    )
-
-    # Skill-facing external APIs the sandbox's `exec curl ...` or node fetch will
-    # hit. wttr.in is the canonical weather tool in the openclaw prompt; the
-    # open-meteo / weatherapi / openweathermap family is a fallback. OpenAI +
-    # Anthropic are here for skills that call their APIs directly (the inference
-    # LLM itself goes through the cluster-local inference host which already has a
-    # dedicated policy block — no proxy bypass needed for that one).
-    SKILL_DIRECT_HOSTS = (
-        "wttr.in",
-        ".wttr.in",
-        "v2.wttr.in",
-        "api.open-meteo.com",
-        ".open-meteo.com",
-        "geocoding-api.open-meteo.com",
-        "air-quality-api.open-meteo.com",
-        "ensemble-api.open-meteo.com",
-        "marine-api.open-meteo.com",
-        "historical-forecast-api.open-meteo.com",
-        "climate-api.open-meteo.com",
-        "api.weather.gov",
-        "api.met.no",
-        "api.weatherapi.com",
-        "api.openweathermap.org",
-        "tile.openweathermap.org",
-        "nominatim.openstreetmap.org",
-        "overpass-api.de",
-        "router.project-osrm.org",
-        "worldtimeapi.org",
-        "duckduckgo.com",
-        ".duckduckgo.com",
-        "html.duckduckgo.com",
-        "lite.duckduckgo.com",
-        "links.duckduckgo.com",
-        "external-content.duckduckgo.com",
-        "improving.duckduckgo.com",
-        "api.search.brave.com",
-        "api.openai.com",
-        "api.anthropic.com",
-        # NOTE: googleapis.com + accounts.google.com live in GOG_DIRECT_HOSTS
-        # below. Keeping them in a named set makes it easy to gate gog-specific
-        # hosts behind a future per-env toggle if policy enforcement against
-        # Google endpoints becomes desirable again.
-        "registry.npmjs.org",
-        "registry-1.npmjs.org",
-        "pypi.org",
-        "files.pythonhosted.org",
-        "github.com",
-        "api.github.com",
-        "codeload.github.com",
-        "objects.githubusercontent.com",
-        "raw.githubusercontent.com",
-        "uploads.github.com",
-    )
-
-    # gogcli + Google API skill hosts. Originally we routed these through the
-    # OpenShell MITM proxy and relied on the `google_apis` policy block
-    # (GOOGLE_HOSTS + GOOGLE_BINS in policy-patch.py) to authorize CONNECT, but
-    # the proxy's OPA rules match the calling binary via /proc/<pid>/exe
-    # readlink, which requires CAP_SYS_PTRACE into the sandbox user namespace.
-    # In practice sandbox-uid processes fail that resolve and OPA falls back to
-    # "unknown binary -> deny", producing `CONNECT tunnel failed, response 403`
-    # even for binaries explicitly enumerated in the policy (verified by
-    # running /usr/bin/curl from sandbox uid to oauth2.googleapis.com: 403,
-    # while the same curl from root: 200). Since the pod's network policy
-    # permits direct egress to Google endpoints, the pragmatic fix is to
-    # bypass the MITM proxy for these hosts; gogcli then dials Google over
-    # TLS end-to-end and OAuth token refresh works. The LLM inference path
-    # goes through inference.local (not googleapis.com) so this does not
-    # affect the Gemini/Vertex AI backend when configured that way.
-    GOG_DIRECT_HOSTS = (
-        "oauth2.googleapis.com",
-        "accounts.google.com",
-        "www.googleapis.com",
-        "gmail.googleapis.com",
-        "sheets.googleapis.com",
-        "drive.googleapis.com",
-        "docs.googleapis.com",
-        "calendar-json.googleapis.com",
-        "people.googleapis.com",
-        "photoslibrary.googleapis.com",
-        "youtube.googleapis.com",
-        "tasks.googleapis.com",
-        "admin.googleapis.com",
-        "content.googleapis.com",
-        "googleapis.com",
-        ".googleapis.com",
-        "google.com",
-        ".google.com",
-        "googleusercontent.com",
-        ".googleusercontent.com",
-        "lh3.googleusercontent.com",
-        "lh4.googleusercontent.com",
-        "lh5.googleusercontent.com",
-        "lh6.googleusercontent.com",
-    )
-
-    # Always-present loopback entries; the rest of the code merges on top.
-    LOOPBACK_NO_PROXY = ("localhost", "127.0.0.1", "::1")
 
 
     def _as_int(value, default=0):
@@ -2163,92 +1152,6 @@ data:
             except ValueError:
                 return default
         return default
-
-    def _etc_environment():
-        """Parse KEY=value lines from /etc/environment (Debian PAM style)."""
-        out = {}
-        try:
-            with open("/etc/environment", "r", encoding="utf-8") as fh:
-                for raw in fh:
-                    line = raw.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "=" not in line:
-                        continue
-                    k, v = line.split("=", 1)
-                    k = k.strip()
-                    v = v.strip().strip('"').strip("'")
-                    if k and k not in out:
-                        out[k] = v
-        except OSError:
-            pass
-        return out
-
-
-    def _merge_no_proxy(existing, *extra_iterables):
-        """Merge comma-separated no_proxy strings and extra iterables.
-
-        Preserves first-seen ordering, drops blanks, case-insensitive dedup
-        (no_proxy semantics are case-insensitive in undici + curl)."""
-        tokens = []
-        seen = set()
-
-        def _push(raw):
-            if raw is None:
-                return
-            for chunk in str(raw).split(","):
-                t = chunk.strip()
-                if not t:
-                    continue
-                key = t.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                tokens.append(t)
-
-        _push(existing)
-        for it in extra_iterables:
-            for t in it:
-                _push(t)
-        return ",".join(tokens)
-
-
-    def _write_etc_environment_kv(updates):
-        """Idempotently upsert KEY="value" lines in /etc/environment.
-
-        `updates` is a dict of the keys we want to overwrite. Other lines are
-        preserved. Silently no-ops on read-only FS (the early boot path in the
-        bridge is the canonical writer; this is defense-in-depth)."""
-        if not updates:
-            return
-        path = "/etc/environment"
-        try:
-            try:
-                with open(path, "r", encoding="utf-8") as fh:
-                    lines = fh.readlines()
-            except FileNotFoundError:
-                lines = []
-
-            remaining = dict(updates)
-            out_lines = []
-            for raw in lines:
-                stripped = raw.strip()
-                if not stripped or stripped.startswith("#") or "=" not in stripped:
-                    out_lines.append(raw if raw.endswith("\n") else raw + "\n")
-                    continue
-                k = stripped.split("=", 1)[0].strip()
-                if k in remaining:
-                    new_v = remaining.pop(k)
-                    out_lines.append('%s="%s"\n' % (k, new_v))
-                else:
-                    out_lines.append(raw if raw.endswith("\n") else raw + "\n")
-            for k, v in remaining.items():
-                out_lines.append('%s="%s"\n' % (k, v))
-
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.writelines(out_lines)
-        except OSError:
-            return
 
 
     def main():
@@ -2309,111 +1212,6 @@ data:
             env_root["vars"] = vars_root
         if not str(vars_root.get("XDG_CONFIG_HOME", "")).strip():
             vars_root["XDG_CONFIG_HOME"] = "/sandbox/.config"
-
-        _etc = _etc_environment()
-
-        # First pass: ensure /etc/environment carries CHAT_DIRECT_HOSTS +
-        # SKILL_DIRECT_HOSTS in both no_proxy AND NO_PROXY. Do this BEFORE the
-        # copy-to-env.vars block below so the merged value flows through.
-        # We only touch the file when a proxy is in play (proxy env present or
-        # a no_proxy line already exists); without any proxy config, no_proxy
-        # is a no-op anyway and we avoid creating unnecessary drift.
-        _proxy_in_play = any(
-            str(_etc.get(_k, "")).strip()
-            for _k in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY")
-        ) or any(
-            (os.environ.get(_k) or "").strip()
-            for _k in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "grpc_proxy", "GRPC_PROXY")
-        ) or bool((os.environ.get("NEMOCLAW_PROXY_HOST") or "").strip())
-
-        if _proxy_in_play:
-            _etc_np_updates = {}
-            for _np_key in ("no_proxy", "NO_PROXY"):
-                merged = _merge_no_proxy(
-                    _etc.get(_np_key, ""),
-                    LOOPBACK_NO_PROXY,
-                    CHAT_DIRECT_HOSTS,
-                    SKILL_DIRECT_HOSTS,
-                    GOG_DIRECT_HOSTS,
-                )
-                if merged and merged != (_etc.get(_np_key) or "").strip():
-                    _etc_np_updates[_np_key] = merged
-            if _etc_np_updates:
-                _write_etc_environment_kv(_etc_np_updates)
-                # Reflect the writeback so the copy pass below uses the merged values.
-                for _k, _v in _etc_np_updates.items():
-                    _etc[_k] = _v
-
-        for _k in (
-            "HTTPS_PROXY",
-            "https_proxy",
-            "HTTP_PROXY",
-            "http_proxy",
-            "NO_PROXY",
-            "no_proxy",
-            "ALL_PROXY",
-            "all_proxy",
-        ):
-            if str(vars_root.get(_k, "")).strip():
-                continue
-            _v = (_etc.get(_k) or "").strip()
-            if not _v:
-                continue
-            vars_root[_k] = _v
-
-        # Final pass: whether env.vars.no_proxy was freshly copied from
-        # /etc/environment or was already set by the operator/webui upload,
-        # force-merge CHAT_DIRECT_HOSTS + SKILL_DIRECT_HOSTS in. This is the
-        # single source of truth for openclaw gateway's undici ProxyAgent (see
-        # OpenClaw's env.vars -> process.env propagation) so the final merged
-        # list always contains the hosts we need direct egress to.
-        if _proxy_in_play:
-            for _np_key in ("no_proxy", "NO_PROXY"):
-                merged = _merge_no_proxy(
-                    vars_root.get(_np_key, ""),
-                    LOOPBACK_NO_PROXY,
-                    CHAT_DIRECT_HOSTS,
-                    SKILL_DIRECT_HOSTS,
-                    GOG_DIRECT_HOSTS,
-                )
-                if merged:
-                    vars_root[_np_key] = merged
-
-        def _proxy_url_fallback():
-            for k in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"):
-                v = (os.environ.get(k) or "").strip().strip('"').strip("'")
-                if v:
-                    return v
-            for k in ("grpc_proxy", "GRPC_PROXY"):
-                v = (os.environ.get(k) or "").strip().strip('"').strip("'")
-                if v.startswith("http"):
-                    return v
-            h = (os.environ.get("NEMOCLAW_PROXY_HOST") or "").strip()
-            p = (os.environ.get("NEMOCLAW_PROXY_PORT") or "").strip()
-            if h and p:
-                return "http://%s:%s" % (h, p)
-            return ""
-
-        _fb = _proxy_url_fallback()
-        if _fb:
-            _np = "localhost,127.0.0.1,::1"
-            try:
-                hp = _fb.split("://", 1)[1].split("/")[0]
-                host = hp.split(":")[0]
-                if host:
-                    _np = _np + "," + host
-            except (IndexError, ValueError):
-                pass
-            for _k in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"):
-                if str(vars_root.get(_k, "")).strip():
-                    continue
-                if not (_etc.get(_k) or "").strip():
-                    vars_root[_k] = _fb
-            for _k in ("no_proxy", "NO_PROXY"):
-                if str(vars_root.get(_k, "")).strip():
-                    continue
-                if not (_etc.get(_k) or "").strip():
-                    vars_root[_k] = _np
 
         try:
             with open(path, "w", encoding="utf-8") as fh:
