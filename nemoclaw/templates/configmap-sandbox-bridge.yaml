@@ -757,6 +757,35 @@ data:
       copy_to_sandbox "$PREF_DIR/fd" "$SBX_HOME/.local/bin/fd" 755
     fi
 
+    # Prefetched Olares CLI (single-binary ELF). Installed as root into
+    # /usr/local/bin/olares-cli so every user/uid in the sandbox can exec
+    # it directly without PATH juggling. Idempotent: sha256-compared with
+    # the sandbox copy, skipped when already current. copy_to_sandbox
+    # runs via `kubectl exec` (which executes as root inside the agent
+    # container), so writing to /usr/local/bin is allowed even though
+    # the rest of skill-env runs in the non-root sandbox user's scope.
+    if [ -f "$PREF_DIR/olares-cli" ]; then
+      _pref_cli_ver=""
+      [ -f "$PREF_DIR/olares-cli.version" ] && _pref_cli_ver=$(tr -d "\r\n" < "$PREF_DIR/olares-cli.version" 2>/dev/null || true)
+      _pref_cli_sha=$(sha256sum "$PREF_DIR/olares-cli" 2>/dev/null | awk "{print \$1}" | tr -d "\r\n")
+      _sbx_cli_sha=$(docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+        sh -c 'test -x /usr/local/bin/olares-cli && sha256sum /usr/local/bin/olares-cli 2>/dev/null | awk "{print \$1}" || echo ""' 2>/dev/null | tr -d "\r\n")
+      if [ -n "$_sbx_cli_sha" ] && [ -n "$_pref_cli_sha" ] && [ "$_sbx_cli_sha" = "$_pref_cli_sha" ]; then
+        echo "[skill-env] prefetched olares-cli${_pref_cli_ver:+ $_pref_cli_ver} already present at /usr/local/bin/olares-cli (sha256 match; skipping)"
+      else
+        echo "[skill-env] installing prefetched olares-cli${_pref_cli_ver:+ $_pref_cli_ver} -> /usr/local/bin/olares-cli (streaming via kubectl exec)"
+        if copy_to_sandbox "$PREF_DIR/olares-cli" /usr/local/bin/olares-cli 0755; then
+          docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+            sh -c 'chown root:root /usr/local/bin/olares-cli 2>/dev/null || true' \
+            >/dev/null 2>&1 || true
+          echo "[skill-env] prefetched olares-cli installed OK"
+        else
+          echo "[skill-env] WARN: copy of prefetched olares-cli into sandbox failed; \`olares-cli\` will not be available" >&2
+        fi
+      fi
+      unset _pref_cli_ver _pref_cli_sha _sbx_cli_sha
+    fi
+
     # Prefetched Go toolchain. The image ships /prefetch/go.tar.gz containing a
     # top-level `go/` dir (bin/, src/, pkg/, ...) = the standard go.dev layout.
     # Stream it directly into /sandbox/.local via one kubectl-exec + tar pipe so
@@ -1139,6 +1168,116 @@ data:
           fi
         fi
 
+        # --- Stage INSECURE_TLS: disable TLS verification for git / curl / wget / npm / pip ---
+        # Rationale: in environments with a split-target TLS MITM proxy (a common
+        # corporate setup) curl/git may work for some HTTPS hosts (the ones the
+        # proxy does not touch, e.g. baidu.com) and fail for others
+        # (github.com / ghcr.io) with:
+        #   curl: (60) SSL certificate problem: self-signed certificate in certificate chain
+        #   git fatal: unable to access ...: server certificate verification failed. CAfile: none
+        # Because we cannot install the (unknown, per-site) interceptor root CA,
+        # the only reliable way to let `brew install gog` (and subsequent
+        # `brew tap steipete/tap` git clones) succeed is to skip verification
+        # inside the sandbox.
+        #
+        # Writes these *user* dotfiles (unconditionally trusted by each tool --
+        # CANNOT be stripped by Homebrew superenv):
+        #   /sandbox/.gitconfig  -> [http] sslVerify = false
+        #   /sandbox/.curlrc     -> insecure
+        #   /sandbox/.wgetrc     -> check_certificate = off
+        # And a /etc/profile.d drop-in exporting env-level equivalents:
+        #   GIT_SSL_NO_VERIFY=1   NODE_TLS_REJECT_UNAUTHORIZED=0
+        #   PYTHONHTTPSVERIFY=0   PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org pypi.python.org"
+        #
+        # Gate: NEMOCLAW_SKILL_INSECURE_TLS ("1"/"true"/"yes" -> on, "0"/"false"/"no" -> off).
+        # Default is ON because the install flow has no way to succeed otherwise
+        # on MITM networks and we have no user-provided CA bundle to install.
+        # Power-users on clean networks can set it to "0" in the Olares app env.
+        _ITLS_ON=1
+        case "${NEMOCLAW_SKILL_INSECURE_TLS:-1}" in
+          0|false|False|FALSE|no|No|NO|off|Off|OFF|"") _ITLS_ON=0 ;;
+          *) _ITLS_ON=1 ;;
+        esac
+        if [ "$_ITLS_ON" = "1" ]; then
+          _log "Stage INSECURE_TLS: disabling TLS verification for git/curl/wget/npm/pip inside sandbox"
+          # Dotfiles. All writes overwrite any prior managed copy so chart
+          # upgrades that change content always win.
+          {
+            echo "# nemoclaw-skill-env (managed; do not edit)"
+            echo "[http]"
+            echo "        sslVerify = false"
+            echo "[http \"https://github.com/\"]"
+            echo "        sslVerify = false"
+            echo "[http \"https://ghcr.io/\"]"
+            echo "        sslVerify = false"
+          } > /sandbox/.gitconfig 2>/dev/null || true
+          chown "$SBX_USER:$SBX_USER" /sandbox/.gitconfig 2>/dev/null || true
+          chmod 0644 /sandbox/.gitconfig 2>/dev/null || true
+
+          {
+            echo "# nemoclaw-skill-env (managed; do not edit)"
+            echo "insecure"
+          } > /sandbox/.curlrc 2>/dev/null || true
+          chown "$SBX_USER:$SBX_USER" /sandbox/.curlrc 2>/dev/null || true
+          chmod 0644 /sandbox/.curlrc 2>/dev/null || true
+
+          {
+            echo "# nemoclaw-skill-env (managed; do not edit)"
+            echo "check_certificate = off"
+          } > /sandbox/.wgetrc 2>/dev/null || true
+          chown "$SBX_USER:$SBX_USER" /sandbox/.wgetrc 2>/dev/null || true
+          chmod 0644 /sandbox/.wgetrc 2>/dev/null || true
+
+          # Also point root (/root) at the same files; brew may re-exec itself
+          # across users when HOMEBREW_PREFIX is root-owned briefly on first run.
+          for _root_home in /root; do
+            [ -d "$_root_home" ] || continue
+            cp -f /sandbox/.gitconfig "$_root_home/.gitconfig" 2>/dev/null || true
+            cp -f /sandbox/.curlrc    "$_root_home/.curlrc"    2>/dev/null || true
+            cp -f /sandbox/.wgetrc    "$_root_home/.wgetrc"    2>/dev/null || true
+          done
+
+          # profile.d drop-in for env-level toggles (login shells + PAM).
+          mkdir -p /etc/profile.d 2>/dev/null || true
+          if [ -w /etc/profile.d ]; then
+            PROFD_ITLS=/etc/profile.d/nemoclaw-insecure-tls.sh
+            {
+              echo "# nemoclaw-skill-env (managed; do not edit)"
+              echo "# Disables TLS verification for tools that do not read ~/.gitconfig"
+              echo "# or ~/.curlrc (npm / node / pip / python requests). See the"
+              echo "# Stage INSECURE_TLS block in configmap-sandbox-bridge.yaml."
+              echo "export GIT_SSL_NO_VERIFY=1"
+              echo "export NODE_TLS_REJECT_UNAUTHORIZED=0"
+              echo "export PYTHONHTTPSVERIFY=0"
+              echo "export PIP_TRUSTED_HOST=\"pypi.org files.pythonhosted.org pypi.python.org\""
+              echo "export HOMEBREW_CURLRC=1"
+            } > "$PROFD_ITLS" 2>/dev/null || true
+            chmod 0644 "$PROFD_ITLS" 2>/dev/null || true
+          fi
+
+          # Append to /etc/environment so non-login sessions (openclaw skill
+          # runner, PAM-less kubectl exec) also see these.
+          if [ -w "${ETCENV:-/etc/environment}" ] || [ -w /etc ] 2>/dev/null; then
+            ETCENV_I=${ETCENV:-/etc/environment}
+            [ -f "$ETCENV_I" ] || touch "$ETCENV_I" 2>/dev/null || true
+            if [ -w "$ETCENV_I" ]; then
+              sed -i "/nemoclaw-insecure-tls/,/end-nemoclaw-insecure-tls/d" "$ETCENV_I" 2>/dev/null || true
+              {
+                echo "# nemoclaw-insecure-tls (managed; do not edit)"
+                echo "GIT_SSL_NO_VERIFY=1"
+                echo "NODE_TLS_REJECT_UNAUTHORIZED=0"
+                echo "PYTHONHTTPSVERIFY=0"
+                echo "PIP_TRUSTED_HOST=pypi.org files.pythonhosted.org pypi.python.org"
+                echo "HOMEBREW_CURLRC=1"
+                echo "# end-nemoclaw-insecure-tls"
+              } >> "$ETCENV_I"
+            fi
+          fi
+          _log "Stage INSECURE_TLS OK: dotfiles + profile.d + /etc/environment updated"
+        else
+          _log "Stage INSECURE_TLS skipped (NEMOCLAW_SKILL_INSECURE_TLS=${NEMOCLAW_SKILL_INSECURE_TLS:-}); assuming trusted CA chain"
+        fi
+
         # --- Stage 0: minimal gcc + g++ (fastest, least likely to hit broken Recommends) ---
         if [ ! -x /usr/bin/gcc ] && command -v apt-get >/dev/null 2>&1; then
           _apt_wait_lock
@@ -1478,7 +1617,7 @@ data:
     # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
     # and invalidates the sentinel on mismatch.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-prefetched-go-v1 > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-insecure-tls-v2 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"

@@ -251,18 +251,35 @@ data:
                 if path == "/api/logs":
                     return self._text(latest_log())
                 if path == "/_probe":
-                    # Minimal-body readiness probe used by the terminal-gate
-                    # nginx server block (see ingress-weui.yaml). 503 while
-                    # install-ui.py is still the :18790 listener (sandbox
-                    # gateway not yet healthy); 200 once the cli sentinel
-                    # exists. After that moment chat-ui-bridge pkills this
-                    # process and socat takes over :18790, so any further
-                    # /_probe requests are forwarded to openclaw gateway
-                    # and come back as 404 (or 2xx) -- either way, non-503,
-                    # which nginx treats as "ready".
+                    # Legacy readiness probe. Kept for external callers that
+                    # expect 503 while installing. The terminal-gate in
+                    # ingress-weui.yaml now uses /_auth_probe below instead
+                    # (see comment on that branch for the rationale).
                     ready = os.path.isfile(SENTINELS["cli"])
                     return self._text("ready\n" if ready else "not ready\n",
                                       code=200 if ready else 503)
+                if path == "/_auth_probe":
+                    # Readiness probe designed for nginx `auth_request`.
+                    # `auth_request` only understands three responses:
+                    #   2xx -> allow
+                    #   401/403 -> deny (catchable by error_page)
+                    #   anything else -> HTTP 500 to the client
+                    # We therefore return 403 (not 503) while the CLI is
+                    # not yet ready. The terminal-gate error_page routes
+                    # 403 to the install-progress page and 200 straight to
+                    # the beclab/terminal Service.
+                    #
+                    # This endpoint is served by the *permanent* install-ui
+                    # instance on pod :18791 (see deployment.yaml,
+                    # start_probe_responder_18791). The original :18790
+                    # install-ui is swapped out for socat once cli is
+                    # ready, after which /_probe on :18789 gets forwarded
+                    # to openclaw gateway and returns 404 -- which auth_request
+                    # would treat as 500. Dedicating :18791 to this endpoint
+                    # guarantees a stable 200/403 answer at all times.
+                    ready = os.path.isfile(SENTINELS["cli"])
+                    return self._text("ready\n" if ready else "not ready\n",
+                                      code=200 if ready else 403)
                 return self._html()
             except BrokenPipeError:
                 return

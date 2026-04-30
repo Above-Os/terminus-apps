@@ -3,18 +3,21 @@
 # skill-env then installs each known artifact from /workspace/.nemoclaw-prefetch/ into
 # the sandbox. Current contents:
 #   busybox, micro, rg, fd          -> sandbox ~/.local/bin/<name>     (single-file static)
+#   olares-cli (+ .version)         -> sandbox /usr/local/bin/olares-cli  (Olares CLI,
+#                                     linux/amd64 ELF from cdn.olares.com; installed as
+#                                     root so every user in the sandbox can invoke it)
 #   go.tar.gz                       -> sandbox /sandbox/.local/go/     (full Go toolchain:
 #                                     `go`, `gofmt`, src/, pkg/ — linux/amd64 glibc build
 #                                     from go.dev, bypasses brew/ghcr.io entirely)
 #   homebrew.tar.gz                 -> sandbox /sandbox/.linuxbrew/Homebrew (Homebrew tree
 #                                     with portable-ruby pre-vendored)
 #
-# Why ship Homebrew + Go prebuilt: baking a ready-to-use tree skips both the initial
-# `git clone` / `brew vendor-install ruby` OCI-blob fetch and the go.dev HTTPS fetch on
-# every cold boot. Shipping Go this way also dodges corporate MITM proxies that break
-# `brew install go` / `brew install gogcli` with `curl: (60) SSL certificate problem`.
-# Source compilation of individual brew formulae still happens at install time but only
-# needs gcc, which skill-env apt-installs in-sandbox.
+# Why ship Homebrew + Go + olares-cli prebuilt: baking a ready-to-use tree skips both the
+# initial `git clone` / `brew vendor-install ruby` OCI-blob fetch and the go.dev / cdn.olares.com
+# HTTPS fetches on every cold boot. It also dodges corporate MITM proxies that break
+# `brew install go` / `brew install gogcli` / `curl https://cdn.olares.com/...` with
+# `curl: (60) SSL certificate problem`. Source compilation of individual brew formulae
+# still happens at install time but only needs gcc, which skill-env apt-installs in-sandbox.
 #
 # gog (gogcli) is intentionally NOT shipped in this image. Users install it in-sandbox
 # via `openclaw config --section skills` -> brew install steipete/tap/gog so version,
@@ -22,11 +25,11 @@
 #
 # Build (linux/amd64 only; sandbox image is glibc amd64):
 #   docker build --platform linux/amd64 \
-#     -t harveyff/nemoclaw-prefetch:2026.4.30-amd \
+#     -t beclab/harveyff-nemoclaw-prefetch:2026.4.30-olares-cli-amd \
 #     -f docker/prefetch/Dockerfile docker/prefetch
 #
 # Push:
-#   docker push harveyff/nemoclaw-prefetch:2026.4.30-amd
+#   docker push beclab/harveyff-nemoclaw-prefetch:2026.4.30-olares-cli-amd
 #
 # Image ref is pinned in templates/deployment.yaml (init-prefetch). Rebuild, push, bump tag there.
 # The `-amd` suffix is intentional — this image is linux/amd64 only (see OlaresManifest.yaml
@@ -46,6 +49,12 @@ ARG FD_TRIPLE=x86_64-unknown-linux-musl
 # init-prefetch.
 ARG GO_VERSION=1.23.4
 ARG GO_ARCH=linux-amd64
+# Olares CLI. Single-binary tarball published on cdn.olares.com; the
+# tarball contains a top-level `olares-cli` ELF. skill-env then installs
+# this binary into the sandbox at /usr/local/bin/olares-cli so `olares`
+# workflows inside the assistant can call it directly.
+ARG OLARES_CLI_URL=https://cdn.olares.com/olares-cli-v1.12.7-20260429_linux_amd64.d2dabf4.tar.gz
+ARG OLARES_CLI_VERSION=1.12.7-20260429-d2dabf4
 
 # ----------------------------------------------------------------------------
 # Stage 1: static binaries (busybox/micro/rg/fd) — unchanged from prior image.
@@ -59,6 +68,8 @@ ARG FD_VERSION
 ARG FD_TRIPLE
 ARG GO_VERSION
 ARG GO_ARCH
+ARG OLARES_CLI_URL
+ARG OLARES_CLI_VERSION
 RUN apk add --no-cache curl ca-certificates tar gzip \
   && mkdir -p /prefetch \
   # busybox provides static `vi` (skill-env wraps it with a 2-line shim).
@@ -100,7 +111,21 @@ RUN apk add --no-cache curl ca-certificates tar gzip \
   && tar -C /prefetch/_go-stage -czf /prefetch/go.tar.gz go \
   && rm -rf /prefetch/_go-stage /tmp/go.tgz \
   && printf "%s\n" "${GO_VERSION}" > /prefetch/go.version \
-  && ls -la /prefetch/go.tar.gz /prefetch/go.version
+  && ls -la /prefetch/go.tar.gz /prefetch/go.version \
+  # Olares CLI. The CDN tarball unpacks to a single top-level `olares-cli`
+  # ELF (no intermediate directory). We `find` for it instead of hard-coding
+  # the filename so future URL revs that include a version suffix (e.g.
+  # `olares-cli-1.13.0`) keep working without a Dockerfile edit.
+  && curl -fsSL -o /tmp/olares-cli.tgz "${OLARES_CLI_URL}" \
+  && mkdir -p /prefetch/_olares-stage \
+  && tar -xzf /tmp/olares-cli.tgz -C /prefetch/_olares-stage \
+  && _cli=$(find /prefetch/_olares-stage -maxdepth 4 -type f \( -name 'olares-cli' -o -name 'olares-cli-*' \) 2>/dev/null | head -1) \
+  && test -n "$_cli" \
+  && install -m0755 "$_cli" /prefetch/olares-cli \
+  && test -x /prefetch/olares-cli \
+  && printf "%s\n" "${OLARES_CLI_VERSION}" > /prefetch/olares-cli.version \
+  && rm -rf /prefetch/_olares-stage /tmp/olares-cli.tgz \
+  && ls -la /prefetch/olares-cli /prefetch/olares-cli.version
 
 # ----------------------------------------------------------------------------
 # Stage 2: Homebrew tree with portable-ruby pre-vendored.
