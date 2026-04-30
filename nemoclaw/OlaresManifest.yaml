@@ -6,7 +6,7 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.0.17
+  version: 1.0.19
   categories:
   - Developer Tools
   - Productivity_v112
@@ -179,13 +179,13 @@ envs:
     applyOnChange: true
     editable: true
     default: "0"
-    description: "Set to 1 to pass --recreate on openshell gateway start (fresh cluster)."
+    description: "Set to 1 to pass --recreate on openshell gateway start (fresh cluster). This tears down the gateway container and removes local cluster image tags; the next start must re-pull from ghcr.io (or your NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR). Leave 0 on air-gapped / flaky-registry nodes unless you understand the re-pull requirement."
   - envName: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
     type: string
     required: false
     applyOnChange: true
     editable: true
-    default: "beclab/hys2023-openshell-cluster:v1.13"
+    default: "beclab/hys2023-openshell-cluster:v1.15"
     description: "Image nemoclaw onboard pulls for OpenShell gateway cluster. Default points at the beclab custom fork (policy disabled at source, direct egress — no MITM proxy). NemoClaw's onboard.ts forcibly sets OPENSHELL_CLUSTER_IMAGE=ghcr.io/nvidia/openshell/cluster:<NEMOCLAW_OPENSHELL_VERSION> before spawning `openshell gateway start`, so env-var overrides don't survive. Workaround: after pulling this image, the chart aliases it via `docker tag` to that exact ghcr ref; openshell's ensure_image() inspects locally, finds the alias, and never pulls upstream. Override to ghcr.io/nvidia/openshell/cluster:<tag> to use the upstream copy verbatim."
   - envName: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
     type: string
@@ -220,8 +220,8 @@ envs:
     required: false
     applyOnChange: true
     editable: true
-    default: "v0.0.26"
-    description: "Git ref of NVIDIA/NemoClaw pulled by nemoclaw.sh during onboard (default v0.0.26). Pinned here to dodge the v0.0.27 upstream bug where `stageOptimizedSandboxBuildContext` omits `scripts/generate-openclaw-config.py` and the sandbox Dockerfile build dies at step 21/56 with `COPY failed: file not found`. Set to `latest` or a newer tag once upstream ships a fix. Empty = latest (risky)."
+    default: "main"
+    description: "Git branch or tag of NVIDIA/NemoClaw for nemoclaw.sh (uses `git clone --depth 1 --branch <ref>`). MUST be a remote branch/tag name — a 40-char commit SHA is rejected by git (\"Remote branch … not found\"). Default `main` carries PR #2484 (OpenClaw 2026.4.24 Dockerfile Patch 4 + generate-openclaw-config build-context). Older tags v0.0.26–v0.0.29 fail sandbox image step 17/54. Pin a release tag here once upstream ships one past #2484. Empty = latest (risky)."
   - envName: NEMOCLAW_INSTALL_HOMEBREW
     type: string
     required: false
@@ -236,6 +236,13 @@ envs:
     editable: true
     default: ""
     description: "Optional. Git clone URL for Homebrew/brew (default https://github.com/Homebrew/brew.git). Set to an internal mirror if the sandbox cannot reach GitHub; otherwise cold-reset leaves brew missing and `brew: command not found`."
+  - envName: NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Optional. Override brew's bottle + portable-ruby download origin. Default is https://ghcr.io (Homebrew upstream). Set to a mirror if your network MITM-intercepts ghcr.io or returns a self-signed cert chain — symptom: `brew install gog` fails with `curl: (60) SSL certificate problem: self-signed certificate in certificate chain` while downloading portable-ruby blobs. Typical values: https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles, https://mirrors.ustc.edu.cn/homebrew-bottles, https://mirrors.aliyun.com/homebrew/homebrew-bottles. Propagated as HOMEBREW_BOTTLE_DOMAIN + HOMEBREW_ARTIFACT_DOMAIN + HOMEBREW_API_DOMAIN into /etc/environment and /etc/profile.d/nemoclaw-brew-temp.sh inside the sandbox."
   - envName: ALLOW_EXTERNAL_DIR_ACCESS
     type: bool
     required: false
