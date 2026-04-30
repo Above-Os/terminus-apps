@@ -1531,15 +1531,26 @@ spec:
           # chat-ui-bridge: sandbox Running, brew/skill-env/policy pass, openclaw gateway
           # healthy, and the real :18790 relay replaces the 503 placeholder). TCP on 18790
           # alone is insufficient because the placeholder also listens immediately.
+          #
+          # failureThreshold * periodSeconds must exceed the WORST-case cold-start:
+          #   init-prefetch image pull (network-bound)
+          #   + sandbox chown /sandbox/.linuxbrew (cp -a of ~120MB brew tree)
+          #   + skill-env Stage CA + apt install gcc/g++ (~80MB apt download)
+          #   + brew install gogcli (ghcr.io bottle OR source build)
+          #   + first openclaw gateway run (reads openclaw.json, clamps, binds :18789)
+          # On MITM / slow-egress networks each stage can take several minutes,
+          # and a retry after bottle-domain misconfig costs another ~5min. 120min
+          # is the safe cap -- K8s kill-and-restart on startup timeout is
+          # destructive here because every restart loses sandbox apt state.
           startupProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
                 - test -f /workspace/.nemoclaw-chat-relay-ready
-            periodSeconds: 15
+            periodSeconds: 30
             timeoutSeconds: 3
-            failureThreshold: 120
+            failureThreshold: 240
           readinessProbe:
             exec:
               command:
