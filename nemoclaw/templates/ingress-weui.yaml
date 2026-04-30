@@ -1,5 +1,6 @@
-# Reverse proxy for NemoClaw / OpenClaw browser chat UI (default sandbox port 18789).
-# See https://docs.nvidia.com/nemoclaw/latest/deployment/deploy-to-remote-gpu.html#remote-dashboard-access
+# Reverse proxy for NemoClaw / OpenClaw browser chat UI (default sandbox port 18789)
+# AND terminal-entrance gate that keeps users on the install-progress page until
+# the sandbox openclaw gateway is usable.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -13,19 +14,30 @@ data:
       ''      close;
     }
 
+    # Send nginx diagnostics to container stdout/stderr so
+    # `kubectl logs deploy/nemoclawweuiingress` actually surfaces upstream
+    # failures (connect refused, no live upstreams, auth_request 500s, etc).
+    # Without this, error.log only lives in the container filesystem and
+    # debugging 5xx means exec-ing into the pod to tail a file.
+    access_log /dev/stdout;
+    error_log  /dev/stderr warn;
+
+    # =====================================================================
+    # WebUI (Olares entrance `webtui` -> this :8080).
+    # Proxies to the OpenClaw web UI served by sandbox :18789 via the
+    # chat-ui-bridge relay (nemoclaw Service :18789 -> pod :18790 -> socat
+    # -> sandbox :18789). While install-ui.py is still the :18790 listener
+    # (sandbox gateway not yet healthy), GET / here returns the same
+    # install-progress HTML that the terminal gate shows below, because
+    # install-ui.py serves that page on any unknown URI.
+    # =====================================================================
     server {
       listen 8080;
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
-
-      # Short name "nemoclaw": non-variable proxy_pass resolves at worker start via libc + Pod resolv.conf
-      # search (nemoclaw.<namespace>.svc.cluster.local). Target is the Service ClusterIP — stable across Pod restarts.
-      # Variable proxy_pass (http://$host:port) needs resolver and breaks short names without FQDN.
       client_max_body_size 100m;
 
-      # gog Google OAuth callback: tunnels to k3s sandbox :8080 where `gog auth add --listen-addr 0.0.0.0:8080` runs.
-      # Exact match so OpenClaw SPA does not steal /oauth2/callback. Mirrors clawdbot's pattern but target is
-      # Service nemoclaw:18788 instead of :8080 (18788 is the in-pod relay that bridges into the k3s sandbox).
+      # gog Google OAuth callback: tunnels to k3s sandbox :8080 where
+      # `gog auth add --listen-addr 0.0.0.0:8080` runs. Exact match so the
+      # OpenClaw SPA does not steal /oauth2/callback.
       location = /oauth2/callback {
           proxy_pass http://nemoclaw:18788;
           proxy_http_version 1.1;
@@ -42,7 +54,6 @@ data:
       location / {
           proxy_pass http://nemoclaw:18789;
           proxy_http_version 1.1;
-
           proxy_set_header Host              $host;
           proxy_set_header X-Forwarded-Host  $http_host;
           proxy_set_header X-Real-IP         $remote_addr;
@@ -51,96 +62,138 @@ data:
           proxy_set_header X-Forwarded-Proto $scheme;
           proxy_set_header Upgrade           $http_upgrade;
           proxy_set_header Connection        $connection_upgrade;
-
           proxy_connect_timeout 600s;
           proxy_send_timeout    600s;
           proxy_read_timeout    3600s;
-
           proxy_buffering off;
           proxy_cache off;
-
           proxy_next_upstream error timeout http_502 http_503 http_504;
           client_max_body_size 100m;
       }
     }
 
-    # ---------------------------------------------------------------------
-    # Terminal entrance gate (Olares entrance `terminal` -> this :8081).
+    # =====================================================================
+    # Terminal entrance (Olares entrance `terminal` -> this :8081).
     #
-    # The beclab/terminal Service can come up instantly (it has no dep on
-    # NemoClaw), so without this gate the user opens the Terminal entrance
-    # into a raw bash shell where `openclaw` / `nemoclaw` commands are
-    # still not installed (skill-env in progress). We want them to see
-    # the same install-progress HTML page that the webtui entrance shows,
-    # and only fall through to the real terminal once openclaw CLI is
-    # ready in the sandbox.
+    # Currently SIMPLE pass-through to the beclab/terminal Service. The
+    # install-progress gate (auth_request -> nemoclaw:18791/_auth_probe)
+    # is temporarily disabled — see the large commented block below for
+    # the full gated implementation, and re-enable it by:
+    #   1. uncommenting the gated server { ... } block below
+    #   2. deleting (or commenting out) this simple server block
+    #   3. ensuring the permanent install-ui probe responder on
+    #      nemoclaw:18791 is running (chat-ui-bridge's
+    #      start_probe_responder_18791 — still live in deployment.yaml)
+    #   4. `kubectl rollout restart deployment/nemoclaw` and
+    #      `kubectl rollout restart deployment/nemoclawweuiingress`
     #
-    # Mechanism: a tiny OpenResty Lua block (access_by_lua_block) makes
-    # an internal subrequest to nemoclaw:18789/_probe on every incoming
-    # request. install-ui.py (chat-ui-bridge's :18790 placeholder) returns
-    # 503 while `.nemoclaw-cli-ready` is absent and 200 once it exists.
-    # After ready, install-ui is pkilled and socat takes over :18790 -->
-    # sandbox :18789; /_probe then reaches openclaw gateway and comes back
-    # non-503 (typically 404), which we also treat as "ready". 502 / 504 /
-    # connection-refused are treated conservatively as "still installing"
-    # so a flapping sandbox never leaves users stuck in a broken terminal.
-    # ---------------------------------------------------------------------
+    # The disabled gate was hitting HTTP 502 because the probe listener
+    # on pod :18791 was not up (pod had not rolled over to the new
+    # chat-ui-bridge script). Re-enable after confirming :18791 is
+    # listening in the nemoclaw pod.
+    # =====================================================================
     server {
       listen 8081;
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
-
       client_max_body_size 100m;
 
-      # Internal probe hop. Short timeouts so the gate does not add
-      # noticeable latency even if nemoclaw is in a weird state.
-      location = /__nemoclaw_probe {
-          internal;
-          proxy_pass http://nemoclaw:18789/_probe;
-          proxy_connect_timeout 2s;
-          proxy_send_timeout    3s;
-          proxy_read_timeout    3s;
-          # Do not retry a failed probe; we want the status code as-is.
-          proxy_next_upstream off;
-      }
-
       location / {
-          # Default upstream is install-ui (nemoclaw:18789 -> pod :18790).
-          # access_by_lua_block may flip this to the real terminal Service
-          # after a successful readiness check.
-          set $gate_upstream "http://nemoclaw:18789";
-
-          access_by_lua_block {
-              local res = ngx.location.capture("/__nemoclaw_probe")
-              local s = res and res.status or 0
-              -- 503 = install-ui says not ready
-              -- 502 / 504 / 0 = probe hop failed (treat as installing)
-              -- anything else (200, 301, 302, 404, 405, ...) = past install-ui
-              if s ~= 0 and s ~= 502 and s ~= 503 and s ~= 504 then
-                  ngx.var.gate_upstream = "http://terminal:80"
-              end
-          }
-
-          proxy_pass $gate_upstream;
+          proxy_pass http://terminal:80;
           proxy_http_version 1.1;
-
           proxy_set_header Host              $host;
           proxy_set_header X-Forwarded-Host  $http_host;
           proxy_set_header X-Real-IP         $remote_addr;
           proxy_set_header X-Forwarded-For   $remote_addr;
           proxy_set_header X-Forwarded-Proto $scheme;
-          # WebSocket support for the real terminal (xterm.js <-> apiserver).
+          # WebSocket (xterm.js <-> beclab/terminal apiserver sidecar).
           proxy_set_header Upgrade           $http_upgrade;
           proxy_set_header Connection        $connection_upgrade;
-
           proxy_connect_timeout 600s;
           proxy_send_timeout    600s;
           proxy_read_timeout    3600s;
-
           proxy_buffering off;
           proxy_cache off;
       }
     }
+
+    # ---------------------------------------------------------------------
+    # DISABLED: install-progress gate for the terminal entrance.
+    # Keep in sync (install-ui.py /_auth_probe, Service port probe=18791,
+    # deployment.yaml start_probe_responder_18791). When re-enabling,
+    # copy this block out of the comment and delete the simple server
+    # above.
+    # ---------------------------------------------------------------------
+    # server {
+    #   listen 8081;
+    #   client_max_body_size 100m;
+    #
+    #   # auth_request subrequest against the permanent install-ui probe
+    #   # responder on nemoclaw:18791. 200 = cli ready, 403 = installing,
+    #   # anything else = probe hop broken (pod booting / not listening).
+    #   location = /__auth_probe {
+    #       internal;
+    #       proxy_pass http://nemoclaw:18791/_auth_probe;
+    #       proxy_pass_request_body off;
+    #       proxy_set_header Content-Length "";
+    #       proxy_set_header Host             $host;
+    #       proxy_connect_timeout 2s;
+    #       proxy_send_timeout    3s;
+    #       proxy_read_timeout    3s;
+    #       proxy_next_upstream off;
+    #   }
+    #
+    #   location / {
+    #       auth_request /__auth_probe;
+    #       # 401/403   = install-ui says "not ready yet"
+    #       # 500/502/504 = probe itself is broken (pod booting)
+    #       error_page 401 403 500 502 504 = @install_ui;
+    #
+    #       proxy_pass http://terminal:80;
+    #       proxy_http_version 1.1;
+    #       proxy_set_header Host              $host;
+    #       proxy_set_header X-Forwarded-Host  $http_host;
+    #       proxy_set_header X-Real-IP         $remote_addr;
+    #       proxy_set_header X-Forwarded-For   $remote_addr;
+    #       proxy_set_header X-Forwarded-Proto $scheme;
+    #       proxy_set_header Upgrade           $http_upgrade;
+    #       proxy_set_header Connection        $connection_upgrade;
+    #       proxy_connect_timeout 600s;
+    #       proxy_send_timeout    600s;
+    #       proxy_read_timeout    3600s;
+    #       proxy_buffering off;
+    #       proxy_cache off;
+    #   }
+    #
+    #   # Install-progress page from the permanent install-ui on
+    #   # nemoclaw:18791 (NOT :18789). Avoids a 404 from openclaw gateway
+    #   # once socat takes over :18790.
+    #   location @install_ui {
+    #       proxy_intercept_errors on;
+    #       error_page 500 502 503 504 = @gate_upstream_down;
+    #
+    #       proxy_pass http://nemoclaw:18791;
+    #       proxy_http_version 1.1;
+    #       proxy_set_header Host              $host;
+    #       proxy_set_header X-Forwarded-Host  $http_host;
+    #       proxy_set_header X-Real-IP         $remote_addr;
+    #       proxy_set_header X-Forwarded-For   $remote_addr;
+    #       proxy_set_header X-Forwarded-Proto $scheme;
+    #       proxy_set_header Upgrade           $http_upgrade;
+    #       proxy_set_header Connection        $connection_upgrade;
+    #       proxy_connect_timeout 5s;
+    #       proxy_send_timeout    30s;
+    #       proxy_read_timeout    30s;
+    #       proxy_buffering off;
+    #   }
+    #
+    #   # Shown when BOTH :18791 (probe responder) and terminal:80 fail.
+    #   # Typical causes: nemoclaw pod rebuilding, Olares terminal app
+    #   # not installed on this node. Auto-refresh 3s.
+    #   location @gate_upstream_down {
+    #       default_type text/html;
+    #       add_header Retry-After "3" always;
+    #       return 503 '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="3"><title>NemoClaw is starting</title><style>body{background:#0b0d10;color:#d6dee6;font:14px/1.5 -apple-system,Segoe UI,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.box{background:#14181d;border:1px solid #232a32;border-radius:12px;padding:22px 28px;max-width:520px}h1{margin:0 0 8px;font-size:18px}.sub{color:#8899a7;margin:0;font-size:13px}code{color:#8899a7;background:#0b0d10;padding:2px 6px;border-radius:4px}</style></head><body><div class="box"><h1>NemoClaw is starting</h1><p class="sub">The install-progress service is briefly unavailable while the pod finishes booting. This page will refresh automatically in 3 seconds. If it persists for more than a minute, run <code>kubectl logs deploy/nemoclaw -c nemoclaw --tail=200</code> and <code>kubectl logs deploy/nemoclawweuiingress --tail=100</code>.</p></div></body></html>';
+    #   }
+    # }
 
 ---
 apiVersion: apps/v1
@@ -177,8 +230,9 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
-            # Terminal entrance gate (Lua conditional proxy -> install-ui
-            # while nemoclaw is bringing up, -> terminal Service once ready).
+            # Terminal entrance gate (auth_request conditional proxy ->
+            # install-ui while nemoclaw is bringing up, -> beclab/terminal
+            # Service once cli is ready).
             - containerPort: 8081
               protocol: TCP
           env:
@@ -227,7 +281,7 @@ spec:
       port: 8080
       targetPort: 8080
     # Terminal entrance gate: Olares entrance `terminal` points here so
-    # the nginx Lua block can keep users on the install-progress page
+    # the auth_request block keeps users on the install-progress page
     # until openclaw gateway is up in the sandbox.
     - name: terminal-gate
       protocol: TCP

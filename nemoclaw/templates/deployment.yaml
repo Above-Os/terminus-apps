@@ -67,7 +67,7 @@ spec:
         # NOT shipped here — users install it via `openclaw config --section skills`
         # inside the sandbox so they control version + auth.
         - name: init-prefetch
-          image: "harveyff/nemoclaw-prefetch:2026.4.30-amd"
+          image: "beclab/harveyff-nemoclaw-prefetch:2026.4.30-olares-cli-amd"
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c"]
           args:
@@ -79,7 +79,7 @@ spec:
               fi
               # Single-binary executables: explicit chmod in case the source perms got lost
               # in transit (e.g. PVC formerly hosted by a CIFS / 9p filesystem that strips +x).
-              for f in busybox micro rg fd; do
+              for f in busybox micro rg fd olares-cli; do
                 if [ -e /workspace/.nemoclaw-prefetch/$f ]; then
                   chmod 755 /workspace/.nemoclaw-prefetch/$f 2>/dev/null || true
                 fi
@@ -98,6 +98,11 @@ spec:
                 _gov=""; [ -f /workspace/.nemoclaw-prefetch/go.version ] && \
                   _gov=" (go $(cat /workspace/.nemoclaw-prefetch/go.version 2>/dev/null))"
                 echo "[init-prefetch] go.tar.gz: $(du -h /workspace/.nemoclaw-prefetch/go.tar.gz | cut -f1)${_gov}"
+              fi
+              if [ -f /workspace/.nemoclaw-prefetch/olares-cli ]; then
+                _cliv=""; [ -f /workspace/.nemoclaw-prefetch/olares-cli.version ] && \
+                  _cliv=" (olares-cli $(cat /workspace/.nemoclaw-prefetch/olares-cli.version 2>/dev/null))"
+                echo "[init-prefetch] olares-cli: $(du -h /workspace/.nemoclaw-prefetch/olares-cli | cut -f1)${_cliv}"
               fi
           volumeMounts:
             - name: workspace-data
@@ -447,7 +452,7 @@ spec:
                   #      changes in a way existing pods must pick up.
                   local reason=""
                   local _got_ver=""
-                  local SKILLENV_EXPECTED_VERSION="2026-04-30-prefetched-go-v1"
+                  local SKILLENV_EXPECTED_VERSION="2026-04-30-olares-cli-v1"
                   if [ -f /workspace/.nemoclaw-skillenv-installed ]; then
                     if [ "${NEMOCLAW_SKILL_INSTALL_GCC:-1}" = "1" ] && \
                        ! docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
@@ -615,8 +620,31 @@ spec:
                   docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
                     /sandbox/.nemoclaw-reconcile-gog-shim.sh 2>&1 | grep -E "^\[gog-shim\]" || true
                 }
+                # Permanent install-progress HTTP server on pod :18791.
+                # Unlike :18790 (which chat-ui-bridge swaps out for a socat
+                # relay once the sandbox gateway is healthy), :18791 NEVER
+                # gets replaced. It is the sole responder for /_auth_probe
+                # used by ingress-weui's :8081 terminal-gate (nginx auth_request),
+                # so the gate always has a stable 200/403 answer -- no risk of
+                # a stray 404 from openclaw gateway after the socat swap, and
+                # no risk of connection-refused during the swap itself.
+                # Side effect: /_probe and the HTML install page are also
+                # reachable on :18791 (diagnostic only; not exposed to Olares
+                # ingress).
+                start_probe_responder_18791() {
+                  pkill -f "install-ui.py --port 18791" 2>/dev/null || true
+                  sleep 1
+                  if command -v python3 >/dev/null 2>&1 && [ -r /opt/nemoclaw/install-ui.py ]; then
+                    nohup python3 /opt/nemoclaw/install-ui.py --port 18791 --bind 0.0.0.0 \
+                      >>/tmp/nemoclaw-probe-ui.log 2>&1 &
+                    echo "[chat-ui-bridge] :18791 permanent probe-responder up (terminal-gate source of truth; see /tmp/nemoclaw-probe-ui.log)"
+                  else
+                    echo "[chat-ui-bridge] WARN: python3 or install-ui.py unavailable; :18791 probe-responder NOT started -- terminal-gate will show fallback page"
+                  fi
+                }
                 start_placeholder_18790
-                echo "[chat-ui-bridge] watching k3s pod ${NS}/${SBX} (Service :18789 -> pod :${CHAT_PUBLISH})"
+                start_probe_responder_18791
+                echo "[chat-ui-bridge] watching k3s pod ${NS}/${SBX} (Service :18789 -> pod :${CHAT_PUBLISH}; probe :18791 permanent)"
                 while true; do
                   if ! pod_running; then
                     sleep 5
@@ -1805,5 +1833,15 @@ spec:
     - name: oauth
       port: 18788
       targetPort: 18788
+    # Permanent install-ui probe responder (see start_probe_responder_18791
+    # in chat-ui-bridge). ingress-weui :8081 terminal-gate calls
+    # http://nemoclaw:18791/_auth_probe on every request to decide between
+    # showing install-ui or proxying to the beclab/terminal Service. This
+    # listener is NEVER swapped out, so the gate's /_auth_probe answer is
+    # always a clean 200 (ready) or 403 (still installing) -- never 404
+    # (socat forwarded to gateway) or connection-refused (swap in progress).
+    - name: probe
+      port: 18791
+      targetPort: 18791
   selector:
     io.kompose.service: nemoclaw

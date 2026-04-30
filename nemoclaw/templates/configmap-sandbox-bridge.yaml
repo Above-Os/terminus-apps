@@ -757,6 +757,35 @@ data:
       copy_to_sandbox "$PREF_DIR/fd" "$SBX_HOME/.local/bin/fd" 755
     fi
 
+    # Prefetched Olares CLI (single-binary ELF). Installed as root into
+    # /usr/local/bin/olares-cli so every user/uid in the sandbox can exec
+    # it directly without PATH juggling. Idempotent: sha256-compared with
+    # the sandbox copy, skipped when already current. copy_to_sandbox
+    # runs via `kubectl exec` (which executes as root inside the agent
+    # container), so writing to /usr/local/bin is allowed even though
+    # the rest of skill-env runs in the non-root sandbox user's scope.
+    if [ -f "$PREF_DIR/olares-cli" ]; then
+      _pref_cli_ver=""
+      [ -f "$PREF_DIR/olares-cli.version" ] && _pref_cli_ver=$(tr -d "\r\n" < "$PREF_DIR/olares-cli.version" 2>/dev/null || true)
+      _pref_cli_sha=$(sha256sum "$PREF_DIR/olares-cli" 2>/dev/null | awk "{print \$1}" | tr -d "\r\n")
+      _sbx_cli_sha=$(docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+        sh -c 'test -x /usr/local/bin/olares-cli && sha256sum /usr/local/bin/olares-cli 2>/dev/null | awk "{print \$1}" || echo ""' 2>/dev/null | tr -d "\r\n")
+      if [ -n "$_sbx_cli_sha" ] && [ -n "$_pref_cli_sha" ] && [ "$_sbx_cli_sha" = "$_pref_cli_sha" ]; then
+        echo "[skill-env] prefetched olares-cli${_pref_cli_ver:+ $_pref_cli_ver} already present at /usr/local/bin/olares-cli (sha256 match; skipping)"
+      else
+        echo "[skill-env] installing prefetched olares-cli${_pref_cli_ver:+ $_pref_cli_ver} -> /usr/local/bin/olares-cli (streaming via kubectl exec)"
+        if copy_to_sandbox "$PREF_DIR/olares-cli" /usr/local/bin/olares-cli 0755; then
+          docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+            sh -c 'chown root:root /usr/local/bin/olares-cli 2>/dev/null || true' \
+            >/dev/null 2>&1 || true
+          echo "[skill-env] prefetched olares-cli installed OK"
+        else
+          echo "[skill-env] WARN: copy of prefetched olares-cli into sandbox failed; \`olares-cli\` will not be available" >&2
+        fi
+      fi
+      unset _pref_cli_ver _pref_cli_sha _sbx_cli_sha
+    fi
+
     # Prefetched Go toolchain. The image ships /prefetch/go.tar.gz containing a
     # top-level `go/` dir (bin/, src/, pkg/, ...) = the standard go.dev layout.
     # Stream it directly into /sandbox/.local via one kubectl-exec + tar pipe so
@@ -1478,7 +1507,7 @@ data:
     # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
     # and invalidates the sentinel on mismatch.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-prefetched-go-v1 > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-olares-cli-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"
