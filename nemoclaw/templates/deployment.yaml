@@ -1580,26 +1580,13 @@ spec:
             # Default goproxy.cn (works in CN without MITM-related pain).
             - name: NEMOCLAW_GOPROXY
               value: "{{ .Values.olaresEnv.NEMOCLAW_GOPROXY | default "https://goproxy.cn,direct" }}"
-            # TLS verification policy for git / curl / wget / npm / pip
-            # inside the sandbox.
-            #
-            # "auto" (default) -- the sandbox already ships with a CA bundle
-            # at /etc/openshell-tls/ca-bundle.pem (baked into the openshell
-            # image; trusts the corporate/MITM root most operators front
-            # egress with). skill-env points SSL_CERT_FILE / CURL_CA_BUNDLE
-            # / GIT_SSL_CAINFO / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS
-            # at it, keeping TLS verification ON. Only when that file
-            # AND /etc/ssl/certs/ca-certificates.crt are both missing does
-            # skill-env fall back to disabling verification.
-            #
-            # "1" / "true"  -- force-disable TLS verification (skip cert
-            #                  check entirely). Use if the shipped bundle
-            #                  still fails on your network.
-            # "0" / "false" -- never fall back to insecure mode. brew/git
-            #                  will fail on MITM networks without a
-            #                  trusted bundle.
+            # Disable TLS verification for git / curl / wget / npm / pip inside the
+            # sandbox. Required on corporate / hotel networks that MITM ghcr.io and
+            # github.com with a self-signed root we have no way to trust
+            # ("curl: (60) SSL certificate problem: self-signed certificate").
+            # Set to "0" on networks that don't rewrite TLS.
             - name: NEMOCLAW_SKILL_INSECURE_TLS
-              value: "{{ .Values.olaresEnv.NEMOCLAW_SKILL_INSECURE_TLS | default "auto" }}"
+              value: "{{ .Values.olaresEnv.NEMOCLAW_SKILL_INSECURE_TLS | default "1" }}"
             - name: CHAT_UI_URL
               value: {{ include "nemoclaw.chatUiUrl" . | quote }}
             - name: OPENCLAW_EXTRA_ALLOWED_ORIGINS
