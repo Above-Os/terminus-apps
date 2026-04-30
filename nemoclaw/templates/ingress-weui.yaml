@@ -64,6 +64,84 @@ data:
       }
     }
 
+    # ---------------------------------------------------------------------
+    # Terminal entrance gate (Olares entrance `terminal` -> this :8081).
+    #
+    # The beclab/terminal Service can come up instantly (it has no dep on
+    # NemoClaw), so without this gate the user opens the Terminal entrance
+    # into a raw bash shell where `openclaw` / `nemoclaw` commands are
+    # still not installed (skill-env in progress). We want them to see
+    # the same install-progress HTML page that the webtui entrance shows,
+    # and only fall through to the real terminal once openclaw CLI is
+    # ready in the sandbox.
+    #
+    # Mechanism: a tiny OpenResty Lua block (access_by_lua_block) makes
+    # an internal subrequest to nemoclaw:18789/_probe on every incoming
+    # request. install-ui.py (chat-ui-bridge's :18790 placeholder) returns
+    # 503 while `.nemoclaw-cli-ready` is absent and 200 once it exists.
+    # After ready, install-ui is pkilled and socat takes over :18790 -->
+    # sandbox :18789; /_probe then reaches openclaw gateway and comes back
+    # non-503 (typically 404), which we also treat as "ready". 502 / 504 /
+    # connection-refused are treated conservatively as "still installing"
+    # so a flapping sandbox never leaves users stuck in a broken terminal.
+    # ---------------------------------------------------------------------
+    server {
+      listen 8081;
+      access_log /opt/bitnami/openresty/nginx/logs/access.log;
+      error_log /opt/bitnami/openresty/nginx/logs/error.log;
+
+      client_max_body_size 100m;
+
+      # Internal probe hop. Short timeouts so the gate does not add
+      # noticeable latency even if nemoclaw is in a weird state.
+      location = /__nemoclaw_probe {
+          internal;
+          proxy_pass http://nemoclaw:18789/_probe;
+          proxy_connect_timeout 2s;
+          proxy_send_timeout    3s;
+          proxy_read_timeout    3s;
+          # Do not retry a failed probe; we want the status code as-is.
+          proxy_next_upstream off;
+      }
+
+      location / {
+          # Default upstream is install-ui (nemoclaw:18789 -> pod :18790).
+          # access_by_lua_block may flip this to the real terminal Service
+          # after a successful readiness check.
+          set $gate_upstream "http://nemoclaw:18789";
+
+          access_by_lua_block {
+              local res = ngx.location.capture("/__nemoclaw_probe")
+              local s = res and res.status or 0
+              -- 503 = install-ui says not ready
+              -- 502 / 504 / 0 = probe hop failed (treat as installing)
+              -- anything else (200, 301, 302, 404, 405, ...) = past install-ui
+              if s ~= 0 and s ~= 502 and s ~= 503 and s ~= 504 then
+                  ngx.var.gate_upstream = "http://terminal:80"
+              end
+          }
+
+          proxy_pass $gate_upstream;
+          proxy_http_version 1.1;
+
+          proxy_set_header Host              $host;
+          proxy_set_header X-Forwarded-Host  $http_host;
+          proxy_set_header X-Real-IP         $remote_addr;
+          proxy_set_header X-Forwarded-For   $remote_addr;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          # WebSocket support for the real terminal (xterm.js <-> apiserver).
+          proxy_set_header Upgrade           $http_upgrade;
+          proxy_set_header Connection        $connection_upgrade;
+
+          proxy_connect_timeout 600s;
+          proxy_send_timeout    600s;
+          proxy_read_timeout    3600s;
+
+          proxy_buffering off;
+          proxy_cache off;
+      }
+    }
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -98,6 +176,10 @@ spec:
           image: "beclab/aboveos-bitnami-openresty:1.25.3-2"
           ports:
             - containerPort: 8080
+              protocol: TCP
+            # Terminal entrance gate (Lua conditional proxy -> install-ui
+            # while nemoclaw is bringing up, -> terminal Service once ready).
+            - containerPort: 8081
               protocol: TCP
           env:
             - name: OPENRESTY_CONF_FILE
@@ -144,3 +226,10 @@ spec:
       protocol: TCP
       port: 8080
       targetPort: 8080
+    # Terminal entrance gate: Olares entrance `terminal` points here so
+    # the nginx Lua block can keep users on the install-progress page
+    # until openclaw gateway is up in the sandbox.
+    - name: terminal-gate
+      protocol: TCP
+      port: 8081
+      targetPort: 8081

@@ -3,27 +3,35 @@
 # skill-env then installs each known artifact from /workspace/.nemoclaw-prefetch/ into
 # the sandbox. Current contents:
 #   busybox, micro, rg, fd          -> sandbox ~/.local/bin/<name>     (single-file static)
+#   go.tar.gz                       -> sandbox /sandbox/.local/go/     (full Go toolchain:
+#                                     `go`, `gofmt`, src/, pkg/ — linux/amd64 glibc build
+#                                     from go.dev, bypasses brew/ghcr.io entirely)
 #   homebrew.tar.gz                 -> sandbox /sandbox/.linuxbrew/Homebrew (Homebrew tree
 #                                     with portable-ruby pre-vendored)
 #
-# Why ship Homebrew prebuilt: baking a ready-to-use tree (~70MB compressed) skips both
-# the initial `git clone Homebrew/brew` and the `brew vendor-install ruby` OCI-blob
-# fetch on every cold boot. Source compilation of individual formulae still happens
-# at install time but only needs gcc, which skill-env apt-installs in-sandbox.
+# Why ship Homebrew + Go prebuilt: baking a ready-to-use tree skips both the initial
+# `git clone` / `brew vendor-install ruby` OCI-blob fetch and the go.dev HTTPS fetch on
+# every cold boot. Shipping Go this way also dodges corporate MITM proxies that break
+# `brew install go` / `brew install gogcli` with `curl: (60) SSL certificate problem`.
+# Source compilation of individual brew formulae still happens at install time but only
+# needs gcc, which skill-env apt-installs in-sandbox.
 #
 # gog (gogcli) is intentionally NOT shipped in this image. Users install it in-sandbox
 # via `openclaw config --section skills` -> brew install steipete/tap/gog so version,
 # auth flow, and OAuth callback host stay under their control.
 #
-# Build (linux/amd64, matches typical sandbox):
+# Build (linux/amd64 only; sandbox image is glibc amd64):
 #   docker build --platform linux/amd64 \
-#     -t beclab/harveyff-nemoclaw-prefetch:2026.4.27 \
+#     -t harveyff/nemoclaw-prefetch:2026.4.30-amd \
 #     -f docker/prefetch/Dockerfile docker/prefetch
 #
 # Push:
-#   docker push beclab/harveyff-nemoclaw-prefetch:2026.4.27
+#   docker push harveyff/nemoclaw-prefetch:2026.4.30-amd
 #
 # Image ref is pinned in templates/deployment.yaml (init-prefetch). Rebuild, push, bump tag there.
+# The `-amd` suffix is intentional — this image is linux/amd64 only (see OlaresManifest.yaml
+# supportArch). Adding arm64 would require publishing a matching -arm suffix and teaching
+# deployment.yaml to pick the right one per node arch.
 
 # Versions for the static-binary fetch stage
 ARG MICRO_VERSION=2.0.13
@@ -32,6 +40,12 @@ ARG RG_VERSION=14.1.1
 ARG RG_TRIPLE=x86_64-unknown-linux-musl
 ARG FD_VERSION=10.2.0
 ARG FD_TRIPLE=x86_64-unknown-linux-musl
+# Go toolchain. linux-amd64 = glibc build from go.dev (sandbox base is
+# debian-bookworm-slim / glibc). Bump GO_VERSION when you want a newer
+# toolchain; the image gets rebuilt and the tag bumped in deployment.yaml
+# init-prefetch.
+ARG GO_VERSION=1.23.4
+ARG GO_ARCH=linux-amd64
 
 # ----------------------------------------------------------------------------
 # Stage 1: static binaries (busybox/micro/rg/fd) — unchanged from prior image.
@@ -43,7 +57,9 @@ ARG RG_VERSION
 ARG RG_TRIPLE
 ARG FD_VERSION
 ARG FD_TRIPLE
-RUN apk add --no-cache curl ca-certificates tar \
+ARG GO_VERSION
+ARG GO_ARCH
+RUN apk add --no-cache curl ca-certificates tar gzip \
   && mkdir -p /prefetch \
   # busybox provides static `vi` (skill-env wraps it with a 2-line shim).
   && install -m0755 /bin/busybox /prefetch/busybox \
@@ -70,7 +86,21 @@ RUN apk add --no-cache curl ca-certificates tar \
   && fd=$(find /tmp -maxdepth 4 -type f -name fd 2>/dev/null | head -1) \
   && test -n "$fd" \
   && install -m0755 "$fd" /prefetch/fd \
-  && test -x /prefetch/fd
+  && test -x /prefetch/fd \
+  # Go toolchain. Download the official tarball from go.dev, verify the `go`
+  # binary is present, then repackage as /prefetch/go.tar.gz so skill-env can
+  # stream-install via `tar -xzf - -C /sandbox/.local` in one kubectl-exec hop.
+  # We keep the original layout (top-level `go/` dir containing bin/src/pkg),
+  # so `GOROOT=/sandbox/.local/go` and `PATH=$GOROOT/bin:...` just work.
+  && curl -fsSL -o /tmp/go.tgz \
+       "https://go.dev/dl/go${GO_VERSION}.${GO_ARCH}.tar.gz" \
+  && mkdir -p /prefetch/_go-stage \
+  && tar -xzf /tmp/go.tgz -C /prefetch/_go-stage \
+  && test -x /prefetch/_go-stage/go/bin/go \
+  && tar -C /prefetch/_go-stage -czf /prefetch/go.tar.gz go \
+  && rm -rf /prefetch/_go-stage /tmp/go.tgz \
+  && printf "%s\n" "${GO_VERSION}" > /prefetch/go.version \
+  && ls -la /prefetch/go.tar.gz /prefetch/go.version
 
 # ----------------------------------------------------------------------------
 # Stage 2: Homebrew tree with portable-ruby pre-vendored.

@@ -59,12 +59,15 @@ spec:
             runAsUser: 0
 
         # Prefetch image is pinned here (not values.yaml). Bump tag when rebuilding docker/prefetch.
-        # Ships static utilities (busybox for `vi`, micro, ripgrep, fd) and a baked Homebrew
-        # tree with portable-ruby pre-vendored — speeds up sandbox cold-start. gog (gogcli)
-        # is intentionally NOT shipped here — users install it via `openclaw config --section
-        # skills` inside the sandbox so they control version + auth.
+        # Ships static utilities (busybox for `vi`, micro, ripgrep, fd), a baked Homebrew
+        # tree with portable-ruby pre-vendored, and a prebuilt Go toolchain (go.tar.gz /
+        # go.version) — so `go` is available in the sandbox without relying on brew /
+        # ghcr.io / go.dev reachability at runtime. Speeds up cold-start and sidesteps
+        # corporate MITM proxies that break TLS to ghcr.io. gog (gogcli) is intentionally
+        # NOT shipped here — users install it via `openclaw config --section skills`
+        # inside the sandbox so they control version + auth.
         - name: init-prefetch
-          image: "beclab/harveyff-nemoclaw-prefetch:2026.4.27"
+          image: "beclab/harveyff-nemoclaw-prefetch:2026.4.30-amd"
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c"]
           args:
@@ -90,6 +93,11 @@ spec:
               ls -l /workspace/.nemoclaw-prefetch/ || true
               if [ -f /workspace/.nemoclaw-prefetch/homebrew.tar.gz ]; then
                 echo "[init-prefetch] homebrew.tar.gz: $(du -h /workspace/.nemoclaw-prefetch/homebrew.tar.gz | cut -f1)"
+              fi
+              if [ -f /workspace/.nemoclaw-prefetch/go.tar.gz ]; then
+                _gov=""; [ -f /workspace/.nemoclaw-prefetch/go.version ] && \
+                  _gov=" (go $(cat /workspace/.nemoclaw-prefetch/go.version 2>/dev/null))"
+                echo "[init-prefetch] go.tar.gz: $(du -h /workspace/.nemoclaw-prefetch/go.tar.gz | cut -f1)${_gov}"
               fi
           volumeMounts:
             - name: workspace-data
@@ -262,17 +270,38 @@ spec:
 
               (
                 start_placeholder_18790() {
-                  # Readiness/startup probes gate on this file — only written after the real
-                  # socat relay to sandbox :18789 is up (not the 503 placeholder).
+                  # Readiness/startup probes gate on .nemoclaw-cli-ready (see below).
+                  # .nemoclaw-chat-relay-ready is the WebUI-relay-up signal -- kept
+                  # as an observability touchpoint but no longer gates Pod Ready.
+                  rm -f /workspace/.nemoclaw-cli-ready 2>/dev/null || true
                   rm -f /workspace/.nemoclaw-chat-relay-ready 2>/dev/null || true
+                  # Kill BOTH the old socat placeholder (TCP-LISTEN) AND the newer
+                  # install-ui python server. start_relay_18790 uses the same
+                  # pattern pair, so moving between placeholder / relay / new
+                  # placeholder never leaves a stale listener on :${CHAT_PUBLISH}.
                   pkill -f "LISTEN:${CHAT_PUBLISH}" 2>/dev/null || true
+                  pkill -f "install-ui.py --port ${CHAT_PUBLISH}" 2>/dev/null || true
                   sleep 1
-                  printf '%s\n' '#!/bin/bash' 'read -t 25 -r _ || true' \
-                    "printf 'HTTP/1.1 503 Service Unavailable\\r\\nContent-Type: text/plain; charset=utf-8\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n'" \
-                    > /tmp/nemoclaw-chat-503.sh
-                  chmod +x /tmp/nemoclaw-chat-503.sh
-                  socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 EXEC:/tmp/nemoclaw-chat-503.sh 2>/dev/null &
-                  echo "[chat-ui-bridge] :${CHAT_PUBLISH} 503 — waiting for sandbox + openclaw gateway"
+                  # Python install-progress page (see configmap-install-ui.yaml).
+                  # Replaces the old socat 503-only placeholder so browsers land
+                  # on a real page during onboard [6/8] sandbox build and the
+                  # sandbox-ensure-gateway bring-up, with live log tail + per-
+                  # sentinel progress dots. Fails back to a printf 503 if
+                  # python3 or the script is unexpectedly missing (cannot rely
+                  # on a single code path here -- a broken :${CHAT_PUBLISH}
+                  # blocks Olares ingress health checks).
+                  if command -v python3 >/dev/null 2>&1 && [ -r /opt/nemoclaw/install-ui.py ]; then
+                    nohup python3 /opt/nemoclaw/install-ui.py --port "${CHAT_PUBLISH}" --bind 0.0.0.0 \
+                      >>/tmp/nemoclaw-install-ui.log 2>&1 &
+                    echo "[chat-ui-bridge] :${CHAT_PUBLISH} install-progress UI up (python install-ui.py; see /tmp/nemoclaw-install-ui.log)"
+                  else
+                    printf '%s\n' '#!/bin/bash' 'read -t 25 -r _ || true' \
+                      "printf 'HTTP/1.1 503 Service Unavailable\\r\\nContent-Type: text/plain; charset=utf-8\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n'" \
+                      > /tmp/nemoclaw-chat-503.sh
+                    chmod +x /tmp/nemoclaw-chat-503.sh
+                    socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 EXEC:/tmp/nemoclaw-chat-503.sh 2>/dev/null &
+                    echo "[chat-ui-bridge] :${CHAT_PUBLISH} 503 (fallback; python3 or install-ui.py missing)"
+                  fi
                 }
                 pod_running() {
                   docker exec "$CLUSTER_CTR" kubectl -n "$NS" get pod "$SBX" \
@@ -283,7 +312,12 @@ spec:
                     env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
                 }
                 start_relay_18790() {
+                  # Take :${CHAT_PUBLISH} away from both the old socat 503
+                  # placeholder AND the python install-ui page. Without the
+                  # python pkill, the SO_REUSEADDR bind below would race the
+                  # still-listening install-ui and socat would silently lose.
                   pkill -f "LISTEN:${CHAT_PUBLISH}" 2>/dev/null || true
+                  pkill -f "install-ui.py --port ${CHAT_PUBLISH}" 2>/dev/null || true
                   sleep 1
                   socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 \
                     "EXEC:/opt/nemoclaw/sandbox-tunnel.sh 18789,stderr" 2>&1 | \
@@ -413,7 +447,7 @@ spec:
                   #      changes in a way existing pods must pick up.
                   local reason=""
                   local _got_ver=""
-                  local SKILLENV_EXPECTED_VERSION="2026-04-30-bottle-domain-v1"
+                  local SKILLENV_EXPECTED_VERSION="2026-04-30-prefetched-go-v1"
                   if [ -f /workspace/.nemoclaw-skillenv-installed ]; then
                     if [ "${NEMOCLAW_SKILL_INSTALL_GCC:-1}" = "1" ] && \
                        ! docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
@@ -450,6 +484,7 @@ spec:
                     OPENCLAW_TRUSTED_PROXIES="${OPENCLAW_TRUSTED_PROXIES:-}" \
                     NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
                     NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
+                    NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
                     sh /opt/nemoclaw/sandbox-install-skill-env.sh >"$_bridge_sk" 2>&1; then
                     sed "s/^/[chat-ui-bridge:skill-env] /" "$_bridge_sk" 2>/dev/null || cat "$_bridge_sk"
                     mkdir -p /workspace 2>/dev/null || true
@@ -602,6 +637,17 @@ spec:
                     sleep 15
                     continue
                   fi
+                  fi
+                  # Mark Pod Ready the moment openclaw gateway in sandbox is healthy.
+                  # TUI (openclaw CLI via docker exec into sandbox) is usable NOW --
+                  # it does not depend on the chat-ui-bridge :18790 relay below.
+                  # WebUI brings up the relay in ~1-2s after this line and writes
+                  # .nemoclaw-chat-relay-ready separately; upstream health monitors
+                  # that care about WebUI specifically can gate on that file instead.
+                  if [ ! -f /workspace/.nemoclaw-cli-ready ]; then
+                    mkdir -p /workspace 2>/dev/null || true
+                    : > /workspace/.nemoclaw-cli-ready
+                    echo "[chat-ui-bridge] gateway healthy; Pod can now signal Ready (TUI usable)"
                   fi
                   start_relay_18790
                   start_relay_oauth
@@ -1234,6 +1280,7 @@ spec:
                       OPENCLAW_TRUSTED_PROXIES="${OPENCLAW_TRUSTED_PROXIES:-}" \
                       NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
                       NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
+                      NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
                       sh /opt/nemoclaw/sandbox-install-skill-env.sh >"$_cold_sk" 2>&1; then
                       sed "s/^/[cold-reset:sandbox-rc] /" "$_cold_sk" 2>/dev/null || cat "$_cold_sk"
                       mkdir -p /workspace 2>/dev/null || true
@@ -1496,6 +1543,10 @@ spec:
             # Set when the sandbox network MITM-intercepts ghcr.io TLS (curl 60 self-signed).
             - name: NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN
               value: "{{ .Values.olaresEnv.NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN | default "" }}"
+            # GOPROXY for the prefetched Go toolchain inside the sandbox.
+            # Default goproxy.cn (works in CN without MITM-related pain).
+            - name: NEMOCLAW_GOPROXY
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GOPROXY | default "https://goproxy.cn,direct" }}"
             - name: CHAT_UI_URL
               value: {{ include "nemoclaw.chatUiUrl" . | quote }}
             - name: OPENCLAW_EXTRA_ALLOWED_ORIGINS
@@ -1527,36 +1578,50 @@ spec:
             # the sandbox shell, so users can run:
             #   gog auth add ... --redirect-host "$NEMOCLAW_GOG_OAUTH_REDIRECT_HOST"
             # without typing the dynamic per-user Olares hostname.
-          # Readiness gates on /workspace/.nemoclaw-chat-relay-ready (written only after
-          # chat-ui-bridge: sandbox Running, brew/skill-env/policy pass, openclaw gateway
-          # healthy, and the real :18790 relay replaces the 503 placeholder). TCP on 18790
-          # alone is insufficient because the placeholder also listens immediately.
+          # Pod Ready gates on a TCP connect to :18790, which is the chat-ui
+          # Service backend port. chat-ui-bridge binds it almost immediately
+          # after the main container starts -- first with python install-ui.py
+          # (the install-progress HTML page, see configmap-install-ui.yaml)
+          # and later, once openclaw gateway reports healthy in the sandbox,
+          # with a socat relay into the sandbox (start_relay_18790). Either
+          # way, TCP :18790 is listening, so readiness stays stable across
+          # the placeholder -> relay swap.
           #
-          # failureThreshold * periodSeconds must exceed the WORST-case cold-start:
-          #   init-prefetch image pull (network-bound)
-          #   + sandbox chown /sandbox/.linuxbrew (cp -a of ~120MB brew tree)
-          #   + skill-env Stage CA + apt install gcc/g++ (~80MB apt download)
-          #   + brew install gogcli (ghcr.io bottle OR source build)
-          #   + first openclaw gateway run (reads openclaw.json, clamps, binds :18789)
-          # On MITM / slow-egress networks each stage can take several minutes,
-          # and a retry after bottle-domain misconfig costs another ~5min. 120min
-          # is the safe cap -- K8s kill-and-restart on startup timeout is
-          # destructive here because every restart loses sandbox apt state.
+          # Why NOT gate on /workspace/.nemoclaw-cli-ready: that sentinel is
+          # only written when openclaw gateway is healthy (~5-20 min on cold
+          # boot due to init-prefetch pull + sandbox onboard [6/8] docker
+          # build + skill-env). While the Pod is NotReady, Service nemoclaw
+          # has no endpoints, so ingress-weui's nginx proxy_pass returns 502
+          # to the browser -- meaning the user CANNOT see the very install
+          # progress page we built. Gating on :18790 listen instead flips
+          # Pod Ready as soon as install-ui.py comes up (usually <30s), so
+          # the browser lands on a real progress page within seconds of
+          # hitting the Olares entrance URL.
+          #
+          # TUI users don't care about Pod Ready -- they docker-exec into
+          # the sandbox directly, bypassing Service/ingress. Olares health
+          # monitors that specifically need gateway/WebUI ready can still
+          # check /workspace/.nemoclaw-cli-ready or .nemoclaw-chat-relay-ready
+          # via kubectl exec.
           startupProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - test -f /workspace/.nemoclaw-chat-relay-ready
-            periodSeconds: 30
+            tcpSocket:
+              port: 18790
+            # chat-ui-bridge starts install-ui.py within ~10-30s of main
+            # container startup (one pkill + sleep + python3 exec). Give a
+            # generous window so slow PVC mounts / initial fork+exec cost
+            # don't trip the probe, but keep failureThreshold bounded so
+            # kubelet surfaces a real hang instead of looping silently.
+            initialDelaySeconds: 15
+            periodSeconds: 10
             timeoutSeconds: 3
-            failureThreshold: 240
+            # 60 * 10s = 10min max wait for :18790 to start listening.
+            # If install-ui.py cannot bind within 10min something is
+            # fundamentally wrong (python3 missing, configmap unmounted,
+            # port stolen) and a container restart is the right action.
+            failureThreshold: 60
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - test -f /workspace/.nemoclaw-chat-relay-ready
+            tcpSocket:
+              port: 18790
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
@@ -1583,6 +1648,13 @@ spec:
             - name: patch-origins-script
               mountPath: /opt/nemoclaw/patch_inference_baseurl.py
               subPath: patch_inference_baseurl.py
+              readOnly: true
+            # Install-progress HTTP page served on :18790 while chat-ui-bridge
+            # is bringing up the sandbox + gateway. Replaces the socat 503
+            # placeholder; see configmap-install-ui.yaml for the rationale.
+            - name: install-ui-script
+              mountPath: /opt/nemoclaw/install-ui.py
+              subPath: install-ui.py
               readOnly: true
             - name: sandbox-bridge-scripts
               mountPath: /opt/nemoclaw/sandbox-ensure-gateway.sh
@@ -1674,6 +1746,13 @@ spec:
                 path: patch_origins.py
               - key: patch_inference_baseurl.py
                 path: patch_inference_baseurl.py
+        - name: install-ui-script
+          configMap:
+            name: nemoclaw-install-ui
+            defaultMode: 493
+            items:
+              - key: install-ui.py
+                path: install-ui.py
         - name: sandbox-bridge-scripts
           configMap:
             name: nemoclaw-sandbox-bridge
