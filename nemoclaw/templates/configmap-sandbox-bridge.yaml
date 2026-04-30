@@ -851,6 +851,37 @@ data:
           su - "$SBX_USER" -c "$1"
         fi
       }
+
+      # Pick best-available CA bundle for SSL_CERT_FILE / CURL_CA_BUNDLE /
+      # GIT_SSL_CAINFO / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS. The same
+      # path is reused by /etc/environment, /etc/profile.d, and the Stage
+      # INSECURE_TLS fallback below so they all agree on one source of truth.
+      #
+      # Priority:
+      #   1) /etc/openshell-tls/ca-bundle.pem  -- baked into the openshell
+      #      sandbox base image; already contains any corporate/MITM root
+      #      the operator network presents. Using this keeps TLS verify ON
+      #      and avoids the insecure fallback entirely.
+      #   2) /etc/ssl/certs/ca-certificates.crt  -- Debian default; present
+      #      after Stage CA runs apt-get install -y ca-certificates below.
+      # Empty string = no bundle available -> Stage INSECURE_TLS becomes
+      # the only way to get past MITM. Re-evaluated after Stage CA.
+      _pick_ca_bundle() {
+        if [ -r /etc/openshell-tls/ca-bundle.pem ]; then
+          printf "%s" /etc/openshell-tls/ca-bundle.pem
+        elif [ -r /etc/ssl/certs/ca-certificates.crt ]; then
+          printf "%s" /etc/ssl/certs/ca-certificates.crt
+        else
+          printf "%s" ""
+        fi
+      }
+      _CA_BUNDLE=$(_pick_ca_bundle)
+      if [ -n "$_CA_BUNDLE" ]; then
+        echo "[skill-env] CA bundle source: $_CA_BUNDLE"
+      else
+        echo "[skill-env] CA bundle source: NONE (will retry after Stage CA)"
+      fi
+
       for f in "$SBX_HOME/.bashrc" "$SBX_HOME/.profile" "$SBX_HOME/.bash_profile" \
                "$SBX_HOME/.local" "$SBX_HOME/.local/bin"; do
         [ -e "$f" ] && chown -R "$SBX_USER":"$SBX_USER" "$f" 2>/dev/null || true
@@ -927,16 +958,22 @@ data:
             echo "HOMEBREW_NO_ANALYTICS=1"
             echo "HOMEBREW_NO_ENV_FILTERING=1"
             # CA bundle for HTTPS git clones (brew tap steipete/tap) and any
-            # curl/wget inside the sandbox. Only emit when the file actually
-            # exists (ca-certificates installed in Stage CA above); setting a
-            # non-existent path would make git fail loudly with
+            # curl/wget inside the sandbox. $_CA_BUNDLE picked above
+            # (_pick_ca_bundle): openshell-tls bundle preferred, Debian
+            # default as fallback. Only emit when a path was found; a
+            # non-existent CAINFO value makes git fail loudly with
             # "unable to access ...: could not load CA file".
-            if [ -r /etc/ssl/certs/ca-certificates.crt ]; then
-              echo "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
-              echo "SSL_CERT_DIR=/etc/ssl/certs"
-              echo "GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt"
-              echo "CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
-              echo "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
+            if [ -n "$_CA_BUNDLE" ] && [ -r "$_CA_BUNDLE" ]; then
+              echo "SSL_CERT_FILE=$_CA_BUNDLE"
+              echo "GIT_SSL_CAINFO=$_CA_BUNDLE"
+              echo "CURL_CA_BUNDLE=$_CA_BUNDLE"
+              echo "REQUESTS_CA_BUNDLE=$_CA_BUNDLE"
+              echo "NODE_EXTRA_CA_CERTS=$_CA_BUNDLE"
+              # SSL_CERT_DIR: the traditional /etc/ssl/certs directory is
+              # always present on Debian (even when using openshell-tls as
+              # the bundle); keep it for tools that need the hashed-dir
+              # layout (some Ruby / Go TLS stacks).
+              [ -d /etc/ssl/certs ] && echo "SSL_CERT_DIR=/etc/ssl/certs"
             fi
             # Bottle / portable-ruby mirror override. Only emit when set --
             # empty domain triggers brew to use its builtin ghcr.io default.
@@ -988,21 +1025,31 @@ data:
           # subdirs like openclaw-998 inside TMPDIR. No-op once perms are already correct.
           echo "chmod 1777 \"\$HOMEBREW_TEMP\" \"\$HOMEBREW_CACHE\" \"\$HOMEBREW_LOGS\" 2>/dev/null || true"
           # CA bundle path (brew tap / brew update / gogcli self-update all
-          # use git+https). Emit only if the bundle exists so login shells
-          # do not inherit a bogus path.  NOTE: no apostrophes allowed in
-          # this block -- the whole sandbox-install-skill-env.sh body is
-          # wrapped in a kubectl-exec sh -c single-quoted string, and a
-          # stray `do not` -> `don\047t` would silently terminate that
-          # wrapper mid-script. Dash then reinterprets subsequent `echo
-          # "if [ -r ... ]; then"` text as real commands and finally
-          # explodes at the closing `}` with "Syntax error: } unexpected".
-          echo "if [ -r /etc/ssl/certs/ca-certificates.crt ]; then"
-          echo "  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
-          echo "  export SSL_CERT_DIR=/etc/ssl/certs"
-          echo "  export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt"
-          echo "  export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
-          echo "  export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
+          # use git+https). The login-shell script probes BOTH candidate
+          # paths at source-time so the bundle is reselected if the Debian
+          # default appears later (e.g. user apt-get install ca-certificates
+          # after skill-env first ran). openshell-tls takes priority since
+          # it already contains any corporate MITM root.
+          #
+          # NOTE: no apostrophes allowed in this block -- the whole
+          # sandbox-install-skill-env.sh body is wrapped in a kubectl-exec
+          # sh -c single-quoted string, and a stray `do not` -> `don\047t`
+          # would silently terminate that wrapper mid-script.
+          echo "_nm_ca=\"\""
+          echo "if [ -r /etc/openshell-tls/ca-bundle.pem ]; then"
+          echo "  _nm_ca=/etc/openshell-tls/ca-bundle.pem"
+          echo "elif [ -r /etc/ssl/certs/ca-certificates.crt ]; then"
+          echo "  _nm_ca=/etc/ssl/certs/ca-certificates.crt"
           echo "fi"
+          echo "if [ -n \"\$_nm_ca\" ]; then"
+          echo "  export SSL_CERT_FILE=\"\$_nm_ca\""
+          echo "  [ -d /etc/ssl/certs ] && export SSL_CERT_DIR=/etc/ssl/certs"
+          echo "  export GIT_SSL_CAINFO=\"\$_nm_ca\""
+          echo "  export CURL_CA_BUNDLE=\"\$_nm_ca\""
+          echo "  export REQUESTS_CA_BUNDLE=\"\$_nm_ca\""
+          echo "  export NODE_EXTRA_CA_CERTS=\"\$_nm_ca\""
+          echo "fi"
+          echo "unset _nm_ca"
           if [ -n "$HB_BOTTLE_DOMAIN" ]; then
             echo "export HOMEBREW_BOTTLE_DOMAIN=$HB_BOTTLE_DOMAIN"
             echo "export HOMEBREW_ARTIFACT_DOMAIN=$HB_BOTTLE_DOMAIN"
@@ -1166,6 +1213,129 @@ data:
           else
             _warn "Stage CA failed (see $_APT_LOG); brew tap git clone over HTTPS will fail with CAfile: none"
           fi
+        fi
+
+        # --- Stage INSECURE_TLS: disable TLS verification for git / curl / wget / npm / pip ---
+        # Rationale: in environments with a split-target TLS MITM proxy (a common
+        # corporate setup) curl/git may work for some HTTPS hosts (the ones the
+        # proxy does not touch, e.g. baidu.com) and fail for others
+        # (github.com / ghcr.io) with:
+        #   curl: (60) SSL certificate problem: self-signed certificate in certificate chain
+        #   git fatal: unable to access ...: server certificate verification failed. CAfile: none
+        # Because we cannot install the (unknown, per-site) interceptor root CA,
+        # the only reliable way to let `brew install gog` (and subsequent
+        # `brew tap steipete/tap` git clones) succeed is to skip verification
+        # inside the sandbox.
+        #
+        # Writes these *user* dotfiles (unconditionally trusted by each tool --
+        # CANNOT be stripped by Homebrew superenv):
+        #   /sandbox/.gitconfig  -> [http] sslVerify = false
+        #   /sandbox/.curlrc     -> insecure
+        #   /sandbox/.wgetrc     -> check_certificate = off
+        # And a /etc/profile.d drop-in exporting env-level equivalents:
+        #   GIT_SSL_NO_VERIFY=1   NODE_TLS_REJECT_UNAUTHORIZED=0
+        #   PYTHONHTTPSVERIFY=0   PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org pypi.python.org"
+        #
+        # Gate: NEMOCLAW_SKILL_INSECURE_TLS
+        #   auto (default) -> enable ONLY when no CA bundle was found above
+        #                     (_CA_BUNDLE empty). If openshell-tls or the
+        #                     Debian bundle is available, TLS stays verified.
+        #   1|true|yes|on   -> force enable even when a bundle is available
+        #                     (useful when the bundle turns out not to trust
+        #                     the MITM root presented on the egress path).
+        #   0|false|no|off  -> never enable; fail fast on MITM when no bundle
+        #                     is available. Recommended for clean networks.
+        #
+        # Re-select $_CA_BUNDLE here so Stage CA's apt-get install of
+        # ca-certificates (which may have run after the initial pick at
+        # the top of the script) is taken into account.
+        _CA_BUNDLE=$(_pick_ca_bundle)
+        _ITLS_MODE="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}"
+        case "$_ITLS_MODE" in
+          0|false|False|FALSE|no|No|NO|off|Off|OFF) _ITLS_ON=0 ;;
+          1|true|True|TRUE|yes|Yes|YES|on|On|ON)    _ITLS_ON=1 ;;
+          auto|Auto|AUTO|""|*)
+            if [ -n "$_CA_BUNDLE" ]; then _ITLS_ON=0; else _ITLS_ON=1; fi
+            ;;
+        esac
+        if [ "$_ITLS_ON" = "1" ]; then
+          _log "Stage INSECURE_TLS: disabling TLS verification for git/curl/wget/npm/pip inside sandbox (mode=$_ITLS_MODE, CA bundle=${_CA_BUNDLE:-<none>})"
+          # Dotfiles. All writes overwrite any prior managed copy so chart
+          # upgrades that change content always win.
+          {
+            echo "# nemoclaw-skill-env (managed; do not edit)"
+            echo "[http]"
+            echo "        sslVerify = false"
+            echo "[http \"https://github.com/\"]"
+            echo "        sslVerify = false"
+            echo "[http \"https://ghcr.io/\"]"
+            echo "        sslVerify = false"
+          } > /sandbox/.gitconfig 2>/dev/null || true
+          chown "$SBX_USER:$SBX_USER" /sandbox/.gitconfig 2>/dev/null || true
+          chmod 0644 /sandbox/.gitconfig 2>/dev/null || true
+
+          {
+            echo "# nemoclaw-skill-env (managed; do not edit)"
+            echo "insecure"
+          } > /sandbox/.curlrc 2>/dev/null || true
+          chown "$SBX_USER:$SBX_USER" /sandbox/.curlrc 2>/dev/null || true
+          chmod 0644 /sandbox/.curlrc 2>/dev/null || true
+
+          {
+            echo "# nemoclaw-skill-env (managed; do not edit)"
+            echo "check_certificate = off"
+          } > /sandbox/.wgetrc 2>/dev/null || true
+          chown "$SBX_USER:$SBX_USER" /sandbox/.wgetrc 2>/dev/null || true
+          chmod 0644 /sandbox/.wgetrc 2>/dev/null || true
+
+          # Also point root (/root) at the same files; brew may re-exec itself
+          # across users when HOMEBREW_PREFIX is root-owned briefly on first run.
+          for _root_home in /root; do
+            [ -d "$_root_home" ] || continue
+            cp -f /sandbox/.gitconfig "$_root_home/.gitconfig" 2>/dev/null || true
+            cp -f /sandbox/.curlrc    "$_root_home/.curlrc"    2>/dev/null || true
+            cp -f /sandbox/.wgetrc    "$_root_home/.wgetrc"    2>/dev/null || true
+          done
+
+          # profile.d drop-in for env-level toggles (login shells + PAM).
+          mkdir -p /etc/profile.d 2>/dev/null || true
+          if [ -w /etc/profile.d ]; then
+            PROFD_ITLS=/etc/profile.d/nemoclaw-insecure-tls.sh
+            {
+              echo "# nemoclaw-skill-env (managed; do not edit)"
+              echo "# Disables TLS verification for tools that do not read ~/.gitconfig"
+              echo "# or ~/.curlrc (npm / node / pip / python requests). See the"
+              echo "# Stage INSECURE_TLS block in configmap-sandbox-bridge.yaml."
+              echo "export GIT_SSL_NO_VERIFY=1"
+              echo "export NODE_TLS_REJECT_UNAUTHORIZED=0"
+              echo "export PYTHONHTTPSVERIFY=0"
+              echo "export PIP_TRUSTED_HOST=\"pypi.org files.pythonhosted.org pypi.python.org\""
+              echo "export HOMEBREW_CURLRC=1"
+            } > "$PROFD_ITLS" 2>/dev/null || true
+            chmod 0644 "$PROFD_ITLS" 2>/dev/null || true
+          fi
+
+          # Append to /etc/environment so non-login sessions (openclaw skill
+          # runner, PAM-less kubectl exec) also see these.
+          if [ -w "${ETCENV:-/etc/environment}" ] || [ -w /etc ] 2>/dev/null; then
+            ETCENV_I=${ETCENV:-/etc/environment}
+            [ -f "$ETCENV_I" ] || touch "$ETCENV_I" 2>/dev/null || true
+            if [ -w "$ETCENV_I" ]; then
+              sed -i "/nemoclaw-insecure-tls/,/end-nemoclaw-insecure-tls/d" "$ETCENV_I" 2>/dev/null || true
+              {
+                echo "# nemoclaw-insecure-tls (managed; do not edit)"
+                echo "GIT_SSL_NO_VERIFY=1"
+                echo "NODE_TLS_REJECT_UNAUTHORIZED=0"
+                echo "PYTHONHTTPSVERIFY=0"
+                echo "PIP_TRUSTED_HOST=pypi.org files.pythonhosted.org pypi.python.org"
+                echo "HOMEBREW_CURLRC=1"
+                echo "# end-nemoclaw-insecure-tls"
+              } >> "$ETCENV_I"
+            fi
+          fi
+          _log "Stage INSECURE_TLS OK: dotfiles + profile.d + /etc/environment updated"
+        else
+          _log "Stage INSECURE_TLS skipped (mode=$_ITLS_MODE, CA bundle=${_CA_BUNDLE:-<none>}); keeping TLS verification ON"
         fi
 
         # --- Stage 0: minimal gcc + g++ (fastest, least likely to hit broken Recommends) ---
@@ -1507,7 +1677,7 @@ data:
     # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
     # and invalidates the sentinel on mismatch.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-olares-cli-v1 > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-openshell-tls-ca-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"

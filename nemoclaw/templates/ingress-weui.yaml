@@ -75,22 +75,17 @@ data:
     # =====================================================================
     # Terminal entrance (Olares entrance `terminal` -> this :8081).
     #
-    # Currently SIMPLE pass-through to the beclab/terminal Service. The
-    # install-progress gate (auth_request -> nemoclaw:18791/_auth_probe)
-    # is temporarily disabled — see the large commented block below for
-    # the full gated implementation, and re-enable it by:
-    #   1. uncommenting the gated server { ... } block below
-    #   2. deleting (or commenting out) this simple server block
-    #   3. ensuring the permanent install-ui probe responder on
-    #      nemoclaw:18791 is running (chat-ui-bridge's
-    #      start_probe_responder_18791 — still live in deployment.yaml)
-    #   4. `kubectl rollout restart deployment/nemoclaw` and
-    #      `kubectl rollout restart deployment/nemoclawweuiingress`
-    #
-    # The disabled gate was hitting HTTP 502 because the probe listener
-    # on pod :18791 was not up (pod had not rolled over to the new
-    # chat-ui-bridge script). Re-enable after confirming :18791 is
-    # listening in the nemoclaw pod.
+    # Simple pass-through to the beclab/terminal Service. The "don't let
+    # users open this until nemoclaw is ready" gate is NOT done at the
+    # nginx layer any more -- it lives at the Pod level via the
+    # readinessProbe on this Deployment below, which exec-curls
+    # nemoclaw:18789 every 15s. When nemoclaw has no Service endpoints
+    # (its own readinessProbe failing on /workspace/.nemoclaw-cli-ready),
+    # the curl fails -> this ingress Pod goes NotReady -> the
+    # `nemoclawweuiingress` Service endpoints disappear -> BOTH :8080
+    # (WebUI) and :8081 (terminal) become unreachable from outside.
+    # Olares therefore sees the whole app as "not yet ready" instead of
+    # routing to an ingress that serves 502s.
     # =====================================================================
     server {
       listen 8081;
@@ -114,86 +109,6 @@ data:
           proxy_cache off;
       }
     }
-
-    # ---------------------------------------------------------------------
-    # DISABLED: install-progress gate for the terminal entrance.
-    # Keep in sync (install-ui.py /_auth_probe, Service port probe=18791,
-    # deployment.yaml start_probe_responder_18791). When re-enabling,
-    # copy this block out of the comment and delete the simple server
-    # above.
-    # ---------------------------------------------------------------------
-    # server {
-    #   listen 8081;
-    #   client_max_body_size 100m;
-    #
-    #   # auth_request subrequest against the permanent install-ui probe
-    #   # responder on nemoclaw:18791. 200 = cli ready, 403 = installing,
-    #   # anything else = probe hop broken (pod booting / not listening).
-    #   location = /__auth_probe {
-    #       internal;
-    #       proxy_pass http://nemoclaw:18791/_auth_probe;
-    #       proxy_pass_request_body off;
-    #       proxy_set_header Content-Length "";
-    #       proxy_set_header Host             $host;
-    #       proxy_connect_timeout 2s;
-    #       proxy_send_timeout    3s;
-    #       proxy_read_timeout    3s;
-    #       proxy_next_upstream off;
-    #   }
-    #
-    #   location / {
-    #       auth_request /__auth_probe;
-    #       # 401/403   = install-ui says "not ready yet"
-    #       # 500/502/504 = probe itself is broken (pod booting)
-    #       error_page 401 403 500 502 504 = @install_ui;
-    #
-    #       proxy_pass http://terminal:80;
-    #       proxy_http_version 1.1;
-    #       proxy_set_header Host              $host;
-    #       proxy_set_header X-Forwarded-Host  $http_host;
-    #       proxy_set_header X-Real-IP         $remote_addr;
-    #       proxy_set_header X-Forwarded-For   $remote_addr;
-    #       proxy_set_header X-Forwarded-Proto $scheme;
-    #       proxy_set_header Upgrade           $http_upgrade;
-    #       proxy_set_header Connection        $connection_upgrade;
-    #       proxy_connect_timeout 600s;
-    #       proxy_send_timeout    600s;
-    #       proxy_read_timeout    3600s;
-    #       proxy_buffering off;
-    #       proxy_cache off;
-    #   }
-    #
-    #   # Install-progress page from the permanent install-ui on
-    #   # nemoclaw:18791 (NOT :18789). Avoids a 404 from openclaw gateway
-    #   # once socat takes over :18790.
-    #   location @install_ui {
-    #       proxy_intercept_errors on;
-    #       error_page 500 502 503 504 = @gate_upstream_down;
-    #
-    #       proxy_pass http://nemoclaw:18791;
-    #       proxy_http_version 1.1;
-    #       proxy_set_header Host              $host;
-    #       proxy_set_header X-Forwarded-Host  $http_host;
-    #       proxy_set_header X-Real-IP         $remote_addr;
-    #       proxy_set_header X-Forwarded-For   $remote_addr;
-    #       proxy_set_header X-Forwarded-Proto $scheme;
-    #       proxy_set_header Upgrade           $http_upgrade;
-    #       proxy_set_header Connection        $connection_upgrade;
-    #       proxy_connect_timeout 5s;
-    #       proxy_send_timeout    30s;
-    #       proxy_read_timeout    30s;
-    #       proxy_buffering off;
-    #   }
-    #
-    #   # Shown when BOTH :18791 (probe responder) and terminal:80 fail.
-    #   # Typical causes: nemoclaw pod rebuilding, Olares terminal app
-    #   # not installed on this node. Auto-refresh 3s.
-    #   location @gate_upstream_down {
-    #       default_type text/html;
-    #       add_header Retry-After "3" always;
-    #       return 503 '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="3"><title>NemoClaw is starting</title><style>body{background:#0b0d10;color:#d6dee6;font:14px/1.5 -apple-system,Segoe UI,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.box{background:#14181d;border:1px solid #232a32;border-radius:12px;padding:22px 28px;max-width:520px}h1{margin:0 0 8px;font-size:18px}.sub{color:#8899a7;margin:0;font-size:13px}code{color:#8899a7;background:#0b0d10;padding:2px 6px;border-radius:4px}</style></head><body><div class="box"><h1>NemoClaw is starting</h1><p class="sub">The install-progress service is briefly unavailable while the pod finishes booting. This page will refresh automatically in 3 seconds. If it persists for more than a minute, run <code>kubectl logs deploy/nemoclaw -c nemoclaw --tail=200</code> and <code>kubectl logs deploy/nemoclawweuiingress --tail=100</code>.</p></div></body></html>';
-    #   }
-    # }
 
 ---
 apiVersion: apps/v1
@@ -251,6 +166,32 @@ spec:
             timeoutSeconds: 5
             successThreshold: 1
             failureThreshold: 6
+          # Pod-level gate: only become Ready once `nemoclaw` Service has
+          # endpoints AND openclaw gateway answers. `nemoclaw`'s own
+          # readinessProbe gates its Service endpoints on the sentinel
+          # /workspace/.nemoclaw-cli-ready, so when nemoclaw is NotReady
+          # the `nemoclaw` Service has zero endpoints and this curl
+          # connection fails (connect timeout). Probe failing flips THIS
+          # ingress Pod NotReady, which removes both the :8080 (WebUI)
+          # and :8081 (terminal) endpoints from the `nemoclawweuiingress`
+          # Service -- Olares treats the entrances as "not yet ready"
+          # instead of seeing nginx return 502.
+          #
+          # No `-f`: ANY HTTP response from `nemoclaw:18789` is accepted
+          # as "upstream reachable" (openclaw gateway may answer 2xx or
+          # redirect for `/`; we only care about TCP+HTTP liveness). A
+          # short --connect-timeout makes "no endpoints" fail fast.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "curl -sS --connect-timeout 2 --max-time 3 -o /dev/null http://nemoclaw:18789/"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 1
           resources:
             limits:
               cpu: 500m

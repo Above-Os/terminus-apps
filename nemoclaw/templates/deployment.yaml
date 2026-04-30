@@ -496,6 +496,7 @@ spec:
                     NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
                     NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
                     NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
+                    NEMOCLAW_SKILL_INSECURE_TLS="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}" \
                     sh /opt/nemoclaw/sandbox-install-skill-env.sh >"$_bridge_sk" 2>&1; then
                     sed "s/^/[chat-ui-bridge:skill-env] /" "$_bridge_sk" 2>/dev/null || cat "$_bridge_sk"
                     mkdir -p /workspace 2>/dev/null || true
@@ -1312,6 +1313,7 @@ spec:
                       NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
                       NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
                       NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
+                      NEMOCLAW_SKILL_INSECURE_TLS="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}" \
                       sh /opt/nemoclaw/sandbox-install-skill-env.sh >"$_cold_sk" 2>&1; then
                       sed "s/^/[cold-reset:sandbox-rc] /" "$_cold_sk" 2>/dev/null || cat "$_cold_sk"
                       mkdir -p /workspace 2>/dev/null || true
@@ -1578,6 +1580,26 @@ spec:
             # Default goproxy.cn (works in CN without MITM-related pain).
             - name: NEMOCLAW_GOPROXY
               value: "{{ .Values.olaresEnv.NEMOCLAW_GOPROXY | default "https://goproxy.cn,direct" }}"
+            # TLS verification policy for git / curl / wget / npm / pip
+            # inside the sandbox.
+            #
+            # "auto" (default) -- the sandbox already ships with a CA bundle
+            # at /etc/openshell-tls/ca-bundle.pem (baked into the openshell
+            # image; trusts the corporate/MITM root most operators front
+            # egress with). skill-env points SSL_CERT_FILE / CURL_CA_BUNDLE
+            # / GIT_SSL_CAINFO / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS
+            # at it, keeping TLS verification ON. Only when that file
+            # AND /etc/ssl/certs/ca-certificates.crt are both missing does
+            # skill-env fall back to disabling verification.
+            #
+            # "1" / "true"  -- force-disable TLS verification (skip cert
+            #                  check entirely). Use if the shipped bundle
+            #                  still fails on your network.
+            # "0" / "false" -- never fall back to insecure mode. brew/git
+            #                  will fail on MITM networks without a
+            #                  trusted bundle.
+            - name: NEMOCLAW_SKILL_INSECURE_TLS
+              value: "{{ .Values.olaresEnv.NEMOCLAW_SKILL_INSECURE_TLS | default "auto" }}"
             - name: CHAT_UI_URL
               value: {{ include "nemoclaw.chatUiUrl" . | quote }}
             - name: OPENCLAW_EXTRA_ALLOWED_ORIGINS
@@ -1609,46 +1631,56 @@ spec:
             # the sandbox shell, so users can run:
             #   gog auth add ... --redirect-host "$NEMOCLAW_GOG_OAUTH_REDIRECT_HOST"
             # without typing the dynamic per-user Olares hostname.
-          # Pod Ready gates on /workspace/.nemoclaw-cli-ready — the sentinel
-          # chat-ui-bridge writes the moment `openclaw gateway health` in the
-          # sandbox reports OK (sandbox image build + skill-env + homebrew +
-          # olares-cli staging + gateway bring-up all complete). This means
-          # Service `nemoclaw` has NO endpoints during the entire install
-          # window; the ingress-weui nginx fronting :8080/:8081 will return
-          # 502 to the browser until the sandbox is ready.
+          # readinessProbe gates Service endpoints on
+          # /workspace/.nemoclaw-cli-ready -- the sentinel chat-ui-bridge
+          # writes once `openclaw gateway health` in the sandbox reports OK
+          # (sandbox image build + skill-env + homebrew + olares-cli staging
+          # + gateway bring-up all complete). So Service `nemoclaw` has NO
+          # endpoints during the install window; ingress-weui :8080 (WebUI)
+          # returns 502 to the browser until the sandbox is actually ready
+          # -- users cannot accidentally open a half-baked UI that would
+          # then error out on the first chat.
           #
-          # Trade-off chosen by the user: prefer "pod is only Ready when fully
-          # usable" over "pod flips Ready in 30s so the install-progress page
-          # is browsable". The install-progress page (install-ui.py) is
-          # currently disabled anyway; re-enabling it in the future means
-          # reverting this probe to `tcpSocket: 18790` (see git history of
-          # this block for the previous configuration).
+          # :8081 (CLI terminal) is pass-through to the terminal Service
+          # and does NOT depend on this probe, so it stays reachable the
+          # whole time.
           #
-          # Cold-boot budget: init-prefetch pull (~3-5min), sandbox onboard
-          # [6/8] docker build (~5-15min), skill-env brew/gcc/olares-cli
-          # (~3-5min), gateway start (~1-2min). Upper bound ~30min.
-          # startupProbe window = periodSeconds * failureThreshold = 30s * 80
-          # = 40min -- leaves a ~10min margin for first-time OCI pulls over
-          # a slow network.
-          startupProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - test -f /workspace/.nemoclaw-cli-ready
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 80
+          # startupProbe is intentionally DISABLED. With it enabled, kubelet
+          # logs a "Startup probe failed" Warning event every periodSeconds
+          # and -- once failureThreshold is exhausted -- will RESTART the
+          # container, which on a slow network (first-time OCI pull inside
+          # DinD) would kill the install mid-flight and trigger a retry
+          # loop. We trade off "noisy Unhealthy event spam" for "install
+          # completes once, reliably". See git history for the previous
+          # configuration if you want to bring it back.
           readinessProbe:
             exec:
               command:
                 - sh
                 - -c
                 - test -f /workspace/.nemoclaw-cli-ready
-            periodSeconds: 15
+            # Give the very first probe a generous initial delay so we do
+            # not flood the event log with "Readiness probe failed" for the
+            # first ~5 min of cold-boot (when we know the sentinel cannot
+            # possibly exist yet).
+            initialDelaySeconds: 300
+            periodSeconds: 30
             timeoutSeconds: 5
-            failureThreshold: 3
+            # No success/fail threshold other than 1 — either the sentinel
+            # file exists or it does not; there is nothing flappy about
+            # `test -f`.
+            successThreshold: 1
+            failureThreshold: 1
+          # startupProbe:
+          #   exec:
+          #     command:
+          #       - sh
+          #       - -c
+          #       - test -f /workspace/.nemoclaw-cli-ready
+          #   initialDelaySeconds: 60
+          #   periodSeconds: 30
+          #   timeoutSeconds: 5
+          #   failureThreshold: 80
           resources:
             limits:
               cpu: "4"
