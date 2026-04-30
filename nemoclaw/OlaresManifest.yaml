@@ -6,14 +6,21 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.0.2
+  version: 1.0.3
   categories:
   - Developer Tools
   - Productivity_v112
 entrances:
+# The Terminal entrance goes through the nemoclawweuiingress nginx gate on
+# :8081 (NOT directly to the terminal Service). The gate runs a tiny Lua
+# readiness probe against nemoclaw:18789/_probe; while `.nemoclaw-cli-ready`
+# is absent it proxies to install-ui.py (install-progress HTML), and only
+# falls through to the real terminal Service once openclaw CLI is usable
+# inside the sandbox. This prevents users from landing on a bash shell
+# where `openclaw` / `nemoclaw` are still not installed.
 - name: terminal
-  port: 80
-  host: terminal
+  port: 8081
+  host: nemoclawweuiingress
   title: NemoClaw CLI
   icon: https://app.cdn.olares.com/appstore/nemoclaw/icon.png
   openMethod: window
@@ -241,7 +248,14 @@ envs:
     applyOnChange: true
     editable: true
     default: ""
-    description: "Optional. Override brew's bottle + portable-ruby download origin. Default is https://ghcr.io (Homebrew upstream). Set to a mirror if your network MITM-intercepts ghcr.io or returns a self-signed cert chain — symptom: `brew install gog` fails with `curl: (60) SSL certificate problem: self-signed certificate in certificate chain` while downloading portable-ruby blobs. Typical values: https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles, https://mirrors.ustc.edu.cn/homebrew-bottles, https://mirrors.aliyun.com/homebrew/homebrew-bottles. Propagated as HOMEBREW_BOTTLE_DOMAIN + HOMEBREW_ARTIFACT_DOMAIN + HOMEBREW_API_DOMAIN into /etc/environment and /etc/profile.d/nemoclaw-brew-temp.sh inside the sandbox."
+    description: "Optional. Override brew's bottle + portable-ruby download origin. Default is https://ghcr.io (Homebrew upstream). NOTE: Homebrew 4.x fetches portable-ruby via an OCI blob path (/v2/homebrew/portable-ruby/.../blobs/sha256:*), so classic China mirrors (TUNA/USTC/Aliyun) that only mirror the /homebrew-bottles tarball layout will return 404 for portable-ruby. Only useful if you have a GHCR-compatible mirror. Propagated as HOMEBREW_BOTTLE_DOMAIN + HOMEBREW_ARTIFACT_DOMAIN + HOMEBREW_API_DOMAIN into /etc/environment and /etc/profile.d/nemoclaw-brew-temp.sh inside the sandbox."
+  - envName: NEMOCLAW_GOPROXY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "https://goproxy.cn,direct"
+    description: "Value for GOPROXY inside the sandbox. Default is goproxy.cn (community CDN in China) with direct fallback. Set to `direct` to disable the proxy, or to an internal Athens server URL for air-gapped / corporate setups. GOSUMDB is hard-wired to `off` because sum.golang.org is frequently blocked and a stale sumdb failure would otherwise wedge every `go build`. Used by the prefetched Go toolchain installed at /sandbox/.local/go during skill-env."
   - envName: ALLOW_EXTERNAL_DIR_ACCESS
     type: bool
     required: false

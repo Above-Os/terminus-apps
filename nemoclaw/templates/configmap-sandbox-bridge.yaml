@@ -410,7 +410,7 @@ data:
     # HOMEBREW_* knobs + HOMEBREW_CC/HOMEBREW_CXX/CC/CXX are written to /etc/environment
     # and /etc/profile.d/nemoclaw-*.sh by sandbox-install-skill-env.sh, so this file
     # only needs to carry the per-user PATH prepend + gog keyring bits.
-    export PATH="/sandbox/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin:$PATH"
+    export PATH="/sandbox/.local/bin:/sandbox/.local/go/bin:/sandbox/go/bin:$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin:$PATH"
     export GOG_KEYRING_BACKEND=file
     export GOG_KEYRING_PASSWORD='__GOG_KEYRING_PASSWORD__'
     # end-nemoclaw-skill-env
@@ -757,6 +757,37 @@ data:
       copy_to_sandbox "$PREF_DIR/fd" "$SBX_HOME/.local/bin/fd" 755
     fi
 
+    # Prefetched Go toolchain. The image ships /prefetch/go.tar.gz containing a
+    # top-level `go/` dir (bin/, src/, pkg/, ...) = the standard go.dev layout.
+    # Stream it directly into /sandbox/.local via one kubectl-exec + tar pipe so
+    # we avoid staging ~150MB on disk twice. Skipped if the sandbox already has
+    # a matching (or newer) /sandbox/.local/go/bin/go.
+    if [ -f "$PREF_DIR/go.tar.gz" ]; then
+      _pref_go_ver=""
+      [ -f "$PREF_DIR/go.version" ] && _pref_go_ver=$(tr -d "\r\n" < "$PREF_DIR/go.version" 2>/dev/null || true)
+      _sbx_go_ver=$(docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+        sh -c 'test -x /sandbox/.local/go/bin/go && /sandbox/.local/go/bin/go version 2>/dev/null | awk "{print \$3}" | sed "s/^go//" || echo ""' 2>/dev/null | tr -d "\r\n")
+      if [ -n "$_sbx_go_ver" ] && [ -n "$_pref_go_ver" ] && [ "$_sbx_go_ver" = "$_pref_go_ver" ]; then
+        echo "[skill-env] prefetched go ${_pref_go_ver} already present at /sandbox/.local/go (skipping reinstall)"
+      else
+        echo "[skill-env] installing prefetched go${_pref_go_ver:+ $_pref_go_ver} -> /sandbox/.local/go (streaming tarball via kubectl exec)"
+        # mkdir-and-extract in one remote sh so partial prior installs get
+        # cleared before the new tree lands. Extraction lives under
+        # /sandbox/.local so the sandbox user (not root) owns the tree.
+        if docker exec -i "$CLUSTER_CTR" kubectl -n "$NS" exec -i "$SBX" -c agent -- \
+             sh -c 'mkdir -p /sandbox/.local && rm -rf /sandbox/.local/go && tar -xzf - -C /sandbox/.local && test -x /sandbox/.local/go/bin/go' \
+             < "$PREF_DIR/go.tar.gz"; then
+          docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+            sh -c 'chown -R "'"$SBX_USER"'":"'"$SBX_USER"'" /sandbox/.local/go 2>/dev/null || true; mkdir -p /sandbox/go/bin /sandbox/go/src /sandbox/go/pkg 2>/dev/null; chown -R "'"$SBX_USER"'":"'"$SBX_USER"'" /sandbox/go 2>/dev/null || true' \
+            >/dev/null 2>&1 || true
+          echo "[skill-env] prefetched go installed OK"
+        else
+          echo "[skill-env] WARN: tar-extract of prefetched go.tar.gz into sandbox failed; `go` will not be available" >&2
+        fi
+      fi
+      unset _pref_go_ver _sbx_go_ver
+    fi
+
     # Append the rendered bash_profile block (preserves any previous user edits
     # outside the managed markers, since we purged only the managed block above).
     docker exec -i "$CLUSTER_CTR" kubectl -n "$NS" exec -i "$SBX" -c agent -- \
@@ -780,6 +811,7 @@ data:
       GKP="'"$GOG_KEYRING_PASSWORD"'"
       GOAUTH_REDIRECT_HOST="'"$GOAUTH_REDIRECT_HOST"'"
       HB_BOTTLE_DOMAIN="'"${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}"'"
+      GOPROXY_VAL="'"${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}"'"
       # kubectl exec runs as root here. Prefer runuser over su for brew/gcc: su can
       # prompt for a password when PAM is strict, which fails non-interactively and
       # leaves gcc uninstalled while the rest of skill-env appears to succeed.
@@ -884,6 +916,19 @@ data:
               echo "HOMEBREW_ARTIFACT_DOMAIN=$HB_BOTTLE_DOMAIN"
               echo "HOMEBREW_API_DOMAIN=$HB_BOTTLE_DOMAIN"
             fi
+            # Go toolchain: only emit when the prefetched tree actually landed
+            # in the sandbox (skill-env streams /prefetch/go.tar.gz into
+            # /sandbox/.local/go). GOSUMDB=off is intentional -- sum.golang.org
+            # is frequently blocked / MITM-intercepted on corporate networks and
+            # a stale sumdb would wedge every `go build` indefinitely.
+            if [ -x /sandbox/.local/go/bin/go ]; then
+              echo "GOROOT=/sandbox/.local/go"
+              echo "GOPATH=/sandbox/go"
+              echo "GOBIN=/sandbox/go/bin"
+              echo "GO111MODULE=on"
+              echo "GOPROXY=$GOPROXY_VAL"
+              echo "GOSUMDB=off"
+            fi
             echo "GOG_KEYRING_BACKEND=file"
             if [ -n "$GKP" ]; then
               echo "GOG_KEYRING_PASSWORD=$GKP"
@@ -936,6 +981,27 @@ data:
           fi
         } > "$PROFD" 2>/dev/null || true
         chmod 0644 "$PROFD" 2>/dev/null || true
+
+        # Go toolchain env: login shells pick up GOROOT/GOPATH + a PATH prefix
+        # that exposes `go` and `$GOPATH/bin`. Only emit if the prefetched Go
+        # tree actually landed in the sandbox; otherwise a non-existent GOROOT
+        # would surface as `go: cannot find GOROOT directory` on every shell
+        # login. No apostrophes in this block -- see the comment above the
+        # SSL_CERT_FILE block for why stray ones wreck the outer sh -c wrapper.
+        if [ -x /sandbox/.local/go/bin/go ]; then
+          PROFD_GO=/etc/profile.d/nemoclaw-golang.sh
+          {
+            echo "# nemoclaw: prefetched Go toolchain (see docker/prefetch/Dockerfile)"
+            echo "export GOROOT=/sandbox/.local/go"
+            echo "export GOPATH=/sandbox/go"
+            echo "export GOBIN=/sandbox/go/bin"
+            echo "export GO111MODULE=on"
+            echo "export GOPROXY=$GOPROXY_VAL"
+            echo "export GOSUMDB=off"
+            echo "export PATH=/sandbox/.local/go/bin:/sandbox/go/bin:\$PATH"
+          } > "$PROFD_GO" 2>/dev/null || true
+          chmod 0644 "$PROFD_GO" 2>/dev/null || true
+        fi
 
         # gog keyring env: required by every gog invocation whose HOME gets
         # sanitized to /tmp by openclaw (skill subprocess) and therefore
@@ -1412,7 +1478,7 @@ data:
     # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
     # and invalidates the sentinel on mismatch.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-bottle-domain-v1 > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-prefetched-go-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"
