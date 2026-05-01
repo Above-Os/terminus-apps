@@ -14,6 +14,25 @@ data:
     sharing the same faster-whisper model instance. Zero extra GPU memory.
     """
 
+    # PyTorch 2.6+ flipped torch.load default to weights_only=True, which breaks
+    # pyannote.audio 3.x diarization checkpoints (they embed TorchVersion / omegaconf
+    # configs that aren't in the safe-globals allowlist). pyannote refuses to fix in
+    # 3.x (see https://github.com/pyannote/pyannote-audio/issues/1908). The model files
+    # come from the official pyannote HF repos via HF_TOKEN, so trusted unpickling is
+    # acceptable here. Patch must run before any "import torch" by downstream modules.
+    #
+    # NOTE: Must FORCE-OVERRIDE weights_only, not just setdefault. lightning_fabric
+    # explicitly passes weights_only=None down to torch.load (see
+    # lightning/fabric/utilities/cloud_io.py::_load), and in PyTorch 2.6+ a None
+    # value resolves to True. So the kwarg is always present and setdefault is a no-op.
+    import torch as _torch
+    _ORIG_TORCH_LOAD = _torch.load
+    def _torch_load_compat(*args, **kwargs):
+        if kwargs.get("weights_only") in (None, True):
+            kwargs["weights_only"] = False
+        return _ORIG_TORCH_LOAD(*args, **kwargs)
+    _torch.load = _torch_load_compat
+
     import os
     import sys
     import tempfile
