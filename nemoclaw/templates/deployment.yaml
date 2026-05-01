@@ -212,6 +212,16 @@ spec:
               docker info >/dev/null 2>&1 || { echo "Docker not ready"; exit 1; }
               echo "Docker ready"
 
+              # --- ghcr sandbox-base docker-pull shim (DISABLED) ---
+              # Previously intercepted `docker pull ghcr.io/nvidia/nemoclaw/sandbox-base:latest` so
+              # a custom NEMOCLAW_SANDBOX_IMAGE was not overwritten by onboard. Disabled while waiting
+              # for upstream NemoClaw/OpenClaw alignment (e.g. Dockerfile Patch 4 vs OpenClaw version).
+              # Re-enable: restore the if-block + set NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL default to 1.
+              # if [ "${NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL:-0}" != "0" ] && [ -n "${NEMOCLAW_SANDBOX_IMAGE:-}" ]; then
+              #   ... docker shim install under /opt/nemoclaw-docker-shim + PATH prepend ...
+              # fi
+              echo "[4b/5] ghcr sandbox-base docker shim skipped (disabled in chart; upstream pull behaviour)"
+
               # Shared per-image puller for [5a/5] first-install preflight and [6/6-pre] gateway
               # prep. Args: $1 image, $2 mirror (may be empty), $3 log tag, $4 log file
               _nemoclaw_pull_image() {
@@ -887,7 +897,7 @@ spec:
                 if [ "${NEMOCLAW_PREFLIGHT_CLUSTER_PULL:-1}" = "1" ]; then
                   CLUSTER_IMG="${NEMOCLAW_OPENSHELL_CLUSTER_IMAGE:-beclab/hys2023-openshell-cluster:v1.16}"
                   CLUSTER_IMG_MIRROR="${NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR:-}"
-                  SANDBOX_IMG="${NEMOCLAW_SANDBOX_IMAGE:-beclab/nvidia-nemoclaw-sandbox-base:23bb570}"
+                  SANDBOX_IMG="${NEMOCLAW_SANDBOX_IMAGE:-beclab/hys2023-nvidia-nemoclaw-sandbox-base:20260427}"
                   SANDBOX_IMG_MIRROR="${NEMOCLAW_SANDBOX_IMAGE_MIRROR:-}"
                   NODE_IMG="${NEMOCLAW_SANDBOX_NODE_IMAGE:-node:22-slim}"
                   NODE_IMG_MIRROR="${NEMOCLAW_SANDBOX_NODE_IMAGE_MIRROR:-}"
@@ -1027,6 +1037,14 @@ spec:
                       echo "[5a/5] WARN: docker tag $CLUSTER_IMG -> $OPENSHELL_CLI_REF failed; nemoclaw onboard will pull upstream ghcr image"
                     fi
                   fi
+                  # ----- Alias sandbox-base -> ghcr.io/nvidia/nemoclaw/sandbox-base:latest (DISABLED) -----
+                  # Was: docker tag $SANDBOX_IMG to ghcr ref so Dockerfile FROM hits local cache before onboard.
+                  # Disabled with the [4b/5] shim while waiting for official updates; onboard will pull/pin ghcr.
+                  # SBX_UPSTREAM_ALIAS="ghcr.io/nvidia/nemoclaw/sandbox-base:latest"
+                  # if [ "$SANDBOX_IMG" != "$SBX_UPSTREAM_ALIAS" ] && docker image inspect "$SANDBOX_IMG" >/dev/null 2>&1; then
+                  #   docker tag "$SANDBOX_IMG" "$SBX_UPSTREAM_ALIAS" 2>/dev/null || true
+                  # fi
+                  echo "[5a/5] sandbox-base -> ghcr retag skipped (disabled in chart)"
                 fi
                 # NemoClaw installer (nemoclaw.sh) shells out to `nemoclaw onboard` which has
                 # 8 stages, any of which can fail on a cold, flaky network: ghcr.io blob CDN,
@@ -1519,9 +1537,13 @@ spec:
             # preflight block above pulls it eagerly with retry. Override the name for a private
             # build, or NEMOCLAW_SANDBOX_IMAGE_MIRROR for an internal mirror.
             - name: NEMOCLAW_SANDBOX_IMAGE
-              value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE | default "beclab/nvidia-nemoclaw-sandbox-base:23bb570" }}"
+              value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE | default "beclab/hys2023-nvidia-nemoclaw-sandbox-base:20260427" }}"
             - name: NEMOCLAW_SANDBOX_IMAGE_MIRROR
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE_MIRROR | default "" }}"
+            # When 1, prepends docker CLI shim (see [4b/5] in install script; currently disabled there).
+            # Default 0: upstream ghcr pull + digest pin for sandbox-base.
+            - name: NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL
+              value: "{{ .Values.olaresEnv.NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL | default "0" }}"
             # sandbox builder base: nemoclaw's sandbox Dockerfile has `FROM node:22-slim@sha256:…`
             # as its builder stage. onboard [6/8] pulls this from docker.io and the docker.io auth
             # endpoint is the most common cause of "TLS handshake timeout" failures on onboard.
