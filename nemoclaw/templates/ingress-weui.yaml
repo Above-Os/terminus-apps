@@ -181,14 +181,22 @@ spec:
           # as "upstream reachable" (openclaw gateway may answer 2xx or
           # redirect for `/`; we only care about TCP+HTTP liveness). A
           # short --connect-timeout makes "no endpoints" fail fast.
+          # `--max-redir 0`: never follow redirects (avoids a future HTTP
+          # -> HTTPS hop that would make curl verify TLS inside this
+          # minimal nginx image and falsely fail the probe).
+          #
+          # Timing: first-boot `nemoclaw` stays NotReady for tens of minutes.
+          # periodSeconds=15 spams kubelet "Readiness probe failed" warnings
+          # (~4/min). Align first probe with nemoclaw initialDelay (300s)
+          # and probe every 60s -- same semantics, far fewer events.
           readinessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - "curl -sS --connect-timeout 2 --max-time 3 -o /dev/null http://nemoclaw:18789/"
-            initialDelaySeconds: 30
-            periodSeconds: 15
+                - "curl -sS --connect-timeout 2 --max-time 4 --max-redir 0 -o /dev/null http://nemoclaw:18789/"
+            initialDelaySeconds: 300
+            periodSeconds: 60
             timeoutSeconds: 5
             successThreshold: 1
             failureThreshold: 1

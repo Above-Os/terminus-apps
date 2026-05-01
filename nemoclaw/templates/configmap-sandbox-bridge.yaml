@@ -926,17 +926,27 @@ data:
             echo "HOMEBREW_NO_ENV_HINTS=1"
             echo "HOMEBREW_NO_ANALYTICS=1"
             echo "HOMEBREW_NO_ENV_FILTERING=1"
-            # CA bundle for HTTPS git clones (brew tap steipete/tap) and any
-            # curl/wget inside the sandbox. Only emit when the file actually
-            # exists (ca-certificates installed in Stage CA above); setting a
-            # non-existent path would make git fail loudly with
-            # "unable to access ...: could not load CA file".
-            if [ -r /etc/ssl/certs/ca-certificates.crt ]; then
+            # CA bundle for HTTPS: curl/git read CURL_CA_BUNDLE / GIT_SSL_CAINFO;
+            # Go crypto/tls reads SSL_CERT_FILE / SSL_CERT_DIR (NOT CURL_CA_BUNDLE),
+            # which is why tools like olares-cli hit x509 unknown authority while
+            # curl still works when only CURL_CA_BUNDLE was set.
+            #
+            # Prefer the openshell image bundle (includes Olares / MITM roots),
+            # else Debian ca-certificates.crt after Stage CA below.
+            if [ -r /etc/openshell-tls/ca-bundle.pem ]; then
+              echo "SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem"
+              echo "SSL_CERT_DIR=/etc/ssl/certs"
+              echo "GIT_SSL_CAINFO=/etc/openshell-tls/ca-bundle.pem"
+              echo "CURL_CA_BUNDLE=/etc/openshell-tls/ca-bundle.pem"
+              echo "REQUESTS_CA_BUNDLE=/etc/openshell-tls/ca-bundle.pem"
+              echo "NODE_EXTRA_CA_CERTS=/etc/openshell-tls/ca-bundle.pem"
+            elif [ -r /etc/ssl/certs/ca-certificates.crt ]; then
               echo "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
               echo "SSL_CERT_DIR=/etc/ssl/certs"
               echo "GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt"
               echo "CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
               echo "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
+              echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"
             fi
             # Bottle / portable-ruby mirror override. Only emit when set --
             # empty domain triggers brew to use its builtin ghcr.io default.
@@ -966,6 +976,11 @@ data:
             echo "# end-nemoclaw-skill-env"
           } >> "$ETCENV"
           echo "[skill-env] /etc/environment updated"
+          if [ -r /etc/openshell-tls/ca-bundle.pem ]; then
+            echo "[skill-env] CA bundle for SSL_CERT_FILE: /etc/openshell-tls/ca-bundle.pem (Go x509 + curl + node)"
+          elif [ -r /etc/ssl/certs/ca-certificates.crt ]; then
+            echo "[skill-env] CA bundle for SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt"
+          fi
         fi
       fi
       mkdir -p /etc/profile.d 2>/dev/null || true
@@ -996,12 +1011,20 @@ data:
           # wrapper mid-script. Dash then reinterprets subsequent `echo
           # "if [ -r ... ]; then"` text as real commands and finally
           # explodes at the closing `}` with "Syntax error: } unexpected".
-          echo "if [ -r /etc/ssl/certs/ca-certificates.crt ]; then"
+          echo "if [ -r /etc/openshell-tls/ca-bundle.pem ]; then"
+          echo "  export SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem"
+          echo "  export SSL_CERT_DIR=/etc/ssl/certs"
+          echo "  export GIT_SSL_CAINFO=/etc/openshell-tls/ca-bundle.pem"
+          echo "  export CURL_CA_BUNDLE=/etc/openshell-tls/ca-bundle.pem"
+          echo "  export REQUESTS_CA_BUNDLE=/etc/openshell-tls/ca-bundle.pem"
+          echo "  export NODE_EXTRA_CA_CERTS=/etc/openshell-tls/ca-bundle.pem"
+          echo "elif [ -r /etc/ssl/certs/ca-certificates.crt ]; then"
           echo "  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
           echo "  export SSL_CERT_DIR=/etc/ssl/certs"
           echo "  export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt"
           echo "  export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
           echo "  export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"
+          echo "  export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"
           echo "fi"
           if [ -n "$HB_BOTTLE_DOMAIN" ]; then
             echo "export HOMEBREW_BOTTLE_DOMAIN=$HB_BOTTLE_DOMAIN"
@@ -1617,7 +1640,7 @@ data:
     # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
     # and invalidates the sentinel on mismatch.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-04-30-insecure-tls-v2 > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-05-01-openshell-ssl-cert-file-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"
