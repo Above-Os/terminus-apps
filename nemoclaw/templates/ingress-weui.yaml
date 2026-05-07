@@ -1,3 +1,13 @@
+{{- /* Host header for in-cluster smoke tests: curl http://127.0.0.1:8080/ sends Host
+     127.0.0.1:8080 which OpenClaw rejects (empty reply -> nginx 502). Rewrite to the
+     same host as CHAT_UI_URL so the probe matches browser behaviour when set. */ -}}
+{{- $chatURL := "" -}}
+{{- if .Values.olaresEnv -}}{{- $chatURL = default "" .Values.olaresEnv.CHAT_UI_URL | trim -}}{{- end -}}
+{{- $chatHost := "" -}}
+{{- if $chatURL -}}
+{{- $t := $chatURL | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" -}}
+{{- $chatHost = index (splitList "/" $t) 0 -}}
+{{- end -}}
 # Reverse proxy for NemoClaw / OpenClaw browser chat UI (default sandbox port 18789)
 # AND terminal-entrance gate that keeps users on the install-progress page until
 # the sandbox openclaw gateway is usable.
@@ -9,9 +19,38 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   nginx.conf: |
+    # Bitnami OpenResty ships a default :8080/:8081 server with empty server_name.
+    # Without explicit server_name + default_server, nginx warns "conflicting server
+    # name \"\"" and may route browser hits to the WRONG server block -> 502 from
+    # OpenResty while TUI (different port / in-sandbox path) still works.
     map $http_upgrade $connection_upgrade {
+      # Plain HTTP/1.1: omit Connection so upstream can use keep-alive (was `close`,
+      # which forces a fresh TCP per asset and can interact badly with some gateways).
+      ''      '';
       default upgrade;
-      ''      close;
+    }
+
+    # When operators `curl http://127.0.0.1:8080/` from inside this pod, Host is loopback.
+    # OpenClaw expects the public webtui host (same as CHAT_UI_URL) in allowedOrigins.
+    map $http_host $openclaw_proxy_host {
+      default                       $http_host;
+{{- if $chatHost }}
+      127.0.0.1                     {{ $chatHost | quote }};
+      127.0.0.1:8080                {{ $chatHost | quote }};
+      localhost                     {{ $chatHost | quote }};
+      localhost:8080                {{ $chatHost | quote }};
+{{- end }}
+    }
+
+    # In-cluster curl to 127.0.0.1:8080 sends no Origin; OpenClaw may require an allow-listed Origin.
+    map $http_host $openclaw_origin_out {
+      default                       $http_origin;
+{{- if $chatURL }}
+      127.0.0.1                     {{ $chatURL | quote }};
+      127.0.0.1:8080                {{ $chatURL | quote }};
+      localhost                     {{ $chatURL | quote }};
+      localhost:8080                {{ $chatURL | quote }};
+{{- end }}
     }
 
     # Send nginx diagnostics to container stdout/stderr so
@@ -19,20 +58,22 @@ data:
     # failures (connect refused, no live upstreams, auth_request 500s, etc).
     # Without this, error.log only lives in the container filesystem and
     # debugging 5xx means exec-ing into the pod to tail a file.
-    access_log /dev/stdout;
+    log_format nemoclaw_weui '$remote_addr "$request" st=$status upst=$upstream_status upaddr=$upstream_addr host="$http_host" orig="$http_origin" ua="$http_user_agent"';
+    access_log /dev/stdout nemoclaw_weui;
     error_log  /dev/stderr warn;
 
     # =====================================================================
     # WebUI (Olares entrance `webtui` -> this :8080).
     # Proxies to the OpenClaw web UI served by sandbox :18789 via the
-    # chat-ui-bridge relay (nemoclaw Service :18789 -> pod :18790 -> socat
-    # -> sandbox :18789). While install-ui.py is still the :18790 listener
-    # (sandbox gateway not yet healthy), GET / here returns the same
-    # install-progress HTML that the terminal gate shows below, because
-    # install-ui.py serves that page on any unknown URI.
+    # chat-ui-bridge `openshell forward` (nemoclaw Service :18789 -> pod :18789
+    # -> single SSH-multiplexed tunnel through OpenShell gateway -> sandbox :18789).
+    # While the sandbox gateway is not yet healthy, pod :18789 hosts a tiny socat
+    # 503 placeholder so this proxy_pass keeps returning HTTP and Olares stays
+    # in "initializing" rather than 502'ing the entrance.
     # =====================================================================
     server {
-      listen 8080;
+      listen 8080 default_server;
+      server_name _;
       client_max_body_size 100m;
 
       # gog Google OAuth callback: tunnels to k3s sandbox :8080 where
@@ -54,7 +95,8 @@ data:
       location / {
           proxy_pass http://nemoclaw:18789;
           proxy_http_version 1.1;
-          proxy_set_header Host              $host;
+          proxy_set_header Host              $openclaw_proxy_host;
+          proxy_set_header Origin            $openclaw_origin_out;
           proxy_set_header X-Forwarded-Host  $http_host;
           proxy_set_header X-Real-IP         $remote_addr;
           # OpenClaw rejects untrusted X-Forwarded-* chains; set client to immediate peer only.
@@ -88,7 +130,8 @@ data:
     # routing to an ingress that serves 502s.
     # =====================================================================
     server {
-      listen 8081;
+      listen 8081 default_server;
+      server_name _;
       client_max_body_size 100m;
 
       location / {
@@ -177,29 +220,37 @@ spec:
           # Service -- Olares treats the entrances as "not yet ready"
           # instead of seeing nginx return 502.
           #
-          # No `-f`: ANY HTTP response from `nemoclaw:18789` is accepted
-          # as "upstream reachable" (openclaw gateway may answer 2xx or
-          # redirect for `/`; we only care about TCP+HTTP liveness). A
-          # short --connect-timeout makes "no endpoints" fail fast.
-          # `--max-redir 0`: never follow redirects (avoids a future HTTP
-          # -> HTTPS hop that would make curl verify TLS inside this
-          # minimal nginx image and falsely fail the probe).
+          # Accept BOTH exit codes:
+          #   0   normal HTTP response (gateway returned 2xx/3xx/4xx — alive)
+          #   52  "Empty reply from server" — openclaw gateway DELIBERATELY closes
+          #       the TCP connection without responding to bare `GET /` from a
+          #       client that has no auth token in the URL fragment AND no
+          #       allow-listed Origin header. From `curl http://127.0.0.1:18789/`
+          #       inside a kube-Service probe (no headers, no fragment), this is
+          #       the EXPECTED healthy state. Treating exit-52 as failure was a
+          #       chart v1.6.x/v1.7.0 bug that pinned `nemoclawweuiingress` at
+          #       NotReady forever even after the upstream pod and gateway were
+          #       fully up. (See user diagnostic in chart v1.7.1 changelog.)
           #
-          # Timing: first-boot `nemoclaw` stays NotReady for tens of minutes.
-          # periodSeconds=15 spams kubelet "Readiness probe failed" warnings
-          # (~4/min). Align first probe with nemoclaw initialDelay (300s)
-          # and probe every 60s -- same semantics, far fewer events.
+          # Anything else fails the probe:
+          #   7   connection refused / no live upstream
+          #   28  connect/read timeout (DNS or routing problem)
+          #   *   any other curl error
+          #
+          # Timing: keep first probe in sync with nemoclaw readiness
+          # initialDelay (see deployment.yaml). A long delay here leaves
+          # Olares entrances in "initializing" even after sandbox gateway is up.
           readinessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - "curl -sS --connect-timeout 2 --max-time 4 --max-redir 0 -o /dev/null http://nemoclaw:18789/"
-            initialDelaySeconds: 300
-            periodSeconds: 60
+                - 'curl -sS --connect-timeout 2 --max-time 4 -o /dev/null http://nemoclaw:18789/; rc=$?; [ "$rc" = 0 ] || [ "$rc" = 52 ]'
+            initialDelaySeconds: 60
+            periodSeconds: 30
             timeoutSeconds: 5
             successThreshold: 1
-            failureThreshold: 1
+            failureThreshold: 3
           resources:
             limits:
               cpu: 500m

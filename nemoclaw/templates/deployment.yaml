@@ -212,15 +212,34 @@ spec:
               docker info >/dev/null 2>&1 || { echo "Docker not ready"; exit 1; }
               echo "Docker ready"
 
-              # --- ghcr sandbox-base docker-pull shim (DISABLED) ---
-              # Previously intercepted `docker pull ghcr.io/nvidia/nemoclaw/sandbox-base:latest` so
-              # a custom NEMOCLAW_SANDBOX_IMAGE was not overwritten by onboard. Disabled while waiting
-              # for upstream NemoClaw/OpenClaw alignment (e.g. Dockerfile Patch 4 vs OpenClaw version).
-              # Re-enable: restore the if-block + set NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL default to 1.
+              # --- ghcr sandbox-base docker-pull shim (TEMPORARILY DISABLED) ---
+              # Re-enable: uncomment the if-block + set NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL default to 1 in env below.
               # if [ "${NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL:-0}" != "0" ] && [ -n "${NEMOCLAW_SANDBOX_IMAGE:-}" ]; then
-              #   ... docker shim install under /opt/nemoclaw-docker-shim + PATH prepend ...
+              #   export NEMOCLAW_REAL_DOCKER="$(command -v docker)"
+              #   mkdir -p /opt/nemoclaw-docker-shim
+              #   printf '%s\n' \
+              #     '#!/bin/sh' \
+              #     ': "${NEMOCLAW_REAL_DOCKER:?NEMOCLAW_REAL_DOCKER unset}"' \
+              #     'SBX_PAT="ghcr.io/nvidia/nemoclaw/sandbox-base"' \
+              #     'GHCR_LATEST="ghcr.io/nvidia/nemoclaw/sandbox-base:latest"' \
+              #     'if [ "$1" = "pull" ]; then' \
+              #     '  case "$*" in *"$SBX_PAT"*)' \
+              #     '    if "$NEMOCLAW_REAL_DOCKER" image inspect "$GHCR_LATEST" >/dev/null 2>&1; then' \
+              #     '      echo "[nemoclaw-docker-shim] skip docker pull (local ghcr.io/nvidia/nemoclaw/sandbox-base:latest present)"' \
+              #     '      exit 0' \
+              #     '    fi' \
+              #     '    ;;' \
+              #     '  esac' \
+              #     'fi' \
+              #     'exec "$NEMOCLAW_REAL_DOCKER" "$@"' \
+              #     > /opt/nemoclaw-docker-shim/docker
+              #   chmod 0755 /opt/nemoclaw-docker-shim/docker
+              #   export PATH="/opt/nemoclaw-docker-shim:$PATH"
+              #   echo "[4b/5] ghcr sandbox-base docker shim active (PATH prepended; NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL=$NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL)"
+              # else
+              #   echo "[4b/5] ghcr sandbox-base docker shim off (set NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL=1 and NEMOCLAW_SANDBOX_IMAGE to guard onboard pulls of ghcr.io/nvidia/nemoclaw/sandbox-base)"
               # fi
-              echo "[4b/5] ghcr sandbox-base docker shim skipped (disabled in chart; upstream pull behaviour)"
+              echo "[4b/5] ghcr sandbox-base docker shim skipped (commented out in chart)"
 
               # Shared per-image puller for [5a/5] first-install preflight and [6/6-pre] gateway
               # prep. Args: $1 image, $2 mirror (may be empty), $3 log tag, $4 log file
@@ -266,14 +285,19 @@ spec:
                 echo "CHAT_UI_URL unset — set app env or Olares domain.webtui (entrance name webtui); else web UI allowlist may default to http://127.0.0.1:18789"
               fi
 
-              # Chat ingress :18790 (Service :18789). Sandbox now runs as a k3s pod inside
-              # the `openshell-cluster-nemoclaw` Docker container (OpenShell >= 0.0.36), not
-              # as a sibling Docker container. We therefore:
-              #   1) wait for `my-assistant` pod to be Running via cluster-container kubectl
+              # Chat data path (post-fix): pod :18789 (openshell forward bound to 0.0.0.0)
+              # -> SSH tunnel through OpenShell gateway -> sandbox netns :18789 (openclaw gateway).
+              # This mirrors `nemoclaw connect` from a bare-Ubuntu install 1:1, so TUI + WebUI
+              # share a single SSH multiplexed connection and never tear each other down.
+              # Steps performed by this script:
+              #   1) wait for `my-assistant` k3s pod to be Running (DinD `openshell-cluster-nemoclaw`)
               #   2) ensure `openclaw gateway` is listening on sandbox :18789 (HOME=/sandbox so
               #      it picks up NemoClaw-provisioned providers + model, not root defaults)
-              #   3) relay pod :18790 -> sandbox :18789 via `docker exec … kubectl exec … node` pipe
-              CHAT_PUBLISH=18790
+              #   3) ensure `openshell forward 0.0.0.0:18789 my-assistant` is alive in this
+              #      container (rebind from the default 127.0.0.1 if `nemoclaw onboard` already
+              #      auto-started one). NO socat:18790, NO per-connection `kubectl exec`.
+              # Pre-onboard (sandbox not yet ready), :18789 hosts a tiny socat 503 placeholder
+              # so the Service has a listener and Olares does not 502 the whole app.
               CLUSTER_CTR="${NEMOCLAW_CLUSTER_CTR:-openshell-cluster-nemoclaw}"
               SANDBOX_NS="${NEMOCLAW_SANDBOX_NS:-openshell}"
               export CLUSTER_CTR SBX=${SANDBOX_FILTER} NS=${SANDBOX_NS}
@@ -283,46 +307,90 @@ spec:
               # caused a false "sandbox not reachable within 15m" while my-assistant was not
               # created yet.
 
+              # Independent ready-sentinel watcher (added in chart v1.7.1).
+              # The big chat-ui-bridge subshell below has many moving parts (kubectl exec
+              # probes, sandbox-ensure-gateway, brew/skill-env install, etc.) -- if any one
+              # of them trips set -e or hits a fatal error path, the whole subshell dies
+              # silently and Pod readiness never gets signalled (we observed this in v1.7.0:
+              # `nemoclaw onboard` already brought up `openshell forward 0.0.0.0:18789`,
+              # but the bridge subshell exited right after `[sandbox-gw] up after 37s` and
+              # nothing wrote /workspace/.nemoclaw-cli-ready, so Pod stayed NotReady forever).
+              #
+              # This watcher has ONE job: when port :18789 in this container is reachable
+              # (either via the openshell forward auto-started by `nemoclaw onboard`, or via
+              # ensure_forward_chat in the bridge subshell), write the readiness sentinel.
+              # It uses set +e and only relies on bash builtins + sleep; cannot crash the
+              # bridge or vice versa. This is the "final safety net" for Pod readiness.
               (
-                start_placeholder_18790() {
-                  # Readiness/startup probes gate on .nemoclaw-cli-ready (see below).
-                  # .nemoclaw-chat-relay-ready is the WebUI-relay-up signal -- kept
-                  # as an observability touchpoint but no longer gates Pod Ready.
-                  rm -f /workspace/.nemoclaw-cli-ready 2>/dev/null || true
-                  rm -f /workspace/.nemoclaw-chat-relay-ready 2>/dev/null || true
-                  # Kill BOTH the old socat placeholder (TCP-LISTEN) AND the newer
-                  # install-ui python server. start_relay_18790 uses the same
-                  # pattern pair, so moving between placeholder / relay / new
-                  # placeholder never leaves a stale listener on :${CHAT_PUBLISH}.
-                  pkill -f "LISTEN:${CHAT_PUBLISH}" 2>/dev/null || true
-                  pkill -f "install-ui.py --port ${CHAT_PUBLISH}" 2>/dev/null || true
-                  sleep 1
-                  # DISABLED: python install-progress page. See large commented
-                  # block at end of this function + configmap-install-ui.yaml.
-                  # Reinstated when re-enabling the WebUI install-progress gate.
-                  #
-                  # Current behaviour: socat placeholder that returns a minimal
-                  # HTTP/1.1 503 for every inbound connection until the sandbox
-                  # gateway is healthy and start_relay_18790 takes over :${CHAT_PUBLISH}.
-                  # This is the original pre-install-ui behaviour.
-                  printf '%s\n' '#!/bin/bash' 'read -t 25 -r _ || true' \
-                    "printf 'HTTP/1.1 503 Service Unavailable\\r\\nContent-Type: text/plain; charset=utf-8\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n'" \
-                    > /tmp/nemoclaw-chat-503.sh
-                  chmod +x /tmp/nemoclaw-chat-503.sh
-                  socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 EXEC:/tmp/nemoclaw-chat-503.sh 2>/dev/null &
-                  echo "[chat-ui-bridge] :${CHAT_PUBLISH} 503 placeholder up (install-progress UI disabled)"
+                set +e
+                # Wait for nemoclaw onboard to finish its first attempt before pinging :18789.
+                # Probing earlier just spams the log with negative results.
+                for _w in $(seq 1 60); do
+                  [ -f /workspace/.nemoclaw-installed ] && break
+                  sleep 5
+                done
+                # Poll for ~2h. If port :18789 stays unreachable that long, something is
+                # genuinely broken upstream and the bridge logs / sandbox-ensure-gateway
+                # output are the right place to look.
+                for _i in $(seq 1 1440); do
+                  if [ -f /workspace/.nemoclaw-cli-ready ]; then
+                    exit 0
+                  fi
+                  if timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789; exec 3<&-; exec 3>&-" 2>/dev/null; then
+                    mkdir -p /workspace 2>/dev/null
+                    : > /workspace/.nemoclaw-cli-ready
+                    echo "[ready-sentinel] :18789 reachable; wrote /workspace/.nemoclaw-cli-ready (Pod -> Ready)"
+                    exit 0
+                  fi
+                  sleep 5
+                done
+                echo "[ready-sentinel] WARN: :18789 never reachable in ~2h; Pod will stay NotReady. Check chat-ui-bridge logs and openshell forward list." >&2
+              ) &
 
-                  # ---- DISABLED: python install-progress page ----
-                  # Re-enable by replacing the socat block above with:
-                  #   if command -v python3 >/dev/null 2>&1 && [ -r /opt/nemoclaw/install-ui.py ]; then
-                  #     nohup python3 /opt/nemoclaw/install-ui.py --port "${CHAT_PUBLISH}" --bind 0.0.0.0 \
-                  #       >>/tmp/nemoclaw-install-ui.log 2>&1 &
-                  #     echo "[chat-ui-bridge] :${CHAT_PUBLISH} install-progress UI up (python install-ui.py; see /tmp/nemoclaw-install-ui.log)"
-                  #   else
-                  #     # ...socat 503 fallback (as above)...
-                  #   fi
-                  # and also re-enable the install-ui.py volumeMount + the
-                  # nemoclaw-install-ui ConfigMap volume in this Deployment.
+              (
+                # CRITICAL: chat-ui-bridge runs many kubectl-exec / docker-exec probes that
+                # legitimately fail during sandbox transitions (cold-reset killing the
+                # gateway, agent container restarting on policy reload, etc). The parent
+                # script has `set -e` enabled for the install pipeline, and that flag is
+                # inherited by `(...) &` subshells. In v1.7.0 we observed this kill the
+                # bridge silently right after sandbox-ensure-gateway succeeded -- the
+                # sentinel was never written and the Pod stayed initializing forever.
+                # Disable strict mode here; failure handling is explicit (`|| true`,
+                # `if cmd; then`, return-code checks) for every command that matters.
+                set +e
+                # Make subshell death visible. `[chat-ui-bridge] subshell exited rc=...`
+                # in `kubectl logs` is a strong signal that the bridge itself crashed
+                # (vs. just being slow). The independent ready-sentinel above will still
+                # mark the Pod Ready if `:18789` becomes reachable via `nemoclaw onboard`
+                # auto-forward, so a bridge crash no longer wedges the install.
+                trap 'rc=$?; echo "[chat-ui-bridge] subshell exited rc=${rc} (line ~${LINENO}); ready-sentinel subshell still active for Pod readiness" >&2' EXIT
+                # Pre-onboard placeholder removed in chart v1.7.0. Reasoning:
+                #   1) Pod readinessProbe gates on /workspace/.nemoclaw-cli-ready, which is
+                #      not written until openclaw gateway is healthy. Until then, this Pod
+                #      has zero Service endpoints, so any placeholder bound to :18789 is
+                #      unreachable from outside anyway.
+                #   2) `nemoclaw onboard` (run synchronously in the main script before this
+                #      subshell hits its main loop) auto-starts an `openshell forward` on
+                #      127.0.0.1:18789. A pre-existing placeholder on 0.0.0.0:18789 would
+                #      shadow the localhost bind and cause onboard's forward to fail.
+                #   3) After gateway-up, ensure_forward_chat fully replaces onboard's
+                #      127.0.0.1 forward with our own 0.0.0.0:18789 binding (kills the
+                #      127.0.0.1 forward + binds the new one BEFORE writing the sentinel),
+                #      so Pod-Ready never lies about :18789 being live.
+                #
+                # Reset helper used after the sandbox pod stops Running (gateway dies, sandbox
+                # crashed). Kicks any in-container forward / leftover sockets so the next
+                # outer-loop iteration starts from a clean slate.
+                reset_chat_state() {
+                  local _clear_cli="${1:-1}"
+                  if [ "$_clear_cli" = "1" ]; then
+                    rm -f /workspace/.nemoclaw-cli-ready 2>/dev/null || true
+                  fi
+                  rm -f /workspace/.nemoclaw-chat-relay-ready 2>/dev/null || true
+                  openshell forward stop 18789 "${SBX}" >/dev/null 2>&1 || \
+                    openshell forward stop 18789      >/dev/null 2>&1 || true
+                  pkill -f "LISTEN:18789" 2>/dev/null || true
+                  pkill -f "install-ui.py --port 18789" 2>/dev/null || true
                 }
                 pod_running() {
                   docker exec "$CLUSTER_CTR" kubectl -n "$NS" get pod "$SBX" \
@@ -330,29 +398,102 @@ spec:
                 }
                 gateway_listening() {
                   docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-                    env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
+                    env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config openclaw gateway health >/dev/null 2>&1
                 }
-                start_relay_18790() {
-                  # Take :${CHAT_PUBLISH} away from both the old socat 503
-                  # placeholder AND the python install-ui page. Without the
-                  # python pkill, the SO_REUSEADDR bind below would race the
-                  # still-listening install-ui and socat would silently lose.
-                  pkill -f "LISTEN:${CHAT_PUBLISH}" 2>/dev/null || true
-                  pkill -f "install-ui.py --port ${CHAT_PUBLISH}" 2>/dev/null || true
+                # Cheap HTTP probe: control UI answers on :18789. When the browser WebUI is
+                # active, many relay connections share kube exec bandwidth; `openclaw gateway health`
+                # can then time out or queue long enough to fail even though the gateway is fine.
+                # Treating HTTP success as up avoids sandbox-ensure-gateway (gateway stop) storms
+                # that drop the TUI while the WebUI keeps retrying.
+                gateway_http_reachable() {
+                  docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+                    sh -c 'if command -v curl >/dev/null 2>&1; then curl -sS -o /dev/null --connect-timeout 2 --max-time 8 http://127.0.0.1:18789/; elif command -v wget >/dev/null 2>&1; then wget -q -T 8 -O /dev/null http://127.0.0.1:18789/; else exit 1; fi' \
+                    >/dev/null 2>&1
+                }
+                # Treat as up if any probe succeeds (kubectl exec + busy gateway blips).
+                # Four rounds, 2s apart; each round accepts either CLI health or HTTP reachability.
+                gateway_listening_relaxed() {
+                  local _i
+                  for _i in 1 2 3 4; do
+                    if gateway_listening || gateway_http_reachable; then
+                      return 0
+                    fi
+                    [ "$_i" -lt 4 ] && sleep 2 || true
+                  done
+                  return 1
+                }
+                # Quick local TCP check: someone is listening on :18789 inside this container.
+                # Used as the "is chat path up" probe for the openshell forward (or its placeholder).
+                chat_port_open() {
+                  timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789; exec 3<&-; exec 3>&-" 2>/dev/null
+                }
+                # Inspect `openshell forward list` for an entry on this sandbox + port 18789.
+                # Echoes "0.0.0.0", "127.0.0.1", or empty (no forward).
+                forward_chat_bind() {
+                  openshell forward list 2>/dev/null \
+                    | awk -v sbx="${SBX}" '$1==sbx && $3=="18789" && $5=="running"{print $2; exit}'
+                }
+                # Ensure `openshell forward 0.0.0.0:18789 -> sandbox :18789` is alive in
+                # this container. Idempotent. Replaces the legacy socat:18790 + sandbox-tunnel.sh
+                # per-connection `kubectl exec` relay (which forked one openshell+ssh per WS
+                # connection and tore everyone down on every relay restart, causing
+                # TUI/WebUI mutual exclusion).
+                ensure_forward_chat() {
+                  local _bind
+                  _bind=$(forward_chat_bind)
+                  # If a 0.0.0.0 forward already exists, leave it ALONE. Do NOT also gate on
+                  # chat_port_open here: that probe goes through the SSH tunnel to the
+                  # gateway in the sandbox, and a transient gateway blip would otherwise
+                  # send us into the destructive "stop forward + start forward" branch
+                  # below -- which in v1.7.0 produced cascading failures and (combined
+                  # with set -e) killed the whole bridge subshell. Chart v1.7.1+ trusts
+                  # the openshell forward list as the source of truth.
+                  if [ "$_bind" = "0.0.0.0" ]; then
+                    if [ ! -f /workspace/.nemoclaw-chat-relay-ready ]; then
+                      mkdir -p /workspace 2>/dev/null || true
+                      : > /workspace/.nemoclaw-chat-relay-ready
+                      echo "[forward] :18789 already on 0.0.0.0 (likely from nemoclaw onboard); reusing"
+                    fi
+                    return 0
+                  fi
+                  if [ -n "$_bind" ]; then
+                    echo "[forward] existing forward on bind=${_bind}; rebinding to 0.0.0.0:18789"
+                    openshell forward stop 18789 "${SBX}" >/dev/null 2>&1 || \
+                      openshell forward stop 18789      >/dev/null 2>&1 || true
+                    sleep 1
+                  fi
+                  # Kick anything else off :18789 (placeholder socat from boot, lingering install-ui).
+                  pkill -f "LISTEN:18789" 2>/dev/null || true
+                  pkill -f "install-ui.py --port 18789" 2>/dev/null || true
                   sleep 1
-                  socat TCP-LISTEN:${CHAT_PUBLISH},fork,reuseaddr,bind=0.0.0.0 \
-                    "EXEC:/opt/nemoclaw/sandbox-tunnel.sh 18789,stderr" 2>&1 | \
-                    while read -r ln; do echo "[chat-ui-bridge] tunnel: $ln"; done &
-                  echo "[chat-ui-bridge] :${CHAT_PUBLISH} -> k3s pod ${NS}/${SBX} :18789 via docker+kubectl+node"
-                  # Defer slightly so the listener has bound before Service traffic arrives.
-                  sleep 1
+                  echo "[forward] starting openshell forward 0.0.0.0:18789 -> ${SBX} :18789 (background)"
+                  if ! openshell forward start "0.0.0.0:18789" "${SBX}" --background >>/tmp/nemoclaw-forward.log 2>&1; then
+                    echo "[forward] ERROR: openshell forward start failed; tail of /tmp/nemoclaw-forward.log:" >&2
+                    tail -10 /tmp/nemoclaw-forward.log 2>/dev/null | sed 's/^/[forward] /' >&2
+                    return 1
+                  fi
+                  # Defer briefly so the SSH child has the listener up before Service traffic arrives.
+                  sleep 2
+                  if [ "$(forward_chat_bind)" != "0.0.0.0" ]; then
+                    echo "[forward] WARN: forward list does not show 0.0.0.0 bind after start" >&2
+                    return 1
+                  fi
                   mkdir -p /workspace 2>/dev/null || true
                   : > /workspace/.nemoclaw-chat-relay-ready
+                  echo "[forward] :18789 chat path live (Service :18789 -> pod :18789 -> SSH-tunnel -> ${SBX} :18789)"
+                  return 0
                 }
                 # OAuth callback relay: pod :18788 -> sandbox :8080.
                 # Listens permanently; the sandbox side is only actually answered while `gog auth add --listen-addr 0.0.0.0:8080` is running.
                 # ingress-weui.yaml's `location = /oauth2/callback` routes to Service nemoclaw:8080 -> this pod port.
+                oauth_relay_tcp_open() {
+                  timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/${OAUTH_PUBLISH}; exec 3<&-; exec 3>&-" 2>/dev/null
+                }
                 start_relay_oauth() {
+                  if oauth_relay_tcp_open; then
+                    echo "[chat-ui-bridge] :${OAUTH_PUBLISH} oauth relay already serving; skip reset"
+                    return 0
+                  fi
                   pkill -f "LISTEN:${OAUTH_PUBLISH}" 2>/dev/null || true
                       sleep 1
                   # NOTE: do NOT use `,stderr` in the EXEC address here. Unlike the chat tunnel
@@ -573,6 +714,13 @@ spec:
                   docker exec -i "$CLUSTER_CTR" kubectl -n "$NS" exec -i "$SBX" -c agent -- \
                     sh -c 'mkdir -p /sandbox/.nemoclaw && cat > /sandbox/.nemoclaw/clamp-openclaw-config.py && chmod 0644 /sandbox/.nemoclaw/clamp-openclaw-config.py' \
                     < /opt/nemoclaw/clamp-openclaw-config.py 2>/dev/null || true
+                  # restart-gateway.sh staging removed in chart v1.7.0: with `openshell forward`
+                  # holding the chat path open via a single SSH session, gateway hot-restarts
+                  # by users became counter-productive (they tear down their own WebUI/TUI
+                  # sessions). Debug-time recovery still available via:
+                  #   docker exec <cluster> kubectl -n <ns> exec -it <sbx> -c agent -- \
+                  #     env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config openclaw gateway stop && \
+                  #     env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config nohup openclaw gateway run --port 18789 --bind loopback &
                   # Probe 1: is gogcli actually installed in the sandbox? Look for any
                   # Cellar/opt path with an executable `gog` of plausible binary size.
                   local _have_gog
@@ -656,10 +804,41 @@ spec:
                 #     echo "[chat-ui-bridge] WARN: python3 or install-ui.py unavailable; :18791 probe-responder NOT started -- terminal-gate will show fallback page"
                 #   fi
                 # }
-                start_placeholder_18790
+                # No pre-onboard placeholder: see reset_chat_state header for why we don't
+                # bind :18789 here. Pod stays NotReady until gateway-up + forward-up.
                 # start_probe_responder_18791  # DISABLED — see block above.
-                echo "[chat-ui-bridge] watching k3s pod ${NS}/${SBX} (Service :18789 -> pod :${CHAT_PUBLISH})"
+                # Post-fix architecture: gateway is launched once by sandbox-ensure-gateway.sh
+                # (or `nemoclaw onboard`), then `openshell forward 0.0.0.0:18789` bridges
+                # Service -> sandbox :18789 via a single long-lived SSH connection. The chart
+                # never tears the gateway or the forward down on transient probe blips, so
+                # concurrent TUI + WebUI sessions never get killed by chart-side housekeeping.
+                # If the gateway truly dies (no `openclaw[- ]gateway` proc AND health/HTTP both
+                # fail twice), sandbox-ensure-gateway.sh is invoked to recover.
+                #
+                # SELF-RESPAWN WRAPPER (added in chart v1.7.3): in v1.7.1 we observed the
+                # subshell exit cleanly with rc=0 right after a `sandbox-ensure-gateway.sh`
+                # cycle (`[chat-ui-bridge] subshell exited rc=0` from the EXIT trap), even
+                # though the inner `while true; do ...; done` has no `break`/`exit`. Suspect
+                # is an interaction between bash's pipe-subshell semantics and our nested
+                # while+pipe layout. Either way, wrapping the full main loop in another
+                # `while true; do ...; done` lets us self-heal: if the inner loop ever
+                # falls through to its closing `done`, we log it and restart in 10s.
+                # The TUI/WebUI are unaffected during the restart (openshell forward and
+                # gateway live in separate processes that the bridge does not own).
+                FIRST_HEALTHY=0
+                echo "[chat-ui-bridge] watching k3s pod ${NS}/${SBX} (Service :18789 -> pod :18789 via openshell forward)"
+                _bridge_iter=0
                 while true; do
+                 _bridge_iter=$((_bridge_iter + 1))
+                 echo "[chat-ui-bridge] (re)entering main loop (iter ${_bridge_iter})"
+                 # Heartbeat: bump mtime often so `stat` reflects a live bridge (inner loop
+                 # can run for days; only touching at outer-loop entry made false "stale"
+                 # alarms after ~1h). `bridge_beat` is cheap (single truncate).
+                 bridge_beat() { : > /tmp/nemoclaw-bridge-heartbeat 2>/dev/null || true; }
+                 mkdir -p /tmp 2>/dev/null
+                 bridge_beat
+                 while true; do
+                  bridge_beat
                   if ! pod_running; then
                     sleep 5
                     continue
@@ -672,32 +851,132 @@ spec:
                   # Function self-prefixes its output (`[chat-ui-bridge:gog-shim] ...`),
                   # no outer pipe wrap needed.
                   ensure_gog_shim_in_sandbox || true
-                  if ! gateway_listening; then
-                    sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1 | \
-                      while read -r ln; do echo "[chat-ui-bridge] $ln"; done
-                    if ! gateway_listening; then
-                    sleep 15
-                    continue
+                  # Debounce transient probe failures: a single blip must not run
+                  # sandbox-ensure-gateway (restart storm kills the TUI while WebUI retries).
+                  # Require two consecutive gateway_listening_relaxed misses (6s apart; each
+                  # round tries health and HTTP reachability up to four times, 2s apart).
+                  if ! gateway_listening_relaxed; then
+                    sleep 6
+                    if ! gateway_listening_relaxed; then
+                      if [ "$FIRST_HEALTHY" = "1" ]; then
+                        # Gateway was once healthy: do not restart from this side. Two reasons:
+                        #   (a) probe miss is usually a `kubectl exec` blip while WS traffic is
+                        #       saturating the agent pod's tty pipe;
+                        #   (b) we run `openshell forward` over a single SSH session that survives
+                        #       these blips and re-pumps as soon as the agent answers again.
+                        # We only force-recover when both `gateway_pid_alive` (no process) AND
+                        # `gateway_listening_relaxed` fail two consecutive rounds (see steady loop).
+                        echo "[chat-ui-bridge] transient gateway probe miss; keeping forward + sockets (no restart)"
+                        sleep 30
+                        continue
+                      fi
+                      echo "[chat-ui-bridge] gateway missed twice (relaxed health-or-http rounds); running sandbox-ensure-gateway.sh"
+                      # NEVER use `sh ... | while read` here: in bash the `while` runs in a
+                      # subshell; combined with pipeline exit semantics this pattern was
+                      # observed to terminate the ENTIRE chat-ui-bridge subshell right after
+                      # sandbox-ensure-gateway finished (EXIT trap rc=0), killing steady-state
+                      # and leaving /tmp/nemoclaw-bridge-heartbeat stale for hours. Process
+                      # substitution keeps logging in the same shell.
+                      while IFS= read -r ln || [ -n "$ln" ]; do
+                        echo "[chat-ui-bridge] $ln"
+                      done < <(sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1)
+                      # Refresh host-side ~/.openclaw/sandboxes/<name>/ metadata so
+                      # `nemoclaw my-assistant connect` does not think the gateway "restarted"
+                      # and spend ~10s re-launching it (chart runs gateway via bridge, not only
+                      # via onboard — state file can drift until this sync).
+                      nemoclaw "${SBX}" gateway-token --quiet >/dev/null 2>&1 || true
+                      if ! gateway_listening_relaxed; then
+                        sleep 15
+                        continue
+                      fi
+                    fi
                   fi
+                  FIRST_HEALTHY=1
+                  # Bring up `openshell forward 0.0.0.0:18789` BEFORE marking Pod Ready, so
+                  # ingress-weui's readinessProbe (`curl http://nemoclaw:18789/`) doesn't
+                  # see a connection-refused window between Pod-Ready and forward-bind.
+                  # Common transient failure: onboard's auto-started 127.0.0.1:18789 forward
+                  # is still releasing its SSH session; retrying picks it up cleanly.
+                  _fwd_ok=0
+                  for _fwd_try in 1 2 3 4 5; do
+                    if ensure_forward_chat; then
+                      _fwd_ok=1
+                      break
+                    fi
+                    echo "[chat-ui-bridge] ensure_forward_chat attempt ${_fwd_try}/5 failed; retry in 3s"
+                    sleep 3
+                  done
+                  if [ "$_fwd_ok" = "1" ]; then
+                    if [ ! -f /workspace/.nemoclaw-cli-ready ]; then
+                      mkdir -p /workspace 2>/dev/null || true
+                      : > /workspace/.nemoclaw-cli-ready
+                      echo "[chat-ui-bridge] gateway healthy + chat forward live; Pod can now signal Ready (TUI + WebUI usable)"
+                    fi
+                  else
+                    echo "[chat-ui-bridge] WARN: openshell forward not up after 5 attempts; keeping Pod NotReady; steady-state loop will keep retrying"
                   fi
-                  # Mark Pod Ready the moment openclaw gateway in sandbox is healthy.
-                  # TUI (openclaw CLI via docker exec into sandbox) is usable NOW --
-                  # it does not depend on the chat-ui-bridge :18790 relay below.
-                  # WebUI brings up the relay in ~1-2s after this line and writes
-                  # .nemoclaw-chat-relay-ready separately; upstream health monitors
-                  # that care about WebUI specifically can gate on that file instead.
-                  if [ ! -f /workspace/.nemoclaw-cli-ready ]; then
-                    mkdir -p /workspace 2>/dev/null || true
-                    : > /workspace/.nemoclaw-cli-ready
-                    echo "[chat-ui-bridge] gateway healthy; Pod can now signal Ready (TUI usable)"
-                  fi
-                  start_relay_18790
                   start_relay_oauth
-                  while pod_running && gateway_listening; do sleep 30; done
-                  echo "[chat-ui-bridge] sandbox gateway dropped (pod_running=$(pod_running && echo y || echo n) gw=$(gateway_listening && echo y || echo n)); resetting"
+                  # Steady state: gateway is up. We only need to (a) keep `openshell forward
+                  # 0.0.0.0:18789` alive (single SSH multiplexed connection — never per-connection
+                  # restart), (b) keep oauth socat alive, and (c) detect REAL gateway death so we
+                  # can recover. We never tear down the chat path on transient health blips —
+                  # that was the root cause of TUI/WebUI mutual exclusion in earlier chart versions.
+                  gateway_pid_alive() {
+                    docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+                      sh -c 'pgrep -f "openclaw[- ]gateway" >/dev/null 2>&1' >/dev/null 2>&1
+                  }
+                  _dead_strikes=0
+                  while pod_running; do
+                    # Cheap idempotent re-assertions; both no-op if state is correct.
+                    if ensure_forward_chat >/dev/null 2>&1 || ensure_forward_chat; then
+                      # Late catch-up: first-loop attempts may have failed on a slow onboard;
+                      # once the forward is finally live, mark Pod Ready so ingress can route.
+                      if [ ! -f /workspace/.nemoclaw-cli-ready ]; then
+                        mkdir -p /workspace 2>/dev/null || true
+                        : > /workspace/.nemoclaw-cli-ready
+                        echo "[chat-ui-bridge] forward came up in steady state; Pod can now signal Ready"
+                      fi
+                    fi
+                    if ! oauth_relay_tcp_open; then
+                      start_relay_oauth
+                    fi
+                    # Death detection: BOTH the gateway pid AND every relaxed health probe must fail.
+                    if gateway_pid_alive; then
+                      _dead_strikes=0
+                    else
+                      if gateway_listening_relaxed; then
+                        # Process probe lied (kubectl exec blip): clear strikes.
+                        _dead_strikes=0
+                      else
+                        _dead_strikes=$((_dead_strikes + 1))
+                        echo "[chat-ui-bridge] gateway death suspected (strike ${_dead_strikes})"
+                        if [ "$_dead_strikes" -ge 2 ]; then
+                          echo "[chat-ui-bridge] gateway confirmed down; running sandbox-ensure-gateway.sh to recover"
+                          while IFS= read -r ln || [ -n "$ln" ]; do
+                            echo "[chat-ui-bridge] $ln"
+                          done < <(sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1)
+                          nemoclaw "${SBX}" gateway-token --quiet >/dev/null 2>&1 || true
+                          _dead_strikes=0
+                          # Re-assert forward after gateway recovery (sandbox netns may have rotated).
+                          ensure_forward_chat || true
+                          sleep 10
+                          continue
+                        fi
+                      fi
+                    fi
+                    bridge_beat
+                    sleep 45
+                  done
+                  echo "[chat-ui-bridge] pod no longer running; resetting chat state and waiting"
                   pkill -f "LISTEN:${OAUTH_PUBLISH}" 2>/dev/null || true
-                  start_placeholder_18790
+                  reset_chat_state 1
                   sleep 5
+                 done
+                 # If we reach here, the inner `while true` exited unexpectedly. Self-respawn
+                 # outer loop handles it: log, sleep, and restart. ready-sentinel + the
+                 # already-running openshell forward keep TUI/WebUI alive in the meantime.
+                 echo "[chat-ui-bridge] WARN: inner main loop fell through unexpectedly (iter=${_bridge_iter}); restarting in 10s" >&2
+                 sleep 10
                 done
               ) &
 
@@ -804,6 +1083,44 @@ spec:
                   sleep 30
                   exit 1
                 fi
+                # Catch Olares copy-paste mistakes before curl (avoids HTTP 000000 noise).
+                case "${NEMOCLAW_ENDPOINT_URL}" in
+                  *" "*)
+                    echo "============================================================"
+                    echo "[preflight] NEMOCLAW_ENDPOINT_URL must be a single URL with no spaces."
+                    echo "Current value: ${NEMOCLAW_ENDPOINT_URL}"
+                    echo "If you put \"nemoclaw my-assistant connect\" here — that is a shell command"
+                    echo "to enter the sandbox, NOT the LLM API. Use your OpenAI-compatible base URL"
+                    echo "(often ending in /v1), e.g. http://<ollama-host>:11434/v1"
+                    echo "============================================================"
+                    sleep 30
+                    exit 1
+                    ;;
+                esac
+                case "${NEMOCLAW_ENDPOINT_URL}" in
+                  http://*|https://*) ;;
+                  *)
+                    echo "============================================================"
+                    echo "[preflight] NEMOCLAW_ENDPOINT_URL must start with http:// or https://"
+                    echo "Current value: ${NEMOCLAW_ENDPOINT_URL}"
+                    echo "That value is not a valid API base URL. Fix it in Olares app env, then restart."
+                    echo "============================================================"
+                    sleep 30
+                    exit 1
+                    ;;
+                esac
+                case "${NEMOCLAW_MODEL}" in
+                  *" "*)
+                    echo "============================================================"
+                    echo "[preflight] NEMOCLAW_MODEL must be a single model id (no spaces)."
+                    echo "Current value: ${NEMOCLAW_MODEL}"
+                    echo "If you pasted shell output (e.g. brew --version), replace it with the"
+                    echo "model name your server lists under GET .../models (e.g. qwen2.5:7b)."
+                    echo "============================================================"
+                    sleep 30
+                    exit 1
+                    ;;
+                esac
                 echo "[preflight] LLM env snapshot: NEMOCLAW_PROVIDER=${NEMOCLAW_PROVIDER} NEMOCLAW_MODEL=${NEMOCLAW_MODEL}"
                 echo "[preflight] NEMOCLAW_ENDPOINT_URL=${NEMOCLAW_ENDPOINT_URL}"
                 if [ -z "${COMPATIBLE_API_KEY:-}" ] || [ "${COMPATIBLE_API_KEY}" = "unused" ]; then
@@ -897,7 +1214,7 @@ spec:
                 if [ "${NEMOCLAW_PREFLIGHT_CLUSTER_PULL:-1}" = "1" ]; then
                   CLUSTER_IMG="${NEMOCLAW_OPENSHELL_CLUSTER_IMAGE:-beclab/hys2023-openshell-cluster:v1.16}"
                   CLUSTER_IMG_MIRROR="${NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR:-}"
-                  SANDBOX_IMG="${NEMOCLAW_SANDBOX_IMAGE:-beclab/hys2023-nvidia-nemoclaw-sandbox-base:20260427}"
+                  SANDBOX_IMG="${NEMOCLAW_SANDBOX_IMAGE:-ghcr.io/nvidia/nemoclaw/sandbox-base:latest}"
                   SANDBOX_IMG_MIRROR="${NEMOCLAW_SANDBOX_IMAGE_MIRROR:-}"
                   NODE_IMG="${NEMOCLAW_SANDBOX_NODE_IMAGE:-node:22-slim}"
                   NODE_IMG_MIRROR="${NEMOCLAW_SANDBOX_NODE_IMAGE_MIRROR:-}"
@@ -1037,14 +1354,18 @@ spec:
                       echo "[5a/5] WARN: docker tag $CLUSTER_IMG -> $OPENSHELL_CLI_REF failed; nemoclaw onboard will pull upstream ghcr image"
                     fi
                   fi
-                  # ----- Alias sandbox-base -> ghcr.io/nvidia/nemoclaw/sandbox-base:latest (DISABLED) -----
-                  # Was: docker tag $SANDBOX_IMG to ghcr ref so Dockerfile FROM hits local cache before onboard.
-                  # Disabled with the [4b/5] shim while waiting for official updates; onboard will pull/pin ghcr.
+                  # ----- Alias sandbox-base -> ghcr.io/nvidia/nemoclaw/sandbox-base:latest (TEMPORARILY DISABLED) -----
+                  # Re-enable with [4b/5] shim when custom NEMOCLAW_SANDBOX_IMAGE + OpenClaw/rcf_patch alignment is ready.
                   # SBX_UPSTREAM_ALIAS="ghcr.io/nvidia/nemoclaw/sandbox-base:latest"
-                  # if [ "$SANDBOX_IMG" != "$SBX_UPSTREAM_ALIAS" ] && docker image inspect "$SANDBOX_IMG" >/dev/null 2>&1; then
-                  #   docker tag "$SANDBOX_IMG" "$SBX_UPSTREAM_ALIAS" 2>/dev/null || true
+                  # if [ "$SANDBOX_IMG" != "$SBX_UPSTREAM_ALIAS" ] \
+                  #      && docker image inspect "$SANDBOX_IMG" >/dev/null 2>&1; then
+                  #   if docker tag "$SANDBOX_IMG" "$SBX_UPSTREAM_ALIAS" 2>/dev/null; then
+                  #     echo "[5a/5] aliased $SANDBOX_IMG -> $SBX_UPSTREAM_ALIAS (nemoclaw hard-coded sandbox-base ref)"
+                  #   else
+                  #     echo "[5a/5] WARN: docker tag $SANDBOX_IMG -> $SBX_UPSTREAM_ALIAS failed; ..." >&2
+                  #   fi
                   # fi
-                  echo "[5a/5] sandbox-base -> ghcr retag skipped (disabled in chart)"
+                  echo "[5a/5] sandbox-base -> ghcr retag skipped (commented out in chart)"
                 fi
                 # NemoClaw installer (nemoclaw.sh) shells out to `nemoclaw onboard` which has
                 # 8 stages, any of which can fail on a cold, flaky network: ghcr.io blob CDN,
@@ -1062,7 +1383,7 @@ spec:
                 # Patch 4) until upstream tags a release; then switch to that tag for reproducibility.
                 NEMOCLAW_PINNED_TAG="${NEMOCLAW_INSTALL_TAG:-main}"
                 export NEMOCLAW_INSTALL_TAG="$NEMOCLAW_PINNED_TAG"
-                echo "[5b/5] NemoClaw install ref pinned to: $NEMOCLAW_PINNED_TAG (override via olaresEnv NEMOCLAW_INSTALL_TAG)"
+                echo "[5b/5] NemoClaw install ref pinned to: $NEMOCLAW_PINNED_TAG (override via olaresEnv NEMOCLAW_INSTALL_TAG; sandbox OpenClaw upgrade runbook: docs/sandbox-openclaw-upgrade.md)"
                 echo "[5b/5] Inference for installer: provider=${NEMOCLAW_PROVIDER} model=${NEMOCLAW_MODEL}"
                 echo "[5b/5] NEMOCLAW_ENDPOINT_URL=${NEMOCLAW_ENDPOINT_URL}"
                 echo "[5b/5] NEMOCLAW_OPENCLAW_INFERENCE_API=${NEMOCLAW_OPENCLAW_INFERENCE_API:-<unset>} (post-onboard gateway loop may rewrite openclaw.json if set)"
@@ -1490,6 +1811,20 @@ spec:
               value: "my-assistant"
             - name: NEMOCLAW_POLICY_MODE
               value: "skip"
+            # Policy tier governs the network presets baked into the sandbox at onboard time.
+            # restricted: only base inference + ClawHub + docs (very tight; npm/pip/brew etc may be blocked or MITMd).
+            # balanced  : default; adds npm, pypi, huggingface, brew, brave (still goes through Sandbox CA on most paths).
+            # open      : adds slack/discord/telegram/jira/outlook on top of balanced; widest egress allowance.
+            # We default to `open` because Balanced trips an OpenShell Sandbox-CA HTTPS interception bug that drops
+            # scoped npm packument requests (e.g. /@clack%2fprompts -> Empty reply / ECONNRESET), which makes
+            # `npm i -g clawhub` (and similar scoped installs) effectively fail inside `nemoclaw my-assistant connect`.
+            - name: NEMOCLAW_POLICY_TIER
+              value: "{{ .Values.olaresEnv.NEMOCLAW_POLICY_TIER | default "open" }}"
+            # NEMOCLAW_DISABLE_GATEWAY_BABYSIT was removed in chart v1.7.0. The chat-ui-bridge
+            # now uses `openshell forward` (single SSH multiplexed connection) for the WebUI
+            # data path, so transient probe blips never tear sockets down. Gateway death is
+            # only acted on when both `pgrep openclaw[- ]gateway` and the health/HTTP probe
+            # fail two consecutive rounds — see `gateway_pid_alive` + the steady-state loop.
             - name: NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE
               value: "1"
             - name: NEMOCLAW_GATEWAY_NAME
@@ -1534,14 +1869,14 @@ spec:
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "beclab/hys2023-openshell-cluster:v1.16" }}"
             # nemoclaw sandbox-base: the image actually running inside each sandbox pod. onboard's
             # own `docker pull` at [6/8] is what gets blocked when this image isn't cached — the
-            # preflight block above pulls it eagerly with retry. Override the name for a private
-            # build, or NEMOCLAW_SANDBOX_IMAGE_MIRROR for an internal mirror.
+            # preflight block above pulls it eagerly with retry. Default: upstream ghcr sandbox-base.
+            # Override for a private/custom build, or set NEMOCLAW_SANDBOX_IMAGE_MIRROR for a mirror.
             - name: NEMOCLAW_SANDBOX_IMAGE
-              value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE | default "beclab/hys2023-nvidia-nemoclaw-sandbox-base:20260427" }}"
+              value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE | default "ghcr.io/nvidia/nemoclaw/sandbox-base:latest" }}"
             - name: NEMOCLAW_SANDBOX_IMAGE_MIRROR
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE_MIRROR | default "" }}"
-            # When 1, prepends docker CLI shim (see [4b/5] in install script; currently disabled there).
-            # Default 0: upstream ghcr pull + digest pin for sandbox-base.
+            # When non-zero, prepends docker CLI shim (see [4b/5]; currently commented out in install script).
+            # Default 0 while shim/retag are disabled.
             - name: NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL
               value: "{{ .Values.olaresEnv.NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL | default "0" }}"
             # sandbox builder base: nemoclaw's sandbox Dockerfile has `FROM node:22-slim@sha256:…`
@@ -1648,7 +1983,10 @@ spec:
           # endpoints during the install window; ingress-weui :8080 (WebUI)
           # returns 502 to the browser until the sandbox is actually ready
           # -- users cannot accidentally open a half-baked UI that would
-          # then error out on the first chat.
+          # then error out on the first chat. After first success the bridge
+          # keeps this file across transient gateway restarts so Pod Ready
+          # does not flap with TUI/WebUI load (WebUI may still 503 briefly
+          # while the relay rebinds).
           #
           # :8081 (CLI terminal) is pass-through to the terminal Service
           # and does NOT depend on this probe, so it stays reachable the
@@ -1668,18 +2006,19 @@ spec:
                 - sh
                 - -c
                 - test -f /workspace/.nemoclaw-cli-ready
-            # Give the very first probe a generous initial delay so we do
-            # not flood the event log with "Readiness probe failed" for the
-            # first ~5 min of cold-boot (when we know the sentinel cannot
-            # possibly exist yet).
-            initialDelaySeconds: 300
+            # First probe delay must stay modest: Olares gates the whole app
+            # on nemoclaw Service endpoints + nemoclawweuiingress readiness.
+            # A 300s delay here meant logs could show "gateway healthy" and
+            # .nemoclaw-cli-ready written while the UI still said initializing
+            # for up to 5 extra minutes (kubelet had not run the probe yet).
+            # 60s still skips the noisiest first minute of DinD/OCI churn;
+            # failureThreshold absorbs a few early misses during long install.
+            initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 5
-            # No success/fail threshold other than 1 — either the sentinel
-            # file exists or it does not; there is nothing flappy about
-            # `test -f`.
+            # failureThreshold 3: tolerate transient kubelet/exec blips on sentinel file.
             successThreshold: 1
-            failureThreshold: 1
+            failureThreshold: 3
           # startupProbe:
           #   exec:
           #     command:
@@ -1863,10 +2202,14 @@ spec:
     - name: gateway
       port: 8080
       targetPort: {{ .Values.olaresEnv.NEMOCLAW_GATEWAY_DOCKER_PORT | default 8080 }}
-    # OpenClaw UI: Service port 18789 -> pod 18790 (relay); 127.0.0.1:18789 may be OpenShell in same netns.
+    # OpenClaw UI: Service :18789 -> pod :18789 directly. The chat-ui-bridge container runs
+    # `openshell forward 0.0.0.0:18789 my-assistant` (a single long-lived SSH multiplexed
+    # connection into the sandbox netns), so TUI + WebUI share one stable bridge and never
+    # interfere with each other. Replaces the legacy socat:18790 + per-connection
+    # `kubectl exec` relay (chart v1.6.x and earlier).
     - name: chat
       port: 18789
-      targetPort: 18790
+      targetPort: 18789
     # gog Google OAuth callback: ingress-weui's `/oauth2/callback` proxies here; pod :18788
     # tunnels to sandbox :8080 via docker+kubectl+node (see start_relay_oauth in Deployment).
     # `gog auth add --listen-addr 0.0.0.0:8080 --redirect-host https://<app-host>/oauth2/callback`.

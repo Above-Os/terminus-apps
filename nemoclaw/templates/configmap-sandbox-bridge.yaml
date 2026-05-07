@@ -1,7 +1,14 @@
-# Scripts that bridge external chat clients (pod :18790) to OpenClaw's gateway
-# which runs inside the NemoClaw sandbox pod. OpenShell >= 0.0.36 runs the sandbox
-# as a k3s pod inside the `openshell-cluster-nemoclaw` Docker container, so the
-# old `docker ps | grep my-assistant` approach no longer works.
+# Helper scripts used by the chat-ui-bridge container in the nemoclaw Deployment.
+# OpenShell >= 0.0.36 runs the sandbox as a k3s pod inside the
+# `openshell-cluster-nemoclaw` Docker container, so reaching the sandbox from the
+# chat-ui-bridge requires `docker exec <cluster> kubectl -n openshell exec <sbx>`.
+#
+# Chart v1.7.0+: the chat WebUI/TUI data path no longer uses these scripts —
+# `openshell forward 0.0.0.0:18789 my-assistant` (a single long-lived SSH
+# multiplexed connection started in chat-ui-bridge) handles all WS traffic.
+# These scripts remain in use for: (a) sandbox-ensure-gateway.sh recovery on
+# real gateway death, (b) sandbox-tunnel.sh for the OAuth callback (pod :18788
+# -> sandbox :8080), (c) skill-env / brew / gog-shim provisioning.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,7 +38,7 @@ data:
 
     health_ok() {
       docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-        env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
+        env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config openclaw gateway health >/dev/null 2>&1
     }
 
     # Do NOT exit early when health_ok: nemoclaw onboard starts the gateway before chat-ui-bridge
@@ -257,8 +264,9 @@ data:
         find /var/tmp -mindepth 1 -maxdepth 1 ! -user "$SBX_USER" -print \
           -exec rm -rf {} + 2>/dev/null || true
       fi
-      # Staleness criterion: XDG_CONFIG_HOME absent -> gog/openclaw skill subprocesses
-      # would be sanitized to /tmp/.config and miss keyring tokens. Force restart.
+      # Staleness: if /proc/<gateway>/environ lacks XDG_CONFIG_HOME=/sandbox, only force
+      # restart when health also fails with explicit HOME+XDG (matches LAUNCH). Truncated
+      # /proc environ must not wedge a healthy gateway.
       _gw_pid=""
       _gw_pid=$(pgrep -f "openclaw[- ]gateway" 2>/dev/null | head -1) || true
       if [ -z "$_gw_pid" ]; then
@@ -269,8 +277,14 @@ data:
       if [ -n "$_gw_pid" ] && [ -r "/proc/$_gw_pid/environ" ]; then
         if ! tr "\0" "\n" < "/proc/$_gw_pid/environ" 2>/dev/null \
              | grep -qiE "^XDG_CONFIG_HOME=/sandbox"; then
-          _gw_stale=1
-          echo "[sandbox-gw] running gateway pid=$_gw_pid lacks XDG_CONFIG_HOME under /sandbox; forcing restart"
+          # /proc/<pid>/environ can be truncated on long env; do not restart a gateway
+          # that still answers health with the same env as LAUNCH (HOME+XDG under /sandbox).
+          if ! env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config openclaw gateway health >/dev/null 2>&1; then
+            _gw_stale=1
+            echo "[sandbox-gw] running gateway pid=$_gw_pid lacks XDG in /proc environ and health fails with explicit XDG; forcing restart"
+          else
+            echo "[sandbox-gw] note: pid=$_gw_pid /proc environ missing XDG_CONFIG_HOME=/sandbox but health OK with explicit env; skip stale restart"
+          fi
         fi
       fi
       # Config mutation staleness: openclaw gateway does NOT re-read
@@ -282,17 +296,40 @@ data:
       if [ "${_cfg_changed:-0}" = "1" ]; then
         _gw_stale=1
         echo "[sandbox-gw] openclaw.json changed; forcing gateway restart to pick up allowedOrigins / trustedProxies"
+        # Brief pause so in-flight TUI / tunnel TCP sessions can finish before we signal the gateway.
+        sleep 2
       fi
-      if [ "$_gw_stale" = "0" ] && env HOME=/sandbox openclaw gateway health >/dev/null 2>&1; then
-        echo "[sandbox-gw] gateway already healthy; rc hooks applied"
-        exit 0
+      if [ "$_gw_stale" = "0" ]; then
+        if env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config openclaw gateway health >/dev/null 2>&1; then
+          echo "[sandbox-gw] gateway already healthy; rc hooks applied"
+          exit 0
+        fi
+        if command -v curl >/dev/null 2>&1 \
+          && curl -sS -o /dev/null --connect-timeout 2 --max-time 8 http://127.0.0.1:18789/ 2>/dev/null; then
+          echo "[sandbox-gw] gateway health CLI blip but HTTP :18789 OK; rc hooks applied no restart"
+          exit 0
+        fi
+        if command -v wget >/dev/null 2>&1 \
+          && wget -q -T 8 -O /dev/null http://127.0.0.1:18789/ 2>/dev/null; then
+          echo "[sandbox-gw] gateway health CLI blip but HTTP :18789 OK wget; rc hooks no restart"
+          exit 0
+        fi
       fi
       [ "$_gw_stale" = "1" ] || echo "[sandbox-gw] gateway not responding; restarting..."
       openclaw gateway stop 2>/dev/null || true
-      ps -eo pid,command 2>/dev/null | awk '"'"'/openclaw[- ]gateway/ && !/awk/ {print $1}'"'"' | while read -r _pid; do
+      # Build a space-separated pid list without tr newline-to-space: this block is inside
+      # sh -c single-quoted script; a literal apostrophe would terminate that string early.
+      _gw_kill_list=$(ps -eo pid,command 2>/dev/null | awk '"'"'/openclaw[- ]gateway/ && !/awk/ {p=(p ? p " " : "") $1} END{print p}'"'"')
+      for _pid in $_gw_kill_list; do
+        [ -n "$_pid" ] || continue
+        kill -TERM "$_pid" 2>/dev/null || true
+      done
+      sleep 2
+      for _pid in $_gw_kill_list; do
+        [ -n "$_pid" ] || continue
         kill -9 "$_pid" 2>/dev/null || true
       done
-      sleep 1
+      sleep 3
       # GOG_KEYRING_BACKEND + GOG_KEYRING_PASSWORD MUST be in openclaw gateway process
       # env so its skill subprocesses (sanitized HOME) inherit them; otherwise gog
       # prompts for the passphrase interactively, which fails in non-TTY agent context.
@@ -302,14 +339,14 @@ data:
       fi
       LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup openclaw gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
       if command -v runuser >/dev/null 2>&1; then
-        runuser -u "$SBX_USER" -- sh -c "$LAUNCH & sleep 2; exit 0"
+        runuser -u "$SBX_USER" -- sh -c "$LAUNCH & sleep 5; exit 0"
       else
-        su - "$SBX_USER" -s /bin/sh -c "cd /sandbox; $LAUNCH & sleep 2; exit 0"
+        su - "$SBX_USER" -s /bin/sh -c "cd /sandbox; $LAUNCH & sleep 5; exit 0"
       fi
       exit 0
     ' 2>&1 | sed 's/^/[sandbox-gw] /'
 
-    for i in $(seq 1 45); do
+    for i in $(seq 1 60); do
       if health_ok; then
         echo "[sandbox-gw] up after ${i}s"
         exit 0
@@ -317,10 +354,17 @@ data:
       sleep 1
     done
 
-    echo "[sandbox-gw] gateway still not responding after 45s; last log tail:"
+    echo "[sandbox-gw] gateway still not responding after 60s; last log tail:"
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
       tail -40 /sandbox/.openclaw-data/gateway.out 2>&1 | sed 's/^/[sandbox-gw] /'
     exit 1
+
+  # restart-gateway.sh removed in chart v1.7.0. With chat traffic now going through
+  # `openshell forward` (single SSH multiplexed connection — see deployment.yaml's
+  # `ensure_forward_chat`), user-triggered gateway hot-restarts became counter-productive
+  # because they tear down the user's own WebUI/TUI sessions instead of fixing them.
+  # When the gateway truly dies, chat-ui-bridge runs `sandbox-ensure-gateway.sh` (above)
+  # automatically; users do not need to intervene from inside the sandbox.
 
   # Per-connection stdio<->TCP bridge used as socat EXEC target.
   # socat pipes the accepted TCP socket to this script's stdin/stdout; node inside
@@ -363,21 +407,29 @@ data:
     #      request terminator for Content-Length-less GETs.
     #   4. Wait for process.stdout.end() callback before exit to flush queued bytes
     #      (kubectl exec remote stdout pipe is NOT a TTY; premature exit truncates).
-    NODE_EXPR='const PORT=Number(process.env.TUNNEL_PORT||18789);const s=require("net").connect(PORT,"127.0.0.1");let done=false;function bye(c){if(done)return;done=true;try{process.stdout.end(()=>process.exit(c));}catch(_){process.exit(c);}}s.on("error",()=>bye(1));s.on("end",()=>bye(0));s.on("close",()=>bye(0));process.stdin.on("end",()=>{try{s.end();}catch(_){}setTimeout(()=>bye(0),15000);});process.stdin.on("error",()=>{});process.stdin.pipe(s,{end:false});s.pipe(process.stdout,{end:false});'
+    #   5. Retry TCP connect ~5s (gateway process up but not yet accept()ing is common);
+    #      without this socat logs waitpid status 1 and WebUI stays 503 while TUI works.
+    NODE_EXPR='const PORT=Number(process.env.TUNNEL_PORT||18789);const net=require("net");let done=false;function bye(c){if(done)return;done=true;try{process.stdout.end(()=>process.exit(c));}catch(_){process.exit(c);}}let s,n=0,L=32;function wire(){s.on("error",()=>bye(1));s.on("end",()=>bye(0));s.on("close",()=>bye(0));process.stdin.on("end",()=>{try{s.end();}catch(_){}setTimeout(()=>bye(0),15000);});process.stdin.on("error",()=>{});process.stdin.pipe(s,{end:false});s.pipe(process.stdout,{end:false});}function go(){try{if(s)s.destroy();}catch(e){}function pre(){if(n++<L)setTimeout(go,200);else bye(1);}s=net.createConnection({port:PORT,host:"127.0.0.1"},()=>{s.removeListener("error",pre);s.on("error",()=>bye(1));wire();});s.on("error",pre);}go();'
     exec docker exec -i "$CLUSTER_CTR" \
       kubectl -n "$NS" exec -i "$SBX" -c agent -- \
       env TUNNEL_PORT="$PORT" NODE_EXPR="$NODE_EXPR" sh -c '
         HEX_PORT=$(printf "%04X" "$TUNNEL_PORT")
+        # LISTEN is st=0A. Local is 127.0.0.1 (0100007F) or 0.0.0.0 (00000000) in /proc/net/tcp.
+        # rem_address is ONE token like 00000000:0000 (contains a colon) -- do NOT split it into
+        # two [0-9A-F:]+ groups or grep never matches and the tunnel exits 1 before node runs.
+        _listen4() { grep -qE "^ *[0-9]+: (0100007F|00000000):${HEX_PORT} [^[:space:]]+[[:space:]]+0A " "$1" 2>/dev/null; }
+        # tcp6: local addr is one token ending with :HEX_PORT; rem one token; then st 0A.
+        _listen6() { grep -qE "^ *[0-9]+: [0-9A-F:]+:${HEX_PORT} [^[:space:]]+[[:space:]]+0A " "$1" 2>/dev/null; }
+        _listen46() { _listen4 "$1" || { [ -r "$2" ] && _listen6 "$2"; }; }
         # 1) Same netns path: fast path for chat (openclaw gateway listens here).
-        if grep -qE "^ *[0-9]+: [0-9A-F]+:${HEX_PORT} " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
+        if _listen46 /proc/net/tcp /proc/net/tcp6; then
           exec node -e "$NODE_EXPR"
         fi
         # 2) Well-known-name fast path: gog auth / openclaw listen on oauth/gateway ports.
         for name_pat in "gog auth" "openclaw-gatewa" "openclaw gateway"; do
           TPID=$(ps -eo pid,args 2>/dev/null | awk -v p="$name_pat" "index(\$0,p)&&!/awk/{print \$1;exit}")
           if [ -n "$TPID" ] && [ -r "/proc/$TPID/ns/net" ] \
-             && grep -qE "^ *[0-9]+: [0-9A-F]+:${HEX_PORT} " \
-                "/proc/$TPID/net/tcp" "/proc/$TPID/net/tcp6" 2>/dev/null; then
+             && _listen46 "/proc/$TPID/net/tcp" "/proc/$TPID/net/tcp6"; then
             exec nsenter --net=/proc/$TPID/ns/net -- node -e "$NODE_EXPR"
           fi
         done
@@ -390,8 +442,7 @@ data:
           case " $SEEN " in *" $INO "*) continue ;; esac
           SEEN="$SEEN $INO"
           PID=$(echo "$link" | awk -F/ "{print \$3}")
-          if grep -qE "^ *[0-9]+: [0-9A-F]+:${HEX_PORT} " \
-             "/proc/$PID/net/tcp" "/proc/$PID/net/tcp6" 2>/dev/null; then
+          if _listen46 "/proc/$PID/net/tcp" "/proc/$PID/net/tcp6"; then
             exec nsenter --net=/proc/"$PID"/ns/net -- node -e "$NODE_EXPR"
           fi
         done
@@ -414,6 +465,20 @@ data:
     export GOG_KEYRING_BACKEND=file
     export GOG_KEYRING_PASSWORD='__GOG_KEYRING_PASSWORD__'
     # end-nemoclaw-skill-env
+    # Optional: after `nemoclaw my-assistant connect`, run `nemoclaw_wait_openclaw_gateway && openclaw tui`
+    # if the TUI races a gateway restart (OpenShell connect netns vs agent netns is sensitive to blips).
+    nemoclaw_wait_openclaw_gateway() {
+      _wx=0
+      while [ "$_wx" -lt 45 ]; do
+        if env HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config openclaw gateway health >/dev/null 2>&1; then
+          return 0
+        fi
+        sleep 1
+        _wx=$((_wx + 1))
+      done
+      echo "[nemoclaw] WARN: openclaw gateway health not OK after 45s; try openclaw tui anyway" >&2
+      return 1
+    }
 
   # Gog shim (Olares hydration has no Helm .Files — edit files/gog-shim-reconcile.sh then re-embed here).
   gog-shim-reconcile.sh: |
@@ -1667,6 +1732,11 @@ data:
         openclaw.json by hand.
       * Ensures env.vars.XDG_CONFIG_HOME=/sandbox/.config when unset so gogcli finds
         OAuth tokens for `openclaw agent` tool runs (same path as `gog auth add`).
+    * Forces gateway.auth.mode to none so file state matches sandbox-ensure-gateway.sh,
+        which always runs `openclaw gateway run ... --auth none`. If onboard left
+        mode=token, the Control UI shows unauthorized: gateway token missing (WS 1008)
+        whenever the gateway process restarts until the browser reloads a tokenized URL;
+        TUI can look idle at the same time.
 
     All operations are best-effort: malformed JSON, missing keys, non-writable files
     just exit 0 silently so the bridge loop never wedges.
@@ -1699,14 +1769,17 @@ data:
         if not isinstance(cfg, dict):
             return 0
 
+        dirty = False
+
         # Provider override (optional).
         models_root = cfg.setdefault("models", {})
         providers = models_root.setdefault("providers", {})
         inference = providers.setdefault("inference", {})
 
         api_override = (os.environ.get("NEMOCLAW_OPENCLAW_INFERENCE_API") or "").strip()
-        if api_override:
+        if api_override and inference.get("api") != api_override:
             inference["api"] = api_override
+            dirty = True
 
         # Clamp per-model maxTokens.
         for model in inference.get("models") or []:
@@ -1714,7 +1787,9 @@ data:
                 continue
             mt = _as_int(model.get("maxTokens"), 0)
             if mt <= 0 or mt > 1024:
-                model["maxTokens"] = 1024
+                if model.get("maxTokens") != 1024:
+                    model["maxTokens"] = 1024
+                    dirty = True
 
         # Clamp agent timeout.
         agents = cfg.setdefault("agents", {}).setdefault("defaults", {})
@@ -1726,11 +1801,14 @@ data:
             upper = 300
 
         ts_now = _as_int(agents.get("timeoutSeconds"), 0)
-        if ts_now < 120:
-            agents["timeoutSeconds"] = 120
-            ts_now = 120
-        if ts_now > upper:
-            agents["timeoutSeconds"] = upper
+        new_ts = ts_now
+        if new_ts < 120:
+            new_ts = 120
+        if new_ts > upper:
+            new_ts = upper
+        if new_ts != ts_now:
+            agents["timeoutSeconds"] = new_ts
+            dirty = True
 
         # NemoClaw: gogcli stores OAuth under $XDG_CONFIG_HOME/gogcli. OpenClaw may spawn
         # tool subprocesses with HOME=/tmp without sourcing shell rc. Official config
@@ -1739,12 +1817,37 @@ data:
         if not isinstance(env_root, dict):
             env_root = {}
             cfg["env"] = env_root
+            dirty = True
         vars_root = env_root.get("vars")
         if not isinstance(vars_root, dict):
             vars_root = {}
             env_root["vars"] = vars_root
+            dirty = True
         if not str(vars_root.get("XDG_CONFIG_HOME", "")).strip():
             vars_root["XDG_CONFIG_HOME"] = "/sandbox/.config"
+            dirty = True
+
+        # Match LAUNCH in sandbox-ensure-gateway.sh (always --auth none).
+        gw = cfg.get("gateway")
+        if not isinstance(gw, dict):
+            gw = {}
+            cfg["gateway"] = gw
+            dirty = True
+        auth = gw.get("auth")
+        if not isinstance(auth, dict):
+            auth = {}
+            gw["auth"] = auth
+            dirty = True
+        cur_mode = str(auth.get("mode", "")).strip().lower()
+        if cur_mode != "none":
+            auth["mode"] = "none"
+            dirty = True
+
+        # Never rewrite openclaw.json when nothing changed: identical bytes keep SHA256
+        # stable so sandbox-ensure-gateway does not set _cfg_changed=1 and restart the
+        # gateway on every bridge health blip (that was killing TUI WS while WebUI retried).
+        if not dirty:
+            return 0
 
         try:
             with open(path, "w", encoding="utf-8") as fh:
