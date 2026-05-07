@@ -1,0 +1,68 @@
+{{- $penpotMcpWsDomainENV := split  ","  .Values.domain.penpotMcpWs -}}
+{{- $penpotMcpWsDomain := index $penpotMcpWsDomainENV "_0" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: penpot-mcp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: penpot-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: penpot-mcp
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: penpot-mcp
+    spec:
+      containers:
+        - name: penpot-mcp
+          image: "node:22-alpine"
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              corepack enable
+              npm i -g @penpot/mcp@2.14.1
+              PKG_DIR="$(npm root -g)/@penpot/mcp"
+              VITE_CFG="$PKG_DIR/packages/plugin/vite.config.ts"
+              if [ -f "$VITE_CFG" ]; then
+                sed -i 's/allowedHosts: \[\]/allowedHosts: true/g' "$VITE_CFG"
+                echo "----- patched vite.config.ts -----"
+                grep allowedHosts "$VITE_CFG" || true
+                echo "----------------------------------"
+              else
+                echo "WARN: vite.config.ts not found at $VITE_CFG"
+              fi
+              exec penpot-mcp
+          env:
+            - name: PENPOT_MCP_SERVER_HOST
+              value: "0.0.0.0"
+            - name: PENPOT_MCP_PLUGIN_SERVER_HOST
+              value: "0.0.0.0"
+            - name: WS_URI
+              value: "wss://{{ $penpotMcpWsDomain }}"
+          ports:
+            - name: plugin
+              containerPort: 4400
+              protocol: TCP
+            - name: mcp-http
+              containerPort: 4401
+              protocol: TCP
+            - name: mcp-ws
+              containerPort: 4402
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
