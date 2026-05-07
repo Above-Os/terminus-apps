@@ -41,3 +41,10 @@ spec:
       - 研究报告、幻灯片、网页和图像生成
       - 自定义技能用于专业工作流
       - 播客脚本生成和音频合成
+
+  upgradeDescription: |
+    修复了在使用本地模型（Qwen3 35B、DeepSeek 等）跑长任务时频繁出现的 "Recursion limit reached" 错误。
+
+    - Backend 镜像升级至 v2.0.1：内置子智能体 max_turns 从 100/60 提升到 500/300。
+    - 在 deerflowv2-env-config ConfigMap 中新增 SUBAGENT_* 环境变量，无需编辑 config.yaml 即可调整每个子智能体的 max_turns 和 timeout_seconds。各模型档位（Claude/GPT-5、Gemma 4 26B、Qwen3 35B 等）的推荐值见 ConfigMap 注释。
+    - 子智能体超时上调以匹配新的 max_turns 上限：general-purpose 30 分钟 → 2 小时，bash 10 分钟 → 30 分钟。避免超时先于 max_turns 触发，让 max_turns 真正起到作用。
