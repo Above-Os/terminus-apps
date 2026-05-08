@@ -6,16 +6,18 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.7.6
+  version: 1.7.8
   categories:
   - Developer Tools
   - Productivity_v112
 entrances:
-# Terminal and WebUI entrances hit nemoclawweuiingress. Olares treats the app
-# as initializing until nemoclaw has Service endpoints (sentinel
-# .nemoclaw-cli-ready) and this ingress passes its readiness curl to
-# nemoclaw:18789. Chart keeps probe initialDelay modest so the UI does not
-# stay on initializing for many minutes after logs already show gateway healthy.
+# The Terminal entrance goes through the nemoclawweuiingress nginx gate on
+# :8081 (NOT directly to the terminal Service). The gate runs a tiny Lua
+# readiness probe against nemoclaw:18789/_probe; while `.nemoclaw-cli-ready`
+# is absent it proxies to install-ui.py (install-progress HTML), and only
+# falls through to the real terminal Service once openclaw CLI is usable
+# inside the sandbox. This prevents users from landing on a bash shell
+# where `openclaw` / `nemoclaw` are still not installed.
 - name: terminal
   port: 8081
   host: nemoclawweuiingress
@@ -121,27 +123,20 @@ envs:
     editable: true
     default: "custom"
     description: "NemoClaw provider: build|openai|anthropic|anthropicCompatible|gemini|ollama|custom|nim-local|vllm. Use `custom` for any OpenAI-compatible /v1 endpoint (vLLM / Ollama's /v1 / Dynamo). NemoClaw's non-interactive onboard curl-validates the endpoint, so you MUST supply a reachable provider + URL + model at install time."
-  - envName: NEMOCLAW_POLICY_TIER
-    type: string
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "open"
-    description: "NemoClaw policy tier baked at onboard: restricted | balanced | open. open adds slack/discord/telegram/jira/outlook to balanced presets; balanced gives npm/pypi/huggingface/brew/brave. Default open here because balanced triggers an OpenShell Sandbox-CA HTTPS interception bug that breaks scoped npm installs (e.g. /@scope%2fpkg -> Empty reply) inside the sandbox. Changing this re-runs onboard on next pod restart only when the sandbox is rebuilt."
   - envName: NEMOCLAW_ENDPOINT_URL
     type: string
     required: true
     applyOnChange: true
     editable: true
     default: ""
-    description: "REQUIRED. OpenAI-compatible base URL including /v1 suffix (e.g. http://<ollama-host>:11434/v1). Must start with http:// or https://, no spaces. Do NOT paste terminal commands here (e.g. nemoclaw my-assistant connect is wrong — that only opens a shell). Must be reachable from this pod at install time. Post-install you can rewire the sandbox via openclaw config --section model."
+    description: "REQUIRED. OpenAI-compatible base URL including /v1 suffix (e.g. http://<ollama-host>/v1 or https://api.openai.com/v1). Must be reachable from this pod at install time — onboard curl-probes both Responses and Chat Completions APIs. Post-install you can rewire the sandbox to go through OpenShell's inference.local via `openclaw config --section model`."
   - envName: NEMOCLAW_MODEL
     type: string
     required: true
     applyOnChange: true
     editable: true
     default: ""
-    description: "REQUIRED. Single model id string (no spaces) that appears in GET {endpoint}/models. Examples: gemma4:26b-a4b-it-ud-q4_K_XL, qwen2.5:7b. Do not paste shell output (e.g. brew --version)."
+    description: "REQUIRED. LLM model id (must appear in GET {NEMOCLAW_ENDPOINT_URL}/models). Examples: gemma4:26b-a4b-it-ud-q4_K_XL, llama3.1:8b, gpt-4o-mini."
   - envName: COMPATIBLE_API_KEY
     type: string
     required: false
@@ -184,6 +179,13 @@ envs:
     editable: true
     default: ""
     description: "Optional max value (seconds) for `agents.defaults.timeoutSeconds` when NemoClaw rewrites `/sandbox/.openclaw/openclaw.json` on every gateway ensure loop. Empty = 300. Local large quants (e.g. 27B+) often need 600-1200+ to avoid OpenClaw surfacing `reason=timeout` / generic `network connection error` while `curl` to https://inference.local/v1/models still returns 200. Must be 60-3600 if set."
+  - envName: NEMOCLAW_OPENCLAW_VERSION
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Pin the OpenClaw version inside the sandbox (e.g. `2026.5.2`). Empty = use whatever NemoClaw bakes (currently floor 2026.4.24 from NemoClaw v0.0.37 blueprint). On change, chart runs `npm install -g openclaw@<ver>` inside the sandbox + restarts the gateway; sticky via /workspace/.nemoclaw-openclaw-pin. Use this to pull fixes that landed in OpenClaw npm releases newer than the blueprint floor (e.g. NemoClaw issue #3145 TUI duplicate-message — likely improved by 2026.4.26 dedupe + 2026.5.x WS-ping fixes)."
   - envName: NEMOCLAW_GATEWAY_DOCKER_PORT
     type: string
     required: false
@@ -246,7 +248,7 @@ envs:
     applyOnChange: true
     editable: true
     default: "main"
-    description: "Git branch or tag of NVIDIA/NemoClaw for nemoclaw.sh (uses `git clone --depth 1 --branch <ref>`). MUST be a remote branch/tag name — a 40-char commit SHA is rejected by git (\"Remote branch … not found\"). Default `main` carries PR #2484 (OpenClaw 2026.4.24 Dockerfile Patch 4 + generate-openclaw-config build-context). Older tags v0.0.26–v0.0.29 fail sandbox image step 17/54. Pin a release tag here once upstream ships one past #2484. Empty = latest (risky). To bump OpenClaw inside sandbox without editing this chart, see repo file docs/sandbox-openclaw-upgrade.md (runtime npm vs install-tag + rebuild)."
+    description: "Git branch or tag of NVIDIA/NemoClaw for nemoclaw.sh (uses `git clone --depth 1 --branch <ref>`). MUST be a remote branch/tag name — a 40-char commit SHA is rejected by git (\"Remote branch … not found\"). Default `main` carries PR #2484 (OpenClaw 2026.4.24 Dockerfile Patch 4 + generate-openclaw-config build-context). Older tags v0.0.26–v0.0.29 fail sandbox image step 17/54. Pin a release tag here once upstream ships one past #2484. Empty = latest (risky)."
   - envName: NEMOCLAW_INSTALL_HOMEBREW
     type: string
     required: false

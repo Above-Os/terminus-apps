@@ -3,4 +3,18 @@ appVersion: '0.0.36'
 description: NVIDIA NemoClaw AI Coding Agent with Docker-in-Docker Sandbox
 name: nemoclaw
 type: application
-version: 1.7.6
+version: 1.7.8
+# 1.7.8 — synthesize Origin header in nemoclawweuiingress when the browser does
+# not send one (top-level same-origin GET / + favicon.ico). OpenClaw 2026.4.x
+# gateway TCP-closes on empty Origin; without this fill, every WebUI hit shows
+# "upstream prematurely closed connection while reading response header" / 502
+# even though TUI works (TUI talks to 127.0.0.1:18789 inside sandbox and
+# bypasses controlUi origin checks entirely). Map prefers CHAT_UI_URL (so the
+# fill matches what patch_origins.py writes into gateway.controlUi.allowedOrigins
+# verbatim) and falls back to `$scheme://$http_host` only when CHAT_UI_URL is
+# unset.
+# 1.7.7 — expose NEMOCLAW_OPENCLAW_VERSION so users can pin a newer OpenClaw npm
+# release into the sandbox (workaround for NemoClaw issue #3145 / blueprint
+# min_openclaw_version still at 2026.4.24 in NemoClaw v0.0.37). Idempotent +
+# sticky via /workspace/.nemoclaw-openclaw-pin; falls back gracefully when npm
+# install permissions/network are unavailable. No-op when env empty (default).
