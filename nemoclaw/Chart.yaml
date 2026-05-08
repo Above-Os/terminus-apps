@@ -3,7 +3,106 @@ appVersion: '0.0.36'
 description: NVIDIA NemoClaw AI Coding Agent with Docker-in-Docker Sandbox
 name: nemoclaw
 type: application
-version: 1.7.8
+version: 1.7.13
+# 1.7.13 — fix LLM connectivity for gateway running in user netns. Chart
+# v1.7.10+ launches `openclaw gateway run` via nsenter into the user/sandbox
+# netns so TUI works concurrently with WebUI; that netns has ONLY a single
+# veth `veth-s-*` (typically 10.200.0.2/24) with default route to its
+# user-netns gateway IP -- which is also where the openshell-sandbox HTTP
+# egress proxy listens (:3128 by default). Direct connect from the user
+# netns to in-cluster Service IPs (e.g. Olares shared inference) fails
+# with "Could not connect to server" after 0ms; same call via
+# http_proxy=<user-ns gateway>:3128 returns HTTP 200 in ~7ms (verified by
+# H-4 diagnostic). Without this fix the gateway can serve TUI/WebUI but
+# every LLM call surfaces as "LLM request failed: network connection
+# error" / "Connection error".
+# Implementation:
+#   - sandbox-ensure-gateway.sh runs `_detect_sandbox_proxy <user_netns_pid>`
+#     which reads `ip -4 route show default` inside the picked user netns
+#     and TCP-probes the gateway IP on 3128/8080/1080 (in that order).
+#     First port that accepts a connection within 2s wins.
+#   - LAUNCH gets http_proxy/https_proxy/HTTP_PROXY/HTTPS_PROXY (both case
+#     variants because node ecosystem libs are inconsistent) plus
+#     no_proxy/NO_PROXY listing loopback + the proxy host itself so the
+#     gateway internal control-UI + canvas + browser-control sidecar
+#     (127.0.0.1:18789 / 18791) bypass the proxy and a request from the
+#     proxy back through itself does not loop.
+#   - NOTHING is hardcoded: subnet/port can change across openshell
+#     versions and the chart will rediscover them on every reconcile.
+#   - Manual override knob: olaresEnv.NEMOCLAW_SANDBOX_HTTP_PROXY (e.g.
+#     "http://10.200.0.1:3128") for non-default sandbox proxy layouts;
+#     when set, auto-detection is skipped.
+#   - When detection AND override are both empty, gateway starts without
+#     proxy + emits a WARN -- TUI/WebUI still work, LLM calls fail until
+#     ops investigates. We do NOT fail the whole bring-up.
+# 1.7.12 — replace `openclaw gateway health` with a pure TCP probe and stop
+# trusting env-staleness / cfg-changed signals when the gateway is reachable.
+# Symptoms before 1.7.12: pod stays 1/2 NotReady ("还没启动好，是卡住了吗")
+# even though gateway.out shows "[gateway] ready" and TCP probe succeeds in
+# the user netns. Two interlocking bugs from 1.7.10/1.7.11:
+#   (1) `openclaw gateway health` reads /sandbox/.openclaw/openclaw.json,
+#       picks up auth.token + auth.mode=token, and tries to authenticate the
+#       WS handshake. Gateway is launched with `--auth none --allow-unconfigured`
+#       so the auth handshake never gets a response and the CLI times out at
+#       its 10s default. From E-1 diagnostic: nsenter into user netns + TCP
+#       probe :18789 returns OK in <100ms; same nsenter + `openclaw gateway
+#       health` returns "Error: gateway timeout after 10000ms".
+#   (2) After our nsenter LAUNCH, BOTH the onboard-spawned gateway (low PID,
+#       XDG_CONFIG_HOME missing, lives in a separate user namespace) AND the
+#       chart-spawned one (correct env) are alive in user netns. pgrep | head
+#       -1 returns the older PID forever, env-staleness check fires, kill -9
+#       gets EPERM across user namespaces, restart loop never converges. From
+#       D-1 diagnostic: two openclaw-gateway PIDs alive in user netns, only
+#       one was LISTENing.
+# Fix: _health_via_netns / health_ok / gateway_listening all use a 3s TCP
+# probe via /dev/tcp/127.0.0.1/18789 (nsenter into user netns first, agent
+# netns fallback). And the early-exit gate in sandbox-ensure-gateway.sh now
+# trusts a TCP-OK as definitive readiness, so a healthy gateway no longer
+# gets killed every loop iteration just because pgrep found an older sibling
+# with stale env. Trade-off: gog keyring-dependent skills may need a manual
+# `openclaw gateway stop && openclaw gateway run ...` inside the sandbox
+# shell to inherit XDG_CONFIG_HOME=/sandbox/.config; preferable to the
+# previous behavior where the WHOLE pod stayed NotReady forever.
+# 1.7.11 — fix "still initializing" infinite cycle introduced by 1.7.10. The
+# netns picker correctly launches the gateway via nsenter into the user netns,
+# but the post-launch health checks (sandbox-ensure-gateway.sh's wait loop AND
+# chat-ui-bridge's gateway_listening) were still calling `openclaw gateway
+# health` directly via `kubectl exec -c agent --`, i.e. in the AGENT netns.
+# Agent netns sees nothing on :18789 -> health_ok always false -> bridge never
+# writes /workspace/.nemoclaw-cli-ready (readiness probe stays failing) AND
+# sandbox-ensure-gateway.sh decides "gateway not responding; restarting...",
+# which kills the user-netns gateway it just launched. Loop forever, user sees
+# "still initializing" for ~30min. Fix: every `openclaw gateway health` call
+# now nsenters into the picked user netns first (with agent-netns fallback for
+# pre-onboard cold starts where no user netns exists yet). Three call sites
+# patched: outer health_ok in sandbox-ensure-gateway.sh, inline early-exit
+# probe inside the kubectl-exec body, and gateway_listening in deployment.yaml.
+# 1.7.10 — fix TUI/WebUI mutual-exclusion (TUI shows "gateway disconnected:
+# closed | idle" while WebUI works) by launching the openclaw gateway in the
+# user/sandbox netns instead of the agent netns. Background: openshell >= 0.0.36
+# isolates "nemoclaw my-assistant connect" sessions in a separate net namespace
+# from "kubectl exec -c agent --". Chart was launching gateway via the latter
+# (agent netns); TUI launched via the former (user netns) sees a different
+# 127.0.0.1 and gets "gateway disconnected" instantly. Manually starting the
+# gateway from inside a "nemoclaw connect" shell makes both work concurrently
+# (user-confirmed). sandbox-ensure-gateway.sh now picks any pid whose ns/net
+# inode != /proc/self/ns/net (= an openshell-spawned process in user netns,
+# typically the auto-port-forward nemoclaw onboard creates) and uses
+# `nsenter --net=...` before runuser+LAUNCH. WebUI path (sandbox-tunnel.sh)
+# already walks /proc and nsenters, so it keeps working with gateway in either
+# netns; this change just makes TUI work TOO. Fallback to agent-netns launch
+# preserved with explicit WARN when no user-netns process visible yet.
+# 1.7.9 — make NEMOCLAW_OPENCLAW_VERSION pin actually take effect when the
+# in-sandbox npm install lands in /sandbox/.local (sandbox user has no write
+# access to /usr/local/lib in most agent containers, so the install would
+# silently win at /sandbox/.local/bin/openclaw but lose at runtime because
+# sandbox-ensure-gateway.sh's LAUNCH PATH puts /usr/local/bin first). The pin
+# helper now writes /sandbox/.openclaw-pinned-marker, and LAUNCH detects that
+# marker to invoke /sandbox/.local/bin/openclaw by full path + PATH-prepends
+# /sandbox/.local/bin. Helper also tears the marker down when env is cleared
+# so reverting NEMOCLAW_OPENCLAW_VERSION="" gracefully falls back to the
+# pre-baked binary on the next gateway restart. Pin helper is now noisier
+# (logs live vs. want comparison every ~3min, plus on first 2 ticks).
 # 1.7.8 — synthesize Origin header in nemoclawweuiingress when the browser does
 # not send one (top-level same-origin GET / + favicon.ico). OpenClaw 2026.4.x
 # gateway TCP-closes on empty Origin; without this fill, every WebUI hit shows

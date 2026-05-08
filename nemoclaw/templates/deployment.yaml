@@ -329,8 +329,38 @@ spec:
                     -o jsonpath='{.status.phase}' 2>/dev/null | grep -q '^Running$'
                 }
                 gateway_listening() {
-                  docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-                    env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
+                  # Probe gateway from the agent container by TCP-connecting to
+                  # 127.0.0.1:18789 via nsenter into the user/sandbox netns
+                  # first (chart v1.7.10+ launches the gateway there) and
+                  # falling back to agent netns for cold starts. We use TCP
+                  # probe instead of `openclaw gateway health` because the
+                  # health CLI authenticates with auth.token from openclaw.json
+                  # while the gateway runs with `--auth none --allow-unconfigured`
+                  # so the WS handshake hangs until the CLI 10s timeout.
+                  # Verified in chart v1.7.11 production (E-1 diagnostic): TCP
+                  # probe in user netns returns OK in <100ms while
+                  # `openclaw gateway health` times out at 10s. Without this
+                  # change, the bridge main loop would treat a perfectly
+                  # healthy gateway as not-yet-ready and never write
+                  # /workspace/.nemoclaw-cli-ready, leaving the WebUI on the
+                  # install-progress placeholder forever.
+                  docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- sh -c '
+                    _agent=$(readlink /proc/self/ns/net 2>/dev/null)
+                    _pick=""
+                    if [ -n "$_agent" ] && command -v nsenter >/dev/null 2>&1; then
+                      for _name in openshell sshd ssh node openclaw bash; do
+                        for _cand in $(ps -ef 2>/dev/null | awk -v n="$_name" "index(\$0,n) && !/awk/ && !/grep/ {print \$2}"); do
+                          [ -r "/proc/$_cand/ns/net" ] || continue
+                          _ns=$(readlink "/proc/$_cand/ns/net" 2>/dev/null) || continue
+                          if [ -n "$_ns" ] && [ "$_ns" != "$_agent" ]; then _pick=$_cand; break 2; fi
+                        done
+                      done
+                    fi
+                    if [ -n "$_pick" ]; then
+                      nsenter --net="/proc/$_pick/ns/net" -- timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1 && exit 0
+                    fi
+                    timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1
+                  ' >/dev/null 2>&1
                 }
                 start_relay_18790() {
                   # Take :${CHAT_PUBLISH} away from both the old socat 503
@@ -657,7 +687,35 @@ spec:
                 #   * gateway refuses to restart (covered by sandbox-ensure-gateway loop)
                 ensure_openclaw_version_in_sandbox() {
                   local _want="${NEMOCLAW_OPENCLAW_VERSION:-}"
-                  [ -n "$_want" ] || return 0
+                  # Throttle "noop" status logs to once-per-N-ticks (default every 12th call,
+                  # ~3min on a 15s loop). State stored on /tmp -- per-pod, NOT hostPath, so
+                  # logs reset on pod restart (which is when the user wants to see them).
+                  local _tick_file=/tmp/nemoclaw-openclaw-pin-tick
+                  local _tick=0
+                  if [ -f "$_tick_file" ]; then
+                    _tick=$(cat "$_tick_file" 2>/dev/null || echo 0)
+                  fi
+                  _tick=$((_tick + 1))
+                  printf "%d" "$_tick" > "$_tick_file" 2>/dev/null || true
+                  local _verbose=0
+                  if [ "$_tick" -le 2 ] || [ $((_tick % 12)) -eq 0 ]; then
+                    _verbose=1
+                  fi
+                  if [ -z "$_want" ]; then
+                    # Env cleared by user (or never set): tear down the pin marker so the
+                    # gateway LAUNCH falls back to the system /usr/local/bin/openclaw on
+                    # the next restart. We leave /sandbox/.local/bin/openclaw in place
+                    # (npm-installed once, harmless on disk) so re-pinning to the same
+                    # version skips the network round-trip.
+                    docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+                      sh -c 'test -f /sandbox/.openclaw-pinned-marker && rm -f /sandbox/.openclaw-pinned-marker && echo "[openclaw-pin] removed pin marker (env cleared)" || true' \
+                      2>/dev/null | sed 's/^/[chat-ui-bridge:openclaw-pin] /'
+                    rm -f /workspace/.nemoclaw-openclaw-pin 2>/dev/null || true
+                    if [ "$_verbose" = "1" ]; then
+                      echo "[chat-ui-bridge:openclaw-pin] NEMOCLAW_OPENCLAW_VERSION env unset -> using whatever NemoClaw baked into the sandbox; pin helper is a no-op"
+                    fi
+                    return 0
+                  fi
                   # Strip leading 'v' for consistent comparison (`openclaw --version` may print "v...").
                   _want="${_want#v}"
                   # Sticky sentinel on hostPath; format `<version>` (single line).
@@ -669,17 +727,24 @@ spec:
                   # Re-verify in-sandbox version: pod restarts wipe rootfs (sentinel survives on
                   # /workspace, so without this re-check we would skip a re-install the user
                   # actually needs).
+                  # Force a known PATH so we don't depend on `kubectl exec`'s default
+                  # (which inherits the container's USER+env -- can vary across openshell
+                  # versions and skip /usr/local/bin if the agent container's entrypoint did
+                  # not re-export PATH for non-login shells).
                   local _kx="docker exec $CLUSTER_CTR kubectl -n $NS exec $SBX -c agent --"
                   local _live
-                  _live=$($_kx sh -c 'openclaw --version 2>/dev/null | head -1 | awk "{for(i=1;i<=NF;i++) if (\$i ~ /^v?[0-9]+\\.[0-9]+\\./) {print \$i; exit}}" | tr -d "v"' 2>/dev/null | tr -d '\r\n ')
+                  _live=$($_kx env PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin" sh -c 'openclaw --version 2>/dev/null | head -1 | awk "{for(i=1;i<=NF;i++) if (\$i ~ /^v?[0-9]+\\.[0-9]+\\./) {print \$i; exit}}" | tr -d "v"' 2>/dev/null | tr -d '\r\n ')
                   if [ -n "$_live" ] && [ "$_live" = "$_want" ]; then
                     if [ "$_have" != "$_want" ]; then
                       mkdir -p /workspace 2>/dev/null
                       printf "%s\n" "$_want" > "$_sentinel"
                     fi
+                    if [ "$_verbose" = "1" ]; then
+                      echo "[chat-ui-bridge:openclaw-pin] live sandbox openclaw=${_live} matches NEMOCLAW_OPENCLAW_VERSION=${_want} (sentinel=${_have:-<absent>}); no action"
+                    fi
                     return 0
                   fi
-                  echo "[chat-ui-bridge:openclaw-pin] sandbox openclaw=${_live:-<unknown>}; pinning to ${_want} via npm install -g openclaw@${_want}"
+                  echo "[chat-ui-bridge:openclaw-pin] DRIFT: live sandbox openclaw=${_live:-<unknown>} vs NEMOCLAW_OPENCLAW_VERSION=${_want}; pinning via npm install -g openclaw@${_want}"
                   # Try root install first (works when sandbox kubectl-exec lands as root);
                   # fall back to user-prefix /sandbox/.local install + symlink. Both paths
                   # eventually surface a binary on PATH (system /usr/local/bin/openclaw or
@@ -714,7 +779,20 @@ spec:
                   if [ "$_ok" = "1" ]; then
                     mkdir -p /workspace 2>/dev/null
                     printf "%s\n" "$_want" > "$_sentinel"
-                    # Trigger gateway restart so it re-execs the new binary.
+                    # Place the in-sandbox pin marker that sandbox-ensure-gateway.sh's
+                    # LAUNCH consumes to switch the gateway binary to the user-prefix
+                    # install. Without this marker the gateway keeps running the
+                    # pre-baked /usr/local/bin/openclaw (because the default PATH puts
+                    # /usr/local/bin before /sandbox/.local/bin) and `openclaw --version`
+                    # in the sandbox keeps showing the old number even though npm
+                    # installed the new one to /sandbox/.local. Idempotent: same marker
+                    # body on every successful pin, ignored when env cleared (above).
+                    docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+                      sh -c "printf '%s\n' '${_want}' > /sandbox/.openclaw-pinned-marker && chown sandbox:sandbox /sandbox/.openclaw-pinned-marker 2>/dev/null; ls -l /sandbox/.openclaw-pinned-marker 2>&1" \
+                      2>&1 | sed 's/^/[chat-ui-bridge:openclaw-pin] marker: /'
+                    # Force gateway restart so it re-execs the new binary. Use the same
+                    # process-substitution pattern as elsewhere so a transient sandbox-
+                    # ensure-gateway non-zero rc doesn't kill this bridge subshell.
                     echo "[chat-ui-bridge:openclaw-pin] forcing gateway restart so the new openclaw takes effect"
                     while IFS= read -r ln || [ -n "$ln" ]; do
                       echo "[chat-ui-bridge] $ln"
@@ -1610,6 +1688,17 @@ spec:
             # fixes that landed after blueprint pinned 2026.4.24).
             - name: NEMOCLAW_OPENCLAW_VERSION
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENCLAW_VERSION | default "" }}"
+            # Manual override for the sandbox HTTP egress proxy that the gateway
+            # (running in the user/sandbox netns since chart v1.7.10) must use to
+            # reach in-cluster Service IPs (e.g. Olares shared inference). Default
+            # empty -> sandbox-ensure-gateway.sh auto-detects via "ip -4 route show
+            # default" inside the user netns + TCP-probes 3128/8080/1080 on that
+            # gateway IP. Set this only if openshell or Olares operators ship a
+            # non-default sandbox proxy that auto-detection cannot reach (different
+            # listen port, off-default netns layout, etc.). Format:
+            # "http://<host>:<port>" (e.g. "http://10.200.0.1:3128").
+            - name: NEMOCLAW_SANDBOX_HTTP_PROXY
+              value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_HTTP_PROXY | default "" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "beclab/hys2023-openshell-cluster:v1.16" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
