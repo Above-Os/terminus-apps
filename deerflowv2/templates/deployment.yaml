@@ -20,7 +20,7 @@ spec:
     spec:
       initContainers:
         - name: init-config
-          image: docker.io/beclab/harveyff-deerflow-backend:v2.0.1
+          image: docker.io/beclab/harveyff-deerflow-backend:v2.0.6-pg
           command:
             - sh
             - -c
@@ -32,7 +32,83 @@ spec:
                 echo "Copying initial config.yaml..."
                 cp /init-config/config.yaml /config/config.yaml
               else
-                echo "config.yaml already exists, skipping."
+                echo "config.yaml already exists, skipping copy."
+                # Chart 1.0.9: switch the persistence backend on existing
+                # installs from sqlite to postgres. The python migration
+                # script (mounted from the same configmap) surgically
+                # rewrites the `database:` block in place while preserving
+                # every other field (custom `models:` etc.). Done in
+                # python -- not sed/awk -- because top-level YAML block
+                # replacement is fragile w.r.t. indentation, comments,
+                # and key order. Idempotent: re-running on an already
+                # migrated config.yaml is a no-op. The deer-flow image
+                # already ships python3.12, no extra deps needed.
+                python3 /init-config/migrate_database_to_postgres.py /config/config.yaml
+                # Idempotent migration for chart >= 1.0.6: upstream PR #1547
+                # gates the bash tool behind sandbox.allow_host_bash; without
+                # the flag the LLM cannot pip/apt install runtime helpers and
+                # OCR on uploaded images silently breaks. Existing users with
+                # a 1.0.5-or-earlier config.yaml on persistent storage need
+                # the flag injected here, since the new ConfigMap default
+                # never touches their on-disk file.
+                if grep -qE '^sandbox:' /config/config.yaml && ! grep -qE 'allow_host_bash' /config/config.yaml; then
+                  echo "Migrating /config/config.yaml: enabling sandbox.allow_host_bash"
+                  sed -i '/^sandbox:$/a\  allow_host_bash: true  # auto-added by chart 1.0.6 init: restores OCR/runtime-install path (upstream PR #1547)' /config/config.yaml
+                fi
+
+                # Chart 1.0.8 additions -- aligns existing config.yaml with
+                # upstream's config.example.yaml v8. Each top-level key is
+                # checked + appended individually so a partial migration
+                # (operator hand-edited some sections, not others) still
+                # gets the missing pieces. All appends are idempotent: if
+                # the key is already present we leave it alone, even if its
+                # value differs from our preferred default.
+                if ! grep -qE '^log_level:' /config/config.yaml; then
+                  echo "Migrating /config/config.yaml: appending log_level"
+                  printf '\n%s\n' 'log_level: info  # chart 1.0.8: see deerflowv2-init-config' >> /config/config.yaml
+                fi
+                if ! grep -qE '^token_usage:' /config/config.yaml; then
+                  echo "Migrating /config/config.yaml: appending token_usage"
+                  printf '\n%s\n%s\n' \
+                    '# chart 1.0.8: surface token counts in the workspace UI' \
+                    'token_usage:' \
+                    '  enabled: true' >> /config/config.yaml
+                fi
+                if ! grep -qE '^uploads:' /config/config.yaml; then
+                  echo "Migrating /config/config.yaml: appending uploads (sourced from env vars)"
+                  printf '\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+                    '# chart 1.0.8: upload limits from deerflowv2-env-config UPLOADS_*' \
+                    'uploads:' \
+                    '  max_files: $UPLOADS_MAX_FILES' \
+                    '  max_file_size: $UPLOADS_MAX_FILE_SIZE' \
+                    '  max_total_size: $UPLOADS_MAX_TOTAL_SIZE' \
+                    '  auto_convert_documents: false' \
+                    '  pdf_converter: auto' >> /config/config.yaml
+                fi
+                if ! grep -qE '^run_events:' /config/config.yaml; then
+                  echo "Migrating /config/config.yaml: appending run_events (persist traces to sqlite)"
+                  printf '\n%s\n%s\n%s\n%s\n%s\n' \
+                    '# chart 1.0.8: persist message + tool-call traces to sqlite so' \
+                    '# token-usage history and run audit logs survive pod restarts.' \
+                    'run_events:' \
+                    '  backend: db' \
+                    '  max_trace_content: 10240' >> /config/config.yaml
+                fi
+                if ! grep -qE '^circuit_breaker:' /config/config.yaml; then
+                  echo "Migrating /config/config.yaml: appending circuit_breaker"
+                  printf '\n%s\n%s\n%s\n%s\n' \
+                    '# chart 1.0.8: stop hammering a dying provider after 5 failures' \
+                    'circuit_breaker:' \
+                    '  failure_threshold: 5' \
+                    '  recovery_timeout_sec: 60' >> /config/config.yaml
+                fi
+                # Pin config_version: 8 so deer-flow stops logging the
+                # outdated-config warning on every startup.
+                if grep -qE '^config_version:' /config/config.yaml; then
+                  sed -i 's/^config_version:.*/config_version: 8/' /config/config.yaml
+                else
+                  printf '\n%s\n' 'config_version: 8  # chart 1.0.8: matches upstream config.example.yaml' >> /config/config.yaml
+                fi
               fi
 
               if [ ! -f /config/extensions_config.json ]; then
@@ -44,6 +120,31 @@ spec:
 
               mkdir -p /data/deer-flow
               mkdir -p /skills/public /skills/custom
+              mkdir -p /langgraph-api
+              # Chart >= 1.0.9: db lives in postgres now, the legacy sqlite
+              # dir under /data/deer-flow/db is no longer mkdir'd. We do
+              # NOT delete the existing file (if any) so operators can
+              # still rescue data from it manually.
+
+              # Chart-managed skill: image-ocr.
+              # Always overwrite so chart bumps push updated skill content.
+              # If an operator wants a custom OCR policy, they should edit
+              # the SKILL.md frontmatter `name:` to a different value (e.g.
+              # `image-ocr-local`); init only owns files literally named
+              # `image-ocr` because that is the directory name we manage.
+              # See configmap.yaml `image-ocr-skill.md` for the rationale.
+              mkdir -p /skills/custom/image-ocr
+              cp /init-config/image-ocr-skill.md /skills/custom/image-ocr/SKILL.md
+
+              # The gateway/langgraph containers run as PUID/PGID=1000 (the
+              # image flips to a non-root account at startup). hostPath dirs
+              # created here as uid 0 stay owned by root, so the runtime
+              # process cannot write memory.json / per-thread user-data /
+              # .langgraph_api/ scratch files. chown unconditionally --
+              # cheap, and harmless if the image actually stays as root.
+              # (Database state lives in postgres now; only filesystem
+              # state needs this treatment.)
+              chown -R 1000:1000 /data/deer-flow /skills /config /langgraph-api
 
               echo "Init complete."
           volumeMounts:
@@ -55,11 +156,13 @@ spec:
               mountPath: /data/deer-flow
             - name: skills-volume
               mountPath: /skills
+            - name: langgraph-api-volume
+              mountPath: /langgraph-api
           securityContext:
             runAsUser: 0
       containers:
         - name: gateway
-          image: docker.io/beclab/harveyff-deerflow-backend:v2.0.1
+          image: docker.io/beclab/harveyff-deerflow-backend:v2.0.6-pg
           command:
             - sh
             - -c
@@ -96,6 +199,30 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: deerflowv2-auth-secret
+                  key: AUTH_JWT_SECRET
+            # Olares postgres middleware — connection details populated by
+            # the Olares chart values injector at install/upgrade time.
+            #
+            # DATABASE_URL — SQLAlchemy + **asyncpg** only. Do NOT add libpq
+            # query params such as keepalives_* here; asyncpg rejects them and
+            # the gateway will crash on startup (TypeError: unexpected keyword
+            # argument 'keepalives').
+            #
+            # CHECKPOINTER_DATABASE_URL — LangGraph AsyncPostgresSaver +
+            # **psycopg** (libpq). Same server/db as DATABASE_URL but with TCP
+            # keepalive query params so idle connections are not silently dropped
+            # by kube-proxy / NAT before psycopg's pool notices.
+            #
+            # config.yaml sets `database.postgres_url: $DATABASE_URL` and
+            # `checkpointer_postgres_url: $CHECKPOINTER_DATABASE_URL`.
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.deerflow }}"
+            - name: CHECKPOINTER_DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.deerflow }}?keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=5"
           envFrom:
             - configMapRef:
                 name: deerflowv2-env-config
@@ -114,7 +241,7 @@ spec:
             - name: skills-volume
               mountPath: /app/skills
         - name: langgraph
-          image: docker.io/beclab/harveyff-deerflow-backend:v2.0.1
+          image: docker.io/beclab/harveyff-deerflow-backend:v2.0.6-pg
           command:
             - sh
             - -c
@@ -143,6 +270,17 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: deerflowv2-auth-secret
+                  key: AUTH_JWT_SECRET
+            # Mirror gateway env: plain DATABASE_URL for ORM, keepalive URL for
+            # LangGraph checkpointer. See gateway container comments above.
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.deerflow }}"
+            - name: CHECKPOINTER_DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.deerflow }}?keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=5"
           envFrom:
             - configMapRef:
                 name: deerflowv2-env-config
