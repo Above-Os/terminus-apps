@@ -1,4 +1,4 @@
-﻿
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -34,7 +34,13 @@ spec:
               mkdir -p /var/lib/clickhouse
               chown -R 1000:1000 /var/lib/clickhouse
               chmod -R 755 /var/lib/clickhouse
-          resources: { }
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
           volumeMounts:
             - name: tensorzero-data
               mountPath: /var/lib/clickhouse
@@ -59,8 +65,8 @@ spec:
               cpu: 2
               memory: 4Gi
             requests:
-              cpu: 100m
-              memory: 500Mi
+              cpu: 200m
+              memory: 1Gi
           ports:
             - containerPort: 8123
               name: ch-http
@@ -90,15 +96,15 @@ spec:
             timeoutSeconds: 1
 
         - name: gateway
-          image: docker.io/beclab/tensorzero-gateway:2026.3.0
+          image: docker.io/beclab/tensorzero-gateway:2026.4.0
           command: ["/bin/bash", "/etc/gateway/start.sh"]
           resources:
             limits:
               cpu: 1
-              memory: 512Mi
+              memory: 1Gi
             requests:
               cpu: 100m
-              memory: 64Mi
+              memory: 128Mi
           ports:
             - containerPort: 3000
               name: gateway
@@ -112,23 +118,33 @@ spec:
             - name: gateway-startups
               mountPath: /etc/gateway/env.sh
               subPath: env.sh
+          # Postgres + ClickHouse migrations can take 60s+ on a cold start.
+          # startupProbe gives the gateway up to 5 minutes (30 * 10s) to come
+          # up before the liveness probe takes over, avoiding spurious restarts.
+          startupProbe:
+            httpGet:
+              path: /status
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /status
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /status
               port: 3000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 5
 
         - name: ui
-          image: docker.io/beclab/tensorzero-ui:2026.3.0
+          image: docker.io/beclab/tensorzero-ui:2026.4.0
           env:
             - name: TENSORZERO_GATEWAY_URL
               value: "http://localhost:3000"
@@ -164,15 +180,7 @@ spec:
         - name: tensorzero-data
           hostPath:
             type: DirectoryOrCreate
-                {{- if .Values.sysVersion }}
-                  {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-            path: '{{ .Values.userspace.appCache }}'
-                  {{- else }}
-            path: '{{ .Values.userspace.appCache }}/tensorzero'
-                  {{- end }}
-                {{- else }}
-            path: '{{ .Values.userspace.appCache }}/tensorzero'
-                {{- end }}
+            path: '{{ .Values.userspace.appData }}'
         - name: gateway-startups
           configMap:
             name: gateway-startups
