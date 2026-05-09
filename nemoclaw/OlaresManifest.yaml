@@ -6,14 +6,21 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.0.0
+  version: 1.0.5
   categories:
   - Developer Tools
   - Productivity_v112
 entrances:
+# The Terminal entrance goes through the nemoclawweuiingress nginx gate on
+# :8081 (NOT directly to the terminal Service). The gate runs a tiny Lua
+# readiness probe against nemoclaw:18789/_probe; while `.nemoclaw-cli-ready`
+# is absent it proxies to install-ui.py (install-progress HTML), and only
+# falls through to the real terminal Service once openclaw CLI is usable
+# inside the sandbox. This prevents users from landing on a bash shell
+# where `openclaw` / `nemoclaw` are still not installed.
 - name: terminal
-  port: 80
-  host: terminal
+  port: 8081
+  host: nemoclawweuiingress
   title: NemoClaw CLI
   icon: https://app.cdn.olares.com/appstore/nemoclaw/icon.png
   openMethod: window
@@ -26,7 +33,7 @@ entrances:
   openMethod: window
   authLevel: internal
 spec:
-  versionName: '0.0.32'
+  versionName: '0.0.36'
   fullDescription: |
     # Overview
     NemoClaw is NVIDIA's AI coding agent that runs on Kubernetes with Docker-in-Docker
@@ -70,15 +77,28 @@ spec:
   license:
   - text: Apache-2.0
     url: https://github.com/NVIDIA/NemoClaw/blob/main/LICENSE
+  # Must cover the sum of container `resources.limits` across every
+  # pod this chart creates (nemoclaw main + docker-in-docker sidecar +
+  # nemoclawweuiingress + terminal). Current totals:
+  #   CPU mem
+  #   4c  8Gi  nemoclaw main
+  #   8c  24Gi docker-in-docker (docker build, k3s, openclaw gateway,
+  #            inference pods — biggest budget consumer by far)
+  #   0.5 512M nemoclawweuiingress nginx
+  #   0.5 512M terminal nginx
+  #   0.5 1Gi  terminal apiserver
+  #   ---
+  #   13.5c 34Gi total -> limitedCpu/limitedMemory must be >= these
+  #                       (we add ~15% headroom below so small per-pod
+  #                       bumps don't require a manifest edit).
   requiredMemory: 4Gi
-  limitedMemory: 14Gi
+  limitedMemory: 40Gi
   requiredDisk: 256Mi
   limitedDisk: 20Gi
   requiredCpu: 2
-  limitedCpu: 6
+  limitedCpu: 16
   supportArch:
   - amd64
-  - arm64
 permission:
   appData: true
   appCache: true
@@ -179,21 +199,21 @@ envs:
     applyOnChange: true
     editable: true
     default: "0"
-    description: "Set to 1 to pass --recreate on openshell gateway start (fresh cluster)."
+    description: "Set to 1 to pass --recreate on openshell gateway start (fresh cluster). This tears down the gateway container and removes local cluster image tags; the next start must re-pull from ghcr.io (or your NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR). Leave 0 on air-gapped / flaky-registry nodes unless you understand the re-pull requirement."
   - envName: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
     type: string
     required: false
     applyOnChange: true
     editable: true
-    default: "ghcr.io/nvidia/openshell/cluster:0.0.32"
-    description: "Image nemoclaw onboard pulls for OpenShell gateway cluster; override if you mirror ghcr.io."
+    default: "beclab/hys2023-openshell-cluster:v1.16"
+    description: "Image nemoclaw onboard pulls for OpenShell gateway cluster. Default points at the beclab custom fork (policy disabled at source, direct egress — no MITM proxy). NemoClaw's onboard.ts forcibly sets OPENSHELL_CLUSTER_IMAGE=ghcr.io/nvidia/openshell/cluster:<NEMOCLAW_OPENSHELL_VERSION> before spawning `openshell gateway start`, so env-var overrides don't survive. Workaround: after pulling this image, the chart aliases it via `docker tag` to that exact ghcr ref; openshell's ensure_image() inspects locally, finds the alias, and never pulls upstream. Override to ghcr.io/nvidia/openshell/cluster:<tag> to use the upstream copy verbatim."
   - envName: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
     type: string
     required: false
     applyOnChange: true
     editable: true
     default: ""
-    description: "Fallback image ref pulled when ghcr.io is unreachable; retagged locally as NEMOCLAW_OPENSHELL_CLUSTER_IMAGE so onboard's internal docker pull hits cache. Example: ghcr.nju.edu.cn/nvidia/openshell/cluster:0.0.32"
+    description: "Fallback image ref pulled when ghcr.io is unreachable; retagged locally as NEMOCLAW_OPENSHELL_CLUSTER_IMAGE so onboard's internal docker pull hits cache. Example: ghcr.nju.edu.cn/nvidia/openshell/cluster:0.0.36"
   - envName: NEMOCLAW_PREFLIGHT_CLUSTER_PULL
     type: string
     required: false
@@ -201,20 +221,34 @@ envs:
     editable: true
     default: "1"
     description: "Set to 0 to skip docker pull before first install (not recommended if ghcr.io is slow)."
+  - envName: NEMOCLAW_PREFER_MIRROR
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "0"
+    description: "When 1, the 5a/5 pre-pull tries the _MIRROR variants first (cluster / sandbox-base / node) before falling back to ghcr.io / docker.io. Saves ~90s per image on cold starts in regions where the upstream is slow or blocked. No-op if the corresponding _MIRROR env is empty."
   - envName: NEMOCLAW_OPENSHELL_VERSION
     type: string
     required: false
     applyOnChange: true
     editable: true
-    default: "v0.0.32"
-    description: "OpenShell CLI release tag installed by NVIDIA/OpenShell install.sh. Must satisfy NemoClaw's MIN_VERSION..MAX_VERSION (currently 0.0.32). Bump this together with NEMOCLAW_OPENSHELL_CLUSTER_IMAGE."
+    default: "v0.0.36"
+    description: "OpenShell CLI release tag installed by NVIDIA/OpenShell install.sh. Must satisfy NemoClaw's MIN_VERSION..MAX_VERSION (currently 0.0.36). Bump this together with NEMOCLAW_OPENSHELL_CLUSTER_IMAGE."
+  - envName: NEMOCLAW_INSTALL_TAG
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "main"
+    description: "Git branch or tag of NVIDIA/NemoClaw for nemoclaw.sh (uses `git clone --depth 1 --branch <ref>`). MUST be a remote branch/tag name — a 40-char commit SHA is rejected by git (\"Remote branch … not found\"). Default `main` carries PR #2484 (OpenClaw 2026.4.24 Dockerfile Patch 4 + generate-openclaw-config build-context). Older tags v0.0.26–v0.0.29 fail sandbox image step 17/54. Pin a release tag here once upstream ships one past #2484. Empty = latest (risky)."
   - envName: NEMOCLAW_INSTALL_HOMEBREW
     type: string
     required: false
     applyOnChange: true
     editable: true
     default: "1"
-    description: "Pre-install Linuxbrew into /sandbox/.linuxbrew for skills that need `brew install`. The chart clones Homebrew in the workspace pod (better egress), caches under /workspace/.nemoclaw-homebrew-cache, then tar-streams into the k3s sandbox — avoids sandbox GitHub blocks. Set to 0 to disable. ~130MB first run."
+    description: "Pre-install Linuxbrew into /sandbox/.linuxbrew for skills that need `brew install`. Clones Homebrew directly inside the k3s sandbox via git or tarball fallback. Set to 0 to disable. ~130MB first run."
   - envName: NEMOCLAW_HOMEBREW_GIT_URL
     type: string
     required: false
@@ -222,27 +256,20 @@ envs:
     editable: true
     default: ""
     description: "Optional. Git clone URL for Homebrew/brew (default https://github.com/Homebrew/brew.git). Set to an internal mirror if the sandbox cannot reach GitHub; otherwise cold-reset leaves brew missing and `brew: command not found`."
-  - envName: NEMOCLAW_TRUST_OPENSHELL_CA
-    type: string
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "1"
-    description: "Set NODE_EXTRA_CA_CERTS=/etc/openshell-tls/client/ca.crt for `openclaw gateway` so OpenClaw trusts OpenShell's self-signed cert when talking to https://inference.local/v1 (the default NemoClaw LLM route). Set to 0 if you use a CA-signed LLM endpoint that's already on the proxy allowlist."
-  - envName: NEMOCLAW_APPLY_POLICY_EXTRAS
-    type: string
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "1"
-    description: "When 1 (default), NemoClaw merges `brew_github`, `google_apis`, `skill_common` (weather, geocoding, DuckDuckGo, major LLM API hosts, etc.), and optional `user_extras` into the sandbox OpenShell policy via `openshell policy set` so Homebrew, gog/Google Workspace, and typical skills egress without per-host setup. Set to 0 to skip patching (manual policy or non-OpenShell installs). Idempotent; does not remove existing policies."
-  - envName: NEMOCLAW_EXTRA_ALLOWED_HOSTS
+  - envName: NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN
     type: string
     required: false
     applyOnChange: true
     editable: true
     default: ""
-    description: "Comma-separated hostnames appended to a `user_extras` named policy when NEMOCLAW_APPLY_POLICY_EXTRAS=1 (TLS terminate, binaries restricted to curl/git + the sandbox-owned wrappers). Use for skills outside the default Homebrew/Google set — e.g. `api.notion.com,api.openai.com,api.anthropic.com`. Domains only (no scheme or path); each entry allows HTTPS/443 GET/HEAD/POST/PUT/PATCH/DELETE to /**. Ignored when policy extras are disabled."
+    description: "Optional. Override brew's bottle + portable-ruby download origin. Default is https://ghcr.io (Homebrew upstream). NOTE: Homebrew 4.x fetches portable-ruby via an OCI blob path (/v2/homebrew/portable-ruby/.../blobs/sha256:*), so classic China mirrors (TUNA/USTC/Aliyun) that only mirror the /homebrew-bottles tarball layout will return 404 for portable-ruby. Only useful if you have a GHCR-compatible mirror. Propagated as HOMEBREW_BOTTLE_DOMAIN + HOMEBREW_ARTIFACT_DOMAIN + HOMEBREW_API_DOMAIN into /etc/environment and /etc/profile.d/nemoclaw-brew-temp.sh inside the sandbox."
+  - envName: NEMOCLAW_GOPROXY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "https://goproxy.cn,direct"
+    description: "Value for GOPROXY inside the sandbox. Default is goproxy.cn (community CDN in China) with direct fallback. Set to `direct` to disable the proxy, or to an internal Athens server URL for air-gapped / corporate setups. GOSUMDB is hard-wired to `off` because sum.golang.org is frequently blocked and a stale sumdb failure would otherwise wedge every `go build`. Used by the prefetched Go toolchain installed at /sandbox/.local/go during skill-env."
   - envName: ALLOW_EXTERNAL_DIR_ACCESS
     type: bool
     required: false

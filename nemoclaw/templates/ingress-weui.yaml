@@ -1,5 +1,6 @@
-# Reverse proxy for NemoClaw / OpenClaw browser chat UI (default sandbox port 18789).
-# See https://docs.nvidia.com/nemoclaw/latest/deployment/deploy-to-remote-gpu.html#remote-dashboard-access
+# Reverse proxy for NemoClaw / OpenClaw browser chat UI (default sandbox port 18789)
+# AND terminal-entrance gate that keeps users on the install-progress page until
+# the sandbox openclaw gateway is usable.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -13,19 +14,30 @@ data:
       ''      close;
     }
 
+    # Send nginx diagnostics to container stdout/stderr so
+    # `kubectl logs deploy/nemoclawweuiingress` actually surfaces upstream
+    # failures (connect refused, no live upstreams, auth_request 500s, etc).
+    # Without this, error.log only lives in the container filesystem and
+    # debugging 5xx means exec-ing into the pod to tail a file.
+    access_log /dev/stdout;
+    error_log  /dev/stderr warn;
+
+    # =====================================================================
+    # WebUI (Olares entrance `webtui` -> this :8080).
+    # Proxies to the OpenClaw web UI served by sandbox :18789 via the
+    # chat-ui-bridge relay (nemoclaw Service :18789 -> pod :18790 -> socat
+    # -> sandbox :18789). While install-ui.py is still the :18790 listener
+    # (sandbox gateway not yet healthy), GET / here returns the same
+    # install-progress HTML that the terminal gate shows below, because
+    # install-ui.py serves that page on any unknown URI.
+    # =====================================================================
     server {
       listen 8080;
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
-
-      # Short name "nemoclaw": non-variable proxy_pass resolves at worker start via libc + Pod resolv.conf
-      # search (nemoclaw.<namespace>.svc.cluster.local). Target is the Service ClusterIP — stable across Pod restarts.
-      # Variable proxy_pass (http://$host:port) needs resolver and breaks short names without FQDN.
       client_max_body_size 100m;
 
-      # gog Google OAuth callback: tunnels to k3s sandbox :8080 where `gog auth add --listen-addr 0.0.0.0:8080` runs.
-      # Exact match so OpenClaw SPA does not steal /oauth2/callback. Mirrors clawdbot's pattern but target is
-      # Service nemoclaw:18788 instead of :8080 (18788 is the in-pod relay that bridges into the k3s sandbox).
+      # gog Google OAuth callback: tunnels to k3s sandbox :8080 where
+      # `gog auth add --listen-addr 0.0.0.0:8080` runs. Exact match so the
+      # OpenClaw SPA does not steal /oauth2/callback.
       location = /oauth2/callback {
           proxy_pass http://nemoclaw:18788;
           proxy_http_version 1.1;
@@ -42,7 +54,6 @@ data:
       location / {
           proxy_pass http://nemoclaw:18789;
           proxy_http_version 1.1;
-
           proxy_set_header Host              $host;
           proxy_set_header X-Forwarded-Host  $http_host;
           proxy_set_header X-Real-IP         $remote_addr;
@@ -51,16 +62,51 @@ data:
           proxy_set_header X-Forwarded-Proto $scheme;
           proxy_set_header Upgrade           $http_upgrade;
           proxy_set_header Connection        $connection_upgrade;
-
           proxy_connect_timeout 600s;
           proxy_send_timeout    600s;
           proxy_read_timeout    3600s;
-
           proxy_buffering off;
           proxy_cache off;
-
           proxy_next_upstream error timeout http_502 http_503 http_504;
           client_max_body_size 100m;
+      }
+    }
+
+    # =====================================================================
+    # Terminal entrance (Olares entrance `terminal` -> this :8081).
+    #
+    # Simple pass-through to the beclab/terminal Service. The "don't let
+    # users open this until nemoclaw is ready" gate is NOT done at the
+    # nginx layer any more -- it lives at the Pod level via the
+    # readinessProbe on this Deployment below, which exec-curls
+    # nemoclaw:18789 every 15s. When nemoclaw has no Service endpoints
+    # (its own readinessProbe failing on /workspace/.nemoclaw-cli-ready),
+    # the curl fails -> this ingress Pod goes NotReady -> the
+    # `nemoclawweuiingress` Service endpoints disappear -> BOTH :8080
+    # (WebUI) and :8081 (terminal) become unreachable from outside.
+    # Olares therefore sees the whole app as "not yet ready" instead of
+    # routing to an ingress that serves 502s.
+    # =====================================================================
+    server {
+      listen 8081;
+      client_max_body_size 100m;
+
+      location / {
+          proxy_pass http://terminal:80;
+          proxy_http_version 1.1;
+          proxy_set_header Host              $host;
+          proxy_set_header X-Forwarded-Host  $http_host;
+          proxy_set_header X-Real-IP         $remote_addr;
+          proxy_set_header X-Forwarded-For   $remote_addr;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          # WebSocket (xterm.js <-> beclab/terminal apiserver sidecar).
+          proxy_set_header Upgrade           $http_upgrade;
+          proxy_set_header Connection        $connection_upgrade;
+          proxy_connect_timeout 600s;
+          proxy_send_timeout    600s;
+          proxy_read_timeout    3600s;
+          proxy_buffering off;
+          proxy_cache off;
       }
     }
 
@@ -95,9 +141,14 @@ spec:
                 path: nginx.conf
       containers:
         - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          image: "beclab/aboveos-bitnami-openresty:1.25.3-2"
           ports:
             - containerPort: 8080
+              protocol: TCP
+            # Terminal entrance gate (auth_request conditional proxy ->
+            # install-ui while nemoclaw is bringing up, -> beclab/terminal
+            # Service once cli is ready).
+            - containerPort: 8081
               protocol: TCP
           env:
             - name: OPENRESTY_CONF_FILE
@@ -115,13 +166,47 @@ spec:
             timeoutSeconds: 5
             successThreshold: 1
             failureThreshold: 6
+          # Pod-level gate: only become Ready once `nemoclaw` Service has
+          # endpoints AND openclaw gateway answers. `nemoclaw`'s own
+          # readinessProbe gates its Service endpoints on the sentinel
+          # /workspace/.nemoclaw-cli-ready, so when nemoclaw is NotReady
+          # the `nemoclaw` Service has zero endpoints and this curl
+          # connection fails (connect timeout). Probe failing flips THIS
+          # ingress Pod NotReady, which removes both the :8080 (WebUI)
+          # and :8081 (terminal) endpoints from the `nemoclawweuiingress`
+          # Service -- Olares treats the entrances as "not yet ready"
+          # instead of seeing nginx return 502.
+          #
+          # No `-f`: ANY HTTP response from `nemoclaw:18789` is accepted
+          # as "upstream reachable" (openclaw gateway may answer 2xx or
+          # redirect for `/`; we only care about TCP+HTTP liveness). A
+          # short --connect-timeout makes "no endpoints" fail fast.
+          # `--max-redir 0`: never follow redirects (avoids a future HTTP
+          # -> HTTPS hop that would make curl verify TLS inside this
+          # minimal nginx image and falsely fail the probe).
+          #
+          # Timing: first-boot `nemoclaw` stays NotReady for tens of minutes.
+          # periodSeconds=15 spams kubelet "Readiness probe failed" warnings
+          # (~4/min). Align first probe with nemoclaw initialDelay (300s)
+          # and probe every 60s -- same semantics, far fewer events.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "curl -sS --connect-timeout 2 --max-time 4 --max-redir 0 -o /dev/null http://nemoclaw:18789/"
+            initialDelaySeconds: 300
+            periodSeconds: 60
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 1
           resources:
             limits:
-              cpu: 100m
-              memory: 256Mi
+              cpu: 500m
+              memory: 512Mi
             requests:
-              cpu: 10m
-              memory: 64Mi
+              cpu: 50m
+              memory: 128Mi
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
@@ -144,3 +229,10 @@ spec:
       protocol: TCP
       port: 8080
       targetPort: 8080
+    # Terminal entrance gate: Olares entrance `terminal` points here so
+    # the auth_request block keeps users on the install-progress page
+    # until openclaw gateway is up in the sandbox.
+    - name: terminal-gate
+      protocol: TCP
+      port: 8081
+      targetPort: 8081
