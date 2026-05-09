@@ -5,22 +5,144 @@ metadata:
   name: deerflowv2-env-config
   namespace: {{ .Release.Namespace }}
 data:
-  # Search & Crawl tools
+  # ──────────────────────────────────────────────────────────────────────────
+  # System locale -- forces UTF-8 inside the slim Python container.
+  # Upstream commit 82e7936d bakes these into the Dockerfile, but our v2.0.1
+  # backend image was built before that commit. Without them, any path or
+  # tool output containing non-ASCII characters (Chinese filenames, emoji
+  # in markdown, etc.) raises UnicodeEncodeError when Python opens the file
+  # or writes to stdout. Safe to leave on permanently.
+  # ──────────────────────────────────────────────────────────────────────────
+  LANG: "C.UTF-8"
+  LC_ALL: "C.UTF-8"
+  PYTHONIOENCODING: "utf-8"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Web search & crawl provider keys.
+  # Tavily / Jina / InfoQuest are the original three. Serper / Firecrawl /
+  # Exa were added by upstream in 2026-Q2 (Serper PR #2630 in commit
+  # 44ab21fc). Leave empty unless the corresponding tool is referenced in
+  # config.yaml's `tools:` list -- empty values are fine, deer-flow only
+  # raises if a $VAR reference resolves to nothing.
+  # ──────────────────────────────────────────────────────────────────────────
   TAVILY_API_KEY: ""
   JINA_API_KEY: ""
   INFOQUEST_API_KEY: ""
-  # Model API keys (set the ones you use in config.yaml models section)
+  SERPER_API_KEY: ""
+  FIRECRAWL_API_KEY: ""
+  EXA_API_KEY: ""
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Model provider keys. Reference these via $VAR in config.yaml's `models:`
+  # section. Empty values are safe; only models that actually use the key
+  # will fail to register at startup.
+  # ──────────────────────────────────────────────────────────────────────────
   OPENAI_API_KEY: ""
   DEEPSEEK_API_KEY: ""
   ANTHROPIC_API_KEY: ""
   GOOGLE_API_KEY: ""
+  GEMINI_API_KEY: ""
   VOLCENGINE_API_KEY: ""
   NOVITA_API_KEY: ""
   MINIMAX_API_KEY: ""
   MOONSHOT_API_KEY: ""
+  VLLM_API_KEY: ""
+
   # LangSmith tracing (set to "true" and fill LANGSMITH_API_KEY to enable)
   LANGCHAIN_TRACING_V2: "false"
   LANGSMITH_API_KEY: ""
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Upload limits. Default upstream caps are tuned for the docker-compose
+  # demo (50 MiB per file, 100 MiB per request, 10 files); on Olares users
+  # routinely drop in 4K screenshots, recordings, and multi-page PDFs that
+  # exceed the per-file cap. Bumping the defaults to 100 MiB / 500 MiB / 20
+  # is conservative for an at-home server -- raise further if you upload
+  # large media. Sizes are bytes.
+  # ──────────────────────────────────────────────────────────────────────────
+  UPLOADS_MAX_FILES: "20"
+  UPLOADS_MAX_FILE_SIZE: "104857600"     # 100 MiB
+  UPLOADS_MAX_TOTAL_SIZE: "524288000"    # 500 MiB
+  # ============================================================================
+  # SUBAGENT LIMITS — tune to fix "Recursion limit reached" errors
+  # ============================================================================
+  # Each subagent (general-purpose, bash) runs as its own LangGraph instance.
+  # `max_turns` caps how many LLM <-> tool roundtrips it can take before the
+  # graph aborts with `GraphRecursionError`. `timeout_seconds` caps wall time.
+  #
+  # The values below are referenced by config.yaml as `$VAR`, resolved via
+  # DeerFlow's `resolve_env_variables()` and coerced to int by Pydantic
+  # (lax mode), so quoted strings here become real ints downstream.
+  #
+  # ─── WHEN TO ADJUST ─────────────────────────────────────────────────────────
+  #   Symptom                                          → Action
+  #   "Recursion limit of N reached" in logs           → raise the matching
+  #                                                       *_MAX_TURNS
+  #   Subagent aborts with "timed out"                 → raise the matching
+  #                                                       *_TIMEOUT_SECONDS
+  #   Local model burns CPU/$$ in obvious loops        → lower *_MAX_TURNS to
+  #                                                       surface failures fast
+  #
+  # ─── RECOMMENDED VALUES BY MODEL CLASS ──────────────────────────────────────
+  #   Model class                                       gp_turns   bash_turns
+  #   ──────────────────────────────────────────────    ────────   ──────────
+  #   Strong frontier (Claude 4 / GPT-5 / Doubao 2)     150        80
+  #   Efficient MoE (Gemma 4 26B A4B)                   200        100
+  #   Mid local (Qwen3 32B+ / DeepSeek V3.2 / Kimi 2.5) 300        150
+  #   Heavy local 30B-class (Qwen3.x 35B) ← default     500        300
+  #   Weak / heavily quantized (Qwen3 ≤ 14B, INT4)      1000       400
+  #
+  # gp_turns = SUBAGENT_GENERAL_PURPOSE_MAX_TURNS
+  # bash_turns = SUBAGENT_BASH_MAX_TURNS
+  # Image-baked builtin defaults: gp=500, bash=300 (already raised from
+  # upstream's 100 / 60 in this fork to handle long delegated workflows).
+  #
+  # ─── HOW TO SIZE TIMEOUTS ───────────────────────────────────────────────────
+  # Timeouts should be a safety net for hung/runaway processes — they should
+  # NOT trigger before max_turns under normal operation, otherwise raising
+  # max_turns has no effect. Rule of thumb:
+  #   timeout_seconds  ≥  max_turns  ×  realistic_seconds_per_turn
+  #
+  # Per-turn cost depends on model speed:
+  #   Strong cloud (Claude / GPT-5)            5-15 s/turn
+  #   Efficient MoE on Blackwell GPU           3-8  s/turn
+  #   30B local on RTX 4090 Q4                 15-30 s/turn
+  #   30B local on CPU / iGPU                  60-180 s/turn
+  #
+  # Defaults below assume 500 turns × 14 s/turn ≈ 2 h for general-purpose,
+  # which covers cloud and mid-tier local GPUs. For pure-CPU or very slow
+  # quantized local setups, push GENERAL_PURPOSE_TIMEOUT_SECONDS to 14400
+  # (4 h) or more.
+  #
+  # ─── HOW TO APPLY CHANGES ───────────────────────────────────────────────────
+  # 1. Edit the value below (or `kubectl edit configmap deerflowv2-env-config`).
+  # 2. Restart the backend so the new env vars are picked up:
+  #      kubectl -n <namespace> rollout restart deploy/deerflowv2-backend
+  # 3. Verify inside the pod:
+  #      kubectl -n <ns> exec deploy/deerflowv2-backend -c gateway -- \
+  #        env | grep SUBAGENT_
+  #
+  # ─── CAVEATS ────────────────────────────────────────────────────────────────
+  # - Values MUST stay quoted strings (e.g. "500", not 500). They are env vars.
+  # - Do NOT delete these keys. `resolve_env_variables()` raises ValueError if
+  #   a `$VAR` reference can't be resolved, which crashes the pod on startup.
+  # - For installs whose appData/config/config.yaml predates this chart (no
+  #   `subagents:` block, or hard-coded numbers): either edit it manually to
+  #   match the template below, OR delete it and let the init-container
+  #   regenerate from the template (this loses any custom `models:` you added,
+  #   so back it up first).
+  # - Changes to this ConfigMap do NOT auto-restart the pod. The rollout
+  #   restart in step 2 is required.
+  SUBAGENT_DEFAULT_TIMEOUT_SECONDS: "1800"
+  # Global default max_turns. Per-agent values below override this, so it
+  # only kicks in for any custom_agents the user defines without an explicit
+  # max_turns override (e.g. a "data-analysis" subagent created via
+  # subagents.custom_agents in config.yaml). Upstream builtin default is 50.
+  SUBAGENT_DEFAULT_MAX_TURNS: "200"
+  SUBAGENT_GENERAL_PURPOSE_MAX_TURNS: "500"
+  SUBAGENT_GENERAL_PURPOSE_TIMEOUT_SECONDS: "7200"
+  SUBAGENT_BASH_MAX_TURNS: "300"
+  SUBAGENT_BASH_TIMEOUT_SECONDS: "1800"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -29,7 +151,23 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   config.yaml: |
-    config_version: 2
+    # Bumped to match upstream config.example.yaml (deer-flow main, May 2026).
+    # The version number itself is purely a "your config is outdated, run
+    # config-upgrade" warning trigger in deer-flow's startup log -- it does
+    # not unlock or restrict any features.
+    config_version: 8
+
+    # Logger threshold for the `deerflow` and `app` loggers. Third-party
+    # libraries (uvicorn, sqlalchemy, langgraph, ...) keep their own levels.
+    # Use "debug" temporarily to surface tool selection / middleware decisions
+    # when an agent misbehaves, then revert.
+    log_level: info
+
+    # Surface input/output/total token counts in the workspace UI when the
+    # provider returns them. Helps spot a runaway Ultra session before it
+    # eats a Tavily quota or burns local GPU time on a duplicate-dispatch.
+    token_usage:
+      enabled: true
 
     # =============================================
     # HOW TO ADD MODELS
@@ -111,8 +249,44 @@ data:
     tool_search:
       enabled: false
 
+    # =============================================
+    # UPLOADS
+    # =============================================
+    # All values are sourced from env vars in deerflowv2-env-config so
+    # operators can resize without editing config.yaml. See that ConfigMap
+    # for tuning notes. Sizes are bytes; the gateway also surfaces these
+    # to the frontend so the file picker can reject too-large files before
+    # they hit the wire.
+    uploads:
+      max_files: $UPLOADS_MAX_FILES
+      max_file_size: $UPLOADS_MAX_FILE_SIZE
+      max_total_size: $UPLOADS_MAX_TOTAL_SIZE
+      # Office/PDF auto-conversion runs on the gateway host BEFORE the
+      # sandbox isolates the file. Keep off unless uploads come from a
+      # fully trusted source -- a malicious .docx can hit the parser before
+      # any sandboxing applies. The image-ocr Skill handles user-driven
+      # OCR explicitly via tesseract anyway.
+      auto_convert_documents: false
+      pdf_converter: auto
+
     sandbox:
       use: deerflow.sandbox.local:LocalSandboxProvider
+      # Re-enable host bash for the LLM. Upstream PR #1547 (Security: Address
+      # critical host-shell escape in LocalSandboxProvider) gates the `bash`
+      # tool behind this flag, because LocalSandboxProvider executes commands
+      # directly on the gateway pod's filesystem rather than inside an
+      # isolated sandbox container. With the flag off, the LLM cannot
+      # `pip install` or `apt-get install` runtime helpers (notably
+      # pytesseract / tesseract-ocr for OCR), which silently breaks the
+      # legacy "ask the model to OCR an image" workflow that worked before
+      # we picked up the security patch.
+      #
+      # In a single-tenant Olares deployment the gateway pod is the trust
+      # boundary anyway, so re-enabling this restores prior behavior without
+      # widening exposure beyond what existed before. If you ever expose this
+      # instance to untrusted users, switch to AioSandboxProvider (per-thread
+      # container) instead and flip this back to false.
+      allow_host_bash: true
 
     skills:
       container_path: /mnt/skills
@@ -134,6 +308,19 @@ data:
         value: 10
       trim_tokens_to_summarize: 15564
       summary_prompt: null
+      # Recently-loaded skill files (e.g. the image-ocr SKILL.md the agent
+      # just opened) are exempt from summarization, otherwise the agent
+      # would lose its instructions mid-task. These are upstream defaults
+      # pinned here so a future deer-flow update changing the defaults
+      # cannot silently degrade the image-ocr workflow.
+      preserve_recent_skill_count: 5
+      preserve_recent_skill_tokens: 25000
+      preserve_recent_skill_tokens_per_skill: 5000
+      skill_file_read_tool_names:
+        - read_file
+        - read
+        - view
+        - cat
 
     memory:
       enabled: true
@@ -145,12 +332,299 @@ data:
       injection_enabled: true
       max_injection_tokens: 2000
 
-    checkpointer:
-      type: sqlite
-      connection_string: checkpoints.db
+    # =============================================
+    # PERSISTENCE (users, threads metadata, checkpoints, run events)
+    # =============================================
+    # The unified `database:` block drives EVERYTHING that needs durable
+    # storage: gateway user store (users + sessions + tokens), thread
+    # metadata, the LangGraph checkpointer, and the run-event journal
+    # (token usage, tool-call traces). All routed to a single postgres
+    # database provisioned automatically by the Olares postgres
+    # middleware (declared in OlaresManifest.yaml as `middleware.postgres`).
+    #
+    # Connection strings are built from .Values.postgres.* in deployment.yaml:
+    #   DATABASE_URL              → SQLAlchemy ORM (asyncpg) — **no** libpq-only params
+    #   CHECKPOINTER_DATABASE_URL → LangGraph checkpointer (psycopg) — TCP keepalives OK
+    # deer-flow resolves both via AppConfig.resolve_env_variables() at startup.
+    #
+    # To switch back to sqlite (single-tenant, no postgres dependency):
+    #   1. Remove the `middleware.postgres` block from OlaresManifest.yaml
+    #   2. Remove the DATABASE_URL env entries from deployment.yaml
+    #   3. Replace the block below with:
+    #        database:
+    #          backend: sqlite
+    #          sqlite_dir: /data/deer-flow/db
+    #   4. Recreate the appData/config/config.yaml or run the migration
+    #      script in reverse.
+    database:
+      backend: postgres
+      postgres_url: $DATABASE_URL
+      checkpointer_postgres_url: $CHECKPOINTER_DATABASE_URL
+
+    # =============================================
+    # SUBAGENT LIMITS
+    # =============================================
+    # All values resolved from env vars defined in the deerflowv2-env-config
+    # ConfigMap — see that ConfigMap's comments for tuning guidance,
+    # recommended values per model class, and how to apply changes.
+    # Tune the env vars there, NOT the literals below.
+    subagents:
+      timeout_seconds: $SUBAGENT_DEFAULT_TIMEOUT_SECONDS
+      max_turns: $SUBAGENT_DEFAULT_MAX_TURNS
+      agents:
+        general-purpose:
+          timeout_seconds: $SUBAGENT_GENERAL_PURPOSE_TIMEOUT_SECONDS
+          max_turns: $SUBAGENT_GENERAL_PURPOSE_MAX_TURNS
+        bash:
+          timeout_seconds: $SUBAGENT_BASH_TIMEOUT_SECONDS
+          max_turns: $SUBAGENT_BASH_MAX_TURNS
+
+    # =============================================
+    # RUN EVENTS (message + tool-call telemetry)
+    # =============================================
+    # Upstream defaults this to "memory", which means every conversation's
+    # full execution trace (subagent dispatches, tool invocations, token
+    # counts, errors) is kept only in process RAM and lost on pod restart.
+    # That makes it impossible to audit "why did the lead burn 15 minutes
+    # last night" after the fact, and it makes the per-run token-usage
+    # accounting in the UI reset on every restart.
+    #
+    # We already run sqlite for the user store + checkpointer, so flipping
+    # run_events to the same backend is essentially free -- traces land in
+    # the same deerflow.db file. Still bounded by max_trace_content (10 KiB
+    # per individual trace blob) so a runaway tool output cannot bloat the
+    # DB indefinitely.
+    run_events:
+      backend: db
+      max_trace_content: 10240
+      track_token_usage: true
+
+    # =============================================
+    # CIRCUIT BREAKER (LLM provider failure isolation)
+    # =============================================
+    # When the upstream model provider (Ollama, vLLM, OpenAI, ...) returns
+    # 5 consecutive failures, fast-fail subsequent calls for 60 seconds
+    # instead of letting LangGraph retry-loops hammer a dying provider.
+    # Defaults below match upstream and work well for both local Ollama
+    # (where 5 timeouts means the model is genuinely stuck) and cloud APIs
+    # (where 5 failures usually means rate limit / outage). Pinned here so
+    # the values are visible to operators rather than buried in code.
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_timeout_sec: 60
 
   extensions_config.json: |
     {
       "mcpServers": {},
       "skills": {}
     }
+
+  # ============================================================================
+  # MIGRATION SCRIPT: sqlite -> postgres database backend
+  # ============================================================================
+  # Mounted at /init-config/migrate_database_to_postgres.py and invoked by the
+  # init-container in deployment.yaml. Idempotently rewrites the `database:`
+  # block in an existing /config/config.yaml (the operator's persisted copy
+  # on the appData hostPath) so chart upgrades flip the backend in place
+  # without losing user-edited fields like `models:`.
+  #
+  # Why python instead of sed/awk: top-level YAML block detection has to
+  # respect indentation, comment lines, and key order. A regex one-liner
+  # gets it wrong on configs that operators have hand-edited, and the
+  # failure mode (silently appending a duplicate `database:` block, then
+  # PyYAML picks one of the two non-deterministically) is hard to debug.
+  # The deer-flow image ships python3.12, so this is free.
+  migrate_database_to_postgres.py: |
+    """Rewrite database:/checkpointer: blocks in config.yaml to use postgres.
+
+    Usage: python3 migrate_database_to_postgres.py /path/to/config.yaml
+    """
+    from __future__ import annotations
+
+    import re
+    import sys
+    from pathlib import Path
+
+    POSTGRES_BLOCK = (
+        "\n"
+        "# Auto-injected by init-container (chart >= 1.0.9). The Olares\n"
+        "# `middleware.postgres` provisioner exposes connection details via\n"
+        "# DATABASE_URL (asyncpg ORM) and CHECKPOINTER_DATABASE_URL (psycopg\n"
+        "# LangGraph saver with TCP keepalives). To switch back to sqlite,\n"
+        "# remove the postgres middleware block from OlaresManifest.yaml and\n"
+        "# edit this section by hand.\n"
+        "database:\n"
+        "  backend: postgres\n"
+        "  postgres_url: $DATABASE_URL\n"
+        "  checkpointer_postgres_url: $CHECKPOINTER_DATABASE_URL\n"
+    )
+
+
+    def ensure_checkpointer_postgres_url(cfg: Path) -> None:
+        """Inject checkpointer_postgres_url for chart 1.0.11+ without full rewrite."""
+        text = cfg.read_text(encoding="utf-8")
+        if "checkpointer_postgres_url:" in text:
+            return
+        if "backend: postgres" not in text or "postgres_url:" not in text:
+            return
+        lines = text.splitlines(keepends=True)
+        out: list[str] = []
+        inserted = False
+        for line in lines:
+            out.append(line)
+            if not inserted and re.match(r"^[ \t]+postgres_url:[ \t]", line):
+                out.append("  checkpointer_postgres_url: $CHECKPOINTER_DATABASE_URL\n")
+                inserted = True
+        if inserted:
+            cfg.write_text("".join(out), encoding="utf-8")
+            print(f"migrate: injected checkpointer_postgres_url into {cfg}")
+
+    # Match a top-level YAML block whose key is `database` or the legacy
+    # upstream `checkpointer`. The body is any consecutive run of indented
+    # or blank lines following the key. Stops at the next top-level key
+    # (a non-whitespace character at column 0) or end-of-file.
+    BLOCK_RE = re.compile(
+        r"^(?:database|checkpointer):[ \t]*\n(?:[ \t]+[^\n]*\n|[ \t]*\n)*",
+        re.MULTILINE,
+    )
+
+
+    def main(path: str) -> int:
+        cfg = Path(path)
+        if not cfg.exists():
+            print(f"migrate: {cfg} does not exist; nothing to do")
+            return 0
+
+        original = cfg.read_text(encoding="utf-8")
+        # Drop ALL existing database:/checkpointer: blocks. There may be
+        # more than one if a previous chart bug appended duplicates.
+        stripped = BLOCK_RE.sub("", original)
+        # Trim trailing whitespace before re-appending so the final file
+        # is not padded with blank lines after repeated runs.
+        new = stripped.rstrip() + "\n" + POSTGRES_BLOCK
+
+        if new == original:
+            print(f"migrate: {cfg} already on postgres backend; no change")
+            ensure_checkpointer_postgres_url(cfg)
+            return 0
+
+        cfg.write_text(new, encoding="utf-8")
+        print(f"migrate: rewrote {cfg} database block -> postgres")
+        ensure_checkpointer_postgres_url(cfg)
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "/config/config.yaml"))
+
+  # ============================================================================
+  # SKILL: image-ocr -- canonical OCR workflow for uploaded images
+  # ============================================================================
+  # deer-flow's <uploaded_files> middleware nudges the model toward read_file /
+  # grep / glob (text-file affordances) regardless of whether the upload is
+  # actually an image. Without further guidance the lead agent tends to either
+  # (a) hallucinate the image contents, or (b) reach for a heavyweight OCR
+  # stack like paddleocr / easyocr that downloads ~600 MB and blows past the
+  # 600s subprocess.run timeout in LocalSandbox.execute_command.
+  #
+  # Skills are deer-flow's first-class extension point for this kind of fix:
+  # any SKILL.md placed under <skills_root>/custom/<name>/ is auto-enabled
+  # (extensions_config.is_skill_enabled defaults to True for the "custom"
+  # category), and its `description` frontmatter is injected into the lead
+  # agent system prompt as <available_skills>. When the user query matches
+  # the description, the agent calls read_file on the SKILL.md to load the
+  # full instructions, then follows them verbatim.
+  #
+  # The init-container copies this skill to /skills/custom/image-ocr/SKILL.md
+  # on every pod start, so chart bumps push updated skill content. Operators
+  # who want a different policy can edit the file directly, then bump the
+  # `name` in the frontmatter so init does not overwrite it; or disable the
+  # skill from the Olares extensions UI.
+  image-ocr-skill.md: |
+    ---
+    name: image-ocr
+    description: >-
+      Extract text from an uploaded image. Trigger when the user asks to OCR
+      an image, read text from a picture, recognize characters, transcribe a
+      screenshot, identify what is written on a poster / receipt / business
+      card / handwritten note, or extract any textual content from an image
+      file. Common phrasings include "OCR this image", "OCR it", "extract
+      text from screenshot", "transcribe this image", "what does this image
+      say", "read the text in this picture", "recognize the characters in
+      this photo", and equivalent requests in any other language (the model
+      should match by intent, not literal wording). Trigger whenever a .png,
+      .jpg, .jpeg, .webp, or .heic file is uploaded and the user wants the
+      textual content rather than a visual description.
+    ---
+
+    # Image OCR
+
+    Canonical, fast path for extracting text from an uploaded image. Follow
+    this strictly to avoid the two failure modes operators have reported:
+
+    1. Hallucinating image contents instead of actually reading the file.
+    2. Picking heavyweight OCR stacks (paddleocr, easyocr, mmocr, rapidocr)
+       that download hundreds of megabytes and time out the bash tool.
+
+    ## Decision tree
+
+    ### Step 1 -- Try `view_image` first (best when available)
+
+    Look at your own tool list. If `view_image` is present, call it directly:
+
+    ```
+    view_image(image_path="/mnt/user-data/uploads/<filename>")
+    ```
+
+    This injects the actual image bytes into your context as a vision input.
+    Read the text directly from what you see and return it. No installation,
+    no sandbox call, sub-second result, exact characters preserved.
+
+    If `view_image` is not in your tool list (the selected model has no
+    vision capability) or the call returns an error, fall through to Step 2.
+
+    ### Step 2 -- pytesseract (only if Step 1 unavailable)
+
+    Install `pytesseract` plus the `tesseract` binary and the Chinese +
+    English language packs in one shot. Use these exact commands; do NOT
+    substitute paddleocr, easyocr, mmocr, rapidocr, or any other OCR stack:
+    they are 10x to 100x larger than tesseract and routinely exceed the
+    bash tool's 600s wall-clock timeout.
+
+    ```bash
+    which tesseract >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-eng > /dev/null)
+    python -c "import pytesseract" 2>/dev/null || pip install -q pytesseract Pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
+    ```
+
+    Then run OCR. The `lang` argument matters; without it Chinese text comes
+    back as garbage:
+
+    ```bash
+    python - <<'PY'
+    import pytesseract
+    from PIL import Image
+    text = pytesseract.image_to_string(
+        Image.open('/mnt/user-data/uploads/<filename>'),
+        lang='chi_sim+chi_tra+eng',
+    )
+    print(text)
+    PY
+    ```
+
+    Total wall time on a fresh sandbox: roughly 30 to 60 seconds for the
+    first install (apt fetches plus tesseract data files), under 2 seconds
+    for subsequent calls in the same conversation since both apt and pip
+    are cached inside the gateway pod for its lifetime.
+
+    ## Constraints
+
+    - Do not invent text. If the image is unreadable or OCR returns
+      nothing, say so explicitly. Do not guess at the contents.
+    - Do not save the OCR output as a file under `/mnt/user-data/outputs`
+      unless the user explicitly asks for a file deliverable. Just
+      include the extracted text inline in your response.
+    - Do not chain multiple OCR libraries in a single turn. Pick one path
+      (Step 1 OR Step 2) and stick with it. If Step 2 fails, report the
+      failure to the user instead of falling back to a third option.
+    - For multi-page PDFs that have already been converted to images, run
+      Step 2 once per page and concatenate the results in page order.

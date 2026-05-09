@@ -41,3 +41,8 @@ spec:
       - Research reports, slide decks, web pages, and image generation
       - Custom skills for specialized workflows
       - Podcast script generation and audio synthesis
+
+  upgradeDescription: |
+    Adds a PostgreSQL database backend (provisioned automatically by the Olares `middleware.postgres`) and a built-in account / authentication system. After upgrade, open the app and follow the `/setup` page to create the first admin account.
+
+    Exposes subagent turn / timeout limits as environment variables on `deerflowv2-env-config`, so operators can fix `Recursion limit reached` errors without rebuilding the image. Each subagent has two knobs: `*_MAX_TURNS` (max LLM ↔ tool roundtrips before LangGraph aborts the run with `GraphRecursionError`) and `*_TIMEOUT_SECONDS` (wall-clock cap; should be ≥ `MAX_TURNS × seconds_per_turn`). Tune `GENERAL_PURPOSE_*` for the deep-research subagent (default `500` / `7200`), `BASH_*` for the shell subagent (`300` / `1800`), and `DEFAULT_*` (`200` / `1800`) only kicks in for custom subagents you declare under `subagents.custom_agents` in `config.yaml`. Symptom → action: `Recursion limit reached` → raise `*_MAX_TURNS`; subagent aborts with "timed out" → raise `*_TIMEOUT_SECONDS`; weak / heavily quantized models usually need higher limits. Edit the ConfigMap and restart the backend deployment to apply.
