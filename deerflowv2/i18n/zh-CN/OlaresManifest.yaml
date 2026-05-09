@@ -43,48 +43,6 @@ spec:
       - 播客脚本生成和音频合成
 
   upgradeDescription: |
-    **1.0.11 修正 1.0.10**：chart `1.0.10` 把 libpq 的 TCP keepalive 查询参数追加进了 `DATABASE_URL`，导致 gateway 启动失败：SQLAlchemy 用的是 **asyncpg**，会把未知 URL 参数传给 `asyncpg.connect()` → `TypeError: connect() got an unexpected keyword argument 'keepalives'`。
+    新增 PostgreSQL 数据库后端（由 Olares `middleware.postgres` 自动创建）以及内置账户与认证系统。升级后打开 app 会跳到 `/setup` 页面，请按提示创建首个 admin 账号。
 
-    - **修复**：`DATABASE_URL` 恢复为不带 keepalive 的普通连接串（asyncpg 安全）。新增环境变量 **`CHECKPOINTER_DATABASE_URL`**，指向同一套库但在末尾附带 `?keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=5`，仅给 LangGraph 的 psycopg 连接池用。内置 `config.yaml` 增加 `database.checkpointer_postgres_url: $CHECKPOINTER_DATABASE_URL`。deer-flow harness 侧新增 `langgraph_postgres_url` 属性 —— **后端镜像须 `v2.0.4-amd-pg` 或更新**。init-container 迁移脚本会给磁盘上仅有 `postgres_url` 的旧配置自动插入 `checkpointer_postgres_url` 行。
-    - **空闲后 `psycopg.OperationalError: the connection is closed`**（最初动机）：只在 checkpointer 专用 URL 上加 keepalive；ORM 侧 postgres 本来就用 SQLAlchemy `pool_pre_ping=True`。
-
-    把 DeerFlow 的持久化层从 chart 自管的 SQLite 文件（hostPath）切到 Olares 内建的 PostgreSQL middleware。deer-flow 统一的 `database:` 配置（同时承担 LangGraph checkpointer、用户/认证库、threads 元数据，以及 1.0.8 加的 run_events 轨迹）现在指向一个由 Olares `middleware.postgres` provisioner 自动创建的、专属于本 app 的 PostgreSQL 库 —— 跟 docmost / affine / flowise / hasura / lobechat 走同一套范式。
-
-    - **重新构建后端镜像**：须使用 `v2.0.4-amd-pg`（含拆分 URL 逻辑）；构建时仍带 `UV_EXTRAS=postgres`，把 `asyncpg`、`psycopg[binary]`、`psycopg-pool`、`langgraph-checkpoint-postgres` 烤进镜像。
-    - **`OlaresManifest.yaml` 加 `middleware.postgres` 块**。Olares 系统自动建一个名为 `deerflow`、属主为 `deerflow` 用户的 postgres 库，随机生成密码，并把连接信息以 `.Values.postgres.{username,password,host,port,databases.deerflow}` 形式暴露给 Helm 模板。
-    - **gateway 与 langgraph 容器同时注入 `DATABASE_URL` 与 `CHECKPOINTER_DATABASE_URL`**。内置 `config.yaml`：`database.postgres_url: $DATABASE_URL`，`database.checkpointer_postgres_url: $CHECKPOINTER_DATABASE_URL`。
-    - **一次性数据丢失**：如果你升过 1.0.4 及之后版本（sqlite on hostPath），那些账号、对话历史、注册到本地 sqlite 的元数据**不会迁移**。init-container 会就地手术，把 `appData/config/config.yaml` 里的 `database:` 块从 sqlite 改写成 postgres，但其他段（自定义的 `models:` 等）原封不动保留。旧的 `appData/deer-flow/db/deerflow.db` 文件留在磁盘上不删，方便你以后手动捞数据；deer-flow 只是不再读它。
-    - **本次升级后第一次启动**：gateway 的 `lifespan` 钩子会对空的 postgres 库跑一次 `Base.metadata.create_all(engine)`，一次性建好所有表。之后打开 app 会跳到 `/setup` 让你重建 admin 账号 —— 跟全新安装的流程一样。
-    - **`requiredDisk` 从 2Gi 降到 512Mi**：持久状态搬到 Olares 共享的 postgres 数据卷里了，不再占 chart 自己的 hostPath。`<appData>/config`、`<appData>/skills`、`<appData>/deer-flow`（memory.json、每会话的 uploads/outputs）这三个 hostPath 挂载保留，因为这些数据不在 db 里。
-
-    本次把内置 `config.yaml` 与上游 `config.example.yaml`（deer-flow main，2026 年 5 月）做了一次全面对齐，把所有对 Olares 单租户部署既安全又有用的配置项都补齐了。**不需要重新构建后端镜像**。已安装实例由 init-container 就地迁移：磁盘上的 `appData/config/config.yaml` 按段幂等打补丁，已经手动添加的 models 或自定义改动都会保留。
-
-    - **UTF-8 locale**：在 gateway 和 langgraph 容器都设上 `LANG`、`LC_ALL`、`PYTHONIOENCODING`。上游 commit `82e7936d` 已把这几行加进 Dockerfile，但我们的 `v2.0.1` 后端镜像比那个 commit 早，没有 baked in。没有这几个变量时，`python:3.12-slim` 容器里碰到中文文件名或 emoji 输出会直接 `UnicodeEncodeError`。
-    - **运行轨迹持久化**：`run_events.backend: db`（原 `memory`）。对话轨迹、工具调用耗时、每轮 token 计数都落到与用户库同一个 sqlite 文件，重启后 workspace UI 的 token 用量统计和"昨晚 agent 到底干了什么"的审计日志都不再清零。
-    - **token 用量展示**：`token_usage.enabled: true`。provider 返回的输入/输出/合计 token 数会按轮显示在 workspace UI，方便在 Ultra 跑飞之前发现"为什么这一会儿就把 Tavily 配额吃光了"。
-    - **上传配额**：在 `deerflowv2-env-config` 新增三个环境变量 —— `UPLOADS_MAX_FILES=20`、`UPLOADS_MAX_FILE_SIZE=104857600`（100 MiB，原 50）、`UPLOADS_MAX_TOTAL_SIZE=524288000`（500 MiB，原 100）。今后调整这三个值即可，不需要改 `config.yaml`。新默认值能直接吞掉 4K 截图、扫描版多页 PDF、短录屏，不再在文件选择器阶段就被拒。
-    - **summarization 时保护 skill**：显式写出 `summarization.preserve_recent_skill_count: 5` 等参数。防止 deer-flow 后续版本改默认值，导致任务跑到一半把 `image-ocr` SKILL.md 给 summarize 掉。
-    - **熔断器**：`circuit_breaker.failure_threshold: 5` / `recovery_timeout_sec: 60` 显式写出。Ollama / vLLM / OpenAI 连续 5 次失败后，60 秒内的 LLM 调用立即 fast-fail，不再让 LangGraph 的 retry 循环把已经挂掉的 provider 继续锤。
-    - **subagent 全局 max_turns**：新增 `SUBAGENT_DEFAULT_MAX_TURNS=200` 环境变量，对应 `subagents.max_turns`。这个值只对用户自定义的 `custom_agents` 生效（内置的 `general-purpose` / `bash` 仍然走各自的覆盖值）。以后在 `config.yaml` 里加一个 `custom_agents.analysis` 块时，不必再单独记得给它配 `max_turns`。
-    - **新 provider 占位 key**：`SERPER_API_KEY`、`FIRECRAWL_API_KEY`、`EXA_API_KEY`、`GEMINI_API_KEY`、`VLLM_API_KEY` 都加进了环境 ConfigMap（默认空值）。想把 `web_search` 切到 Serper（上游 PR #2630）或 Firecrawl，填个 key 就行，不用动 chart。
-    - **config 版本号**：`config_version: 8`（原 2）。盖掉 gateway 每次启动时打的 `Your config.yaml ... is outdated` 警告。
-
-    新增 `image-ocr` Skill，把图片 OCR 的执行路径固化下来，修掉 1.0.6 里两种回归现象：模型对上传图片要么直接胡编内容（deer-flow 的 `<uploaded_files>` 中间件不分文件类型地把 read_file / grep / glob 推给模型），要么挑了 paddleocr / easyocr 这种 600 MB 起步的大包（下载就把 `LocalSandbox.execute_command` 那个 600s `subprocess.run` 超时撑爆）。同时包含 1.0.6 的所有修复。
-
-    - 新增 `image-ocr` Skill，由 init-container 每次启动都覆盖写到 `<appData>/skills/custom/image-ocr/SKILL.md`（chart 升级会推送新内容）。deer-flow 默认启用所有 custom 类 skill，主 agent 在 system prompt 里就能看到这个 skill 的 name 和触发描述，无需额外配置。决策树是：选中模型有 `view_image` 时优先走它（亚秒级，字符精准），没有就退化到 `pytesseract` + `tesseract-ocr` apt 包（含中英文语言包，首次装 30s 左右，后续 <2s），并明确禁止用 paddleocr / easyocr / mmocr / rapidocr。
-    - 想用别的 OCR 策略的运维同学，可以直接编辑 SKILL.md 并把 frontmatter 里的 `name:` 改名（init 只会覆写仍叫 `image-ocr` 的那个目录），或者从 Olares 的扩展页里把这个 skill 关掉。
-    - 文件位置提醒（不是本次 chart 改动，是 auth 迁移之后上游的新布局）：每个对话的上传和输出文件现在落在 `<appData>/deerflowv2/deer-flow/users/<deerflow_user_id>/threads/<thread_id>/user-data/`；老的顶层 `deer-flow/threads/` 目录只保留迁移前的历史数据。从 Olares Files 应用里找文件请进 `users/` 子目录，或者直接让 agent 调 `present_files`，前端会出预览/下载卡片。
-
-    修复上游 PR #1547（Security: Address critical host-shell escape in LocalSandboxProvider）合入后，让模型自己 `pip install` / `apt-get install` 跑工具的链路被掐断的问题。
-
-    - 在内置 `config.yaml` 里加上 `sandbox.allow_host_bash: true`。新版本 deer-flow 在 LocalSandboxProvider 模式下默认把 `bash` 工具从 LLM 视野里隐藏，模型既不能 `pip install pytesseract` 也不能 `apt-get install tesseract-ocr`，1.0.3 之前能跑的 OCR、临时安装小工具等"让模型自己装东西用"的玩法全部失效。Olares 单租户部署里 gateway pod 本来就是信任边界，开回去只是恢复以前的行为，并没有放大攻击面。如果以后要把这个实例开放给外部不可信用户，请改用 AioSandboxProvider（每会话一个独立容器），同时把这个开关关掉。
-
-    采用 DeerFlow 上游内置的新认证体系，修复 1.0.3 升级后接口频繁 403 "CSRF token missing" 的问题。
-
-    - Frontend 镜像升级至 v2.0.3，配套新增登录页、CSRF token 自动注入、账户设置页面，与新后端鉴权中间件完整对接。
-    - 首次启动**不会**自动创建 admin 账号。升级后第一次打开会自动跳到 `/setup` 页面，由你自己填邮箱和密码设置首个 admin（gateway 日志会打 `First boot detected — no admin account exists. Visit /setup to complete admin account creation.`）。如果以后忘了密码，跑 `kubectl -n <ns> exec deploy/deerflowv2-backend -c gateway -- python -m app.gateway.auth.reset_admin --email <admin@email>`，新密码会写到 `/data/deer-flow/admin_initial_credentials.txt`（权限 0600）。
-    - JWT 签名密钥首次安装时随机生成 64 位 alphaNum，保存在 `deerflowv2-auth-secret` Secret 里，并加 `helm.sh/resource-policy: keep`。`helm upgrade` 不会再轮换密钥，已登录用户在 chart 升级后不会被踢出。
-    - 用户数据库迁移到 /data/deer-flow/db/deerflow.db（持久化 hostPath）。之前镜像内的相对路径会落到 /app/backend，本次升级前在该路径注册的账号需要重新创建。init-container 现在会（a）幂等地把 `database:` 块追加到已存在的 `appData/config/config.yaml` 上，让从 1.0.3 升上来的用户拿到新路径同时不丢自己编辑过的 `models:` 配置；（b）把持久化 hostPath 全部 chown 到 uid 1000，确保运行时用户能写 `deerflow.db`、`admin_initial_credentials.txt`、`.langgraph_api/`。
-    - clientproxy 显式设置 `X-Forwarded-Proto: https`。Olares 入口在 clientproxy 上游做 HTTPS 终止，之前的 `$scheme` 在这一跳是 `http`，导致后端把登录/注册 POST 拒绝为 "Cross-site auth request denied"。
-    - frontend 容器新增 `DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://deerflowv2-backend-svc:8001` 和 `DEER_FLOW_TRUSTED_ORIGINS=https://<entrance 域名>`。默认值 127.0.0.1:8001 只在 `make dev` 单进程模式下可用，前端 pod 日志会出现 "Service temporarily unavailable" + `ECONNREFUSED 127.0.0.1:8001`。
-    - clientproxy 把 `/api/langgraph/*` 改为 rewrite 成 `/api/*` 后转发到 **gateway**，与上游 `docker/nginx/nginx.conf` 官方拓扑保持一致。之前直接 `proxy_pass` 到 langgraph 容器的做法，让每个浏览器发起的 LangGraph 请求都进了 `langgraph dev` 进程的 auth handler——在分容器部署里这个进程从不跑 gateway 的 lifespan、没有持久化引擎，于是每次都 500：`RuntimeError: get_local_provider() called before init_engine_from_config()`。新路由下所有 LangGraph 协议流量都由 gateway 的 compat router（threads/runs/thread_runs/assistants_compat）承接，由 gateway 内部用 langgraph_sdk 与 langgraph 容器通信。
+    新增一组 subagent 调度上限的环境变量到 `deerflowv2-env-config`，无需重新打包镜像就能在线调整、解决 `Recursion limit reached` 报错。每个 subagent 有两个旋钮：`*_MAX_TURNS` 控制 LLM ↔ 工具最大往返轮数（超出时 LangGraph 抛 `GraphRecursionError`），`*_TIMEOUT_SECONDS` 控制墙钟上限（建议 ≥ `MAX_TURNS × 单轮耗时`）。`GENERAL_PURPOSE_*` 给深度研究子 agent 用（默认 `500` / `7200`），`BASH_*` 给 shell 子 agent 用（`300` / `1800`），`DEFAULT_*`（`200` / `1800`）只对你在 `config.yaml` 的 `subagents.custom_agents` 里自定义的子 agent 生效。常见症状对应：报 `Recursion limit reached` → 调高 `*_MAX_TURNS`；报"timed out" → 调高 `*_TIMEOUT_SECONDS`；本地小模型 / 量化重的模型通常需要更大的上限。修改 ConfigMap 后重启后端 deployment 即可生效。
