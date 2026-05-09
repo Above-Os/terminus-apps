@@ -518,6 +518,461 @@ data:
         sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "/config/config.yaml"))
 
   # ============================================================================
+  # MIGRATION SCRIPT: legacy ephemeral SQLite -> postgres conversation history
+  # ============================================================================
+  # Mounted into the *gateway* container at /migrate (see deployment.yaml).
+  # Run on demand by the operator AFTER:
+  #   1. Upgrading to chart >= 1.1.4 (postgres backend + this script)
+  #   2. Visiting /setup in the browser to create the first admin account
+  #
+  #   kubectl -n <ns> exec -it deploy/deerflowv2-backend -c gateway -- \
+  #     sh /migrate/migrate_legacy_sqlite.sh <admin_email>
+  #
+  # The script reads /data/deer-flow/checkpoints.db read-only, looks up the
+  # admin user_id from the new PG `users` table, and writes every checkpoint
+  # + pending write into PostgreSQL via AsyncPostgresSaver, stamping
+  # metadata.user_id = <admin> so the migrated threads show up in the admin's
+  # sidebar (langgraph_auth.add_owner_filter scopes the thread list to
+  # metadata.user_id == ctx.user.identity).
+  #
+  # Idempotent: re-running upserts the same rows. Source SQLite is opened
+  # read-only and never modified -- safe to run as many times as needed.
+  # Mounted via items: so only these two files appear under /migrate, the
+  # rest of init-config (config.yaml etc.) does not leak into the runtime
+  # filesystem.
+  migrate_legacy_sqlite.sh: |
+    #!/bin/sh
+    # Convenience wrapper around migrate_legacy_sqlite.py. Sets up PYTHONPATH
+    # and uv so the script can import deerflow.* modules from the running
+    # gateway image without the operator having to remember the venv layout.
+    set -e
+
+    if [ "$#" -lt 1 ]; then
+      cat <<'EOF'
+    Usage: sh /migrate/migrate_legacy_sqlite.sh <admin_email> [--src PATH] [--dry-run]
+
+    Examples:
+      sh /migrate/migrate_legacy_sqlite.sh admin@example.com
+      sh /migrate/migrate_legacy_sqlite.sh admin@example.com --dry-run
+      sh /migrate/migrate_legacy_sqlite.sh admin@example.com --src /data/deer-flow/db/checkpoints.db
+    EOF
+      exit 1
+    fi
+
+    ADMIN_EMAIL="$1"
+    shift
+
+    cd /app/backend
+    exec env PYTHONPATH=. uv run python /migrate/migrate_legacy_sqlite.py \
+      --admin-email "$ADMIN_EMAIL" "$@"
+
+  migrate_legacy_sqlite.py: |
+    """Migrate legacy SQLite checkpointer data to the new PostgreSQL backend.
+
+    Run inside the gateway container after upgrading to chart >= 1.1.4 and
+    completing /setup (so an admin user exists in PG):
+
+        kubectl -n <ns> exec -it deploy/deerflowv2-backend -c gateway -- \
+          sh /migrate/migrate_legacy_sqlite.sh <admin_email>
+
+    Two-phase migration. Both phases run in one invocation:
+
+      Phase 1 -- LangGraph checkpoints
+        Opens /data/deer-flow/checkpoints.db read-only via AsyncSqliteSaver
+        and copies every checkpoint + pending write into PostgreSQL via
+        AsyncPostgresSaver, stamping metadata.user_id = <admin user_id> so
+        langgraph_auth.add_owner_filter authorises the migrated threads.
+
+      Phase 2 -- threads_meta rows (the sidebar list)
+        DeerFlow's gateway lists conversations from a separate `threads_meta`
+        SQL table -- distinct from LangGraph's checkpoints schema. Without
+        a row here a migrated thread is invisible in the UI even though the
+        underlying checkpoint exists. For each thread_id seen in phase 1,
+        upsert a row with display_name = first user message (60 chars),
+        user_id = admin, created/updated_at = first/last checkpoint ts.
+
+    Idempotent on both phases: re-running upserts the same checkpoints and
+    only inserts threads_meta rows that don't already exist (or backfills
+    user_id / display_name on rows whose owner is NULL). The source SQLite
+    file is opened read-only and never modified.
+    """
+    from __future__ import annotations
+
+    import argparse
+    import asyncio
+    import logging
+    import os
+    from collections import defaultdict
+    from datetime import UTC, datetime
+    from pathlib import Path
+    from typing import Any
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    log = logging.getLogger("migrate")
+
+    DEFAULT_SQLITE = "/data/deer-flow/checkpoints.db"
+    DISPLAY_NAME_MAX_LEN = 60
+
+
+    # ------------------------------------------------------------------ helpers
+
+
+    def _parse_iso(value: Any) -> datetime | None:
+        """Parse the LangGraph checkpoint `ts` field into an aware datetime.
+
+        Checkpoints written by older LangGraph versions sometimes carry the
+        `ts` as a millisecond integer; newer ones use ISO-8601 strings.
+        Returns None when the value is missing or unparsable so the caller
+        can fall back to `datetime.now(UTC)` rather than crashing the whole
+        thread-meta backfill on one bad row.
+        """
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC)
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(float(value), UTC)
+            except (OSError, OverflowError, ValueError):
+                return None
+        if isinstance(value, str):
+            s = value.replace("Z", "+00:00")
+            try:
+                dt = datetime.fromisoformat(s)
+            except ValueError:
+                return None
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+        return None
+
+
+    def _extract_first_user_text(checkpoint: dict) -> str | None:
+        """Find the first human/user message text in a checkpoint state.
+
+        LangGraph deserialises message channels into LangChain Message
+        objects (HumanMessage, AIMessage, ...) with `.type` and `.content`,
+        but very old checkpoints may contain raw dicts instead. Handle
+        both. Multimodal `content` (list of part dicts) is flattened to
+        its concatenated text parts so an image-only first turn does not
+        produce an empty title.
+        """
+        channel_values = checkpoint.get("channel_values") or {}
+        messages = channel_values.get("messages") or []
+        for msg in messages:
+            mtype = getattr(msg, "type", None) or (
+                msg.get("type") if isinstance(msg, dict) else None
+            )
+            if mtype not in {"human", "user"}:
+                continue
+            content = getattr(msg, "content", None)
+            if content is None and isinstance(msg, dict):
+                content = msg.get("content")
+            if isinstance(content, str):
+                text = content.strip()
+            elif isinstance(content, list):
+                parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        parts.append(str(part.get("text", "")))
+                    elif isinstance(part, str):
+                        parts.append(part)
+                text = " ".join(p for p in parts if p).strip()
+            else:
+                text = ""
+            if text:
+                return text[:DISPLAY_NAME_MAX_LEN]
+        return None
+
+
+    # ----------------------------------------------------------------- phase 1
+
+
+    async def _lookup_user_id(email: str) -> str:
+        """Resolve an admin email to its user_id row in the new PG users table."""
+        from sqlalchemy import select
+
+        from deerflow.persistence.engine import get_session_factory
+        from deerflow.persistence.user.model import UserRow
+
+        sf = get_session_factory()
+        if sf is None:
+            raise SystemExit(
+                "session factory is None -- engine failed to initialise. "
+                "Is DATABASE_URL set inside this pod?"
+            )
+        async with sf() as session:
+            row = (
+                await session.execute(select(UserRow).where(UserRow.email == email))
+            ).scalar_one_or_none()
+            if row is None:
+                raise SystemExit(
+                    f"No user with email {email!r} in PG. Did you complete /setup?"
+                )
+            return str(row.id)
+
+
+    async def _migrate_checkpoints(
+        src_path: str, target_user_id: str, dry_run: bool
+    ) -> dict[str, dict]:
+        """Phase 1: copy every SQLite checkpoint into PG.
+
+        Returns a per-thread summary {thread_id: {"created": dt, "updated": dt,
+        "display_name": str|None}} so phase 2 can upsert threads_meta rows
+        without re-reading the source file.
+        """
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+        # file: URI with mode=ro guarantees we never write to the source DB,
+        # even if AsyncSqliteSaver.setup() were to attempt a CREATE TABLE.
+        src_uri = f"file:{src_path}?mode=ro"
+        pg_url = (
+            os.environ.get("CHECKPOINTER_DATABASE_URL")
+            or os.environ.get("DATABASE_URL")
+        )
+        if not pg_url:
+            raise SystemExit("CHECKPOINTER_DATABASE_URL / DATABASE_URL not set")
+
+        log.info("phase 1: LangGraph checkpoints")
+        log.info("  source : %s (read-only)", src_path)
+        log.info("  target : postgres (CHECKPOINTER_DATABASE_URL)")
+        log.info("  user_id: %s", target_user_id)
+        if dry_run:
+            log.info("  DRY RUN -- nothing will be written to PG")
+
+        threads_info: dict[str, dict] = {}
+        cp_count = 0
+        pw_count = 0
+        skipped = 0
+
+        async with AsyncSqliteSaver.from_conn_string(src_uri) as src:
+            async with AsyncPostgresSaver.from_conn_string(pg_url) as dst:
+                if not dry_run:
+                    await dst.setup()
+
+                # Passing config=None enumerates every checkpoint across every
+                # thread. Iteration order is by checkpoint_id descending so the
+                # *first* checkpoint we see for a given thread is the latest
+                # one -- important for picking up the most recent user message
+                # as the title fallback.
+                async for tup in src.alist(None):
+                    try:
+                        config = dict(tup.config)
+                        config["configurable"] = dict(config.get("configurable", {}))
+                        thread_id = config["configurable"].get("thread_id", "<no-thread>")
+
+                        metadata = dict(tup.metadata or {})
+                        metadata["user_id"] = target_user_id
+
+                        checkpoint = tup.checkpoint
+                        new_versions = dict(checkpoint.get("channel_versions") or {})
+
+                        if dry_run:
+                            new_config = config
+                        else:
+                            new_config = await dst.aput(
+                                config, checkpoint, metadata, new_versions
+                            )
+
+                        cp_count += 1
+
+                        # Phase-2 summary -- updated on every checkpoint, but
+                        # `display_name` only gets *set* on the earliest user
+                        # message we encounter (which, given the descending
+                        # iteration, is updated until we hit step 0).
+                        ts = _parse_iso(checkpoint.get("ts"))
+                        info = threads_info.setdefault(
+                            thread_id,
+                            {"created": ts, "updated": ts, "display_name": None},
+                        )
+                        if ts is not None:
+                            if info["created"] is None or ts < info["created"]:
+                                info["created"] = ts
+                            if info["updated"] is None or ts > info["updated"]:
+                                info["updated"] = ts
+                        text = _extract_first_user_text(checkpoint)
+                        if text:
+                            # Overwrite so we end up with the title from the
+                            # *earliest* checkpoint (chronologically the user's
+                            # opening question), not whichever step happened to
+                            # be enumerated first.
+                            info["display_name"] = text
+
+                        if tup.pending_writes:
+                            grouped: dict[str, list[tuple[str, object]]] = defaultdict(list)
+                            for task_id, channel, value in tup.pending_writes:
+                                grouped[task_id].append((channel, value))
+                            for task_id, writes in grouped.items():
+                                if not dry_run:
+                                    await dst.aput_writes(new_config, writes, task_id)
+                                pw_count += len(writes)
+
+                        if cp_count % 100 == 0:
+                            log.info(
+                                "  ...%d checkpoints, %d pending writes, %d threads so far",
+                                cp_count, pw_count, len(threads_info),
+                            )
+                    except Exception as exc:
+                        # One bad row should not abort a 15 MB migration.
+                        skipped += 1
+                        log.warning("  skipped checkpoint due to error: %s", exc)
+
+        log.info(
+            "  done: %d checkpoints, %d pending writes, %d threads, %d skipped",
+            cp_count, pw_count, len(threads_info), skipped,
+        )
+        return threads_info
+
+
+    # ----------------------------------------------------------------- phase 2
+
+
+    async def _backfill_thread_meta(
+        target_user_id: str,
+        threads_info: dict[str, dict],
+        dry_run: bool,
+    ) -> None:
+        """Phase 2: insert/update one threads_meta row per migrated thread.
+
+        Without this, /api/threads/search returns nothing for the migrated
+        threads and the sidebar stays empty even though the checkpoints are
+        in PG. Idempotent: existing rows whose user_id is None get adopted
+        by the admin; existing rows already owned by someone are left alone.
+        """
+        from deerflow.persistence.engine import get_session_factory
+        from deerflow.persistence.thread_meta.model import ThreadMetaRow
+
+        sf = get_session_factory()
+        if sf is None:
+            raise SystemExit("session factory is None")
+
+        log.info("phase 2: threads_meta backfill (sidebar entries)")
+        if dry_run:
+            log.info("  DRY RUN -- nothing will be written to PG")
+            for tid, info in list(threads_info.items())[:5]:
+                log.info(
+                    "  would upsert thread=%s title=%r updated=%s",
+                    tid,
+                    info.get("display_name") or "Untitled (migrated)",
+                    info.get("updated"),
+                )
+            log.info("  ...and %d more thread(s)", max(0, len(threads_info) - 5))
+            return
+
+        inserted = 0
+        adopted = 0
+        skipped = 0
+        now = datetime.now(UTC)
+
+        async with sf() as session:
+            for thread_id, info in threads_info.items():
+                try:
+                    existing = await session.get(ThreadMetaRow, thread_id)
+                    if existing is None:
+                        row = ThreadMetaRow(
+                            thread_id=thread_id,
+                            user_id=target_user_id,
+                            display_name=info.get("display_name")
+                            or "Untitled (migrated)",
+                            status="idle",
+                            metadata_json={"migrated_from": "legacy_sqlite"},
+                            created_at=info.get("created") or now,
+                            updated_at=info.get("updated") or now,
+                        )
+                        session.add(row)
+                        inserted += 1
+                    elif existing.user_id is None:
+                        # Pre-existing row from before auth was wired up.
+                        # Adopt it for the admin and fill in any missing
+                        # cosmetic fields.
+                        existing.user_id = target_user_id
+                        if not existing.display_name:
+                            existing.display_name = (
+                                info.get("display_name") or "Untitled (migrated)"
+                            )
+                        existing.updated_at = info.get("updated") or now
+                        adopted += 1
+                    else:
+                        # Already owned -- never silently steal a thread
+                        # that's been claimed by some other user (or even
+                        # the same admin, in which case the row is fine).
+                        skipped += 1
+                except Exception as exc:
+                    log.warning(
+                        "  skipped thread_meta for %s due to error: %s",
+                        thread_id, exc,
+                    )
+            await session.commit()
+
+        log.info(
+            "  done: %d inserted, %d adopted (user_id was NULL), %d already owned",
+            inserted, adopted, skipped,
+        )
+
+
+    # --------------------------------------------------------------- driver
+
+
+    async def _run(args: argparse.Namespace) -> None:
+        from deerflow.config.app_config import get_app_config
+        from deerflow.persistence.engine import close_engine, init_engine_from_config
+
+        app_config = get_app_config()
+        await init_engine_from_config(app_config.database)
+        try:
+            target_user_id = await _lookup_user_id(args.admin_email)
+            log.info("resolved admin user_id: %s", target_user_id)
+            threads_info = await _migrate_checkpoints(
+                args.src, target_user_id, args.dry_run
+            )
+            await _backfill_thread_meta(target_user_id, threads_info, args.dry_run)
+        finally:
+            await close_engine()
+
+        log.info("=" * 60)
+        log.info("migration complete -- refresh the DeerFlow UI to see the")
+        log.info("migrated conversations in the admin sidebar.")
+        log.info("Safe to re-run if you upload a fresh sqlite dump.")
+        log.info("=" * 60)
+
+
+    def main() -> int:
+        p = argparse.ArgumentParser(description=__doc__)
+        p.add_argument(
+            "--admin-email",
+            required=True,
+            help="Email of the admin user created via /setup",
+        )
+        p.add_argument(
+            "--src",
+            default=DEFAULT_SQLITE,
+            help=f"Legacy SQLite path (default: {DEFAULT_SQLITE})",
+        )
+        p.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Iterate the source DB but do not write anything to PG",
+        )
+        args = p.parse_args()
+
+        if not Path(args.src).exists():
+            log.warning(
+                "source SQLite not found at %s -- nothing to migrate. "
+                "Pass --src <path> if your file lives elsewhere.",
+                args.src,
+            )
+            return 0
+
+        asyncio.run(_run(args))
+        return 0
+
+
+    if __name__ == "__main__":
+        raise SystemExit(main())
+
+  # ============================================================================
   # SKILL: image-ocr -- canonical OCR workflow for uploaded images
   # ============================================================================
   # deer-flow's <uploaded_files> middleware nudges the model toward read_file /
