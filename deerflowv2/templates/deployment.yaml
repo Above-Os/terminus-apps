@@ -1,4 +1,32 @@
 ---
+{{/*
+Build comma-separated GATEWAY_CORS_ORIGINS from the Olares-injected
+entrance domain (Values.domain.deerflowv2). The backend's CSRFMiddleware
+checks the browser Origin against this allowlist on auth endpoints
+(/api/v1/auth/{login/local,register,initialize,logout}); without it the
+middleware falls back to comparing Origin against a request_origin
+reconstructed from X-Forwarded-* headers, which fails as
+"Cross-site auth request denied" whenever the proxy chain rewrites Host
+between Olares entrance and clientproxy. Each entrance maps to https://
+since Olares always terminates TLS upstream.
+*/}}
+{{- $rawDomains := "" -}}
+{{- with .Values.domain -}}
+  {{- $rawDomains = default "" (index . "deerflowv2") -}}
+{{- end -}}
+{{- $gatewayOrigins := list -}}
+{{- range splitList "," $rawDomains }}
+  {{/* trim whitespace AND any trailing "/" so we never emit
+       https://example.com/ — backend's _normalize_origin() rejects any
+       value with a non-empty path component (RFC 6454: Origin = scheme +
+       host + port only), and a single trailing slash makes parsed.path
+       == "/", silently dropping the entry from the allowlist. */}}
+  {{- $h := trimSuffix "/" (trim .) -}}
+  {{- if ne $h "" -}}
+    {{- $gatewayOrigins = append $gatewayOrigins (printf "https://%s" $h) -}}
+  {{- end -}}
+{{- end -}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,13 +39,33 @@ spec:
   selector:
     matchLabels:
       app: deerflowv2-backend
+  # RollingUpdate with maxSurge:1 / maxUnavailable:0 spins up the new
+  # pod alongside the old one and only retires the old one once the
+  # new pod's readinessProbe (added below) passes. The previous
+  # `Recreate` strategy guaranteed a zero-pod window between old
+  # termination and new readiness, during which clientproxy proxied to
+  # an empty endpoint set and browsers saw 502 Bad Gateway. Single-node
+  # Olares clusters can run both pods briefly because the hostPath
+  # volumes (config / data / skills / langgraph_api) are not exclusive.
+  # Cost: 2x memory + CPU for ~30-60s during a rollout, which fits
+  # comfortably within the per-container limits (1Gi gateway + 2Gi
+  # langgraph). To force the old failure mode (e.g. on a memory-tight
+  # node), revert to `type: Recreate`.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: deerflowv2-backend
     spec:
+      # Default is 30s, but uvicorn needs to (a) finish in-flight
+      # requests, (b) close the LangGraph postgres pool, and (c) close
+      # the SQLAlchemy engine cleanly. Bumping to 45s leaves headroom
+      # so SIGKILL doesn't truncate a long checkpointer write mid-run.
+      terminationGracePeriodSeconds: 45
       initContainers:
         - name: init-config
           image: docker.io/beclab/harveyff-deerflow-backend:v2.0.7-pg
@@ -167,6 +215,20 @@ spec:
             - sh
             - -c
             - "cd /app/backend && PYTHONPATH=. uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers 2"
+          # Delay SIGTERM by 5s so K8s has time to (1) flip the pod's
+          # readiness off, (2) propagate the endpoint removal to
+          # kube-proxy / clientproxy, and (3) drain any in-flight
+          # request. Without this, the pod stops accepting connections
+          # the instant termination starts -- requests already routed to
+          # this pod (but not yet read) get a TCP RST and surface as a
+          # browser-side ECONNRESET / 502 even with RollingUpdate.
+          # 5s matches the K8s "graceful pod termination" recipe and
+          # the readinessProbe periodSeconds (so we wait at least one
+          # full scrape cycle before killing uvicorn).
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           ports:
             - containerPort: 8001
               name: gateway
@@ -177,6 +239,26 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 30
+          # K8s only routes Service traffic to a pod when its
+          # readinessProbe passes. Without this block, the pod is
+          # marked Ready as soon as the container starts (default
+          # behavior), so during a rollout the new pod is added to the
+          # service endpoint set BEFORE uvicorn finishes binding to
+          # 8001 -- clientproxy gets `connection refused`, browsers
+          # see a window of 502s. Tying readiness to /health (same
+          # endpoint as startupProbe + livenessProbe) closes that
+          # window: the pod only joins the endpoints when uvicorn is
+          # actually serving. failureThreshold:3 is permissive enough
+          # to ride out transient blips (a single missed scrape during
+          # a long PG query) without flapping out of rotation.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
@@ -204,6 +286,29 @@ spec:
                 secretKeyRef:
                   name: deerflowv2-auth-secret
                   key: AUTH_JWT_SECRET
+            # Trust X-Real-IP only when the TCP peer is in this CIDR --
+            # used by routers/auth.py::_get_client_ip() for per-IP rate
+            # limiting (login attempts + /api/v1/auth/setup-status 60s
+            # cooldown). Without it, the gateway sees every browser
+            # request as coming from the same clientproxy pod IP, so the
+            # cooldown is global and the second tab/refresh on /setup
+            # gets 429. 10.233.0.0/16 covers the standard Olares
+            # cluster pod CIDR (kube-ovn + flannel default); the
+            # clientproxy itself transparently forwards Olares
+            # entrance's X-Real-IP (see clientproxy.yaml).
+            - name: AUTH_TRUSTED_PROXIES
+              value: "10.233.0.0/16"
+            # Allowlist for CSRFMiddleware.is_allowed_auth_origin(). Built
+            # from the Olares-injected entrance domain at chart-render time
+            # (see header of this template). Required because the Olares
+            # entrance proxy may rewrite Host before the request reaches
+            # clientproxy, breaking the backend's request_origin
+            # reconstruction and producing "Cross-site auth request denied"
+            # 403s on /setup, /register, /login, /initialize.
+            {{- if gt (len $gatewayOrigins) 0 }}
+            - name: GATEWAY_CORS_ORIGINS
+              value: {{ join "," $gatewayOrigins | quote }}
+            {{- end }}
             # Olares postgres middleware — connection details populated by
             # the Olares chart values injector at install/upgrade time.
             #
@@ -240,17 +345,50 @@ spec:
               mountPath: /data/deer-flow
             - name: skills-volume
               mountPath: /app/skills
+            # On-demand legacy SQLite -> postgres migration tool. Mounted
+            # only into the gateway container (not langgraph) since the
+            # operator runs it via `kubectl exec deploy/... -c gateway`.
+            # Uses items: projection so only the two migration files
+            # appear under /migrate -- the rest of init-config (config.yaml,
+            # the OCR skill, the database backend rewriter) does not leak
+            # into the runtime filesystem. See configmap.yaml for the
+            # script source and operator usage instructions.
+            - name: migrate-vol
+              mountPath: /migrate
         - name: langgraph
           image: docker.io/beclab/harveyff-deerflow-backend:v2.0.7-pg
           command:
             - sh
             - -c
             - "cd /app/backend && uv run langgraph dev --no-browser --allow-blocking --no-reload --host 0.0.0.0 --port 2024"
+          # See gateway preStop for rationale.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           ports:
             - containerPort: 2024
               name: langgraph
+          # See gateway readinessProbe for rationale. langgraph dev
+          # exposes /ok (not /health) -- doc'd in deer-flow's
+          # deployment-guide and operations-and-troubleshooting pages.
+          # initialDelaySeconds is higher than gateway's because
+          # `langgraph dev --no-reload --allow-blocking` does its
+          # graph compilation + checkpoint pool warmup synchronously
+          # at startup; on cold pulls this can take 20-30s before /ok
+          # responds. failureThreshold:6 (= 30s of /ok failures)
+          # tolerates a slow PG checkpointer pool initialisation.
+          readinessProbe:
+            httpGet:
+              path: /ok
+              port: 2024
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /ok
               port: 2024
             periodSeconds: 60
             timeoutSeconds: 10
@@ -275,6 +413,13 @@ spec:
                 secretKeyRef:
                   name: deerflowv2-auth-secret
                   key: AUTH_JWT_SECRET
+            # See gateway container for rationale.
+            - name: AUTH_TRUSTED_PROXIES
+              value: "10.233.0.0/16"
+            {{- if gt (len $gatewayOrigins) 0 }}
+            - name: GATEWAY_CORS_ORIGINS
+              value: {{ join "," $gatewayOrigins | quote }}
+            {{- end }}
             # Mirror gateway env: plain DATABASE_URL for ORM, keepalive URL for
             # LangGraph checkpointer. See gateway container comments above.
             - name: DATABASE_URL
@@ -304,6 +449,21 @@ spec:
         - name: init-config-vol
           configMap:
             name: deerflowv2-init-config
+        # Subset of init-config exposed to the gateway container at /migrate
+        # for on-demand legacy SQLite -> postgres migration. Items projection
+        # keeps the runtime mount clean (only the two migration files, no
+        # config.yaml or skill content leaking in). 0755 lets the operator
+        # `sh /migrate/migrate_legacy_sqlite.sh ...` directly without an
+        # explicit `chmod +x`.
+        - name: migrate-vol
+          configMap:
+            name: deerflowv2-init-config
+            defaultMode: 0755
+            items:
+              - key: migrate_legacy_sqlite.sh
+                path: migrate_legacy_sqlite.sh
+              - key: migrate_legacy_sqlite.py
+                path: migrate_legacy_sqlite.py
         - name: config-volume
           hostPath:
             path: '{{ .Values.userspace.appData }}/config'
