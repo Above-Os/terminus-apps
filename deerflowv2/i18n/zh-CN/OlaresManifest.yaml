@@ -41,3 +41,8 @@ spec:
       - 研究报告、幻灯片、网页和图像生成
       - 自定义技能用于专业工作流
       - 播客脚本生成和音频合成
+
+  upgradeDescription: |
+    新增 PostgreSQL 数据库后端（由 Olares `middleware.postgres` 自动创建）以及内置账户与认证系统。升级后打开 app 会跳到 `/setup` 页面，请按提示创建首个 admin 账号。
+
+    新增一组 subagent 调度上限的环境变量到 `deerflowv2-env-config`，无需重新打包镜像就能在线调整、解决 `Recursion limit reached` 报错。每个 subagent 有两个旋钮：`*_MAX_TURNS` 控制 LLM ↔ 工具最大往返轮数（超出时 LangGraph 抛 `GraphRecursionError`），`*_TIMEOUT_SECONDS` 控制墙钟上限（建议 ≥ `MAX_TURNS × 单轮耗时`）。`GENERAL_PURPOSE_*` 给深度研究子 agent 用（默认 `500` / `7200`），`BASH_*` 给 shell 子 agent 用（`300` / `1800`），`DEFAULT_*`（`200` / `1800`）只对你在 `config.yaml` 的 `subagents.custom_agents` 里自定义的子 agent 生效。常见症状对应：报 `Recursion limit reached` → 调高 `*_MAX_TURNS`；报"timed out" → 调高 `*_TIMEOUT_SECONDS`；本地小模型 / 量化重的模型通常需要更大的上限。修改 ConfigMap 后重启后端 deployment 即可生效。

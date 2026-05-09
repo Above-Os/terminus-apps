@@ -30,8 +30,37 @@ data:
     SBX_USER="${SBX_USER:-sandbox}"
 
     health_ok() {
-      docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-        env HOME=/sandbox openclaw gateway health >/dev/null 2>&1
+      # Probe gateway readiness from the agent container by TCP-connecting to
+      # 127.0.0.1:18789 via nsenter into the user/sandbox netns first (chart
+      # v1.7.10+ launches the gateway there) and falling back to agent netns.
+      # We use a TCP probe instead of `openclaw gateway health` because the
+      # health CLI authenticates with the auth.token stored in openclaw.json,
+      # which the gateway -- launched with `--auth none --allow-unconfigured`
+      # -- does not accept, so the WS handshake hangs until the CLI 10s
+      # timeout. Verified in chart v1.7.11 production: TCP probe in user netns
+      # returns OK in <100ms while `openclaw gateway health` times out after
+      # 10s with "Error: gateway timeout after 10000ms". The gateway only
+      # bind()s :18789 once it has finished loading config and reached the
+      # "ready" state (gateway.out shows "starting HTTP server" -> "ready"
+      # transition under 100ms), so a TCP probe is a reliable readiness
+      # signal.
+      docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- sh -c '
+        _agent=$(readlink /proc/self/ns/net 2>/dev/null)
+        _pick=""
+        if [ -n "$_agent" ] && command -v nsenter >/dev/null 2>&1; then
+          for _name in openshell sshd ssh node openclaw bash; do
+            for _cand in $(ps -ef 2>/dev/null | awk -v n="$_name" "index(\$0,n) && !/awk/ && !/grep/ {print \$2}"); do
+              [ -r "/proc/$_cand/ns/net" ] || continue
+              _ns=$(readlink "/proc/$_cand/ns/net" 2>/dev/null) || continue
+              if [ -n "$_ns" ] && [ "$_ns" != "$_agent" ]; then _pick=$_cand; break 2; fi
+            done
+          done
+        fi
+        if [ -n "$_pick" ]; then
+          nsenter --net="/proc/$_pick/ns/net" -- timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1 && exit 0
+        fi
+        timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1
+      ' >/dev/null 2>&1
     }
 
     # Do NOT exit early when health_ok: nemoclaw onboard starts the gateway before chat-ui-bridge
@@ -69,9 +98,63 @@ data:
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
       env "SBX_USER=${SBX_USER:-sandbox}" "GOG_KEYRING_PASSWORD=${GKP}" "GOG_KEYRING_BACKEND=file" \
       "ORIGIN_CSV=${_ORIG_CSV}" "OPENCLAW_TRUSTED_PROXIES=${_TPCSV}" \
-      "NEMOCLAW_ENDPOINT_URL=${_NEM_EP}" sh -c '
+      "NEMOCLAW_ENDPOINT_URL=${_NEM_EP}" \
+      "NEMOCLAW_SANDBOX_HTTP_PROXY=${NEMOCLAW_SANDBOX_HTTP_PROXY:-}" \
+      "NEMOCLAW_SANDBOX_NO_PROXY_EXTRA=${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA:-}" \
+      "NEMOCLAW_GATEWAY_NETNS=${NEMOCLAW_GATEWAY_NETNS:-auto}" sh -c '
       set -u
       cd /sandbox || exit 1
+      # Pick a pid in a non-agent netns (= user/sandbox netns where openshell-spawned
+      # ssh sessions live). Echoes pid or empty. Used by both the early-exit health
+      # probe below AND the post-launch wait loop, so they agree on which netns
+      # the gateway lives in (chart v1.7.10+ launches gateway via nsenter into
+      # this same netns -- see LAUNCH section). Without this, both probes run in
+      # agent netns and never see the user-netns gateway -> infinite stop+launch
+      # loop where every iteration kills the previously-launched gateway.
+      _netns_pick_pid() {
+        _np_agent=$(readlink /proc/self/ns/net 2>/dev/null) || return 1
+        for _np_n in openshell sshd ssh node openclaw bash; do
+          for _np_c in $(ps -ef 2>/dev/null | awk -v n="$_np_n" "index(\$0,n) && !/awk/ && !/grep/ {print \$2}"); do
+            [ -r "/proc/$_np_c/ns/net" ] || continue
+            _np_ns=$(readlink "/proc/$_np_c/ns/net" 2>/dev/null) || continue
+            if [ -n "$_np_ns" ] && [ "$_np_ns" != "$_np_agent" ]; then
+              echo "$_np_c"
+              return 0
+            fi
+          done
+        done
+        for _np_l in /proc/[0-9]*/ns/net; do
+          [ -r "$_np_l" ] || continue
+          _np_ns=$(readlink "$_np_l" 2>/dev/null) || continue
+          if [ -n "$_np_ns" ] && [ "$_np_ns" != "$_np_agent" ]; then
+            echo "$_np_l" | awk -F/ "{print \$3}"
+            return 0
+          fi
+        done
+        return 1
+      }
+      _health_via_netns() {
+        # Returns 0 if 127.0.0.1:18789 accepts a TCP connection in either the
+        # user netns (preferred, where chart v1.7.10+ launches the gateway via
+        # nsenter) or the agent netns (fallback for cold starts before any
+        # user-netns process exists). We DO NOT use `openclaw gateway health`
+        # here because that command reads /sandbox/.openclaw/openclaw.json,
+        # picks up the stored auth.token, and tries to authenticate the WS
+        # handshake -- but the gateway is launched with `--auth none
+        # --allow-unconfigured`, so the auth-token handshake never gets a
+        # response and times out at the CLI defaults 10s timeout. Verified in
+        # production: TCP probe in same user netns returns OK in <100ms while
+        # `openclaw gateway health` times out after 10s with
+        # "Error: gateway timeout after 10000ms" (chart v1.7.11 logs). TCP
+        # probe is sufficient -- gateway only `bind`s :18789 after it has
+        # finished loading config and is ready to accept connections (see
+        # gateway.out: "starting HTTP server" -> "ready" within 100ms).
+        _hv_pid=$(_netns_pick_pid 2>/dev/null) || true
+        if [ -n "$_hv_pid" ] && command -v nsenter >/dev/null 2>&1; then
+          nsenter --net="/proc/$_hv_pid/ns/net" -- timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1 && return 0
+        fi
+        timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1
+      }
       mkdir -p /sandbox /sandbox/.openclaw /sandbox/.openclaw-data /sandbox/.nemoclaw /sandbox/.config /sandbox/inbox /sandbox/.local/bin /sandbox/.openclaw/tasks 2>/dev/null || true
       touch /sandbox/.openclaw-data/gateway.out 2>/dev/null || true
       chown -R "$SBX_USER:$SBX_USER" /sandbox/.openclaw /sandbox/.openclaw-data /sandbox/.nemoclaw /sandbox/.config /sandbox/inbox /sandbox/.local/bin /sandbox/.openclaw/tasks 2>/dev/null || true
@@ -283,8 +366,46 @@ data:
         _gw_stale=1
         echo "[sandbox-gw] openclaw.json changed; forcing gateway restart to pick up allowedOrigins / trustedProxies"
       fi
-      if [ "$_gw_stale" = "0" ] && env HOME=/sandbox openclaw gateway health >/dev/null 2>&1; then
-        echo "[sandbox-gw] gateway already healthy; rc hooks applied"
+      # Gateway readiness gate (chart v1.7.12+).
+      #
+      # PRIORITY: a TCP probe (via _health_via_netns -> nsenter into user netns
+      # -> /dev/tcp/127.0.0.1/18789) decides everything. If the gateway answers
+      # TCP, we exit 0 and skip kill+launch even when:
+      #   - _gw_stale=1 (running gateway pid lacks XDG_CONFIG_HOME=/sandbox)
+      #   - _cfg_changed=1 (clamp/patch_origins/patch_inference_baseurl
+      #     mutated openclaw.json this iteration)
+      # Rationale (post chart-v1.7.10 production diagnostics):
+      #   1) After our nsenter LAUNCH succeeds, BOTH the old onboard-spawned
+      #      gateway (pid<3000, XDG missing) AND the new chart-spawned one
+      #      (pid>5000, XDG=/sandbox/.config) are alive in user netns. Only
+      #      one of them holds :18789 (the first to bind); the other lingers
+      #      because it could not bind. pgrep | head -1 always returns the
+      #      lowest PID = the onboard one, so the env-staleness check sees
+      #      "no XDG" forever and keeps requesting restart.
+      #   2) The kill-loop below sends kill -9 from agent root. The
+      #      onboard-spawned gateway lives in a SEPARATE user namespace
+      #      (openshell >= 0.0.36 isolation), so agent root maps to UID 65534
+      #      inside that userns and the signal is rejected with EPERM. The
+      #      kill silently fails and the next iteration repeats the same
+      #      restart attempt, accumulating dead-but-unkillable openclaw
+      #      processes (verified: D-1 diagnostic showed two pairs alive in
+      #      user netns; only pid=2417 was actually LISTENing).
+      #   3) Net effect of the previous logic: a HEALTHY gateway (TCP
+      #      reachable, gateway.out shows "ready") was being mistaken for
+      #      stale every ~15s, the readiness sentinel never got written, and
+      #      the WebUI hung on the install-progress placeholder forever
+      #      ("还没启动好，是卡住了吗").
+      # Trade-off: a gateway with wrong XDG_CONFIG_HOME may not find gog
+      # keyring tokens for `gog auth`-backed skills. We accept that as a
+      # known soft failure (skill-level) rather than the previous hard
+      # failure (whole pod stays NotReady). When the user re-onboards or
+      # explicitly restarts the gateway via TUI, the env normalizes.
+      if _health_via_netns; then
+        if [ "${_gw_stale:-0}" = "1" ]; then
+          echo "[sandbox-gw] gateway responding on TCP :18789 despite stale env / cfg-changed; not forcing restart (would create unkillable cross-userns duplicates). gog skills may need a manual restart inside the sandbox shell to pick up XDG_CONFIG_HOME=/sandbox/.config."
+        else
+          echo "[sandbox-gw] gateway already healthy (TCP); rc hooks applied"
+        fi
         exit 0
       fi
       [ "$_gw_stale" = "1" ] || echo "[sandbox-gw] gateway not responding; restarting..."
@@ -300,11 +421,328 @@ data:
       if [ -n "${GOG_KEYRING_PASSWORD:-}" ]; then
         GOG_ENV="GOG_KEYRING_BACKEND=file GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}"
       fi
-      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup openclaw gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
-      if command -v runuser >/dev/null 2>&1; then
-        runuser -u "$SBX_USER" -- sh -c "$LAUNCH & sleep 2; exit 0"
+      # OpenClaw binary selection (chart NEMOCLAW_OPENCLAW_VERSION pin support).
+      # When the chart-side helper has installed a pinned version (npm prefix
+      # /sandbox/.local) AND written the marker file below, we explicitly invoke
+      # that binary by full path AND PATH-prepend /sandbox/.local/bin. Without
+      # this, the default PATH below puts /usr/local/bin first and the pre-baked
+      # openclaw (typically NemoClaw blueprint floor 2026.4.24) wins -- making
+      # NEMOCLAW_OPENCLAW_VERSION look like a no-op even after npm install
+      # succeeded into the user prefix. /sandbox/.openclaw-pinned-marker is
+      # owned by chat-ui-bridge (writes/removes it; we only consume).
+      OPENCLAW_BIN=openclaw
+      _PIN_PATH_PREFIX=""
+      if [ -f /sandbox/.openclaw-pinned-marker ] && [ -x /sandbox/.local/bin/openclaw ]; then
+        OPENCLAW_BIN=/sandbox/.local/bin/openclaw
+        _PIN_PATH_PREFIX="/sandbox/.local/bin:"
+        _PIN_VER=$(head -1 /sandbox/.openclaw-pinned-marker 2>/dev/null | tr -d "\r\n ")
+        echo "[sandbox-gw] using pinned openclaw at /sandbox/.local/bin/openclaw (NEMOCLAW_OPENCLAW_VERSION=${_PIN_VER:-<unknown>})"
+      fi
+      # Sandbox egress proxy (chart v1.7.13+).
+      #
+      # When chart v1.7.10+ launches the gateway via nsenter into the user
+      # netns, the gateway loses agent-netns connectivity to in-cluster
+      # Service IPs (e.g. Olares shared inference at 10.233.0.0/16). The
+      # user netns has only a single veth `veth-s-*` (typically
+      # 10.200.0.2/24) with default route pointing at the openshell-sandbox
+      # HTTP egress proxy in the agent netns. Verified in production
+      # (chart v1.7.12 H-4 diagnostic on openshell 0.0.36): direct curl to
+      # inference Service IP fails with "Could not connect to server"
+      # after 0ms, while same request via http_proxy = the user-netns
+      # default-gateway IP at :3128 returns HTTP 200 in ~7ms. Without this
+      # fix the gateway can serve TUI/WebUI sessions but every LLM call
+      # surfaces as "LLM request failed: network connection error" /
+      # "Connection error" (gateway.out fills with
+      # `embedded run agent end isError=true`).
+      #
+      # Detection (NOT hardcoded -- subnet/port can change across openshell
+      # versions):
+      #   1. Read user netns default-route gateway with `ip -4 route show
+      #      default` (= 10.200.0.1 on openshell 0.0.36, but the chart does
+      #      not depend on that constant).
+      #   2. Probe TCP connect to that gateway on a small ordered list of
+      #      well-known proxy ports (3128 = squid/openshell-sandbox default,
+      #      8080 = generic, 1080 = SOCKS-style fallback some setups use).
+      #   3. First port that accepts a TCP handshake within 2s wins.
+      #   4. If detection fails entirely (no default route, or no port
+      #      responding), we LAUNCH without proxy and emit a WARN -- the
+      #      gateway will still serve TUI/WebUI but LLM calls will fail
+      #      until ops investigates (or sets a manual override below).
+      #
+      # Both lowercase and uppercase env-var forms are set because the node
+      # ecosystem is inconsistent (undici/axios/openai-sdk pick different
+      # variants; openclaw model-pricing fetches use lowercase). NO_PROXY
+      # excludes loopback so the gateway internal API + canvas + browser
+      # control sidecar (127.0.0.1:18789 / 18791) bypass the proxy, and
+      # also lists the detected proxy host itself so a request from the
+      # proxy back through itself does not loop.
+      _detect_sandbox_proxy() {
+        _dsp_pid="$1"
+        [ -n "$_dsp_pid" ] || return 1
+        command -v nsenter >/dev/null 2>&1 || return 1
+        _dsp_gw=$(nsenter --net="/proc/${_dsp_pid}/ns/net" -- ip -4 route show default 2>/dev/null | awk "/^default/ {print \$3; exit}")
+        [ -n "$_dsp_gw" ] || return 1
+        for _dsp_port in 3128 8080 1080; do
+          if nsenter --net="/proc/${_dsp_pid}/ns/net" -- timeout 2 bash -c "exec 3<>/dev/tcp/${_dsp_gw}/${_dsp_port}" >/dev/null 2>&1; then
+            echo "http://${_dsp_gw}:${_dsp_port}"
+            return 0
+          fi
+        done
+        return 1
+      }
+      _build_proxy_env() {
+        _bpe_url="$1"
+        [ -n "$_bpe_url" ] || return 0
+        _bpe_host=$(echo "$_bpe_url" | sed -E "s|^https?://||; s|:.*$||")
+        _bpe_no="127.0.0.1,localhost,::1"
+        [ -n "$_bpe_host" ] && _bpe_no="${_bpe_no},${_bpe_host}"
+        # Public-Internet egress hosts that the openclaw plugin loader (and
+        # interactive shells under `nemoclaw connect`) reach via npm/pip/
+        # git/docker/etc. These are PUBLIC IPs (not RFC1918 / cluster-
+        # internal), so user netns can connect directly without going
+        # through the sandbox HTTP proxy. Bypassing the proxy here is
+        # preferable for two reasons:
+        #   1) The openshell-sandbox HTTP proxy MITMs HTTPS with its own CA
+        #      (so JS extensions can be policy-checked). On openshell 0.0.36
+        #      this MITM has a known bug with %-encoded scoped npm package
+        #      URLs (e.g. "@clack%2fprompts" -> Empty reply). Bypassing the
+        #      proxy makes scoped packages fetch normally.
+        #   2) Direct connect is ~10x faster (verified in I-5: feishu
+        #      @larksuiteoapi/node-sdk install -- 49 packages -- direct=7s
+        #      vs via-proxy=60s+ and frequently fails on scoped deps).
+        # Curated list grouped by ecosystem (chart v1.7.14+):
+        #   * npm/yarn (incl. cn mirrors): npmjs / yarnpkg / npmmirror /
+        #     npm.taobao.org / npm.aliyun.com / unpkg.com / cdn.jsdelivr.net
+        #     / cdnjs.cloudflare.com / esm.sh
+        #   * python: pypi / files.pythonhosted.org / mirrors.aliyun.com /
+        #     pypi.tuna.tsinghua.edu.cn / pypi.douban.com
+        #   * github: raw / objects / codeload / api / github-releases
+        #   * AI/ML providers (used by openclaw skills + plugin SDKs):
+        #     api.openai.com / api.anthropic.com / openrouter.ai /
+        #     api.together.xyz / generativelanguage.googleapis.com /
+        #     huggingface.co / cdn-lfs.huggingface.co / hf.co
+        #   * container registries: docker.io / registry-1.docker.io /
+        #     ghcr.io / quay.io / gcr.io / mcr.microsoft.com / k8s.gcr.io /
+        #     registry.k8s.io
+        #   * cloud storage / CDN: storage.googleapis.com / fonts.* /
+        #     blob.core.windows.net / s3.amazonaws.com / *.cloudfront.net
+        #   * other language ecosystems: crates.io (rust) / proxy.golang.org
+        #     (go) / sum.golang.org / repo1.maven.org (java) /
+        #     repo.maven.apache.org / rubygems.org
+        #   * NVIDIA (NeMo / CUDA bits some plugins pull): developer.nvidia.com
+        #     / download.nvidia.com / catalog.ngc.nvidia.com
+        # Operators can append site-specific entries via
+        # NEMOCLAW_SANDBOX_NO_PROXY_EXTRA (comma-separated, no spaces).
+        _bpe_pub="registry.npmjs.org,.npmjs.org,registry.yarnpkg.com,registry.npmmirror.com,registry.npm.taobao.org,npm.aliyun.com,unpkg.com,cdn.jsdelivr.net,cdnjs.cloudflare.com,esm.sh"
+        _bpe_pub="${_bpe_pub},pypi.org,files.pythonhosted.org,mirrors.aliyun.com,pypi.tuna.tsinghua.edu.cn,pypi.douban.com"
+        _bpe_pub="${_bpe_pub},github.com,.github.com,raw.githubusercontent.com,objects.githubusercontent.com,codeload.github.com,api.github.com,github-releases.githubusercontent.com"
+        _bpe_pub="${_bpe_pub},api.openai.com,api.anthropic.com,openrouter.ai,api.together.xyz,generativelanguage.googleapis.com,huggingface.co,cdn-lfs.huggingface.co,hf.co"
+        _bpe_pub="${_bpe_pub},docker.io,registry-1.docker.io,ghcr.io,quay.io,gcr.io,mcr.microsoft.com,k8s.gcr.io,registry.k8s.io"
+        _bpe_pub="${_bpe_pub},storage.googleapis.com,fonts.googleapis.com,fonts.gstatic.com,blob.core.windows.net,s3.amazonaws.com,.cloudfront.net"
+        _bpe_pub="${_bpe_pub},crates.io,static.crates.io,proxy.golang.org,sum.golang.org,repo1.maven.org,repo.maven.apache.org,rubygems.org"
+        _bpe_pub="${_bpe_pub},developer.nvidia.com,download.nvidia.com,catalog.ngc.nvidia.com"
+        # Messaging channel realtime hosts. WSS upgrades are mangled by the
+        # openshell-sandbox MITM HTTP proxy (the proxy terminates TLS and re-
+        # signs with its own CA, but does not implement the websocket upgrade
+        # handshake correctly for these providers -- verified in chart v1.7.15
+        # debugging: enabling channels.discord on a healthy gateway sends
+        # SIGUSR1 + restart; the new gateway hangs in "starting..." for 60s+
+        # because discord-channel init blocks on the WSS connect to
+        # gateway.discord.gg, never reaches "starting HTTP server", and the
+        # bridge then kills + relaunches in a loop). Bypassing the proxy makes
+        # the WSS go straight from user netns to the public host. Each channel
+        # also needs the matching openshell policy preset (slack/discord/
+        # telegram/jira/outlook); included in NEMOCLAW_POLICY_TIER=open by
+        # default since chart v1.7.16. Feishu (Lark) is added here too because
+        # @larksuiteoapi/node-sdk auto-loads when channels.feishu is enabled
+        # and uses long-poll HTTPS to open.feishu.cn. Same logic for
+        # work.weixin.qq.com (work-wechat) and api.line.me (line bot).
+        _bpe_pub="${_bpe_pub},gateway.discord.gg,discord.com,cdn.discordapp.com,media.discordapp.net,discordapp.com"
+        _bpe_pub="${_bpe_pub},slack.com,wss-primary.slack.com,wss-mobile.slack.com,files.slack.com,edgeapi.slack.com"
+        _bpe_pub="${_bpe_pub},api.telegram.org,telegram.org,telegra.ph,t.me"
+        _bpe_pub="${_bpe_pub},open.feishu.cn,open.larksuite.com,passport.feishu.cn,passport.larksuite.com,internal-api-lark-api.feishu.cn,internal-api-lark-api.larksuite.com"
+        _bpe_pub="${_bpe_pub},work.weixin.qq.com,qyapi.weixin.qq.com,api.line.me,api-data.line.me"
+        _bpe_pub="${_bpe_pub},login.microsoftonline.com,graph.microsoft.com,outlook.office.com,outlook.live.com"
+        _bpe_pub="${_bpe_pub},api.atlassian.com,id.atlassian.com,gateway.atlassian.com"
+        _bpe_no="${_bpe_no},${_bpe_pub}"
+        if [ -n "${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA:-}" ]; then
+          _bpe_no="${_bpe_no},${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA}"
+        fi
+        echo "http_proxy=$_bpe_url https_proxy=$_bpe_url HTTP_PROXY=$_bpe_url HTTPS_PROXY=$_bpe_url no_proxy=$_bpe_no NO_PROXY=$_bpe_no"
+      }
+      # Manual override (rarely needed; only set when openshell or Olares
+      # operators ship a non-default sandbox proxy that detection cannot
+      # reach -- e.g. a different listen port or off-default netns layout):
+      _PROXY_ENV=""
+      if [ -n "${NEMOCLAW_SANDBOX_HTTP_PROXY:-}" ]; then
+        _PROXY_ENV=$(_build_proxy_env "$NEMOCLAW_SANDBOX_HTTP_PROXY")
+        echo "[sandbox-gw] sandbox egress proxy from NEMOCLAW_SANDBOX_HTTP_PROXY env: ${NEMOCLAW_SANDBOX_HTTP_PROXY}"
+      fi
+      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+      # NETNS PICKER (chart v1.7.10+).
+      # OpenShell >= 0.0.36 puts processes started via "nemoclaw my-assistant connect"
+      # (i.e. "openshell my-assistant ssh ...") in a SEPARATE net namespace from
+      # processes we launch here via "kubectl exec -c agent --". The agent netns is
+      # what THIS script runs in (we are PID-namespace-shared with the sandbox pod
+      # but our /proc/self/ns/net is the agent containers netns).
+      # Symptom of getting this wrong: gateway listens on 127.0.0.1:18789 in agent
+      # netns; "openclaw tui" launched by the user via "nemoclaw my-assistant
+      # connect" lives in user netns and sees a different loopback -> immediate
+      # "gateway disconnected: closed | idle". WebUI happens to work because
+      # sandbox-tunnel.sh (the per-connection relay below) walks /proc and nsenters
+      # the right netns at request time -- but TUI has no such adapter.
+      # User-confirmed manual workaround: starting the gateway from inside a
+      # "nemoclaw my-assistant connect" shell (= user netns) makes BOTH TUI and
+      # WebUI work concurrently.
+      # We replicate that by detecting the user netns from agent context: any pid
+      # whose /proc/<pid>/ns/net inode != /proc/self/ns/net inode is in a different
+      # netns -- typically the openshell-spawned ssh session created by nemoclaw
+      # onboards auto-port-forward. nsenter --net into that ns + runuser preserves
+      # all other namespaces (mount, user, pid) so /sandbox paths still resolve.
+      AGENT_NETNS=$(readlink /proc/self/ns/net 2>/dev/null)
+
+      # Decide which netns the gateway should be launched in (chart v1.7.18+).
+      #
+      # Background: chart v1.7.10 moved the gateway into the user/sandbox netns
+      # so TUI (= openclaw shell launched by `nemoclaw my-assistant connect`,
+      # which lives in user netns) and WebUI could share one running gateway.
+      # That works for chat, but the user netns has NO route to the public
+      # internet -- only a default route to the openshell sandbox HTTP egress
+      # proxy at 10.200.0.1:3128 (verified by U1-U5 diagnostics: U1 raw TCP
+      # connect to gateway.discord.gg:443 from user netns = TCP_USER_FAIL;
+      # same call via --proxy http://10.200.0.1:3128 = http=200). Node`s `ws`
+      # library does NOT honor HTTP_PROXY for WebSocket upgrade, so the
+      # openclaw gateways messaging-channel sidecars (Discord/Slack/Telegram/
+      # Feishu/Outlook/...) cannot ever reach gateway.discord.gg etc. while
+      # the gateway runs in user netns -- gateway.out fills with
+      # "fetch failed" + "Gateway websocket closed: 1006" + "AggregateError @
+      # internalConnectMultiple" no matter how generous NO_PROXY or openshell
+      # network policy is. The agent netns (= the cluster pods netns visible
+      # from `kubectl exec -c agent --`) DOES have direct cluster + public
+      # routes (verified by A/B/C diagnostics: REST + raw TCP + TLS handshake
+      # to Discord all OK in agent netns). Trade-off: gateway in agent netns
+      # means TUI in user netns sees a different 127.0.0.1 and shows
+      # "gateway disconnected: closed | idle" -- WebUI keeps working because
+      # sandbox-tunnel.sh walks /proc and nsenters the right netns at request
+      # time.
+      #
+      # Modes (knob: NEMOCLAW_GATEWAY_NETNS, propagated from the parent
+      # nemoclaw container env via the env passthrough above):
+      #   - auto    (default) : agent netns IFF /sandbox/.openclaw/openclaw.json
+      #                         has any channels.<name>.enabled=true (excluding
+      #                         the synthetic channels.defaults entry); user
+      #                         netns otherwise. Trades TUI concurrency for
+      #                         channel egress only when channels are actually
+      #                         configured.
+      #   - agent             : force agent netns (channels work, TUI does not).
+      #   - user              : force user netns (chart v1.7.10 default; TUI +
+      #                         WebUI both work but messaging channels cannot
+      #                         reach their public WSS endpoints).
+      #
+      # Anything else logs a WARN and is treated as auto.
+      _decide_gateway_netns() {
+        _dgn_mode="${NEMOCLAW_GATEWAY_NETNS:-auto}"
+        case "$_dgn_mode" in
+          agent)
+            GW_NETNS_MODE=agent
+            GW_NETNS_REASON="explicit NEMOCLAW_GATEWAY_NETNS=agent (TUI will be unavailable; WebUI + messaging channels work)"
+            return 0
+            ;;
+          user)
+            GW_NETNS_MODE=user
+            GW_NETNS_REASON="explicit NEMOCLAW_GATEWAY_NETNS=user (TUI + WebUI work; messaging channels cannot reach public WSS)"
+            return 0
+            ;;
+          auto|"")
+            ;;
+          *)
+            echo "[sandbox-gw] WARN: NEMOCLAW_GATEWAY_NETNS=${_dgn_mode} unrecognized; treating as auto" >&2
+            ;;
+        esac
+        # auto branch: scan openclaw.json for any non-default channel that is enabled.
+        GW_NETNS_MODE=user
+        GW_NETNS_REASON="auto: no enabled non-default channel in openclaw.json (TUI+WebUI concurrency preserved)"
+        if [ -f /sandbox/.openclaw/openclaw.json ] && command -v python3 >/dev/null 2>&1; then
+          _dgn_chans=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ch=(d.get(\"channels\") or {}); en=[k for k,v in ch.items() if k!=\"defaults\" and isinstance(v,dict) and v.get(\"enabled\") is True]; print(\",\".join(sorted(en)))" /sandbox/.openclaw/openclaw.json 2>/dev/null) || _dgn_chans=""
+          if [ -n "$_dgn_chans" ]; then
+            GW_NETNS_MODE=agent
+            GW_NETNS_REASON="auto: channels enabled in openclaw.json: ${_dgn_chans} (user netns has no public route; ws lib ignores HTTPS_PROXY)"
+          fi
+        fi
+      }
+      GW_NETNS_MODE=user
+      GW_NETNS_REASON="(uninitialized)"
+      _decide_gateway_netns
+      echo "[sandbox-gw] gateway netns choice: ${GW_NETNS_MODE} -- ${GW_NETNS_REASON}"
+
+      USER_NETNS_PID=""
+      if [ "$GW_NETNS_MODE" = "user" ] && [ -n "$AGENT_NETNS" ] && command -v nsenter >/dev/null 2>&1; then
+        # Prefer well-known names first (cheap, deterministic). Fall through to a
+        # full /proc walk only if none match.
+        for _name in openshell sshd ssh node openclaw bash; do
+          # ps options vary across busybox/distro -- keep -ef portable.
+          for _cand in $(ps -ef 2>/dev/null | awk -v n="$_name" "index(\$0,n) && !/awk/ && !/grep/ {print \$2}"); do
+            [ -r "/proc/$_cand/ns/net" ] || continue
+            _ns=$(readlink "/proc/$_cand/ns/net" 2>/dev/null) || continue
+            if [ -n "$_ns" ] && [ "$_ns" != "$AGENT_NETNS" ]; then
+              USER_NETNS_PID="$_cand"
+              echo "[sandbox-gw] netns picker: matched name=${_name} pid=${_cand} (ns=${_ns} != agent ${AGENT_NETNS})"
+              break 2
+            fi
+          done
+        done
+        if [ -z "$USER_NETNS_PID" ]; then
+          for _link in /proc/[0-9]*/ns/net; do
+            [ -r "$_link" ] || continue
+            _ns=$(readlink "$_link" 2>/dev/null) || continue
+            if [ -n "$_ns" ] && [ "$_ns" != "$AGENT_NETNS" ]; then
+              USER_NETNS_PID=$(echo "$_link" | awk -F/ "{print \$3}")
+              echo "[sandbox-gw] netns picker: /proc walk matched pid=${USER_NETNS_PID} (ns=${_ns} != agent ${AGENT_NETNS})"
+              break
+            fi
+          done
+        fi
+      fi
+      if [ -n "$USER_NETNS_PID" ]; then
+        # Auto-detect sandbox egress proxy from the picked user netns
+        # (skip if operator already pinned NEMOCLAW_SANDBOX_HTTP_PROXY above).
+        if [ -z "$_PROXY_ENV" ]; then
+          _PROXY_URL=$(_detect_sandbox_proxy "$USER_NETNS_PID" 2>/dev/null) || true
+          if [ -n "$_PROXY_URL" ]; then
+            _PROXY_ENV=$(_build_proxy_env "$_PROXY_URL")
+            echo "[sandbox-gw] sandbox egress proxy detected: ${_PROXY_URL} (probed via user-netns default route + TCP); injecting http_proxy/https_proxy into gateway env so LLM calls route through it"
+          else
+            _DSP_GW=$(nsenter --net="/proc/${USER_NETNS_PID}/ns/net" -- ip -4 route show default 2>/dev/null | awk "/^default/ {print \$3; exit}")
+            echo "[sandbox-gw] WARN: no sandbox egress proxy reachable from user netns (default-gw=${_DSP_GW:-<none>}; tried ports 3128/8080/1080). Gateway will start without http_proxy and LLM calls to in-cluster Service IPs will fail. Set NEMOCLAW_SANDBOX_HTTP_PROXY env on the nemoclaw deployment to override (e.g. http://10.200.0.1:3128)."
+          fi
+          # Re-render LAUNCH now that _PROXY_ENV is known.
+          LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+        fi
+        echo "[sandbox-gw] launching gateway via nsenter into user netns (pid=${USER_NETNS_PID}) so TUI (also in user netns) can reach 127.0.0.1:18789 directly"
+        if command -v runuser >/dev/null 2>&1; then
+          nsenter --net="/proc/${USER_NETNS_PID}/ns/net" -- runuser -u "$SBX_USER" -- sh -c "$LAUNCH & sleep 2; exit 0"
+        else
+          nsenter --net="/proc/${USER_NETNS_PID}/ns/net" -- su - "$SBX_USER" -s /bin/sh -c "cd /sandbox; $LAUNCH & sleep 2; exit 0"
+        fi
       else
-        su - "$SBX_USER" -s /bin/sh -c "cd /sandbox; $LAUNCH & sleep 2; exit 0"
+        # Agent-netns launch path. Two sub-cases:
+        #   * GW_NETNS_MODE=agent : intentional (auto-detected channels OR explicit
+        #     NEMOCLAW_GATEWAY_NETNS=agent). Channels can reach public WSS.
+        #   * GW_NETNS_MODE=user but no user-netns process visible yet: cold start
+        #     before nemoclaw onboard spawned its forwarder. The next bridge loop
+        #     iteration relaunches via nsenter once a user-netns pid appears.
+        # WebUI works in either sub-case because sandbox-tunnel.sh walks /proc and
+        # nsenters whichever netns has :18789 LISTENing.
+        if [ "$GW_NETNS_MODE" = "agent" ]; then
+          echo "[sandbox-gw] launching gateway in agent netns (${GW_NETNS_REASON}); WebUI works via sandbox-tunnel.sh, TUI in user netns will show -- gateway disconnected: closed | idle -- by design"
+        else
+          echo "[sandbox-gw] WARN: no user-netns process detected yet; launching gateway in agent netns (TUI may show -- gateway disconnected: closed | idle -- until a user-netns process spawns)"
+        fi
+        if command -v runuser >/dev/null 2>&1; then
+          runuser -u "$SBX_USER" -- sh -c "$LAUNCH & sleep 2; exit 0"
+        else
+          su - "$SBX_USER" -s /bin/sh -c "cd /sandbox; $LAUNCH & sleep 2; exit 0"
+        fi
       fi
       exit 0
     ' 2>&1 | sed 's/^/[sandbox-gw] /'
@@ -1635,10 +2073,10 @@ data:
     fi
 
     # Version stamp: force re-run of skill-env on chart upgrades that bump this.
-    # Bump NEMOCLAW_SKILLENV_VERSION whenever the sandbox-install-skill-env logic
-    # changes in a way existing sandboxes should pick up. ensure_skill_env_installed
-    # in chat-ui-bridge compares this against /workspace/.nemoclaw-skillenv-version
-    # and invalidates the sentinel on mismatch.
+    # Bump whenever sandbox-install-skill-env logic changes in a way existing
+    # sandboxes should pick up. ensure_skill_env_installed in deployment.yaml
+    # (chat-ui-bridge) compares SKILLENV_EXPECTED_VERSION against this file — the
+    # two strings MUST be identical byte-for-byte or the bridge re-installs forever.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
       /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-05-01-openshell-ssl-cert-file-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
