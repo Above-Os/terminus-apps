@@ -39,23 +39,19 @@ spec:
   selector:
     matchLabels:
       app: deerflowv2-backend
-  # RollingUpdate with maxSurge:1 / maxUnavailable:0 spins up the new
-  # pod alongside the old one and only retires the old one once the
-  # new pod's readinessProbe (added below) passes. The previous
-  # `Recreate` strategy guaranteed a zero-pod window between old
-  # termination and new readiness, during which clientproxy proxied to
-  # an empty endpoint set and browsers saw 502 Bad Gateway. Single-node
-  # Olares clusters can run both pods briefly because the hostPath
-  # volumes (config / data / skills / langgraph_api) are not exclusive.
-  # Cost: 2x memory + CPU for ~30-60s during a rollout, which fits
-  # comfortably within the per-container limits (1Gi gateway + 2Gi
-  # langgraph). To force the old failure mode (e.g. on a memory-tight
-  # node), revert to `type: Recreate`.
+  # Recreate ensures only one backend pod runs at a time. RollingUpdate
+  # would briefly run two pods (maxSurge:1) and avoid the zero-pod 502
+  # window during upgrades, but two backend pods sharing the same
+  # hostPath state (memory.json, .langgraph_api scratch dirs) and the
+  # same PG checkpointer pool can race in subtle ways: concurrent
+  # memory.json writes, LangGraph in-process run state diverging across
+  # replicas, and rate-limiter dicts (login attempts / setup-status
+  # cooldown) being per-process. The trade-off is a short 502 window
+  # during upgrades; the readinessProbe + preStop + terminationGrace
+  # below keep that window as small as possible (typically a few
+  # seconds, just the new pod's uvicorn startup time).
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   template:
     metadata:
       labels:
@@ -221,9 +217,11 @@ spec:
           # request. Without this, the pod stops accepting connections
           # the instant termination starts -- requests already routed to
           # this pod (but not yet read) get a TCP RST and surface as a
-          # browser-side ECONNRESET / 502 even with RollingUpdate.
-          # 5s matches the K8s "graceful pod termination" recipe and
-          # the readinessProbe periodSeconds (so we wait at least one
+          # browser-side ECONNRESET / 502 mid-shutdown. With the Recreate
+          # strategy this gives the proxy time to start returning a clean
+          # 503 instead of yanking the TCP socket out from under in-flight
+          # work. 5s matches the K8s "graceful pod termination" recipe
+          # and the readinessProbe periodSeconds (so we wait at least one
           # full scrape cycle before killing uvicorn).
           lifecycle:
             preStop:
