@@ -191,6 +191,20 @@ spec:
                 install_openshell
               fi
 
+              # Prefer image-baked /usr/local/bin/openshell (pinned, known-good) when
+              # ~/.local/bin/openshell is missing OR is a broken stub — CDN partial writes
+              # and failed custom-url installs have produced binaries that report version
+              # 0.0.0; operators then hit `openshell policy show` (wrong — use policy get)
+              # or invoke the stub by mistake while /usr/local/bin/openshell is 0.0.36.
+              if [ -x /home/node/.local/bin/openshell ]; then
+                _os_loc_ver="$(/home/node/.local/bin/openshell --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+                if [ "$_os_loc_ver" = "0.0.0" ] || [ -z "$_os_loc_ver" ]; then
+                  echo "[openshell] removing broken /home/node/.local/bin/openshell (version '${_os_loc_ver:-empty}')"
+                  rm -f /home/node/.local/bin/openshell
+                fi
+              fi
+              export PATH="/usr/local/bin:/usr/local/sbin:${PATH}"
+
               # Legacy socat proxy (pod :8000 -> DYNAMO_HOST). Kept for compatibility with older
               # NemoClaw custom providers that expected `host.openshell.internal:8000`. Skipped
               # automatically when DYNAMO_HOST is empty — modern setup goes via OpenShell's
@@ -498,7 +512,11 @@ spec:
                   #      changes in a way existing pods must pick up.
                   local reason=""
                   local _got_ver=""
-                  local SKILLENV_EXPECTED_VERSION="2026-04-30-olares-cli-v1"
+                  # MUST match the printf stamp at the end of sandbox-install-skill-env.sh
+                  # (configmap-sandbox-bridge.yaml). If these drift, the bridge logs
+                  # "skill-env version mismatch" and re-runs the full installer on every
+                  # loop tick (~10s) — looks like a random restart / flapping readiness.
+                  local SKILLENV_EXPECTED_VERSION="2026-05-01-openshell-ssl-cert-file-v1"
                   if [ -f /workspace/.nemoclaw-skillenv-installed ]; then
                     if [ "${NEMOCLAW_SKILL_INSTALL_GCC:-1}" = "1" ] && \
                        ! docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
@@ -1317,6 +1335,62 @@ spec:
                 echo "[5/5] NemoClaw already installed, skipping installer"
               fi
 
+              # Openshell network presets (discord/slack/telegram/...) are normally applied at
+              # onboard step [8/8]. When /workspace/.nemoclaw-installed exists the installer
+              # skips the whole onboard — including [8/8] — so NEMOCLAW_POLICY_TIER=open in the
+              # Deployment env never reaches openshell unless we reconcile here. Without the
+              # discord preset, iptables blocks gateway.discord.gg even when NO_PROXY bypasses
+              # the HTTP MITM; OpenClaw then hangs between [gateway] starting... and HTTP bind.
+              # Idempotent: `nemoclaw <sandbox> policy-add <preset> --yes` exits non-zero when
+              # the preset is already applied — we treat that as success.
+              (
+                _pol_mode="${NEMOCLAW_POLICY_MODE:-suggested}"
+                if [ "$_pol_mode" = "skip" ]; then
+                  echo "[policy-tier] NEMOCLAW_POLICY_MODE=skip — skipping preset reconcile"
+                  exit 0
+                fi
+                _pol_tier="${NEMOCLAW_POLICY_TIER:-open}"
+                case "$_pol_tier" in
+                  restricted)
+                    echo "[policy-tier] tier=restricted — no tier presets (baseline only)"
+                    exit 0
+                    ;;
+                  balanced)
+                    _pol_presets="npm pypi huggingface brew brave"
+                    ;;
+                  open)
+                    _pol_presets="npm pypi huggingface brew brave slack discord telegram jira outlook"
+                    ;;
+                  *)
+                    echo "[policy-tier] WARN: unknown NEMOCLAW_POLICY_TIER=${_pol_tier}; using open preset list"
+                    _pol_presets="npm pypi huggingface brew brave slack discord telegram jira outlook"
+                    ;;
+                esac
+                export OPENSHELL_GATEWAY="${NEMOCLAW_GATEWAY_NAME:-nemoclaw}"
+                _pol_sbx="${NEMOCLAW_SANDBOX_NAME:-my-assistant}"
+                _pol_wait="${NEMOCLAW_POLICY_RECONCILE_WAIT_ITER:-180}"
+                _pol_ctr="${CLUSTER_CTR:-openshell-cluster-nemoclaw}"
+                _pol_ns="${SANDBOX_NS:-openshell}"
+                _pol_pod="${SANDBOX_FILTER:-my-assistant}"
+                for _pol_j in $(seq 1 "$_pol_wait"); do
+                  docker inspect "$_pol_ctr" >/dev/null 2>&1 || { sleep 2; continue; }
+                  if docker exec "$_pol_ctr" kubectl -n "$_pol_ns" get pod "$_pol_pod" >/dev/null 2>&1; then
+                    break
+                  fi
+                  sleep 2
+                done
+                if ! docker exec "$_pol_ctr" kubectl -n "$_pol_ns" get pod "$_pol_pod" >/dev/null 2>&1; then
+                  echo "[policy-tier] sandbox pod ${_pol_ns}/${_pol_pod} not ready after ${_pol_wait} polls — skipping (retry next pod boot)"
+                  exit 0
+                fi
+                echo "[policy-tier] reconciling tier=${_pol_tier} presets -> sandbox=${_pol_sbx} gateway=${OPENSHELL_GATEWAY}"
+                for _preset in $_pol_presets; do
+                  echo "[policy-tier] nemoclaw ${_pol_sbx} policy-add ${_preset} --yes"
+                  nemoclaw "${_pol_sbx}" policy-add "${_preset}" --yes 2>&1 \
+                    | sed "s/^/[policy-tier] /" || true
+                done
+              ) &
+
               # One-shot cold-start reset (DEFERRED until after [5b/5] so we do not race onboard:
               # my-assistant only appears once onboard has progressed far enough.)
               (
@@ -1656,8 +1730,34 @@ spec:
               value: "unused"
             - name: NEMOCLAW_SANDBOX_NAME
               value: "my-assistant"
+            # Policy tier governs the network presets baked into the sandbox at onboard
+            # time. Default `open` because the chart-deployed sandbox is intended for
+            # full plugin/skill use (slack/discord/telegram/jira/outlook etc.) — the
+            # restricted/balanced tiers leave most messaging-channel hosts blocked at
+            # the iptables layer, which silently breaks `openclaw extensions add` for
+            # those channels even after fixing NO_PROXY (the connection itself is
+            # rejected by the sandbox before npm/curl ever sees a proxy decision).
+            # Override via Helm value `olaresEnv.NEMOCLAW_POLICY_TIER` (valid:
+            # restricted | balanced | open). Was inadvertently dropped in the
+            # 2026-05-08 "upgrade app 2.0.6" commit — restored here.
+            - name: NEMOCLAW_POLICY_TIER
+              value: "{{ .Values.olaresEnv.NEMOCLAW_POLICY_TIER | default "open" }}"
+            # NEMOCLAW_POLICY_MODE (per docs.nvidia.com/nemoclaw):
+            #   suggested (default) — additive: apply tier defaults + keep previously
+            #     `policy-add`'d presets. This is what we want for normal upgrades.
+            #   custom — pair with NEMOCLAW_POLICY_PRESETS to make an explicit list
+            #     authoritative (anything not in the list is removed).
+            #   skip — leaves applied set untouched and does NOT apply tier defaults.
+            # Default flipped from "skip" to "suggested" so NEMOCLAW_POLICY_TIER=open
+            # actually downloads tier presets at onboard time. Override to "skip" via
+            # olaresEnv.NEMOCLAW_POLICY_MODE if an operator wants to freeze a manually
+            # curated policy set across re-onboards.
             - name: NEMOCLAW_POLICY_MODE
-              value: "skip"
+              value: "{{ .Values.olaresEnv.NEMOCLAW_POLICY_MODE | default "suggested" }}"
+            # Optional: max polls (2s sleep each) waiting for k3s sandbox pod before tier
+            # preset reconcile (default 180 ~= 6m). Increase on very slow clusters.
+            - name: NEMOCLAW_POLICY_RECONCILE_WAIT_ITER
+              value: "{{ .Values.olaresEnv.NEMOCLAW_POLICY_RECONCILE_WAIT_ITER | default "" }}"
             - name: NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE
               value: "1"
             - name: NEMOCLAW_GATEWAY_NAME
@@ -1699,6 +1799,41 @@ spec:
             # "http://<host>:<port>" (e.g. "http://10.200.0.1:3128").
             - name: NEMOCLAW_SANDBOX_HTTP_PROXY
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_HTTP_PROXY | default "" }}"
+            # Extra hosts to bypass the sandbox HTTP proxy (chart v1.7.14+).
+            # The default NO_PROXY list already includes npm/yarn/pypi/github
+            # tarball hosts (see _build_proxy_env in sandbox-ensure-gateway.sh)
+            # so the openclaw plugin loader can fetch scoped packages directly,
+            # avoiding the openshell-sandbox HTTPS-MITM bug that mangles
+            # %-encoded URLs like "@clack%2fprompts" -> Empty reply. Append
+            # additional hosts here when a plugin needs another public
+            # registry that should bypass the proxy. Format: comma-separated,
+            # no spaces. Examples: "registry.cn-hangzhou.aliyuncs.com,
+            # huggingface.co,docker.io".
+            - name: NEMOCLAW_SANDBOX_NO_PROXY_EXTRA
+              value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_NO_PROXY_EXTRA | default "" }}"
+            # Which net namespace the openclaw gateway runs in (chart v1.7.18+).
+            # The user/sandbox netns is a closed network with only a default route
+            # to the openshell-sandbox HTTP egress proxy at 10.200.0.1:3128. That
+            # is sufficient for HTTP REST traffic (HTTP_PROXY env covers it) but
+            # NOT for messaging-channel WebSocket sidecars (Discord/Slack/Telegram/
+            # Feishu/Outlook) because Node's `ws` library never honors HTTP_PROXY
+            # for the WSS upgrade -- so gateway.out fills with "fetch failed" and
+            # "Gateway websocket closed: 1006" no matter how generous NO_PROXY or
+            # openshell network policy is. The agent netns DOES have direct
+            # cluster + public routes, so moving the gateway there fixes channel
+            # connectivity at the cost of TUI concurrency (TUI launched via
+            # `nemoclaw my-assistant connect` lives in user netns and sees a
+            # different 127.0.0.1, so it shows "gateway disconnected: closed |
+            # idle"; WebUI keeps working via sandbox-tunnel.sh /proc walk).
+            # Modes:
+            #   - auto  (default) : agent IFF /sandbox/.openclaw/openclaw.json has
+            #                       any channels.<name>.enabled=true; user otherwise.
+            #   - agent           : force agent netns (channels work, TUI does not).
+            #   - user            : force user netns (chart v1.7.10 default; TUI +
+            #                       WebUI both work but channels cannot reach
+            #                       public WSS).
+            - name: NEMOCLAW_GATEWAY_NETNS
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_NETNS | default "auto" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "beclab/hys2023-openshell-cluster:v1.16" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR

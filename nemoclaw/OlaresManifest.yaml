@@ -6,7 +6,7 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.7.13
+  version: 1.7.18
   categories:
   - Developer Tools
   - Productivity_v112
@@ -44,7 +44,7 @@ spec:
 
     # Entrances
     - **NemoClaw CLI** — Terminal; run `nemoclaw my-assistant connect` then `openclaw tui` (see [Quickstart](https://docs.nvidia.com/nemoclaw/latest/get-started/quickstart.html)).
-    - **OpenClaw Web UI** — Service **nemoclaw:18789** → pod **18790**. By default **18790** relays to **127.0.0.1:18789** (workspace OpenClaw once the gateway is up). After **`nemoclaw my-assistant connect`** and OpenClaw inside the sandbox, the chart switches **18790** to relay via the sandbox. Set **CHAT_UI_URL** or rely on Olares **domain.webtui** (entrance **name: webtui**); patches **`allowedOrigins`** and **`gateway.trustedProxies`** (reduces **403** behind HTTPS). Optional **OPENCLAW_TRUSTED_PROXIES** if 403 persists.
+    - **OpenClaw Web UI** — Service **nemoclaw:18789** → pod **18790**. By default **18790** relays to **127.0.0.1:18789** (workspace OpenClaw once the gateway is up). After **`nemoclaw my-assistant connect`** and OpenClaw inside the sandbox, the chart switches **18790** to relay via the sandbox. Set **CHAT_UI_URL** or rely on Olares **domain.webtui** (entrance **name: webtui**); patches **`allowedOrigins`** and **`gateway.trustedProxies`** (reduces **403** behind HTTPS). Optional **OPENCLAW_TRUSTED_PROXIES** if 403 persists. If the Control UI shows **gateway token missing**, run **`nemoclaw my-assistant gateway-token --quiet`** inside the **nemoclaw** pod (or after Terminal connect) and paste the value into **Control UI → Settings** (or append **`#token=<paste>`** to the dashboard URL if your OpenClaw build supports it).
 
     # OpenShell gateway
     No separate browser entry — use the Terminal and `openshell status` / `openshell doctor` on the CLI. Port **8080** remains on Service **nemoclaw** for port-forward or internal use.
@@ -186,6 +186,48 @@ envs:
     editable: true
     default: ""
     description: "Pin the OpenClaw version inside the sandbox (e.g. `2026.5.2`). Empty = use whatever NemoClaw bakes (currently floor 2026.4.24 from NemoClaw v0.0.37 blueprint). On change, chart runs `npm install -g openclaw@<ver>` inside the sandbox + restarts the gateway; sticky via /workspace/.nemoclaw-openclaw-pin. Use this to pull fixes that landed in OpenClaw npm releases newer than the blueprint floor (e.g. NemoClaw issue #3145 TUI duplicate-message — likely improved by 2026.4.26 dedupe + 2026.5.x WS-ping fixes)."
+  - envName: NEMOCLAW_POLICY_TIER
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "open"
+    description: "OpenShell network policy tier for preset packs (discord/slack/npm/…). `open` (default) = npm + pypi + huggingface + brew + brave + slack + discord + telegram + jira + outlook; `balanced` = npm/pypi/huggingface/brew/brave only; `restricted` = baseline only (chart skips tier reconcile). Chart v1.7.16+ runs **`nemoclaw <sandbox> policy-add <preset> --yes`** in the background after the k3s sandbox pod exists whenever **`NEMOCLAW_POLICY_MODE` is not `skip`** — so presets still apply even if **`/workspace/.nemoclaw-installed` skipped onboard [8/8]**. Inspect live policy with **`openshell policy get <sandbox> --full`** (openshell 0.0.36 — there is no `policy show`). Extra hosts: **`openshell policy update <sandbox> --add-endpoint <host>:443:read-write:rest:enforce`**. Docs: https://docs.nvidia.com/nemoclaw/latest/reference/network-policies.html"
+  - envName: NEMOCLAW_POLICY_MODE
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "suggested"
+    description: "How non-interactive onboarding reconciles tier-derived presets with already-applied ones. `suggested` (default) — additive: applies tier defaults + keeps presets you previously added with `nemoclaw policy-add`. `custom` — pair with NEMOCLAW_POLICY_PRESETS to make an explicit list authoritative (anything not listed gets removed). `skip` — leaves the applied set untouched, does NOT apply tier defaults, AND disables the chart background **`nemoclaw … policy-add`** tier reconcile (freeze hand-curated policy)."
+  - envName: NEMOCLAW_POLICY_RECONCILE_WAIT_ITER
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Optional max polls (2s between polls) waiting for the k3s sandbox pod before **`nemoclaw … policy-add`** tier reconcile runs. Empty = 180 (~6 minutes). Raise only if the sandbox pod is very slow to appear."
+  - envName: NEMOCLAW_SANDBOX_HTTP_PROXY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Manual override for the openshell-sandbox HTTP egress proxy URL (e.g. `http://10.200.0.1:3128`). Empty = chart auto-detects by probing the user-netns default route gateway IP on ports 3128/8080/1080. The proxy is needed by user-netns processes (the `openclaw gateway` runs there) to reach in-cluster Service IPs like Olares shared inference; bypass for public hosts is controlled separately via NO_PROXY (see NEMOCLAW_SANDBOX_NO_PROXY_EXTRA). Override only when auto-detection picks the wrong port or the proxy listens on a non-default address."
+  - envName: NEMOCLAW_SANDBOX_NO_PROXY_EXTRA
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "Comma-separated extra hosts to bypass the sandbox HTTP proxy (no spaces, e.g. `mirror.aliyun.com,my-feeds.cn`). Appends to the chart's curated default list (npm/yarn/pypi/github/huggingface/openai/anthropic/docker/quay/maven/crates etc.). Bypassing the proxy is preferable for public registries because openshell 0.0.36's HTTPS MITM mangles %-encoded URLs for scoped npm packages (e.g. @clack%2fprompts → `Empty reply from server`). Hosts added here ALSO need to be in the OpenShell network policy — bypass alone won't get past the iptables drop. Add via `openshell policy update <sandbox> --add-endpoint <host>:443:read-only:rest:enforce` (or by including a preset that covers them via NEMOCLAW_POLICY_TIER)."
+  - envName: NEMOCLAW_GATEWAY_NETNS
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "auto"
+    description: "Which net namespace the OpenClaw gateway runs in. The user/sandbox netns is a closed network whose only default route is the openshell HTTP egress proxy (10.200.0.1:3128); HTTP REST + LLM calls work via HTTP_PROXY but Node's `ws` library never honors HTTP_PROXY for the WSS upgrade, so messaging-channel sidecars (Discord/Slack/Telegram/Feishu/Outlook) cannot reach gateway.discord.gg / wss-primary.slack.com etc. while the gateway runs there — gateway.out shows `fetch failed` + `Gateway websocket closed: 1006` no matter how generous NO_PROXY or `openshell policy` is. The agent netns has direct cluster + public routes, so the gateway can reach channel WSS endpoints from there at the cost of TUI concurrency (TUI lives in user netns and shows `gateway disconnected: closed | idle` — WebUI keeps working via sandbox-tunnel.sh). Values: `auto` (default; agent IFF any `channels.<name>.enabled=true` exists in `/sandbox/.openclaw/openclaw.json`, otherwise user), `agent` (force agent — channels work, TUI does not), `user` (force chart v1.7.10 default — TUI+WebUI both work but channels cannot connect to public WSS)."
   - envName: NEMOCLAW_GATEWAY_DOCKER_PORT
     type: string
     required: false

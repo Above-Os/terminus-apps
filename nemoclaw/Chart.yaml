@@ -3,7 +3,116 @@ appVersion: '0.0.36'
 description: NVIDIA NemoClaw AI Coding Agent with Docker-in-Docker Sandbox
 name: nemoclaw
 type: application
-version: 1.7.13
+version: 1.7.18
+# 1.7.18 — fix messaging channels (Discord/Slack/Telegram/Feishu/Outlook) hanging
+# in `[discord] [default] auto-restart attempt N/10` with `gateway websocket closed:
+# 1006` + `internalConnectMultiple` + `fetch failed` even after chart v1.7.16
+# applied the openshell `discord/slack/...` policy presets and v1.7.15 added the
+# corresponding hosts to NO_PROXY. Root cause: chart v1.7.10 launches the openclaw
+# gateway via `nsenter --net` into the user/sandbox netns so TUI + WebUI can share
+# a single gateway. That user netns is a closed network whose only default route
+# is the openshell-sandbox HTTP egress proxy at 10.200.0.1:3128 -- HTTP REST works
+# via HTTP_PROXY (LLM calls fine, even Discord REST returns 200 in <1s when the
+# `discord` policy preset is applied), but Node's `ws` library does NOT honor
+# HTTP_PROXY for the WebSocket upgrade, so the gateway's channel sidecars cannot
+# ever reach gateway.discord.gg:443 / wss-primary.slack.com:443 / api.telegram.org
+# /etc. Verified by user-netns diagnostics (chart v1.7.17 + open tier + suggested
+# mode applied):
+#   U1 (raw TCP gateway.discord.gg:443 from user netns)        = TCP_USER_FAIL
+#   U2 (curl direct https://discord.com/api/v10/gateway)       = Couldn't connect
+#                                                                after 58 ms
+#   U3 (same via --proxy http://10.200.0.1:3128)               = http=200
+#   U4 (openssl s_client gateway.discord.gg:443 direct)        = (empty)
+#   U5 (DNS resolve gateway.discord.gg)                        = OK (3 A-records)
+# i.e. the user netns has no public route at all; everything must traverse the
+# proxy, and the channel WSS upgrade has no proxy support. The agent netns DOES
+# have direct cluster + public routes (verified by A/B/C: TLS handshake to
+# gateway.discord.gg returns real Google cert, no MITM). Fix: NEW olaresEnv knob
+# `NEMOCLAW_GATEWAY_NETNS` (default `auto`) decides where to launch the gateway:
+#   - auto    : agent netns IFF /sandbox/.openclaw/openclaw.json has any
+#               channels.<name>.enabled=true (excluding the synthetic
+#               channels.defaults entry); user netns otherwise. Operators who
+#               only use WebUI chat see no behavioral change vs v1.7.10-1.7.17.
+#   - agent   : force agent netns. WebUI keeps working via sandbox-tunnel.sh
+#               /proc walk; channels reach public WSS; TUI in user netns shows
+#               "gateway disconnected: closed | idle" by design.
+#   - user    : force user netns (chart v1.7.10 default). TUI + WebUI both work
+#               but messaging channels cannot connect to public WSS endpoints.
+# Implementation:
+#   - sandbox-ensure-gateway.sh: forwards NEMOCLAW_GATEWAY_NETNS through the
+#     `kubectl exec -- env "K=V" sh -c '...'` boundary; new
+#     `_decide_gateway_netns` function reads the env + scans openclaw.json for
+#     enabled channels via python3 one-liner; sets GW_NETNS_MODE to agent|user;
+#     existing USER_NETNS_PID picker is gated on GW_NETNS_MODE=user so the
+#     agent-netns branch is taken without a "WARN: no user-netns process" log
+#     when the choice is intentional.
+#   - deployment.yaml: new env var with extensive comment explaining the
+#     trade-off; defaults to auto so first-deploy installs that have no
+#     channels yet keep TUI concurrency, then automatically switch to agent
+#     netns on the next bridge loop tick (~10s) once the user adds a channel.
+# Operators upgrading from 1.7.17 with a working chat (no channels) get no
+# functional change. Operators upgrading with channels already enabled in
+# openclaw.json see one extra gateway restart on the next bridge tick as the
+# launch path moves to agent netns; subsequent ticks no-op.
+# 1.7.17 — fix skill-env version gate drift: chat-ui-bridge SKILLENV_EXPECTED_VERSION
+# must match the stamp written by sandbox-install-skill-env.sh (2026-05-01-openshell-
+# ssl-cert-file-v1). When they mismatch, every bridge loop iteration re-runs the full
+# skill-env installer and looks like a random "restart" / flapping logs.
+# 1.7.16 — policy tier reconcile + openshell PATH hygiene:
+#   * Background loop after [5/5]: when NEMOCLAW_POLICY_MODE != skip, run
+#     `nemoclaw <sandbox> policy-add <preset> --yes` for every preset in
+#     NEMOCLAW_POLICY_TIER (open/balanced/restricted) once the k3s sandbox pod
+#     exists. Fixes Discord/messaging channels hanging after onboard [8/8] was
+#     skipped because `.nemoclaw-installed` was already present — iptables
+#     never had the discord preset even though NO_PROXY listed gateway.discord.gg.
+#   * Remove broken /home/node/.local/bin/openshell (version 0.0.0) and prepend
+#     `/usr/local/bin` to PATH so operators hit the image-pinned openshell 0.0.36.
+#   * Optional olaresEnv.NEMOCLAW_POLICY_RECONCILE_WAIT_ITER (default 180 polls).
+#   * OlaresManifest: Web UI doc — gateway token via `nemoclaw … gateway-token`.
+# 1.7.15 — broaden the chart's default NO_PROXY allow-list so additional
+# public ecosystems beyond npm/pypi/github also bypass the openshell
+# sandbox HTTP proxy MITM. Hosts added (curated by ecosystem):
+#   * npm/yarn cn mirrors + CDNs: registry.npm.taobao.org, npm.aliyun.com,
+#     unpkg.com, cdn.jsdelivr.net, cdnjs.cloudflare.com, esm.sh
+#   * python mirrors: mirrors.aliyun.com, pypi.tuna.tsinghua.edu.cn,
+#     pypi.douban.com
+#   * github extras: api.github.com, github-releases.githubusercontent.com
+#   * AI/ML provider APIs (used by openclaw skills + plugin SDKs):
+#     api.openai.com, api.anthropic.com, openrouter.ai, api.together.xyz,
+#     generativelanguage.googleapis.com, huggingface.co,
+#     cdn-lfs.huggingface.co, hf.co
+#   * container registries: docker.io, registry-1.docker.io, ghcr.io,
+#     quay.io, gcr.io, mcr.microsoft.com, k8s.gcr.io, registry.k8s.io
+#   * cloud storage / CDN: storage.googleapis.com, fonts.googleapis.com,
+#     fonts.gstatic.com, blob.core.windows.net, s3.amazonaws.com,
+#     .cloudfront.net
+#   * other lang ecosystems: crates.io, static.crates.io, proxy.golang.org,
+#     sum.golang.org, repo1.maven.org, repo.maven.apache.org, rubygems.org
+#   * NVIDIA: developer.nvidia.com, download.nvidia.com,
+#     catalog.ngc.nvidia.com
+# All entries are PUBLIC IPs reachable directly from the user netns; only
+# RFC1918 / cluster-internal traffic still flows through the sandbox proxy.
+# Operators can still append site-specific hosts via olaresEnv.
+# NEMOCLAW_SANDBOX_NO_PROXY_EXTRA. Local validation script
+# `_validate_proxy_env.py` at repo root renders + executes _build_proxy_env
+# without deploying so changes can be sanity-checked offline.
+# 1.7.14 — fix `openclaw extensions add <channel>` (Feishu/Slack/Telegram
+# etc.) failing with "npm install failed" after 1.7.13 enabled the sandbox
+# HTTP egress proxy. Root cause: the openshell-sandbox HTTP proxy MITMs
+# HTTPS using its own CA so JS extensions can be policy-checked, but on
+# openshell 0.0.36 the MITM mangles %-encoded URLs for scoped npm packages
+# (e.g. "https://registry.npmjs.org/@clack%2fprompts" -> "Empty reply
+# from server"). Verified by I-3/I-5 diagnostics on chart v1.7.13:
+# direct curl to a scoped pkg URL works (49 packages added in 7s) while
+# the same call via http_proxy=http://10.200.0.1:3128 returns curl (52)
+# Empty reply or hangs to 60s+ timeout. Fix: extend the NO_PROXY list to
+# include public package registries that the user netns can reach
+# DIRECTLY without the proxy (npm/yarn/pypi/github tarball hosts).
+# Cluster-internal Service IPs (Olares shared inference, etc.) still go
+# through the proxy because the user netns has no route to them. Knob
+# olaresEnv.NEMOCLAW_SANDBOX_NO_PROXY_EXTRA exposed for ops to append
+# more public registries (e.g. aliyun npm mirror, huggingface, docker.io)
+# without editing the chart.
 # 1.7.13 — fix LLM connectivity for gateway running in user netns. Chart
 # v1.7.10+ launches `openclaw gateway run` via nsenter into the user/sandbox
 # netns so TUI works concurrently with WebUI; that netns has ONLY a single
