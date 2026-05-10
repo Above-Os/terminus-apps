@@ -1,6 +1,23 @@
 {{- $karakeepDomainENV := split "," .Values.domain.karakeep -}}
 {{- $karakeepDomain := index $karakeepDomainENV "_0" -}}
 
+{{- $smtpUseSSL := .Values.olaresEnv.SMTP_SSL | default "" }}
+{{- $smtpUseTLS := .Values.olaresEnv.SMTP_TLS | default "" }}
+{{- $smtpSecurityProtocols := .Values.olaresEnv.SMTP_SECURITY_PROTOCOLS | default "" }}
+{{- $smtpSecurityLower := lower (toString $smtpSecurityProtocols) }}
+{{- $smtpSecure := "false" }}
+{{- if eq $smtpSecurityLower "ssl" }}
+  {{- $smtpSecure = "true" }}
+{{- else if eq $smtpSecurityLower "tls" }}
+  {{- $smtpSecure = "false" }}
+{{- else if eq $smtpSecurityLower "none" }}
+  {{- $smtpSecure = "false" }}
+{{- else }}
+  {{- if or (eq (lower (toString $smtpUseSSL)) "true") (eq (toString $smtpUseSSL) "1") }}
+    {{- $smtpSecure = "true" }}
+  {{- end }}
+{{- end }}
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -39,7 +56,7 @@ spec:
           runAsUser: 0
       containers:
       - name: karakeep
-        image: "beclab/karakeep-app-karakeep:0.31.0"
+        image: "beclab/karakeep-app-karakeep:0.32.0"
         imagePullPolicy: IfNotPresent
         ports:
           - containerPort: 3000
@@ -58,6 +75,26 @@ spec:
             value: '{{ .Values.olaresEnv.OPENAI_API_KEY }}'
           - name: OLLAMA_BASE_URL
             value: '{{ .Values.olaresEnv.OLLAMA_BASE_URL }}'
+          - name: INFERENCE_TEXT_MODEL
+            value: '{{ .Values.olaresEnv.INFERENCE_TEXT_MODEL | default "gemma3" }}'
+          - name: INFERENCE_IMAGE_MODEL
+            value: '{{ .Values.olaresEnv.INFERENCE_IMAGE_MODEL | default "llava" }}'
+          - name: INFERENCE_OUTPUT_SCHEMA
+            value: '{{ .Values.olaresEnv.INFERENCE_OUTPUT_SCHEMA | default "plain" }}'
+          {{- if and (eq (toString .Values.olaresEnv.USE_SYSTEM_SMTP_SETTINGS) "true") (eq (toString .Values.olaresEnv.SMTP_ENABLED) "true") }}
+          - name: SMTP_HOST
+            value: '{{ .Values.olaresEnv.SMTP_HOST }}'
+          - name: SMTP_PORT
+            value: '{{ .Values.olaresEnv.SMTP_PORT | default "587" }}'
+          - name: SMTP_SECURE
+            value: '{{ $smtpSecure }}'
+          - name: SMTP_USER
+            value: '{{ .Values.olaresEnv.SMTP_USER }}'
+          - name: SMTP_PASSWORD
+            value: '{{ .Values.olaresEnv.SMTP_PASSWORD }}'
+          - name: SMTP_FROM
+            value: '{{ .Values.olaresEnv.SMTP_FROM }}'
+          {{- end }}
         resources:
           requests:
             cpu: 300m
