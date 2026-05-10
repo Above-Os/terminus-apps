@@ -3,4 +3,352 @@ appVersion: '0.0.36'
 description: NVIDIA NemoClaw AI Coding Agent with Docker-in-Docker Sandbox
 name: nemoclaw
 type: application
-version: 1.0.6
+version: 1.7.25
+# 1.7.25 — sandbox-ensure-gateway LAUNCH injects openshell TLS bundle env for all gateway
+# children (SSL_CERT_FILE/SSL_CERT_DIR + NODE_EXTRA_CA_CERTS + GIT_SSL_CAINFO +
+# REQUESTS_CA_BUNDLE + CURL_CA_BUNDLE when /etc/openshell-tls/ca-bundle.pem exists).
+# Fixes embedded `openclaw agent` tool runs hitting x509 unknown authority on
+# oauth2.googleapis.com / gmail.googleapis.com etc. while interactive shells worked
+# (skill-env already exported these). Benefits any subprocess honoring those vars
+# (Go, Node, curl, git, Python requests); not gog-only. Fallback: Debian
+# /etc/ssl/certs/ca-certificates.crt when openshell bundle absent.
+# 1.7.24 — openclaw-pin: stop using shell redirection to ANY host path for the npm
+# transcript. v1.7.23 moved the log from /tmp to /workspace but users still saw:
+#   environment: line NNN: "/workspace/nemoclaw-openclaw-pin.log": No such file or directory
+# meaning the Olares `environment` wrapper cannot create/write those paths when attached to
+# the redirect slot (ENOENT before docker exec). Capture stdout+stderr with bash command
+# substitution instead: _log_capture=$($_kx sh -c '...' 2>&1) && _ok=1 then printf|sed to logs.
+# 1.7.23 — openclaw-pin: write npm transcript to /workspace/nemoclaw-openclaw-pin.log
+# instead of /tmp/nemoclaw-openclaw-pin.log. Production nemoclaw container subshell hit:
+#   environment: line NNN: "/tmp/nemoclaw-openclaw-pin.log": No such file or directory
+# so the outer redirection failed before docker exec ran; bridge logged verify failure and
+# never pinned 2026.5.7 (sandbox stayed 2026.4.24). /workspace is hostPath-mounted and used
+# for all other sentinels; mkdir -p /workspace before redirect.
+# 1.7.22 — harden NEMOCLAW_OPENCLAW_VERSION pin (ensure_openclaw_version_in_sandbox).
+# User hit after pinning 2026.5.7: ERR_MODULE_NOT_FOUND for orphaned hashed dist
+# chunks (e.g. dispatch-Dw_9PM8V.js importing runtime-plugins-BuhvuqB5.js) while a
+# newer complete pair existed; TUI/WebUI broke but `openclaw --version` showed
+# 2026.5.7. WebUI left-corner stayed 2026.4.24 because sandbox-ensure-gateway.sh
+# exits early when TCP :18789 is healthy, so the old gateway process never
+# restarted after npm. Fixes: rm -rf openclaw under /usr/local, /sandbox/.local,
+# /tmp/npm-global before install; npm cache clean --force; npm install -g --force;
+# post-install openclaw --version + node createRequire resolve('openclaw') probe;
+# on success pkill -9 openclaw gateway from agent root then run ensure-gateway.
+# On verify failure sentinel + /sandbox/.openclaw-pinned-marker are not written;
+# bridge retries next tick.
+# 1.7.21 — cut ~3-5min off pod-Ready time on fresh installs by (a) adding the
+# missing sentinel guard to cold-reset's skill-env reinstall and (b) reordering
+# chat-ui-bridge's main loop so cli-ready fires the moment the gateway is healthy
+# instead of waiting for skill-env to finish.
+# Symptom user reported (chart v1.7.20):
+#   "10 分钟过去了，没什么变化，总体安装时间过长，尝试优化"
+# i.e. after the (already long) ~19min nemoclaw onboard + [6/6] gateway start,
+# the pod still sat NotReady for another 5-10min with the bridge log alternating
+# between [chat-ui-bridge:skill-env] ... and [cold-reset:sandbox-rc] ... lines
+# that walked through identical apt update + apt install ca-certificates + gcc
+# presence check + dotfile wiring stages.
+# Two independent inefficiencies fed that 5-10min idle window:
+#   1. cold-reset's skill-env install path was missing the same three-stage
+#      sentinel/version/gcc check that chat-ui-bridge's ensure_skill_env_installed
+#      uses (deployment.yaml line ~503). chat-ui-bridge typically wins the race
+#      to install (it polls every ~10s while cold-reset spends 30s+ waiting for
+#      the sandbox pod to exist), writes /workspace/.nemoclaw-skillenv-installed
+#      + /workspace/.nemoclaw-skillenv-version, then cold-reset proceeds anyway
+#      and runs the same script again. The two paths serialize on dpkg lock so
+#      the duplicate adds full apt-update + ca-certificates + gcc check time on
+#      top of bridge's run, ~3-5min wasted per pod boot. Fixed by adding the
+#      same sentinel + version-stamp early-exit to cold-reset before its
+#      sh /opt/nemoclaw/sandbox-install-skill-env.sh invocation. The full
+#      install path is retained as a fallback for the (rare) case where bridge
+#      failed before reaching its own ensure_skill_env_installed.
+#   2. chat-ui-bridge's main while-loop was structured "ensure_brew →
+#      ensure_skill_env_installed → ensure_gog_shim → ensure_openclaw_version →
+#      gateway_listening → write .nemoclaw-cli-ready". On a fresh install
+#      ensure_skill_env_installed blocks for 3-5min, during which the
+#      gateway_listening check + cli-ready write never happen — even though the
+#      gateway has been listening since onboard's [7/8]/[6/6]. The Pod is
+#      therefore NotReady for the full duration even though TUI + WebUI relay
+#      can already work. Reordered to "ensure_brew → ensure_openclaw_version →
+#      gateway_listening → write cli-ready → start_relay_18790/start_relay_oauth
+#      → ensure_skill_env_installed → ensure_gog_shim". skill-env's outputs
+#      (gcc/g++/dotfiles/CA bundle/Go toolchain/gog keyring) are needed by
+#      ADVANCED skills (gogcli source builds, brew-install of gcc-built
+#      formulas) but NOT by basic chat (TUI/WebUI), so deferring them past
+#      cli-ready is safe. ensure_openclaw_version stays before the gateway
+#      check because a NEMOCLAW_OPENCLAW_VERSION drift forces a gateway restart
+#      via the .openclaw-pinned-marker file consumed by sandbox-ensure-gateway.sh.
+# Net effect on a fresh install (typical):
+#   * Pod becomes Ready ~3-5min sooner (right after gateway healthy + npm pin).
+#   * skill-env runs once in the post-Ready window instead of twice serially.
+#   * Total bootstrap clock time roughly: onboard (~19min) + bridge gateway pin
+#     (~30s) + cli-ready → effectively 20min instead of 25-30min before this
+#     change. (onboard itself is upstream nemoclaw.sh; not optimised here.)
+# Net effect on a warm restart (sentinel + stamp present):
+#   * cold-reset skill-env step short-circuits after ~2s (kubectl exec + cat).
+#   * chat-ui-bridge skill-env step short-circuits after ~2s (existing guard).
+#   * Pod-Ready in <30s.
+# Compatibility: no schema changes; no new env vars; no new sentinel files.
+# SKILLENV_EXPECTED_VERSION constant in cold-reset MUST stay byte-identical to
+# the one in deployment.yaml ensure_skill_env_installed AND the printf stamp at
+# the end of sandbox-install-skill-env.sh (configmap-sandbox-bridge.yaml).
+# 1.7.20 — default-pin OpenClaw to 2026.5.7 so new installs ship a tested release
+# without operator intervention. NemoClaw v0.0.37 blueprint still floors openclaw
+# at 2026.4.24, which carries upstream issue #3145 (TUI duplicate-message) +
+# channel-sidecar fetch-retry bugs that surface as "fetch failed | other side
+# closed" on REST and "Gateway websocket closed: 1006" on WSS even when the
+# transport layer is fine. Operators previously had to discover the right
+# version + type it into Olares UI olaresEnv.NEMOCLAW_OPENCLAW_VERSION; this
+# bump moves that into the chart default so a vanilla install gets the better
+# experience by default.
+# Helm value precedence keeps existing installs with an explicit pin intact:
+# olaresEnv > chart default. Setting the field empty in Olares UI still falls
+# back to the NemoClaw-baked binary (chart tears down /sandbox/.openclaw-pinned-
+# marker on next bridge tick, gateway restarts to /usr/local/bin/openclaw).
+# Bumping again later: edit deployment.yaml NEMOCLAW_OPENCLAW_VERSION default +
+# OlaresManifest.yaml NEMOCLAW_OPENCLAW_VERSION default in lockstep.
+# 1.7.19 — fix dind container CrashLoopBackOff after host reboot (stale pidfile).
+# Symptom user reported (chart v1.7.18): after a machine reboot the nemoclaw
+# Pod fails to come back up with dind logs:
+#   level=info msg="Starting up"
+#   failed to start daemon, ensure docker is not running or delete
+#   /var/run/docker.pid: process with PID 1 is still running
+# Root cause: chart deployment overrides the dind container `command:` to invoke
+# `dockerd` directly, which BYPASSES the docker-library upstream
+# `dockerd-entrypoint.sh` -- the script that normally `rm`s a stale
+# /var/run/docker.pid before exec'ing dockerd. /var/run in this chart is
+# `emptyDir: {}`, but emptyDirs are backed by
+# /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~empty-dir/docker-socket/
+# on the node disk and SURVIVE a node reboot. After reboot, the old
+# docker.pid + containerd.pid remain with PIDs from the previous boot;
+# dockerd's startup-time pidfile check reads those, finds the PID alive in
+# the new container's PID namespace (almost always PID 1 == the new
+# entrypoint), and refuses to start. The dind container then CrashLoopBackOff
+# until an operator manually `kubectl exec`s in and `rm`s the pidfile.
+# Fix: wrap the dockerd command with /bin/sh -c that runs `rm -f
+# /var/run/docker.pid /var/run/docker/containerd/containerd.pid` before
+# `exec dockerd ...`. This is exactly what the upstream
+# dockerd-entrypoint.sh does for the same failure mode. Safe even when a
+# healthy dockerd somehow exists -- kubelet would not have started a new
+# container in that case.
+# 1.7.18 — fix messaging channels (Discord/Slack/Telegram/Feishu/Outlook) hanging
+# in `[discord] [default] auto-restart attempt N/10` with `gateway websocket closed:
+# 1006` + `internalConnectMultiple` + `fetch failed` even after chart v1.7.16
+# applied the openshell `discord/slack/...` policy presets and v1.7.15 added the
+# corresponding hosts to NO_PROXY. Root cause: chart v1.7.10 launches the openclaw
+# gateway via `nsenter --net` into the user/sandbox netns so TUI + WebUI can share
+# a single gateway. That user netns is a closed network whose only default route
+# is the openshell-sandbox HTTP egress proxy at 10.200.0.1:3128 -- HTTP REST works
+# via HTTP_PROXY (LLM calls fine, even Discord REST returns 200 in <1s when the
+# `discord` policy preset is applied), but Node's `ws` library does NOT honor
+# HTTP_PROXY for the WebSocket upgrade, so the gateway's channel sidecars cannot
+# ever reach gateway.discord.gg:443 / wss-primary.slack.com:443 / api.telegram.org
+# /etc. Verified by user-netns diagnostics (chart v1.7.17 + open tier + suggested
+# mode applied):
+#   U1 (raw TCP gateway.discord.gg:443 from user netns)        = TCP_USER_FAIL
+#   U2 (curl direct https://discord.com/api/v10/gateway)       = Couldn't connect
+#                                                                after 58 ms
+#   U3 (same via --proxy http://10.200.0.1:3128)               = http=200
+#   U4 (openssl s_client gateway.discord.gg:443 direct)        = (empty)
+#   U5 (DNS resolve gateway.discord.gg)                        = OK (3 A-records)
+# i.e. the user netns has no public route at all; everything must traverse the
+# proxy, and the channel WSS upgrade has no proxy support. The agent netns DOES
+# have direct cluster + public routes (verified by A/B/C: TLS handshake to
+# gateway.discord.gg returns real Google cert, no MITM). Fix: NEW olaresEnv knob
+# `NEMOCLAW_GATEWAY_NETNS` (default `auto`) decides where to launch the gateway:
+#   - auto    : agent netns IFF /sandbox/.openclaw/openclaw.json has any
+#               channels.<name>.enabled=true (excluding the synthetic
+#               channels.defaults entry); user netns otherwise. Operators who
+#               only use WebUI chat see no behavioral change vs v1.7.10-1.7.17.
+#   - agent   : force agent netns. WebUI keeps working via sandbox-tunnel.sh
+#               /proc walk; channels reach public WSS; TUI in user netns shows
+#               "gateway disconnected: closed | idle" by design.
+#   - user    : force user netns (chart v1.7.10 default). TUI + WebUI both work
+#               but messaging channels cannot connect to public WSS endpoints.
+# Implementation:
+#   - sandbox-ensure-gateway.sh: forwards NEMOCLAW_GATEWAY_NETNS through the
+#     `kubectl exec -- env "K=V" sh -c '...'` boundary; new
+#     `_decide_gateway_netns` function reads the env + scans openclaw.json for
+#     enabled channels via python3 one-liner; sets GW_NETNS_MODE to agent|user;
+#     existing USER_NETNS_PID picker is gated on GW_NETNS_MODE=user so the
+#     agent-netns branch is taken without a "WARN: no user-netns process" log
+#     when the choice is intentional.
+#   - deployment.yaml: new env var with extensive comment explaining the
+#     trade-off; defaults to auto so first-deploy installs that have no
+#     channels yet keep TUI concurrency, then automatically switch to agent
+#     netns on the next bridge loop tick (~10s) once the user adds a channel.
+# Operators upgrading from 1.7.17 with a working chat (no channels) get no
+# functional change. Operators upgrading with channels already enabled in
+# openclaw.json see one extra gateway restart on the next bridge tick as the
+# launch path moves to agent netns; subsequent ticks no-op.
+# 1.7.17 — fix skill-env version gate drift: chat-ui-bridge SKILLENV_EXPECTED_VERSION
+# must match the stamp written by sandbox-install-skill-env.sh (2026-05-01-openshell-
+# ssl-cert-file-v1). When they mismatch, every bridge loop iteration re-runs the full
+# skill-env installer and looks like a random "restart" / flapping logs.
+# 1.7.16 — policy tier reconcile + openshell PATH hygiene:
+#   * Background loop after [5/5]: when NEMOCLAW_POLICY_MODE != skip, run
+#     `nemoclaw <sandbox> policy-add <preset> --yes` for every preset in
+#     NEMOCLAW_POLICY_TIER (open/balanced/restricted) once the k3s sandbox pod
+#     exists. Fixes Discord/messaging channels hanging after onboard [8/8] was
+#     skipped because `.nemoclaw-installed` was already present — iptables
+#     never had the discord preset even though NO_PROXY listed gateway.discord.gg.
+#   * Remove broken /home/node/.local/bin/openshell (version 0.0.0) and prepend
+#     `/usr/local/bin` to PATH so operators hit the image-pinned openshell 0.0.36.
+#   * Optional olaresEnv.NEMOCLAW_POLICY_RECONCILE_WAIT_ITER (default 180 polls).
+#   * OlaresManifest: Web UI doc — gateway token via `nemoclaw … gateway-token`.
+# 1.7.15 — broaden the chart's default NO_PROXY allow-list so additional
+# public ecosystems beyond npm/pypi/github also bypass the openshell
+# sandbox HTTP proxy MITM. Hosts added (curated by ecosystem):
+#   * npm/yarn cn mirrors + CDNs: registry.npm.taobao.org, npm.aliyun.com,
+#     unpkg.com, cdn.jsdelivr.net, cdnjs.cloudflare.com, esm.sh
+#   * python mirrors: mirrors.aliyun.com, pypi.tuna.tsinghua.edu.cn,
+#     pypi.douban.com
+#   * github extras: api.github.com, github-releases.githubusercontent.com
+#   * AI/ML provider APIs (used by openclaw skills + plugin SDKs):
+#     api.openai.com, api.anthropic.com, openrouter.ai, api.together.xyz,
+#     generativelanguage.googleapis.com, huggingface.co,
+#     cdn-lfs.huggingface.co, hf.co
+#   * container registries: docker.io, registry-1.docker.io, ghcr.io,
+#     quay.io, gcr.io, mcr.microsoft.com, k8s.gcr.io, registry.k8s.io
+#   * cloud storage / CDN: storage.googleapis.com, fonts.googleapis.com,
+#     fonts.gstatic.com, blob.core.windows.net, s3.amazonaws.com,
+#     .cloudfront.net
+#   * other lang ecosystems: crates.io, static.crates.io, proxy.golang.org,
+#     sum.golang.org, repo1.maven.org, repo.maven.apache.org, rubygems.org
+#   * NVIDIA: developer.nvidia.com, download.nvidia.com,
+#     catalog.ngc.nvidia.com
+# All entries are PUBLIC IPs reachable directly from the user netns; only
+# RFC1918 / cluster-internal traffic still flows through the sandbox proxy.
+# Operators can still append site-specific hosts via olaresEnv.
+# NEMOCLAW_SANDBOX_NO_PROXY_EXTRA. Local validation script
+# `_validate_proxy_env.py` at repo root renders + executes _build_proxy_env
+# without deploying so changes can be sanity-checked offline.
+# 1.7.14 — fix `openclaw extensions add <channel>` (Feishu/Slack/Telegram
+# etc.) failing with "npm install failed" after 1.7.13 enabled the sandbox
+# HTTP egress proxy. Root cause: the openshell-sandbox HTTP proxy MITMs
+# HTTPS using its own CA so JS extensions can be policy-checked, but on
+# openshell 0.0.36 the MITM mangles %-encoded URLs for scoped npm packages
+# (e.g. "https://registry.npmjs.org/@clack%2fprompts" -> "Empty reply
+# from server"). Verified by I-3/I-5 diagnostics on chart v1.7.13:
+# direct curl to a scoped pkg URL works (49 packages added in 7s) while
+# the same call via http_proxy=http://10.200.0.1:3128 returns curl (52)
+# Empty reply or hangs to 60s+ timeout. Fix: extend the NO_PROXY list to
+# include public package registries that the user netns can reach
+# DIRECTLY without the proxy (npm/yarn/pypi/github tarball hosts).
+# Cluster-internal Service IPs (Olares shared inference, etc.) still go
+# through the proxy because the user netns has no route to them. Knob
+# olaresEnv.NEMOCLAW_SANDBOX_NO_PROXY_EXTRA exposed for ops to append
+# more public registries (e.g. aliyun npm mirror, huggingface, docker.io)
+# without editing the chart.
+# 1.7.13 — fix LLM connectivity for gateway running in user netns. Chart
+# v1.7.10+ launches `openclaw gateway run` via nsenter into the user/sandbox
+# netns so TUI works concurrently with WebUI; that netns has ONLY a single
+# veth `veth-s-*` (typically 10.200.0.2/24) with default route to its
+# user-netns gateway IP -- which is also where the openshell-sandbox HTTP
+# egress proxy listens (:3128 by default). Direct connect from the user
+# netns to in-cluster Service IPs (e.g. Olares shared inference) fails
+# with "Could not connect to server" after 0ms; same call via
+# http_proxy=<user-ns gateway>:3128 returns HTTP 200 in ~7ms (verified by
+# H-4 diagnostic). Without this fix the gateway can serve TUI/WebUI but
+# every LLM call surfaces as "LLM request failed: network connection
+# error" / "Connection error".
+# Implementation:
+#   - sandbox-ensure-gateway.sh runs `_detect_sandbox_proxy <user_netns_pid>`
+#     which reads `ip -4 route show default` inside the picked user netns
+#     and TCP-probes the gateway IP on 3128/8080/1080 (in that order).
+#     First port that accepts a connection within 2s wins.
+#   - LAUNCH gets http_proxy/https_proxy/HTTP_PROXY/HTTPS_PROXY (both case
+#     variants because node ecosystem libs are inconsistent) plus
+#     no_proxy/NO_PROXY listing loopback + the proxy host itself so the
+#     gateway internal control-UI + canvas + browser-control sidecar
+#     (127.0.0.1:18789 / 18791) bypass the proxy and a request from the
+#     proxy back through itself does not loop.
+#   - NOTHING is hardcoded: subnet/port can change across openshell
+#     versions and the chart will rediscover them on every reconcile.
+#   - Manual override knob: olaresEnv.NEMOCLAW_SANDBOX_HTTP_PROXY (e.g.
+#     "http://10.200.0.1:3128") for non-default sandbox proxy layouts;
+#     when set, auto-detection is skipped.
+#   - When detection AND override are both empty, gateway starts without
+#     proxy + emits a WARN -- TUI/WebUI still work, LLM calls fail until
+#     ops investigates. We do NOT fail the whole bring-up.
+# 1.7.12 — replace `openclaw gateway health` with a pure TCP probe and stop
+# trusting env-staleness / cfg-changed signals when the gateway is reachable.
+# Symptoms before 1.7.12: pod stays 1/2 NotReady ("还没启动好，是卡住了吗")
+# even though gateway.out shows "[gateway] ready" and TCP probe succeeds in
+# the user netns. Two interlocking bugs from 1.7.10/1.7.11:
+#   (1) `openclaw gateway health` reads /sandbox/.openclaw/openclaw.json,
+#       picks up auth.token + auth.mode=token, and tries to authenticate the
+#       WS handshake. Gateway is launched with `--auth none --allow-unconfigured`
+#       so the auth handshake never gets a response and the CLI times out at
+#       its 10s default. From E-1 diagnostic: nsenter into user netns + TCP
+#       probe :18789 returns OK in <100ms; same nsenter + `openclaw gateway
+#       health` returns "Error: gateway timeout after 10000ms".
+#   (2) After our nsenter LAUNCH, BOTH the onboard-spawned gateway (low PID,
+#       XDG_CONFIG_HOME missing, lives in a separate user namespace) AND the
+#       chart-spawned one (correct env) are alive in user netns. pgrep | head
+#       -1 returns the older PID forever, env-staleness check fires, kill -9
+#       gets EPERM across user namespaces, restart loop never converges. From
+#       D-1 diagnostic: two openclaw-gateway PIDs alive in user netns, only
+#       one was LISTENing.
+# Fix: _health_via_netns / health_ok / gateway_listening all use a 3s TCP
+# probe via /dev/tcp/127.0.0.1/18789 (nsenter into user netns first, agent
+# netns fallback). And the early-exit gate in sandbox-ensure-gateway.sh now
+# trusts a TCP-OK as definitive readiness, so a healthy gateway no longer
+# gets killed every loop iteration just because pgrep found an older sibling
+# with stale env. Trade-off: gog keyring-dependent skills may need a manual
+# `openclaw gateway stop && openclaw gateway run ...` inside the sandbox
+# shell to inherit XDG_CONFIG_HOME=/sandbox/.config; preferable to the
+# previous behavior where the WHOLE pod stayed NotReady forever.
+# 1.7.11 — fix "still initializing" infinite cycle introduced by 1.7.10. The
+# netns picker correctly launches the gateway via nsenter into the user netns,
+# but the post-launch health checks (sandbox-ensure-gateway.sh's wait loop AND
+# chat-ui-bridge's gateway_listening) were still calling `openclaw gateway
+# health` directly via `kubectl exec -c agent --`, i.e. in the AGENT netns.
+# Agent netns sees nothing on :18789 -> health_ok always false -> bridge never
+# writes /workspace/.nemoclaw-cli-ready (readiness probe stays failing) AND
+# sandbox-ensure-gateway.sh decides "gateway not responding; restarting...",
+# which kills the user-netns gateway it just launched. Loop forever, user sees
+# "still initializing" for ~30min. Fix: every `openclaw gateway health` call
+# now nsenters into the picked user netns first (with agent-netns fallback for
+# pre-onboard cold starts where no user netns exists yet). Three call sites
+# patched: outer health_ok in sandbox-ensure-gateway.sh, inline early-exit
+# probe inside the kubectl-exec body, and gateway_listening in deployment.yaml.
+# 1.7.10 — fix TUI/WebUI mutual-exclusion (TUI shows "gateway disconnected:
+# closed | idle" while WebUI works) by launching the openclaw gateway in the
+# user/sandbox netns instead of the agent netns. Background: openshell >= 0.0.36
+# isolates "nemoclaw my-assistant connect" sessions in a separate net namespace
+# from "kubectl exec -c agent --". Chart was launching gateway via the latter
+# (agent netns); TUI launched via the former (user netns) sees a different
+# 127.0.0.1 and gets "gateway disconnected" instantly. Manually starting the
+# gateway from inside a "nemoclaw connect" shell makes both work concurrently
+# (user-confirmed). sandbox-ensure-gateway.sh now picks any pid whose ns/net
+# inode != /proc/self/ns/net (= an openshell-spawned process in user netns,
+# typically the auto-port-forward nemoclaw onboard creates) and uses
+# `nsenter --net=...` before runuser+LAUNCH. WebUI path (sandbox-tunnel.sh)
+# already walks /proc and nsenters, so it keeps working with gateway in either
+# netns; this change just makes TUI work TOO. Fallback to agent-netns launch
+# preserved with explicit WARN when no user-netns process visible yet.
+# 1.7.9 — make NEMOCLAW_OPENCLAW_VERSION pin actually take effect when the
+# in-sandbox npm install lands in /sandbox/.local (sandbox user has no write
+# access to /usr/local/lib in most agent containers, so the install would
+# silently win at /sandbox/.local/bin/openclaw but lose at runtime because
+# sandbox-ensure-gateway.sh's LAUNCH PATH puts /usr/local/bin first). The pin
+# helper now writes /sandbox/.openclaw-pinned-marker, and LAUNCH detects that
+# marker to invoke /sandbox/.local/bin/openclaw by full path + PATH-prepends
+# /sandbox/.local/bin. Helper also tears the marker down when env is cleared
+# so reverting NEMOCLAW_OPENCLAW_VERSION="" gracefully falls back to the
+# pre-baked binary on the next gateway restart. Pin helper is now noisier
+# (logs live vs. want comparison every ~3min, plus on first 2 ticks).
+# 1.7.8 — synthesize Origin header in nemoclawweuiingress when the browser does
+# not send one (top-level same-origin GET / + favicon.ico). OpenClaw 2026.4.x
+# gateway TCP-closes on empty Origin; without this fill, every WebUI hit shows
+# "upstream prematurely closed connection while reading response header" / 502
+# even though TUI works (TUI talks to 127.0.0.1:18789 inside sandbox and
+# bypasses controlUi origin checks entirely). Map prefers CHAT_UI_URL (so the
+# fill matches what patch_origins.py writes into gateway.controlUi.allowedOrigins
+# verbatim) and falls back to `$scheme://$http_host` only when CHAT_UI_URL is
+# unset.
+# 1.7.7 — expose NEMOCLAW_OPENCLAW_VERSION so users can pin a newer OpenClaw npm
+# release into the sandbox (workaround for NemoClaw issue #3145 / blueprint
+# min_openclaw_version still at 2026.4.24 in NemoClaw v0.0.37). Idempotent +
+# sticky via /workspace/.nemoclaw-openclaw-pin; falls back gracefully when npm
+# install permissions/network are unavailable. No-op when env empty (default).
