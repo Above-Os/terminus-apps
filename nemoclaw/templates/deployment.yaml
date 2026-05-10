@@ -500,6 +500,16 @@ spec:
                 # bridge picks up the slack the first time it sees the sandbox pod Running. Both
                 # paths are guarded by sentinel files on /workspace so they only fire once per
                 # bootstrap. Both underlying scripts are themselves idempotent.
+                #
+                # Race avoidance (chart v1.7.21+): In the typical case BOTH paths are eligible
+                # to install skill-env on a fresh pod. chat-ui-bridge enters its loop ~30-60s
+                # before cold-reset (cold-reset waits for the sandbox pod to actually exist,
+                # which only happens partway through onboard). chat-ui-bridge therefore wins
+                # the race almost always and writes /workspace/.nemoclaw-skillenv-installed +
+                # the version stamp. Cold-reset now mirrors the bridge's three-stage check
+                # (sentinel exists + version stamp matches SKILLENV_EXPECTED_VERSION) and
+                # early-exits when bridge already finished, saving ~3-5min of duplicated
+                # apt update + apt install + gcc check + dotfile wiring per pod boot.
                 ensure_skill_env_installed() {
                   # Three-stage guard:
                   #   1. Fast path: host-side sentinel says we already did this pod.
@@ -767,33 +777,99 @@ spec:
                   # fall back to user-prefix /sandbox/.local install + symlink. Both paths
                   # eventually surface a binary on PATH (system /usr/local/bin/openclaw or
                   # /sandbox/.local/bin/openclaw).
+                  #
+                  # Hardened pipeline (chart v1.7.22+): the previous implementation just ran
+                  # `npm install -g openclaw@$VER` in place. That is unsafe for OpenClaw's
+                  # bundled-output layout (esbuild emits hashed chunks like
+                  # dist/dispatch-Dw_9PM8V.js + dist/runtime-plugins-BuhvuqB5.js where every
+                  # release ships a different hash pair). npm only unlinks files listed in
+                  # the OLD package's package.json files[] field; if a partial install
+                  # writes the new dispatch-XXX.js but bails before runtime-plugins-YYY.js
+                  # lands (network blip, signal, dpkg/landlock denial) we end up with the
+                  # new dispatch chunk importing a runtime-plugins chunk that never made
+                  # it to disk. Even worse: a SUCCESSFUL second install on top of that
+                  # state can leave the OLD dispatch-Dw_9PM8V.js orphaned in dist/ next to
+                  # the NEW dispatch-8E8vi2HV.js, and node ESM resolver may pick the wrong
+                  # one depending on package.json exports map. Symptom user reported on
+                  # chart v1.7.20+v1.7.21 with NEMOCLAW_OPENCLAW_VERSION=2026.5.7:
+                  #   Error [ERR_MODULE_NOT_FOUND]: Cannot find module
+                  #   '/usr/local/lib/node_modules/openclaw/dist/runtime-plugins-BuhvuqB5.js'
+                  #   imported from .../dispatch-Dw_9PM8V.js
+                  # while `openclaw --version` reported 2026.5.7 and the dist directory
+                  # actually contained dispatch-8E8vi2HV.js + runtime-plugins-QyLdUr8j.js
+                  # (a complete second pair). New TUI processes still resolved to the
+                  # orphaned old dispatch and exploded.
+                  # Hardening:
+                  #   * rm -rf BOTH the system module dir AND the npm cache before install
+                  #     so npm can't see-stale + skip-as-already-current. We cover all
+                  #     three install prefixes (system /usr/local, sandbox-user /sandbox/.local,
+                  #     and the legacy npm-config-prefix /tmp/npm-global written by user-
+                  #     issued `openclaw update` runs) so a single helper invocation always
+                  #     converges to a single install location.
+                  #   * --force flag so npm overwrites even when its internal heuristics
+                  #     decide the package is already current.
+                  #   * Post-install sanity check: spawn `openclaw --version` AND a node
+                  #     module-resolve probe through `require('module').createRequire(...)`
+                  #     so we exercise the dispatch -> runtime-plugins import graph at
+                  #     pin time. If either fails, we leave the sentinel + marker absent
+                  #     and the next bridge tick retries automatically.
                   # NOTE: capture exit status BEFORE piping to sed (pipefail is not on by default
                   # in this bash subshell, so `if cmd | sed` would always observe sed's rc=0 and
                   # mark every install as successful — verified by walking through this bridge
                   # subshell's `set +e` semantics during the v1.7.x debugging cycle).
                   local _ok=0
-                  local _logfile=/tmp/nemoclaw-openclaw-pin.log
-                  $_kx sh -c "
+                  # Never redirect this docker+kubectl pipeline to a host log file. Olares wraps
+                  # the executable as `environment` (seen in user logs: "environment: line NNN:
+                  # \"/tmp/...\" or \"/workspace/...\": No such file or directory") — the wrapper
+                  # cannot open those paths for append/redir in the bridge subshell, so the
+                  # whole pin aborts before npm runs and the sandbox stays on 2026.4.24.
+                  # Capture stdout+stderr in bash memory instead; $? still reflects the inner
+                  # sh -c exit status.
+                  local _log_capture=""
+                  _log_capture=$($_kx sh -c "
                       set -e
                       VER=\"${_want}\"
                       # --no-fund/--no-audit: silence non-essential network calls; --prefer-online: avoid stale cache.
+                      # --force: ensure npm overwrites even when it thinks the package is already at \$VER (defends against the orphaned-chunk bug above).
+                      install_flags='--no-fund --no-audit --prefer-online --force'
+                      # Cover all three places a previous install might have left orphaned chunks behind.
+                      cleanup_targets='/usr/local/lib/node_modules/openclaw /sandbox/.local/lib/node_modules/openclaw /tmp/npm-global/lib/node_modules/openclaw'
+                      npm cache clean --force >/dev/null 2>&1 || true
                       if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-                        sudo npm install -g --no-fund --no-audit --prefer-online \"openclaw@\$VER\" 2>&1
+                        for d in \$cleanup_targets; do sudo rm -rf \"\$d\" 2>/dev/null || true; done
+                        sudo npm install -g \$install_flags \"openclaw@\$VER\" 2>&1
                       elif [ -w /usr/local/lib ]; then
-                        npm install -g --no-fund --no-audit --prefer-online \"openclaw@\$VER\" 2>&1
+                        for d in \$cleanup_targets; do rm -rf \"\$d\" 2>/dev/null || true; done
+                        npm install -g \$install_flags \"openclaw@\$VER\" 2>&1
                       else
                         echo '[openclaw-pin] system /usr/local not writable; falling back to /sandbox/.local prefix'
+                        rm -rf /sandbox/.local/lib/node_modules/openclaw /tmp/npm-global/lib/node_modules/openclaw 2>/dev/null || true
                         mkdir -p /sandbox/.local
                         NPM_CONFIG_PREFIX=/sandbox/.local \
-                          npm install -g --no-fund --no-audit --prefer-online \"openclaw@\$VER\" 2>&1
+                          npm install -g \$install_flags \"openclaw@\$VER\" 2>&1
                         # Best-effort override of system shim so PATH order does not matter.
                         ln -sf /sandbox/.local/bin/openclaw /usr/local/bin/openclaw 2>/dev/null \
                           || echo '[openclaw-pin] note: cannot symlink /usr/local/bin/openclaw (read-only); /sandbox/.local/bin/openclaw must come first in gateway PATH for it to win'
                       fi
-                      openclaw --version 2>&1 || true
-                    " >"$_logfile" 2>&1 && _ok=1
-                  sed 's/^/[chat-ui-bridge:openclaw-pin] /' "$_logfile" 2>/dev/null || cat "$_logfile" 2>/dev/null
-                  rm -f "$_logfile" 2>/dev/null || true
+                      # ---- Post-install sanity check ----
+                      # 1. Binary version round-trip (catches missing entry-point chunk).
+                      _ver_out=\$(openclaw --version 2>&1 | head -1) || _ver_out='<exec failed>'
+                      echo \"[openclaw-pin] post-install: \$_ver_out\"
+                      case \"\$_ver_out\" in
+                        *\"\$VER\"*) ;;
+                        *)
+                          echo \"[openclaw-pin] FAIL: --version output does not contain \$VER (got: \$_ver_out)\"
+                          exit 11
+                          ;;
+                      esac
+                      # 2. Module-resolve probe: ask node to require.resolve('openclaw') from a
+                      # createRequire rooted at the install prefix; this dereferences the
+                      # package.json + exports map AND statically validates that the dispatch
+                      # entry chunk and its imports exist on disk. Cheap (no network).
+                      _probe=\"const Module=require('module');const r=Module.createRequire('/usr/local/lib/node_modules/openclaw/');try{const p=r.resolve('openclaw');console.log('[openclaw-pin] resolve OK:',p);}catch(e){if(e&&e.code==='MODULE_NOT_FOUND'){const r2=Module.createRequire('/sandbox/.local/lib/node_modules/openclaw/');try{const p=r2.resolve('openclaw');console.log('[openclaw-pin] resolve OK:',p);}catch(e2){console.error('[openclaw-pin] resolve FAIL:',e2&&e2.message);process.exit(12);}}else{console.error('[openclaw-pin] resolve FAIL:',e&&e.message);process.exit(12);}}\"
+                      node -e \"\$_probe\"
+                    " 2>&1) && _ok=1
+                  printf '%s\n' "$_log_capture" | sed 's/^/[chat-ui-bridge:openclaw-pin] /'
                   if [ "$_ok" = "1" ]; then
                     mkdir -p /workspace 2>/dev/null
                     printf "%s\n" "$_want" > "$_sentinel"
@@ -808,15 +884,41 @@ spec:
                     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
                       sh -c "printf '%s\n' '${_want}' > /sandbox/.openclaw-pinned-marker && chown sandbox:sandbox /sandbox/.openclaw-pinned-marker 2>/dev/null; ls -l /sandbox/.openclaw-pinned-marker 2>&1" \
                       2>&1 | sed 's/^/[chat-ui-bridge:openclaw-pin] marker: /'
-                    # Force gateway restart so it re-execs the new binary. Use the same
-                    # process-substitution pattern as elsewhere so a transient sandbox-
-                    # ensure-gateway non-zero rc doesn't kill this bridge subshell.
+                    # Force gateway restart so it re-execs the new binary.
+                    #
+                    # The previous implementation just called sandbox-ensure-gateway.sh
+                    # and trusted it to handle the restart. That works for the cold-
+                    # start case but is a NO-OP when a stale gateway is running --
+                    # ensure-gateway.sh has an `if _health_via_netns; then exit 0` short
+                    # circuit (configmap-sandbox-bridge.yaml line ~403) that explicitly
+                    # avoids killing healthy-on-TCP gateway processes (originally added
+                    # to prevent unkillable cross-userns duplicate accumulation post
+                    # chart v1.7.10). Net effect: NEMOCLAW_OPENCLAW_VERSION drift was
+                    # detected, npm reinstalled the new binary, but the long-running
+                    # gateway (still running the pre-baked 2026.4.24) was never killed
+                    # so WebUI's left-corner version sticker stayed at 2026.4.24 and
+                    # any new gateway-spawned subprocess loaded the still-mapped old
+                    # dist files.
+                    # Fix (chart v1.7.22+): pkill the gateway HERE from agent root --
+                    # which can signal across the openshell userns boundary because
+                    # this exec lands as agent-container root, not sandbox user.
+                    # Then call ensure-gateway.sh; with no listener, it falls through
+                    # the TCP-healthy short-circuit and runs the LAUNCH path with the
+                    # newly-pinned binary path.
+                    echo "[chat-ui-bridge:openclaw-pin] killing existing gateway from agent root so new binary launches"
+                    docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
+                      sh -c '
+                        pkill -9 -f "openclaw[- ]gateway" 2>/dev/null
+                        sleep 1
+                        pgrep -fa "openclaw[- ]gateway" 2>/dev/null && echo "[openclaw-pin] WARN: gateway still alive after pkill -9" || echo "[openclaw-pin] gateway gone"
+                      ' 2>&1 | sed 's/^/[chat-ui-bridge:openclaw-pin] /'
                     echo "[chat-ui-bridge:openclaw-pin] forcing gateway restart so the new openclaw takes effect"
                     while IFS= read -r ln || [ -n "$ln" ]; do
                       echo "[chat-ui-bridge] $ln"
                     done < <(sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1)
                   else
-                    echo "[chat-ui-bridge:openclaw-pin] WARN: openclaw upgrade to ${_want} did not complete cleanly; sandbox keeps the pre-baked version. See bridge log above for npm output."
+                    echo "[chat-ui-bridge:openclaw-pin] WARN: openclaw upgrade to ${_want} did NOT pass post-install verify; sandbox keeps the pre-baked version. Sentinel + pin marker NOT written -- next bridge tick (~10s) will retry."
+                    echo "[chat-ui-bridge:openclaw-pin]      Common causes: (1) npm registry transient 5xx, (2) /usr/local/lib has a read-only landlock layer that swallowed write errors, (3) version $_want unpublished from npm, (4) network egress policy blocks registry.npmjs.org."
                   fi
                 }
                 # DISABLED: permanent install-ui probe responder on pod :18791.
@@ -846,25 +948,28 @@ spec:
                     sleep 5
                     continue
                   fi
+                  # ----- Pre-Ready phase (fast): only the bare minimum required to mark the
+                  # Pod Ready (= TUI works + WebUI relay can connect). Anything that takes
+                  # 30s+ on a fresh install gets deferred to the post-Ready phase below so
+                  # the Pod doesnt sit NotReady while skills setup churns.
+                  # Brew clone is fast when the sandbox already has /sandbox/.linuxbrew/
+                  # Homebrew (typical case after onboard) — ~5s for a `brew --version` check.
                   ensure_brew_in_sandbox
-                  ensure_skill_env_installed
-                  # Track gogcli (un)install in the sandbox: shim appears when user runs
-                  # `openclaw config --section skills` -> brew install gogcli, vanishes
-                  # on uninstall. Cheap (two kubectl-exec probes); reconciles every loop.
-                  # Function self-prefixes its output (`[chat-ui-bridge:gog-shim] ...`),
-                  # no outer pipe wrap needed.
-                  ensure_gog_shim_in_sandbox || true
-                  # User-pinned OpenClaw version (no-op when env empty). Sticky via
-                  # /workspace/.nemoclaw-openclaw-pin; runs before gateway_listening so a
-                  # version bump triggers the gateway restart inside the same loop tick.
+                  # OpenClaw version pin: when NEMOCLAW_OPENCLAW_VERSION drifts from the
+                  # in-sandbox version, this runs `npm install -g openclaw@<ver>` (~30-60s
+                  # on first install, ~2s no-op after). It MUST run before gateway_listening
+                  # so a version bump triggers the gateway restart inside the same loop tick
+                  # (the LAUNCH path consumes /sandbox/.openclaw-pinned-marker which the
+                  # helper writes only on success). Sentinel-guarded via /workspace/.nemoclaw-
+                  # openclaw-pin; idempotent.
                   ensure_openclaw_version_in_sandbox || true
                   if ! gateway_listening; then
                     sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1 | \
                       while read -r ln; do echo "[chat-ui-bridge] $ln"; done
                     if ! gateway_listening; then
-                    sleep 15
-                    continue
-                  fi
+                      sleep 15
+                      continue
+                    fi
                   fi
                   # Mark Pod Ready the moment openclaw gateway in sandbox is healthy.
                   # TUI (openclaw CLI via docker exec into sandbox) is usable NOW --
@@ -879,6 +984,23 @@ spec:
                   fi
                   start_relay_18790
                   start_relay_oauth
+                  # ----- Post-Ready phase (slow, idempotent, sentinel-guarded): runs AFTER
+                  # the Pod is signalled Ready (chart v1.7.21+). On a fresh install these
+                  # take ~3-5min combined (mostly skill-env apt update + apt install
+                  # ca-certificates + gcc presence check); without the reorder the Pod
+                  # sat NotReady that whole time even though gateway + TUI + WebUI relay
+                  # were already up. skill-env produces gcc/g++/dotfiles/CA bundle/Go +
+                  # gog-keyring file — needed by ADVANCED skills (gogcli source builds,
+                  # brew install of gcc-built formulas) but NOT by basic chat. After
+                  # the first iteration both functions early-exit fast (sentinel +
+                  # version stamp match).
+                  ensure_skill_env_installed
+                  # Track gogcli (un)install in the sandbox: shim appears when user runs
+                  # `openclaw config --section skills` -> brew install gogcli, vanishes
+                  # on uninstall. Cheap (two kubectl-exec probes); reconciles every loop.
+                  # Function self-prefixes its output (`[chat-ui-bridge:gog-shim] ...`),
+                  # no outer pipe wrap needed.
+                  ensure_gog_shim_in_sandbox || true
                   while pod_running && gateway_listening; do sleep 30; done
                   echo "[chat-ui-bridge] sandbox gateway dropped (pod_running=$(pod_running && echo y || echo n) gw=$(gateway_listening && echo y || echo n)); resetting"
                   pkill -f "LISTEN:${OAUTH_PUBLISH}" 2>/dev/null || true
@@ -1556,31 +1678,67 @@ spec:
                       ' 2>&1 | sed "s/^/[cold-reset:brew] /"
                     fi
 
-                    echo "[cold-reset] installing ~/.bash_profile env hooks + skill-env"
-                    _cold_sk=/tmp/nemoclaw-cold-skillenv.log
-                    if env \
-                      CLUSTER_CTR="$CLUSTER_CTR" \
-                      NS="$SANDBOX_NS" \
-                      SBX="$SANDBOX_FILTER" \
-                      SBX_USER=sandbox \
-                      SCRIPT_DIR=/opt/nemoclaw \
-                      GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}" \
-                      NEMOCLAW_SKILL_INSTALL_GCC="${NEMOCLAW_SKILL_INSTALL_GCC:-1}" \
-                      NEMOCLAW_PREFETCH_GOG_PATH="${NEMOCLAW_PREFETCH_GOG_PATH:-}" \
-                      CHAT_UI_URL="${CHAT_UI_URL:-}" \
-                      OPENCLAW_EXTRA_ALLOWED_ORIGINS="${OPENCLAW_EXTRA_ALLOWED_ORIGINS:-}" \
-                      OPENCLAW_TRUSTED_PROXIES="${OPENCLAW_TRUSTED_PROXIES:-}" \
-                      NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
-                      NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
-                      NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
-                      NEMOCLAW_SKILL_INSECURE_TLS="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}" \
-                      sh /opt/nemoclaw/sandbox-install-skill-env.sh >"$_cold_sk" 2>&1; then
-                      sed "s/^/[cold-reset:sandbox-rc] /" "$_cold_sk" 2>/dev/null || cat "$_cold_sk"
-                      mkdir -p /workspace 2>/dev/null || true
-                      : > /workspace/.nemoclaw-skillenv-installed
-                    else
-                      sed "s/^/[cold-reset:sandbox-rc] /" "$_cold_sk" 2>/dev/null || cat "$_cold_sk"
-                      echo "[cold-reset:sandbox-rc] skill-env failed; NOT writing .nemoclaw-skillenv-installed (chat-ui-bridge will retry)"
+                    # Early-exit when chat-ui-bridge already installed skill-env at the
+                    # expected version (chart v1.7.21+). Both paths share the sentinel
+                    # /workspace/.nemoclaw-skillenv-installed + version stamp at
+                    # /workspace/.nemoclaw-skillenv-version (written by sandbox-install-
+                    # skill-env.sh) + the same SKILLENV_EXPECTED_VERSION constant. The
+                    # comment block at line ~498 promises "Both paths are guarded by
+                    # sentinel files on /workspace so they only fire once per bootstrap"
+                    # — that promise was historically only true for the chat-ui-bridge
+                    # side; cold-reset just re-ran sandbox-install-skill-env.sh blindly,
+                    # which on a typical fresh install runs ~3-5min AFTER bridge already
+                    # finished the same install (because cold-reset spends 30s+ waiting
+                    # for the sandbox pod to exist while bridge polls every ~10s).
+                    # Without this guard, the two paths serialize on dpkg lock + repeat
+                    # apt update + apt install ca-certificates + gcc-presence check +
+                    # dotfile wiring, doubling pod-Ready time.
+                    # Keep the install path here as a fallback: if bridge somehow failed
+                    # before reaching ensure_skill_env_installed (subshell crashed,
+                    # gog-shim install bailed, etc.) the sentinel will be absent and the
+                    # full install runs as before. SKILLENV_EXPECTED_VERSION MUST stay
+                    # in lockstep with deployment.yaml ensure_skill_env_installed AND
+                    # the printf stamp at the end of sandbox-install-skill-env.sh
+                    # (configmap-sandbox-bridge.yaml).
+                    _cold_skip_skillenv=0
+                    if [ -f /workspace/.nemoclaw-skillenv-installed ]; then
+                      _cold_have_v=$(docker exec "$CLUSTER_CTR" kubectl -n "$SANDBOX_NS" exec "${SANDBOX_FILTER}" -c agent -- \
+                        /bin/sh -c "cat /workspace/.nemoclaw-skillenv-version 2>/dev/null" 2>/dev/null \
+                        | tr -d '\r\n' || true)
+                      _cold_want_v="2026-05-01-openshell-ssl-cert-file-v1"
+                      if [ "$_cold_have_v" = "$_cold_want_v" ]; then
+                        echo "[cold-reset] skill-env already at expected version $_cold_have_v (chat-ui-bridge sentinel match); skipping ~3-5min reinstall"
+                        _cold_skip_skillenv=1
+                      fi
+                    fi
+
+                    if [ "$_cold_skip_skillenv" = "0" ]; then
+                      echo "[cold-reset] installing ~/.bash_profile env hooks + skill-env"
+                      _cold_sk=/tmp/nemoclaw-cold-skillenv.log
+                      if env \
+                        CLUSTER_CTR="$CLUSTER_CTR" \
+                        NS="$SANDBOX_NS" \
+                        SBX="$SANDBOX_FILTER" \
+                        SBX_USER=sandbox \
+                        SCRIPT_DIR=/opt/nemoclaw \
+                        GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}" \
+                        NEMOCLAW_SKILL_INSTALL_GCC="${NEMOCLAW_SKILL_INSTALL_GCC:-1}" \
+                        NEMOCLAW_PREFETCH_GOG_PATH="${NEMOCLAW_PREFETCH_GOG_PATH:-}" \
+                        CHAT_UI_URL="${CHAT_UI_URL:-}" \
+                        OPENCLAW_EXTRA_ALLOWED_ORIGINS="${OPENCLAW_EXTRA_ALLOWED_ORIGINS:-}" \
+                        OPENCLAW_TRUSTED_PROXIES="${OPENCLAW_TRUSTED_PROXIES:-}" \
+                        NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
+                        NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
+                        NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
+                        NEMOCLAW_SKILL_INSECURE_TLS="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}" \
+                        sh /opt/nemoclaw/sandbox-install-skill-env.sh >"$_cold_sk" 2>&1; then
+                        sed "s/^/[cold-reset:sandbox-rc] /" "$_cold_sk" 2>/dev/null || cat "$_cold_sk"
+                        mkdir -p /workspace 2>/dev/null || true
+                        : > /workspace/.nemoclaw-skillenv-installed
+                      else
+                        sed "s/^/[cold-reset:sandbox-rc] /" "$_cold_sk" 2>/dev/null || cat "$_cold_sk"
+                        echo "[cold-reset:sandbox-rc] skill-env failed; NOT writing .nemoclaw-skillenv-installed (chat-ui-bridge will retry)"
+                      fi
                     fi
                   else
                     echo "[cold-reset] sandbox pod ${SANDBOX_FILTER} not observed within $((_sbx_wait * 2))s — chat-ui-bridge will retry skill-env once the pod exists"
@@ -1786,8 +1944,16 @@ spec:
             # waiting for NemoClaw to bump its blueprint floor (NemoClaw issue #3145 — TUI
             # message duplication — is likely improved by 2026.4.26 dedupe + 2026.5.x WS-ping
             # fixes that landed after blueprint pinned 2026.4.24).
+            # Default pinned to a known-good OpenClaw release (chart v1.7.20+).
+            # Bumping this default-pins NEW installs to a tested OpenClaw without
+            # requiring the operator to discover + type the version into Olares
+            # UI. Existing installs that already have an explicit value (set
+            # earlier via olaresEnv.NEMOCLAW_OPENCLAW_VERSION) keep that value
+            # because Helm value precedence: olaresEnv map > chart default.
+            # When bumping, prefer versions that include upstream NemoClaw issue
+            # fixes (#3145 TUI dedupe + WS-ping; channel-sidecar fetch retry).
             - name: NEMOCLAW_OPENCLAW_VERSION
-              value: "{{ .Values.olaresEnv.NEMOCLAW_OPENCLAW_VERSION | default "" }}"
+              value: "{{ .Values.olaresEnv.NEMOCLAW_OPENCLAW_VERSION | default "2026.5.7" }}"
             # Manual override for the sandbox HTTP egress proxy that the gateway
             # (running in the user/sandbox netns since chart v1.7.10) must use to
             # reach in-cluster Service IPs (e.g. Olares shared inference). Default
@@ -2084,7 +2250,35 @@ spec:
           env:
             - name: DOCKER_TLS_CERTDIR
               value: ""
-          command: ["dockerd", "--host=unix:///var/run/docker.sock"]
+          # Wrap dockerd with stale-pidfile cleanup (chart v1.7.19+).
+          # /var/run is an emptyDir, but emptyDirs are backed by
+          # /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~empty-dir/<vol>/
+          # on the node disk and survive a node reboot. After a host reboot or
+          # any dirty dockerd shutdown (OOM kill / kubelet `kill -9` across
+          # pod restart) the previous boot's /var/run/docker.pid +
+          # /var/run/docker/containerd/containerd.pid remain. dockerd's
+          # startup-time pidfile check reads the old PID, finds that PID
+          # still alive in the new container's PID namespace -- almost always
+          # PID 1 == the new entrypoint itself -- and refuses to start with:
+          #   "failed to start daemon, ensure docker is not running or delete
+          #    /var/run/docker.pid: process with PID 1 is still running"
+          # Result: the whole nemoclaw Pod stays CrashLoopBackOff after a
+          # node reboot until an operator manually `kubectl exec`s into the
+          # dind container and `rm`s the pidfile (or the volume is wiped).
+          # The docker-library upstream `dockerd-entrypoint.sh` does this
+          # cleanup automatically, but we override `command:` to invoke
+          # dockerd directly (skipping TLS-cert-dir setup we don't need),
+          # which bypassed the entrypoint cleanup. Replicating just the
+          # pidfile rm here keeps the existing `--host=unix:...` invocation
+          # while restoring reboot safety. Safe even when a healthy dockerd
+          # is somehow already running -- kubelet would not have started a
+          # new container if the old one were still alive.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              rm -f /var/run/docker.pid /var/run/docker/containerd/containerd.pid 2>/dev/null || true
+              exec dockerd --host=unix:///var/run/docker.sock
           resources:
             limits:
               cpu: "8"
