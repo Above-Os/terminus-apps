@@ -6,7 +6,7 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.0.9
+  version: 1.0.10
   categories:
   - Developer Tools
   - Productivity_v112
@@ -164,7 +164,7 @@ envs:
     applyOnChange: true
     editable: true
     default: "2026.5.7"
-    description: "Pin the OpenClaw version inside the sandbox. Chart v1.7.20+ defaults to `2026.5.7` so first-time installs ship a tested release out of the box (NemoClaw blueprint v0.0.37 still floors at 2026.4.24, which carries upstream issue #3145 TUI duplicate-message + channel sidecar fetch retry bugs). On change (or first deploy when this differs from the in-sandbox version), chart runs `npm install -g openclaw@<ver>` inside the sandbox, writes /sandbox/.openclaw-pinned-marker, and restarts the gateway so the new binary is picked up by both gateway LAUNCH and channel sidecars; sticky via /workspace/.nemoclaw-openclaw-pin. Set to empty to fall back to whatever NemoClaw bakes (the marker is torn down + gateway restarted on next bridge tick). Available versions: `npm view openclaw versions --json` (sandbox shell)."
+    description: "Pin the OpenClaw version inside the sandbox. Chart v1.0.27 defaults to `2026.5.7` so first-time installs ship a tested release out of the box (NemoClaw blueprint v0.0.37 still floors at 2026.4.24, which carries upstream issue #3145 TUI duplicate-message + channel sidecar fetch retry bugs). On change (or first deploy when this differs from the in-sandbox version), chart runs `npm install -g openclaw@<ver>` inside the sandbox, writes /sandbox/.openclaw-pinned-marker, and restarts the gateway so the new binary is picked up by both gateway LAUNCH and channel sidecars; sticky via /workspace/.nemoclaw-openclaw-pin. Set to empty to fall back to whatever NemoClaw bakes (the marker is torn down + gateway restarted on next bridge tick). Available versions: `npm view openclaw versions --json` (sandbox shell)."
   - envName: NEMOCLAW_POLICY_TIER
     type: string
     required: false
@@ -228,6 +228,13 @@ envs:
       value: "agent"
     - title: user (TUI + WebUI; public WSS channels blocked)
       value: "user"
+  - envName: NEMOCLAW_GATEWAY_NODE_OPTIONS
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=5000"
+    description: "Node.js options injected only into the OpenClaw gateway process. Default prefers IPv4 and raises Node 20+'s network-family autoselection timeout to reduce Discord gateway.discord.gg WSS flapping (`Gateway websocket closed: 1006`, `AggregateError @ internalConnectMultiple`) on dual-stack or high-latency networks. Set to empty to use Node defaults, or try `--dns-result-order=ipv4first --no-network-family-autoselection` if Discord remains unstable."
   - envName: NEMOCLAW_GATEWAY_DOCKER_PORT
     type: string
     required: false

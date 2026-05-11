@@ -25,11 +25,11 @@
 #
 # Build (linux/amd64 only; sandbox image is glibc amd64):
 #   docker build --platform linux/amd64 \
-#     -t beclab/harveyff-nemoclaw-prefetch:2026.4.30-olares-cli-amd \
+#     -t beclab/harveyff-nemoclaw-prefetch:2026.5.10-olares-cli-amd \
 #     -f docker/prefetch/Dockerfile docker/prefetch
 #
 # Push:
-#   docker push beclab/harveyff-nemoclaw-prefetch:2026.4.30-olares-cli-amd
+#   docker push beclab/harveyff-nemoclaw-prefetch:2026.5.10-olares-cli-amd
 #
 # Image ref is pinned in templates/deployment.yaml (init-prefetch). Rebuild, push, bump tag there.
 # The `-amd` suffix is intentional — this image is linux/amd64 only (see OlaresManifest.yaml
@@ -53,8 +53,8 @@ ARG GO_ARCH=linux-amd64
 # tarball contains a top-level `olares-cli` ELF. skill-env then installs
 # this binary into the sandbox at /usr/local/bin/olares-cli so `olares`
 # workflows inside the assistant can call it directly.
-ARG OLARES_CLI_URL=https://cdn.olares.com/olares-cli-v1.12.7-20260429_linux_amd64.d2dabf4.tar.gz
-ARG OLARES_CLI_VERSION=1.12.7-20260429-d2dabf4
+ARG OLARES_CLI_URL=https://cdn.olares.com/olares-cli-v1.12.7-20260510_linux_amd64.8705e94.tar.gz
+ARG OLARES_CLI_VERSION=1.12.7-20260510-8705e94
 
 # ----------------------------------------------------------------------------
 # Stage 1: static binaries (busybox/micro/rg/fd) — unchanged from prior image.
