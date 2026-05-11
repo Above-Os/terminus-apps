@@ -101,7 +101,7 @@ data:
       "NEMOCLAW_ENDPOINT_URL=${_NEM_EP}" \
       "NEMOCLAW_SANDBOX_HTTP_PROXY=${NEMOCLAW_SANDBOX_HTTP_PROXY:-}" \
       "NEMOCLAW_SANDBOX_NO_PROXY_EXTRA=${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA:-}" \
-      "NEMOCLAW_GATEWAY_NETNS=${NEMOCLAW_GATEWAY_NETNS:-auto}" sh -c '
+      "NEMOCLAW_GATEWAY_NETNS=${NEMOCLAW_GATEWAY_NETNS:-agent}" sh -c '
       set -u
       cd /sandbox || exit 1
       # Pick a pid in a non-agent netns (= user/sandbox netns where openshell-spawned
@@ -134,10 +134,19 @@ data:
         return 1
       }
       _health_via_netns() {
-        # Returns 0 if 127.0.0.1:18789 accepts a TCP connection in either the
-        # user netns (preferred, where chart v1.7.10+ launches the gateway via
-        # nsenter) or the agent netns (fallback for cold starts before any
-        # user-netns process exists). We DO NOT use `openclaw gateway health`
+        # Returns 0 if 127.0.0.1:18789 accepts a TCP connection in the expected
+        # netns. When NEMOCLAW_GATEWAY_NETNS=agent (chart default v1.0.10+), only
+        # the agent netns is authoritative. Do NOT probe the user netns first in
+        # that mode: a stale onboard/user-netns gateway can keep listening on
+        # 127.0.0.1:18789 with missing XDG_CONFIG_HOME, tricking this script into
+        # "gateway responding on TCP" and preventing the real agent-netns gateway
+        # (needed by Discord WSS) from ever launching.
+        #
+        # In user/auto mode, fall back to the historical behavior: probe user
+        # netns first (where chart v1.7.10+ launched the gateway via nsenter), then
+        # agent netns for cold starts before any user-netns process exists.
+        #
+        # We DO NOT use `openclaw gateway health`
         # here because that command reads /sandbox/.openclaw/openclaw.json,
         # picks up the stored auth.token, and tries to authenticate the WS
         # handshake -- but the gateway is launched with `--auth none
@@ -149,6 +158,12 @@ data:
         # probe is sufficient -- gateway only `bind`s :18789 after it has
         # finished loading config and is ready to accept connections (see
         # gateway.out: "starting HTTP server" -> "ready" within 100ms).
+        case "${NEMOCLAW_GATEWAY_NETNS:-agent}" in
+          agent)
+            timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1
+            return $?
+            ;;
+        esac
         _hv_pid=$(_netns_pick_pid 2>/dev/null) || true
         if [ -n "$_hv_pid" ] && command -v nsenter >/dev/null 2>&1; then
           nsenter --net="/proc/$_hv_pid/ns/net" -- timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/18789" >/dev/null 2>&1 && return 0
@@ -598,7 +613,14 @@ data:
         _PROXY_ENV=$(_build_proxy_env "$NEMOCLAW_SANDBOX_HTTP_PROXY")
         echo "[sandbox-gw] sandbox egress proxy from NEMOCLAW_SANDBOX_HTTP_PROXY env: ${NEMOCLAW_SANDBOX_HTTP_PROXY}"
       fi
-      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+      # Discord gateway WSS can fail intermittently with:
+      #   Gateway websocket closed: 1006
+      #   AggregateError @ internalConnectMultiple
+      # on Olares/OpenShell hosts where some resolved address families are not
+      # routable from the sandbox/agent netns. Prefer IPv4 for Node DNS lookups
+      # used by OpenClaw channel sidecars while leaving policy/proxy behavior intact.
+      _NODE_DNS_ENV="NODE_OPTIONS=--dns-result-order=ipv4first"
+      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} ${_NODE_DNS_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
       # NETNS PICKER (chart v1.7.10+).
       # OpenShell >= 0.0.36 puts processes started via "nemoclaw my-assistant connect"
       # (i.e. "openshell my-assistant ssh ...") in a SEPARATE net namespace from
@@ -648,20 +670,19 @@ data:
       #
       # Modes (knob: NEMOCLAW_GATEWAY_NETNS, propagated from the parent
       # nemoclaw container env via the env passthrough above):
-      #   - auto    (default) : agent netns IFF /sandbox/.openclaw/openclaw.json
+      #   - agent  (default) : force agent netns (channels work, TUI does not).
+      #                         This favors Discord/Slack/etc. WSS reliability.
+      #   - auto             : agent netns IFF /sandbox/.openclaw/openclaw.json
       #                         has any channels.<name>.enabled=true (excluding
       #                         the synthetic channels.defaults entry); user
-      #                         netns otherwise. Trades TUI concurrency for
-      #                         channel egress only when channels are actually
-      #                         configured.
-      #   - agent             : force agent netns (channels work, TUI does not).
+      #                         netns otherwise.
       #   - user              : force user netns (chart v1.7.10 default; TUI +
       #                         WebUI both work but messaging channels cannot
       #                         reach their public WSS endpoints).
       #
       # Anything else logs a WARN and is treated as auto.
       _decide_gateway_netns() {
-        _dgn_mode="${NEMOCLAW_GATEWAY_NETNS:-auto}"
+        _dgn_mode="${NEMOCLAW_GATEWAY_NETNS:-agent}"
         case "$_dgn_mode" in
           agent)
             GW_NETNS_MODE=agent
@@ -736,7 +757,7 @@ data:
             echo "[sandbox-gw] WARN: no sandbox egress proxy reachable from user netns (default-gw=${_DSP_GW:-<none>}; tried ports 3128/8080/1080). Gateway will start without http_proxy and LLM calls to in-cluster Service IPs will fail. Set NEMOCLAW_SANDBOX_HTTP_PROXY env on the nemoclaw deployment to override (e.g. http://10.200.0.1:3128)."
           fi
           # Re-render LAUNCH now that _PROXY_ENV is known.
-          LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+          LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} ${_NODE_DNS_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
         fi
         echo "[sandbox-gw] launching gateway via nsenter into user netns (pid=${USER_NETNS_PID}) so TUI (also in user netns) can reach 127.0.0.1:18789 directly"
         if command -v runuser >/dev/null 2>&1; then
@@ -2098,7 +2119,7 @@ data:
     # (chat-ui-bridge) compares SKILLENV_EXPECTED_VERSION against this file — the
     # two strings MUST be identical byte-for-byte or the bridge re-installs forever.
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-05-01-openshell-ssl-cert-file-v1 > /workspace/.nemoclaw-skillenv-version" \
+      /bin/sh -c "mkdir -p /workspace 2>/dev/null; printf %s 2026-05-11-interactive-npm-proxy-v1 > /workspace/.nemoclaw-skillenv-version" \
       >/dev/null 2>&1 || true
 
     rm -f "$rendered_bp"
