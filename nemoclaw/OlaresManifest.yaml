@@ -6,7 +6,7 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.0.7
+  version: 1.0.8
   categories:
   - Developer Tools
   - Productivity_v112
@@ -37,6 +37,15 @@ spec:
     > NemoClaw is available in early preview starting March 16, 2026. This software is not production-ready. Interfaces, APIs, and behavior may change without notice as we iterate on the design. The project is shared to gather feedback and enable early experimentation. We welcome issues and discussion from the community while the project evolves.
 
     Official docs: [NemoClaw](https://docs.nvidia.com/nemoclaw/latest/index.html), [Remote dashboard / CHAT_UI_URL](https://docs.nvidia.com/nemoclaw/latest/deployment/deploy-to-remote-gpu.html#remote-dashboard-access).
+
+    **Olares**
+    - **CLI** — Terminal entrance; `nemoclaw my-assistant connect` then `openclaw tui`. OpenShell: `openshell status` / `openshell doctor` (Service **nemoclaw:8080**).
+    - **Web UI** — Relay **18790** → sandbox gateway **127.0.0.1:18789**. Set **CHAT_UI_URL** or **domain.webtui**; chart patches **allowedOrigins** / **trustedProxies**. **Gateway token:** `nemoclaw my-assistant gateway-token --quiet` → paste in Control UI Settings (or `#token=…` in the URL if supported).
+    - **openclaw.json** — Copied to **/openclaw-config** ~every 10 minutes (backup mirror); edits there are not pushed back automatically.
+
+    **Features**
+    - Docker-in-Docker sandbox for isolated execution.
+    - OpenAI-compatible LLM endpoints (incl. Dynamo) via env configuration.
 
   developer: NVIDIA
   website: https://github.com/NVIDIA/NemoClaw
@@ -154,8 +163,8 @@ envs:
     required: false
     applyOnChange: true
     editable: true
-    default: ""
-    description: "Pin the OpenClaw version inside the sandbox (e.g. `2026.5.2`). Empty = use whatever NemoClaw bakes (currently floor 2026.4.24 from NemoClaw v0.0.37 blueprint). On change, chart runs `npm install -g openclaw@<ver>` inside the sandbox + restarts the gateway; sticky via /workspace/.nemoclaw-openclaw-pin. Use this to pull fixes that landed in OpenClaw npm releases newer than the blueprint floor (e.g. NemoClaw issue #3145 TUI duplicate-message — likely improved by 2026.4.26 dedupe + 2026.5.x WS-ping fixes)."
+    default: "2026.5.7"
+    description: "Pin the OpenClaw version inside the sandbox. Chart v1.7.20+ defaults to `2026.5.7` so first-time installs ship a tested release out of the box (NemoClaw blueprint v0.0.37 still floors at 2026.4.24, which carries upstream issue #3145 TUI duplicate-message + channel sidecar fetch retry bugs). On change (or first deploy when this differs from the in-sandbox version), chart runs `npm install -g openclaw@<ver>` inside the sandbox, writes /sandbox/.openclaw-pinned-marker, and restarts the gateway so the new binary is picked up by both gateway LAUNCH and channel sidecars; sticky via /workspace/.nemoclaw-openclaw-pin. Set to empty to fall back to whatever NemoClaw bakes (the marker is torn down + gateway restarted on next bridge tick). Available versions: `npm view openclaw versions --json` (sandbox shell)."
   - envName: NEMOCLAW_POLICY_TIER
     type: string
     required: false

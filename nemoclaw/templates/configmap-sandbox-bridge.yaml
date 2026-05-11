@@ -570,6 +570,26 @@ data:
         fi
         echo "http_proxy=$_bpe_url https_proxy=$_bpe_url HTTP_PROXY=$_bpe_url HTTPS_PROXY=$_bpe_url no_proxy=$_bpe_no NO_PROXY=$_bpe_no"
       }
+      # TLS trust bundle for sandbox HTTPS MITM (openshell egress proxy re-signs TLS).
+      # Interactive shells get these from skill-env (/etc/profile.d + /etc/environment);
+      # the openclaw gateway process historically did NOT, so embedded agent runs and
+      # tool subprocesses (gog=Go oauth2.googleapis.com, curl, python requests, node
+      # undici when not using NODE_EXTRA_CA_CERTS, etc.) saw x509: certificate signed
+      # by unknown authority while the same command worked in a login shell.
+      # Inject the SAME bundle variables into LAUNCH so every child inherits them.
+      # Not gog-specific: any client honoring SSL_CERT_FILE / SSL_CERT_DIR (Go 1.20+),
+      # NODE_EXTRA_CA_CERTS (node), GIT_SSL_CAINFO (git), REQUESTS_CA_BUNDLE /
+      # CURL_CA_BUNDLE (python requests / curl) benefits. Clients with bundled roots
+      # or custom trust stores may still need separate config.
+      _build_openshell_tls_stack_env() {
+        if [ -r /etc/openshell-tls/ca-bundle.pem ]; then
+          echo "SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem SSL_CERT_DIR=/etc/ssl/certs NODE_EXTRA_CA_CERTS=/etc/openshell-tls/ca-bundle.pem GIT_SSL_CAINFO=/etc/openshell-tls/ca-bundle.pem REQUESTS_CA_BUNDLE=/etc/openshell-tls/ca-bundle.pem CURL_CA_BUNDLE=/etc/openshell-tls/ca-bundle.pem"
+        elif [ -r /etc/ssl/certs/ca-certificates.crt ]; then
+          echo "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt SSL_CERT_DIR=/etc/ssl/certs"
+        fi
+      }
+      _TLS_STACK_ENV=$(_build_openshell_tls_stack_env)
+      [ -z "$_TLS_STACK_ENV" ] || echo "[sandbox-gw] TLS stack env for MITM proxy (gateway children): ${_TLS_STACK_ENV}"
       # Manual override (rarely needed; only set when openshell or Olares
       # operators ship a non-default sandbox proxy that detection cannot
       # reach -- e.g. a different listen port or off-default netns layout):
@@ -578,7 +598,7 @@ data:
         _PROXY_ENV=$(_build_proxy_env "$NEMOCLAW_SANDBOX_HTTP_PROXY")
         echo "[sandbox-gw] sandbox egress proxy from NEMOCLAW_SANDBOX_HTTP_PROXY env: ${NEMOCLAW_SANDBOX_HTTP_PROXY}"
       fi
-      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+      LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
       # NETNS PICKER (chart v1.7.10+).
       # OpenShell >= 0.0.36 puts processes started via "nemoclaw my-assistant connect"
       # (i.e. "openshell my-assistant ssh ...") in a SEPARATE net namespace from
@@ -716,7 +736,7 @@ data:
             echo "[sandbox-gw] WARN: no sandbox egress proxy reachable from user netns (default-gw=${_DSP_GW:-<none>}; tried ports 3128/8080/1080). Gateway will start without http_proxy and LLM calls to in-cluster Service IPs will fail. Set NEMOCLAW_SANDBOX_HTTP_PROXY env on the nemoclaw deployment to override (e.g. http://10.200.0.1:3128)."
           fi
           # Re-render LAUNCH now that _PROXY_ENV is known.
-          LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
+          LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
         fi
         echo "[sandbox-gw] launching gateway via nsenter into user netns (pid=${USER_NETNS_PID}) so TUI (also in user netns) can reach 127.0.0.1:18789 directly"
         if command -v runuser >/dev/null 2>&1; then
