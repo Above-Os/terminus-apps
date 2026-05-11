@@ -101,6 +101,7 @@ data:
       "NEMOCLAW_ENDPOINT_URL=${_NEM_EP}" \
       "NEMOCLAW_SANDBOX_HTTP_PROXY=${NEMOCLAW_SANDBOX_HTTP_PROXY:-}" \
       "NEMOCLAW_SANDBOX_NO_PROXY_EXTRA=${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA:-}" \
+      "NEMOCLAW_GATEWAY_NODE_OPTIONS=${NEMOCLAW_GATEWAY_NODE_OPTIONS:-}" \
       "NEMOCLAW_GATEWAY_NETNS=${NEMOCLAW_GATEWAY_NETNS:-agent}" sh -c '
       set -u
       cd /sandbox || exit 1
@@ -616,10 +617,14 @@ data:
       # Discord gateway WSS can fail intermittently with:
       #   Gateway websocket closed: 1006
       #   AggregateError @ internalConnectMultiple
-      # on Olares/OpenShell hosts where some resolved address families are not
-      # routable from the sandbox/agent netns. Prefer IPv4 for Node DNS lookups
-      # used by OpenClaw channel sidecars while leaving policy/proxy behavior intact.
-      _NODE_DNS_ENV="NODE_OPTIONS=--dns-result-order=ipv4first"
+      # on Olares/OpenShell hosts where one resolved address family is not
+      # routable or too slow from the sandbox/agent netns. Prefer IPv4 and give
+      # Node network-family autoselection a real-world timeout while leaving
+      # policy/proxy behavior intact. Operators can override the whole value via
+      # NEMOCLAW_GATEWAY_NODE_OPTIONS.
+      _NODE_OPTIONS_VALUE="${NEMOCLAW_GATEWAY_NODE_OPTIONS:---dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=5000}"
+      _NODE_OPTIONS_VALUE=$(printf "%s" "$_NODE_OPTIONS_VALUE" | tr -d "\"")
+      _NODE_DNS_ENV="NODE_OPTIONS=\"${_NODE_OPTIONS_VALUE}\""
       LAUNCH="HOME=/sandbox XDG_CONFIG_HOME=/sandbox/.config ${GOG_ENV} ${_TLS_STACK_ENV} ${_PROXY_ENV} ${_NODE_DNS_ENV} PATH=${_PIN_PATH_PREFIX}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sandbox/.local/bin:/sandbox/.linuxbrew/Homebrew/bin:/sandbox/.linuxbrew/bin nohup ${OPENCLAW_BIN} gateway run --port 18789 --bind loopback --auth none --allow-unconfigured >>/sandbox/.openclaw-data/gateway.out 2>&1 </dev/null"
       # NETNS PICKER (chart v1.7.10+).
       # OpenShell >= 0.0.36 puts processes started via "nemoclaw my-assistant connect"
@@ -2224,6 +2229,25 @@ data:
             env_root["vars"] = vars_root
         if not str(vars_root.get("XDG_CONFIG_HOME", "")).strip():
             vars_root["XDG_CONFIG_HOME"] = "/sandbox/.config"
+
+        # Discord group chat defaults for Olares.
+        channels_root = cfg.get("channels")
+        if isinstance(channels_root, dict):
+            discord = channels_root.get("discord")
+            if isinstance(discord, dict) and discord.get("enabled", True) is not False:
+                if not str(discord.get("groupPolicy", "")).strip():
+                    discord["groupPolicy"] = "open"
+                messages = cfg.get("messages")
+                if not isinstance(messages, dict):
+                    messages = {}
+                    cfg["messages"] = messages
+                group_chat = messages.get("groupChat")
+                if not isinstance(group_chat, dict):
+                    group_chat = {}
+                    messages["groupChat"] = group_chat
+                visible_replies = str(group_chat.get("visibleReplies", "")).strip()
+                if not visible_replies or visible_replies == "message_tool":
+                    group_chat["visibleReplies"] = "automatic"
 
         try:
             with open(path, "w", encoding="utf-8") as fh:

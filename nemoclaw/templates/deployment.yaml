@@ -67,7 +67,7 @@ spec:
         # NOT shipped here — users install it via `openclaw config --section skills`
         # inside the sandbox so they control version + auth.
         - name: init-prefetch
-          image: "beclab/harveyff-nemoclaw-prefetch:2026.4.30-olares-cli-amd"
+          image: "beclab/harveyff-nemoclaw-prefetch:2026.5.10-olares-cli-amd"
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c"]
           args:
@@ -268,6 +268,34 @@ spec:
                   done
                 done
                 echo "[$_tag] WARN: all pull attempts for $_img (mirror=$_mir) failed" | tee -a "$_log" >&2
+                return 1
+              }
+              _nemoclaw_force_pull_image() {
+                _img="$1"; _mir="$2"; _tag="$3"; _log="$4"
+                _order="upstream mirror"
+                if [ -n "$_mir" ] && [ "${NEMOCLAW_PREFER_MIRROR:-0}" = "1" ]; then
+                  _order="mirror upstream"
+                fi
+                for _src in $_order; do
+                  case "$_src" in
+                    upstream) _ref="$_img" ;;
+                    mirror)   _ref="$_mir"; [ -z "$_ref" ] && continue ;;
+                  esac
+                  echo "[$_tag] docker pull $_ref (force refresh)" | tee -a "$_log"
+                  for attempt in 1 2; do
+                    if docker pull "$_ref" >>"$_log" 2>&1; then
+                      echo "[$_tag] refreshed $_ref (source=$_src, attempt=$attempt)" | tee -a "$_log"
+                      if [ "$_ref" != "$_img" ]; then
+                        docker tag "$_ref" "$_img" >>"$_log" 2>&1 || true
+                        echo "[$_tag] retagged $_ref -> $_img" | tee -a "$_log"
+                      fi
+                      return 0
+                    fi
+                    echo "[$_tag] force attempt $attempt for $_ref failed (see $_log); sleeping 10s" | tee -a "$_log"
+                    sleep 10
+                  done
+                done
+                echo "[$_tag] WARN: force refresh failed for $_img (mirror=$_mir)" | tee -a "$_log" >&2
                 return 1
               }
 
@@ -1784,10 +1812,7 @@ spec:
               PLAINTEXT_FLAG=""
               [ "${GW_SCHEME}" = "http" ] && PLAINTEXT_FLAG="--plaintext"
 
-              # `openshell gateway start --recreate` (and some failure paths) remove the cluster
-              # image from the DinD cache. [5a/5] only runs when /workspace/.nemoclaw-installed is
-              # absent, so upgrades / restarts skip it — then ensure_image() tries ghcr and dies
-              # offline. Re-pull + re-alias here every boot before gateway start.
+              # Refresh and re-alias the OpenShell cluster image before gateway start.
               if [ "${NEMOCLAW_GATEWAY_RECREATE:-0}" = "1" ]; then
                 echo "[6/6-pre] WARN: NEMOCLAW_GATEWAY_RECREATE=1 deletes local gateway/cluster images."
                 echo "[6/6-pre] WARN: Ensure ghcr.io egress or set NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR; air-gapped nodes should keep RECREATE=0."
@@ -1800,7 +1825,15 @@ spec:
               _gw_did_pull=0
               if [ "${NEMOCLAW_PREFLIGHT_CLUSTER_PULL:-1}" = "1" ]; then
                 _gw_prep_log=/tmp/nemoclaw-gateway-cluster-pull.log
-                if ! docker image inspect "$CLUSTER_IMG" >/dev/null 2>&1; then
+                echo "[6/6-pre] refreshing cluster image $CLUSTER_IMG before gateway start"
+                : > "$_gw_prep_log"
+                if _nemoclaw_force_pull_image "$CLUSTER_IMG" "$CLUSTER_IMG_MIRROR" "6/6-pre:cluster" "$_gw_prep_log"; then
+                  _gw_did_pull=1
+                else
+                  echo "[6/6-pre] WARN: forced cluster refresh failed; continuing with local image if present. Last lines of $_gw_prep_log:" >&2
+                  tail -40 "$_gw_prep_log" 2>/dev/null || true
+                fi
+                if [ "$_gw_did_pull" != "1" ] && ! docker image inspect "$CLUSTER_IMG" >/dev/null 2>&1; then
                   echo "[6/6-pre] $CLUSTER_IMG missing — re-pulling for gateway start..."
                   : > "$_gw_prep_log"
                   if _nemoclaw_pull_image "$CLUSTER_IMG" "$CLUSTER_IMG_MIRROR" "6/6-pre:cluster" "$_gw_prep_log"; then
@@ -1818,8 +1851,7 @@ spec:
                 fi
               fi
               _sbx_url="${NEMOCLAW_OPENSHELL_SANDBOX_URL:-}"
-              # Re-layer CDN openshell-sandbox only after a fresh pull (stock image); skip on
-              # routine restarts so we do not docker-build every pod boot.
+              # Re-layer CDN openshell-sandbox only after a fresh pull.
               if [ "$_gw_did_pull" = "1" ] && [ -n "$_sbx_url" ] && docker image inspect "$CLUSTER_IMG" >/dev/null 2>&1; then
                 _sbx_stage=/tmp/nemoclaw-sandbox-bin-gateway
                 rm -rf "$_sbx_stage" && mkdir -p "$_sbx_stage"
@@ -1851,6 +1883,16 @@ spec:
                 else
                   echo "[6/6-pre] WARN: docker tag $CLUSTER_IMG -> $OPENSHELL_CLI_REF failed" >&2
                 fi
+              fi
+              if docker inspect "$CLUSTER_CTR" >/dev/null 2>&1 \
+                   && docker image inspect "$OPENSHELL_CLI_REF" >/dev/null 2>&1; then
+                _desired_img_id=$(docker image inspect "$OPENSHELL_CLI_REF" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d[0] or {}).get("Id","") if d else "")' 2>/dev/null || true)
+                _running_img_id=$(docker inspect "$CLUSTER_CTR" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d[0] or {}).get("Image","") if d else "")' 2>/dev/null || true)
+                if [ -n "$_desired_img_id" ] && [ -n "$_running_img_id" ] && [ "$_desired_img_id" != "$_running_img_id" ]; then
+                  echo "[6/6-pre] $CLUSTER_CTR runs stale image $_running_img_id; desired $OPENSHELL_CLI_REF is $_desired_img_id — removing container so openshell recreates it"
+                  docker rm -f "$CLUSTER_CTR" >/dev/null 2>&1 || true
+                fi
+                unset _desired_img_id _running_img_id
               fi
 
               echo "[6/6] Starting OpenShell gateway name=${GW_NAME} port=${GW_DOCKER_PORT} scheme=${GW_SCHEME}..."
@@ -1964,101 +2006,39 @@ spec:
             # reason=timeout and UI shows generic "network connection error").
             - name: NEMOCLAW_OPENCLAW_MAX_AGENT_TIMEOUT
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENCLAW_MAX_AGENT_TIMEOUT | default "" }}"
-            # Pin the OpenClaw npm version baked by the NemoClaw blueprint into the sandbox.
-            # Empty (default) = use whatever NemoClaw installs (currently min_openclaw_version
-            # 2026.4.24 in NemoClaw v0.0.37). Set e.g. "2026.5.2" to pull a newer OpenClaw via
-            # `npm install -g openclaw@<ver>` inside the sandbox after onboard. Useful while
-            # waiting for NemoClaw to bump its blueprint floor (NemoClaw issue #3145 — TUI
-            # message duplication — is likely improved by 2026.4.26 dedupe + 2026.5.x WS-ping
-            # fixes that landed after blueprint pinned 2026.4.24).
-            # Default pinned to a known-good OpenClaw release (chart v1.7.20+).
-            # Bumping this default-pins NEW installs to a tested OpenClaw without
-            # requiring the operator to discover + type the version into Olares
-            # UI. Existing installs that already have an explicit value (set
-            # earlier via olaresEnv.NEMOCLAW_OPENCLAW_VERSION) keep that value
-            # because Helm value precedence: olaresEnv map > chart default.
-            # When bumping, prefer versions that include upstream NemoClaw issue
-            # fixes (#3145 TUI dedupe + WS-ping; channel-sidecar fetch retry).
+            # Pin OpenClaw inside the sandbox; empty falls back to the NemoClaw-baked version.
             - name: NEMOCLAW_OPENCLAW_VERSION
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENCLAW_VERSION | default "2026.5.7" }}"
-            # Manual override for the sandbox HTTP egress proxy that the gateway
-            # (running in the user/sandbox netns since chart v1.7.10) must use to
-            # reach in-cluster Service IPs (e.g. Olares shared inference). Default
-            # empty -> sandbox-ensure-gateway.sh auto-detects via "ip -4 route show
-            # default" inside the user netns + TCP-probes 3128/8080/1080 on that
-            # gateway IP. Set this only if openshell or Olares operators ship a
-            # non-default sandbox proxy that auto-detection cannot reach (different
-            # listen port, off-default netns layout, etc.). Format:
-            # "http://<host>:<port>" (e.g. "http://10.200.0.1:3128").
+            # Optional manual sandbox HTTP egress proxy override.
             - name: NEMOCLAW_SANDBOX_HTTP_PROXY
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_HTTP_PROXY | default "" }}"
-            # Extra hosts to bypass the sandbox HTTP proxy (chart v1.7.14+).
-            # The default NO_PROXY list already includes npm/yarn/pypi/github
-            # tarball hosts (see _build_proxy_env in sandbox-ensure-gateway.sh)
-            # so the openclaw plugin loader can fetch scoped packages directly,
-            # avoiding the openshell-sandbox HTTPS-MITM bug that mangles
-            # %-encoded URLs like "@clack%2fprompts" -> Empty reply. Append
-            # additional hosts here when a plugin needs another public
-            # registry that should bypass the proxy. Format: comma-separated,
-            # no spaces. Examples: "registry.cn-hangzhou.aliyuncs.com,
-            # huggingface.co,docker.io".
+            # Extra comma-separated public hosts to add to the gateway NO_PROXY list.
             - name: NEMOCLAW_SANDBOX_NO_PROXY_EXTRA
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_NO_PROXY_EXTRA | default "" }}"
-            # Which net namespace the openclaw gateway runs in (chart v1.7.18+).
-            # The user/sandbox netns is a closed network with only a default route
-            # to the openshell-sandbox HTTP egress proxy at 10.200.0.1:3128. That
-            # is sufficient for HTTP REST traffic (HTTP_PROXY env covers it) but
-            # NOT for messaging-channel WebSocket sidecars (Discord/Slack/Telegram/
-            # Feishu/Outlook) because Node's `ws` library never honors HTTP_PROXY
-            # for the WSS upgrade -- so gateway.out fills with "fetch failed" and
-            # "Gateway websocket closed: 1006" no matter how generous NO_PROXY or
-            # openshell network policy is. The agent netns DOES have direct
-            # cluster + public routes, so moving the gateway there fixes channel
-            # connectivity at the cost of TUI concurrency (TUI launched via
-            # `nemoclaw my-assistant connect` lives in user netns and sees a
-            # different 127.0.0.1, so it shows "gateway disconnected: closed |
-            # idle"; WebUI keeps working via sandbox-tunnel.sh /proc walk).
-            # Modes:
-            #   - agent (default) : force agent netns (channels work, TUI does not).
-            #                       This favors Discord/Slack/etc. WSS reliability.
-            #   - auto            : agent IFF /sandbox/.openclaw/openclaw.json has
-            #                       any channels.<name>.enabled=true; user otherwise.
-            #   - user            : force user netns (chart v1.7.10 default; TUI +
-            #                       WebUI both work but channels cannot reach
-            #                       public WSS).
+            # Gateway netns: agent favors public WSS channels; user favors TUI loopback access.
             - name: NEMOCLAW_GATEWAY_NETNS
               value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_NETNS | default "agent" }}"
+            # Node.js runtime options for the OpenClaw gateway process.
+            - name: NEMOCLAW_GATEWAY_NODE_OPTIONS
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_NODE_OPTIONS | default "--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=5000" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "beclab/hys2023-openshell-cluster:v1.16" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR | default "" }}"
-            # Custom-build binary URLs. Chart default points at Olares CDN so out-of-the-box
-            # installs use the beclab fork (policy wildcard validation relaxed, direct egress,
-            # no MITM). Set these to "" via Olares UI to fall back to the upstream stock path:
-            #   CLI_URL=""     -> NVIDIA install.sh from raw.githubusercontent.com
-            #   SANDBOX_URL="" -> skip injection; use the openshell-sandbox baked into CLUSTER_IMG
-            # See [2/5] (install_openshell) and [5a.5/5] (sandbox injection) in the script.
+            # Custom OpenShell binaries; set empty to use upstream defaults.
             - name: NEMOCLAW_OPENSHELL_CLI_URL
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLI_URL | default "https://cdn.olares.com/nemoclaw/openshell-20264302050" }}"
             - name: NEMOCLAW_OPENSHELL_SANDBOX_URL
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_SANDBOX_URL | default "https://cdn.olares.com/nemoclaw/openshell-sandbox-20264302050" }}"
-            # Official OpenShell CLI override (see crates/openshell-bootstrap/src/lib.rs::
-            # default_gateway_image_ref). When non-empty, `openshell gateway start` uses this
-            # exact image ref instead of the compile-time-baked ghcr.io/nvidia/openshell/cluster:<ver>.
-            # We point it at NEMOCLAW_OPENSHELL_CLUSTER_IMAGE so the custom fork is used end-to-end:
-            # preflight pulls it once, then `ensure_image()` inspects locally (no re-pull).
+            # Force OpenShell to use the custom cluster image.
             - name: OPENSHELL_CLUSTER_IMAGE
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "beclab/hys2023-openshell-cluster:v1.16" }}"
-            # nemoclaw sandbox-base: the image actually running inside each sandbox pod. onboard's
-            # own `docker pull` at [6/8] is what gets blocked when this image isn't cached — the
-            # preflight block above pulls it eagerly with retry. Override the name for a private
-            # build, or NEMOCLAW_SANDBOX_IMAGE_MIRROR for an internal mirror.
+            # Sandbox base image and optional mirror.
             - name: NEMOCLAW_SANDBOX_IMAGE
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE | default "beclab/hys2023-nvidia-nemoclaw-sandbox-base:20260427" }}"
             - name: NEMOCLAW_SANDBOX_IMAGE_MIRROR
               value: "{{ .Values.olaresEnv.NEMOCLAW_SANDBOX_IMAGE_MIRROR | default "" }}"
-            # When 1, prepends docker CLI shim (see [4b/5] in install script; currently disabled there).
-            # Default 0: upstream ghcr pull + digest pin for sandbox-base.
+            # Optional sandbox-base pull interception; currently disabled by default.
             - name: NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL
               value: "{{ .Values.olaresEnv.NEMOCLAW_INTERCEPT_GHCR_SANDBOX_PULL | default "0" }}"
             # sandbox builder base: nemoclaw's sandbox Dockerfile has `FROM node:22-slim@sha256:…`
