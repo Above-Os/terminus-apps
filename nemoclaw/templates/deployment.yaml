@@ -526,7 +526,7 @@ spec:
                   # (configmap-sandbox-bridge.yaml). If these drift, the bridge logs
                   # "skill-env version mismatch" and re-runs the full installer on every
                   # loop tick (~10s) — looks like a random restart / flapping readiness.
-                  local SKILLENV_EXPECTED_VERSION="2026-05-01-openshell-ssl-cert-file-v1"
+                  local SKILLENV_EXPECTED_VERSION="2026-05-11-interactive-npm-proxy-v1"
                   if [ -f /workspace/.nemoclaw-skillenv-installed ]; then
                     if [ "${NEMOCLAW_SKILL_INSTALL_GCC:-1}" = "1" ] && \
                        ! docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
@@ -562,6 +562,7 @@ spec:
                     OPENCLAW_EXTRA_ALLOWED_ORIGINS="${OPENCLAW_EXTRA_ALLOWED_ORIGINS:-}" \
                     OPENCLAW_TRUSTED_PROXIES="${OPENCLAW_TRUSTED_PROXIES:-}" \
                     NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
+                    NEMOCLAW_SANDBOX_NO_PROXY_EXTRA="${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA:-}" \
                     NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
                     NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
                     NEMOCLAW_SKILL_INSECURE_TLS="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}" \
@@ -1539,12 +1540,37 @@ spec:
                     sleep 2
                   done
                   if docker exec "$CLUSTER_CTR" kubectl -n "$SANDBOX_NS" get pod "${SANDBOX_FILTER}" >/dev/null 2>&1; then
-                    echo "[cold-reset] killing any running gateway and normalising /sandbox ownership to sandbox:sandbox"
-                    docker exec "$CLUSTER_CTR" kubectl -n "$SANDBOX_NS" exec "${SANDBOX_FILTER}" -c agent -- sh -c '
-                      openclaw gateway stop 2>/dev/null || true
-                      ps -eo pid,command 2>/dev/null | awk "/openclaw gateway/ && !/awk/ {print \$1}" | while read -r _pid; do
-                        kill -9 "$_pid" 2>/dev/null || true
-                      done
+                    # Do NOT stop the gateway here by default (chart v1.0.11+).
+                    #
+                    # cold-reset runs after onboard, but chat-ui-bridge may already have
+                    # started the real gateway (possibly pinned OpenClaw, agent netns for
+                    # Discord, TLS/proxy env injected). The old block always ran
+                    # `openclaw gateway stop` as soon as the sandbox pod appeared. In
+                    # production this sent SIGTERM to a healthy gateway ~4 minutes after
+                    # Discord had started:
+                    #   [gateway] signal SIGTERM received
+                    #   [ws] webchat disconnected code=1012 reason=service restart
+                    # causing Channels to flip back to startup-not-ready even though the
+                    # agent-netns Discord path was correct.
+                    #
+                    # We previously tried to stop only when .nemoclaw-cli-ready was
+                    # absent, but that is still a race: bridge can have a working relay
+                    # and channel startup in progress while the sentinel is not yet
+                    # visible to this one-shot subshell. Make the destructive stop
+                    # opt-in instead; sandbox-ensure-gateway is the lifecycle owner.
+                    _cold_stop_gateway="${NEMOCLAW_COLD_RESET_STOP_GATEWAY:-0}"
+                    echo "[cold-reset] normalising /sandbox ownership to sandbox:sandbox (stop_gateway=${_cold_stop_gateway})"
+                    docker exec "$CLUSTER_CTR" kubectl -n "$SANDBOX_NS" exec "${SANDBOX_FILTER}" -c agent -- \
+                      env "COLD_RESET_STOP_GATEWAY=${_cold_stop_gateway}" sh -c '
+                      if [ "${COLD_RESET_STOP_GATEWAY:-1}" = "1" ]; then
+                        echo "[cold-reset] stopping pre-ready gateway before sandbox ownership reset"
+                        openclaw gateway stop 2>/dev/null || true
+                        ps -eo pid,command 2>/dev/null | awk "/openclaw gateway/ && !/awk/ {print \$1}" | while read -r _pid; do
+                          kill -9 "$_pid" 2>/dev/null || true
+                        done
+                      else
+                        echo "[cold-reset] gateway already marked ready by chat-ui-bridge; leaving it running"
+                      fi
                       mkdir -p /sandbox/.openclaw /sandbox/.openclaw-data /sandbox/.nemoclaw /sandbox/.config /sandbox/inbox \
                         /sandbox/.local/bin /sandbox/.local/var/homebrew/locks 2>/dev/null || true
                       chown -R sandbox:sandbox /sandbox/.openclaw /sandbox/.openclaw-data /sandbox/.nemoclaw /sandbox/.config /sandbox/inbox /sandbox/.local 2>/dev/null || true
@@ -1705,7 +1731,7 @@ spec:
                       _cold_have_v=$(docker exec "$CLUSTER_CTR" kubectl -n "$SANDBOX_NS" exec "${SANDBOX_FILTER}" -c agent -- \
                         /bin/sh -c "cat /workspace/.nemoclaw-skillenv-version 2>/dev/null" 2>/dev/null \
                         | tr -d '\r\n' || true)
-                      _cold_want_v="2026-05-01-openshell-ssl-cert-file-v1"
+                      _cold_want_v="2026-05-11-interactive-npm-proxy-v1"
                       if [ "$_cold_have_v" = "$_cold_want_v" ]; then
                         echo "[cold-reset] skill-env already at expected version $_cold_have_v (chat-ui-bridge sentinel match); skipping ~3-5min reinstall"
                         _cold_skip_skillenv=1
@@ -1728,6 +1754,7 @@ spec:
                         OPENCLAW_EXTRA_ALLOWED_ORIGINS="${OPENCLAW_EXTRA_ALLOWED_ORIGINS:-}" \
                         OPENCLAW_TRUSTED_PROXIES="${OPENCLAW_TRUSTED_PROXIES:-}" \
                         NEMOCLAW_ENDPOINT_URL="${NEMOCLAW_ENDPOINT_URL:-}" \
+                        NEMOCLAW_SANDBOX_NO_PROXY_EXTRA="${NEMOCLAW_SANDBOX_NO_PROXY_EXTRA:-}" \
                         NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN="${NEMOCLAW_HOMEBREW_BOTTLE_DOMAIN:-}" \
                         NEMOCLAW_GOPROXY="${NEMOCLAW_GOPROXY:-https://goproxy.cn,direct}" \
                         NEMOCLAW_SKILL_INSECURE_TLS="${NEMOCLAW_SKILL_INSECURE_TLS:-auto}" \
@@ -1992,14 +2019,15 @@ spec:
             # different 127.0.0.1, so it shows "gateway disconnected: closed |
             # idle"; WebUI keeps working via sandbox-tunnel.sh /proc walk).
             # Modes:
-            #   - auto  (default) : agent IFF /sandbox/.openclaw/openclaw.json has
+            #   - agent (default) : force agent netns (channels work, TUI does not).
+            #                       This favors Discord/Slack/etc. WSS reliability.
+            #   - auto            : agent IFF /sandbox/.openclaw/openclaw.json has
             #                       any channels.<name>.enabled=true; user otherwise.
-            #   - agent           : force agent netns (channels work, TUI does not).
             #   - user            : force user netns (chart v1.7.10 default; TUI +
             #                       WebUI both work but channels cannot reach
             #                       public WSS).
             - name: NEMOCLAW_GATEWAY_NETNS
-              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_NETNS | default "auto" }}"
+              value: "{{ .Values.olaresEnv.NEMOCLAW_GATEWAY_NETNS | default "agent" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE
               value: "{{ .Values.olaresEnv.NEMOCLAW_OPENSHELL_CLUSTER_IMAGE | default "beclab/hys2023-openshell-cluster:v1.16" }}"
             - name: NEMOCLAW_OPENSHELL_CLUSTER_IMAGE_MIRROR
@@ -2079,6 +2107,11 @@ spec:
             # .nemoclaw-installed exists else 120). Override e.g. 1800 for 1h first-boot slack.
             - name: NEMOCLAW_COLD_RESET_SANDBOX_WAIT_ITER
               value: "{{ .Values.olaresEnv.NEMOCLAW_COLD_RESET_SANDBOX_WAIT_ITER | default "" }}"
+            # Safety valve only. Default 0: cold-reset never stops a running gateway;
+            # sandbox-ensure-gateway owns lifecycle. Set 1 only for manual recovery from
+            # a known-bad pre-ready gateway.
+            - name: NEMOCLAW_COLD_RESET_STOP_GATEWAY
+              value: "{{ .Values.olaresEnv.NEMOCLAW_COLD_RESET_STOP_GATEWAY | default "0" }}"
             # Optional git URL for cloning Homebrew/brew inside the sandbox (default: GitHub). Use an
             # internal mirror if the sandbox cannot reach github.com (clone failure leaves brew missing).
             - name: NEMOCLAW_HOMEBREW_GIT_URL

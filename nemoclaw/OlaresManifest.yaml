@@ -6,7 +6,7 @@ metadata:
   description: NVIDIA NemoClaw - AI Coding Agent with Sandbox Isolation
   appid: nemoclaw
   title: NemoClaw
-  version: 1.0.8
+  version: 1.0.9
   categories:
   - Developer Tools
   - Productivity_v112
@@ -219,8 +219,8 @@ envs:
     required: false
     applyOnChange: true
     editable: true
-    default: "auto"
-    description: "Which net namespace the OpenClaw gateway runs in. The user/sandbox netns is a closed network whose only default route is the openshell HTTP egress proxy (10.200.0.1:3128); HTTP REST + LLM calls work via HTTP_PROXY but Node's `ws` library never honors HTTP_PROXY for the WSS upgrade, so messaging-channel sidecars (Discord/Slack/Telegram/Feishu/Outlook) cannot reach gateway.discord.gg / wss-primary.slack.com etc. while the gateway runs there — gateway.out shows `fetch failed` + `Gateway websocket closed: 1006` no matter how generous NO_PROXY or `openshell policy` is. The agent netns has direct cluster + public routes, so the gateway can reach channel WSS endpoints from there at the cost of TUI concurrency (TUI lives in user netns and shows `gateway disconnected: closed | idle` — WebUI keeps working via sandbox-tunnel.sh). Values: `auto` (default; agent IFF any `channels.<name>.enabled=true` exists in `/sandbox/.openclaw/openclaw.json`, otherwise user), `agent` (force agent — channels work, TUI does not), `user` (force chart v1.7.10 default — TUI+WebUI both work but channels cannot connect to public WSS)."
+    default: "agent"
+    description: "Which net namespace the OpenClaw gateway runs in. Default is `agent` so Discord/Slack/Telegram/Feishu/Outlook WSS sidecars can reach public endpoints reliably. The user/sandbox netns is a closed network whose only default route is the openshell HTTP egress proxy (10.200.0.1:3128); HTTP REST + LLM calls work via HTTP_PROXY but Node's `ws` library never honors HTTP_PROXY for the WSS upgrade, so messaging-channel sidecars cannot reach gateway.discord.gg / wss-primary.slack.com etc. while the gateway runs there — gateway.out shows `fetch failed` + `Gateway websocket closed: 1006`. The agent netns has direct cluster + public routes, so channels work there at the cost of TUI concurrency (TUI lives in user netns and may show `gateway disconnected: closed | idle`; WebUI keeps working via sandbox-tunnel.sh). Values: `agent` (default; public WSS channels OK, TUI limited), `auto` (agent IFF any `channels.<name>.enabled=true` exists in `/sandbox/.openclaw/openclaw.json`, otherwise user), `user` (TUI+WebUI both work but public WSS channels are blocked)."
     options:
     - title: auto (channels on → agent netns; else user netns)
       value: "auto"
