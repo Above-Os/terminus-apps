@@ -50,6 +50,53 @@ spec:
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
+
+        # Initialize user-editable config files (tensorzero.toml, env.sh) into the
+        # persistent appData directory. On first start (or if a file is missing),
+        # we seed it from the ConfigMap defaults; if the file already exists we
+        # leave the user's customizations untouched. The runtime gateway container
+        # then mounts these files from the persistent volume rather than from the
+        # ConfigMap, so edits survive pod restarts and chart upgrades.
+        - name: init-user-config
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - '-c'
+          args:
+            - |
+              set -e
+              mkdir -p /data/config
+              for f in tensorzero.toml env.sh; do
+                if [ ! -f "/data/config/$f" ]; then
+                  echo "[init-user-config] seeding /data/config/$f from defaults"
+                  cp "/defaults/$f" "/data/config/$f"
+                else
+                  echo "[init-user-config] /data/config/$f already exists, keeping user version"
+                fi
+              done
+              chown -R 1000:1000 /data/config
+              chmod 644 /data/config/tensorzero.toml /data/config/env.sh
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: tensorzero-data
+              mountPath: /data
+            - name: gateway-startups
+              mountPath: /defaults/tensorzero.toml
+              subPath: tensorzero.toml
+            - name: gateway-startups
+              mountPath: /defaults/env.sh
+              subPath: env.sh
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
       containers:
         - name: clickhouse
           image: "docker.io/beclab/clickhouse-clickhouse-server:25.5"
@@ -112,12 +159,16 @@ spec:
             - name: gateway-startups
               mountPath: /etc/gateway/start.sh
               subPath: start.sh
-            - name: gateway-startups
+            # tensorzero.toml and env.sh are user-editable. They are seeded from
+            # the ConfigMap defaults by the init-user-config initContainer on
+            # first start, then served from the persistent appData volume so
+            # that user edits survive pod restarts and chart upgrades.
+            - name: tensorzero-data
               mountPath: /app/config/tensorzero.toml
-              subPath: tensorzero.toml
-            - name: gateway-startups
+              subPath: config/tensorzero.toml
+            - name: tensorzero-data
               mountPath: /etc/gateway/env.sh
-              subPath: env.sh
+              subPath: config/env.sh
           # Postgres + ClickHouse migrations can take 60s+ on a cold start.
           # startupProbe gives the gateway up to 5 minutes (30 * 10s) to come
           # up before the liveness probe takes over, avoiding spurious restarts.
@@ -180,15 +231,7 @@ spec:
         - name: tensorzero-data
           hostPath:
             type: DirectoryOrCreate
-                {{- if .Values.sysVersion }}
-                  {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-            path: '{{ .Values.userspace.appCache }}'
-                  {{- else }}
-            path: '{{ .Values.userspace.appCache }}/tensorzero'
-                  {{- end }}
-                {{- else }}
-            path: '{{ .Values.userspace.appCache }}/tensorzero'
-                {{- end }}
+            path: '{{ .Values.userspace.appData }}'
         - name: gateway-startups
           configMap:
             name: gateway-startups
