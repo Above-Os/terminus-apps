@@ -1,1 +1,17 @@
-
+# These values are normally injected by Olares at install time:
+#   - .Values.userspace.appData / .Values.userspace.userData / .Values.sharedlib
+#     come from the platform.
+#   - .Values.olaresEnv is populated from the OlaresManifest.yaml `envs:` block
+#     (ALLOW_HOME_DIR_ACCESS, ALLOW_EXTERNAL_DIR_ACCESS).
+#
+# We re-declare the user-toggleable envs here as defaults so that:
+#   1) `helm template` / `helm lint` succeed without nil-pointer errors when
+#      run outside Olares (CI, local validation).
+#   2) Anyone who accidentally bypasses the Olares envs injector still gets
+#      a safe, "deny" default for the host-FS mounts.
+#
+# Real values come from the user's choice in the Olares app settings UI;
+# they always override what's listed here.
+olaresEnv:
+  ALLOW_HOME_DIR_ACCESS: "false"
+  ALLOW_EXTERNAL_DIR_ACCESS: "false"
