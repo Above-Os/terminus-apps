@@ -26,3 +26,9 @@ spec:
 
     **First-time Setup**
     Open the `Hermes CLI` entrance and run `hermes setup` to launch the interactive wizard. It writes API keys, model providers, and channel tokens into `/opt/data`.
+
+    **Gateway Restart (1.3.0+)**
+    `hermes gateway restart` does NOT work in containerized deployments (it falls back to a foreground duplicate that fights the real sidecar for messaging tokens). To restart the gateway sidecar in-place — for example after editing `/opt/data/.env`, swapping a Discord/Telegram token, or changing the model provider — touch the sentinel file from the CLI entrance: `touch /opt/data/.gateway-restart-requested`. The sidecar wrapper polls this file every 2 seconds; it tears down the running gateway, picks up the latest config, and is back online within ~5 seconds. The same sentinel also short-circuits the post-crash 30-second backoff window.
+
+    **Accurate Status Indicators (1.3.1+)**
+    The pod now runs with `shareProcessNamespace: true`, so the workspace shell's `hermes gateway status` and the dashboard's "GATEWAY STATUS" indicator can both see the sidecar's gateway process and report the truth instead of the previous always-STOPPED false negative. The dashboard's "Restart Gateway" button also becomes functional — it kills the sidecar gateway, which the wrapper auto-restarts within the configured delay. For an immediate restart, the sentinel file remains the fastest path.
