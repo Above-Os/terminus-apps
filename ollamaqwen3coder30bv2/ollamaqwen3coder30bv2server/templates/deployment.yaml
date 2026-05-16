@@ -1,4 +1,6 @@
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+﻿{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- $ollamaclientDomainENV := split "," .Values.domain.ollamaclient -}}
+{{- $ollamaclientDomain := index $ollamaclientDomainENV "_0" -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -23,31 +25,45 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: ollama
-        bytetrade.io/terminal: ollama
     spec:
-      initContainers:
-        - name: init-chmod-data
-          image: "docker.io/beclab/aboveos-busybox:1.37.0"
-          command:
-            - sh
-            - "-c"
-            - |
-              chown -R 1000:1000 /app-data-root
-          resources: {}
-          volumeMounts:
-            - name: data
-              mountPath: /app-data-root
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          imagePullPolicy: IfNotPresent
-          securityContext:
-            runAsUser: 0
       containers:
         - name: ollama
           image: "docker.io/beclab/ollama-ollama:0.24.0"
+{{- with .Values.olaresEnv }}
+{{- if and .KEEP_ALIVE (eq (lower (toString .KEEP_ALIVE)) "true") }}
+          command:
+            - sh
+            - '-c'
+            - |
+              echo "Starting Ollama server..."
+              ollama serve &
+              SERVER_PID=$!
+              until ollama list > /dev/null 2>&1; do
+                sleep 1
+              done
+              echo "Ollama server is ready. Preloading model..."
+              START_TIME=$(date +%s)
+              ollama run ${MODEL_NAME} "Hello"
+              END_TIME=$(date +%s)
+              ELAPSED=$((END_TIME - START_TIME))
+              echo "Model preloading completed in ${ELAPSED} seconds"
+              wait $SERVER_PID
+{{- end }}
+{{- end }}
           envFrom:
             - configMapRef:
                 name: ollama-env
+          env:
+            - name: OLLAMA_NOPRUNE
+              value: "1"
+{{- with .Values.olaresEnv }}
+{{- if and .KEEP_ALIVE (eq (lower (toString .KEEP_ALIVE)) "true") }}
+            - name: OLLAMA_KEEP_ALIVE
+              value: "-1"
+{{- end }}
+{{- end }}
+            - name: OLLAMA_THINKING
+              value: 'true'
           ports:
             - containerPort: 11434
           livenessProbe:
@@ -69,8 +85,8 @@ spec:
             failureThreshold: 30
           resources:
             limits:
-              cpu: "4"
-              memory: 38Gi
+              cpu: "6"
+              memory: 34Gi
             requests:
               cpu: 50m
               memory: 4Gi
@@ -80,11 +96,10 @@ spec:
       volumes:
         - name: data
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/ollama"
+            path: "{{ .Values.userspace.userData }}/Ollama/{{ .Release.Name }}"
             type: DirectoryOrCreate
       restartPolicy: Always
 status: {}
-
 ---
 apiVersion: v1
 kind: Service
@@ -96,7 +111,7 @@ metadata:
   namespace: "{{ .Release.Namespace }}"
 spec:
   ports:
-    - name: "http"
+    - name: "ollama"
       port: 11434
       targetPort: 11434
   selector:
@@ -110,11 +125,11 @@ metadata:
   creationTimestamp: null
   labels:
     io.kompose.service: ollama
-  name: sharedentrances-ollama
+  name: sharedentrances-api
   namespace: "{{ .Release.Namespace }}"
 spec:
   ports:
-    - name: "http"
+    - name: "api"
       port: 80
       targetPort: 11434
   selector:
