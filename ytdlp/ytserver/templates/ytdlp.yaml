@@ -54,39 +54,20 @@ spec:
     metadata:
       labels:
         app: ytdlp
+        io.kompose.service: ytdlp
     spec:
       serviceAccountName: ytdlp-cluster-account
       serviceAccount: ytdlp-cluster-account
       securityContext:
         runAsUser: 0
         runAsNonRoot: false
-
-      initContainers:
-      - name: init-data
-        image: "beclab/aboveos-busybox:1.37.0"
-        securityContext:
-          privileged: true
-          runAsNonRoot: false
-          runAsUser: 0
-        volumeMounts:
-        - name: config-dir
-          mountPath: /config
-        - name: download-dir
-          mountPath: /downloads
-        command:
-        - sh
-        - -c
-        - |
-          chown -R 1000:1000 /config && \
-          chown -R 1000:1000 /downloads
       containers:
       - name: yt-dlp
-        image: "beclab/ytdlp-server:v0.1.29"
+        image: "beclab/ytdlp-server:v0.0.0.5.17.3"
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
           runAsNonRoot: false
-
         ports:
         - containerPort: 3082
         env:
@@ -94,8 +75,17 @@ spec:
           value: "false"
         - name: FAIL_THRESHOLD
           value: "2"
-        - name: DOWNLOAD_SERVER_URL
-          value: http://download-provider-svc.os-framework:28080/
+        - name: YTDLP_PG_HOST
+          value: "{{ .Values.postgres.host }}"
+        - name: YTDLP_PG_PORT
+          value: "{{ .Values.postgres.port }}"
+        - name: YTDLP_PG_USERNAME
+          value: "{{ .Values.postgres.username }}"
+        - name: YTDLP_PG_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: YTDLP_PG_DATABASE
+          value: "{{ .Values.postgres.databases.ytdlp }}"
+
         volumeMounts:
         - name: config-dir
           mountPath: /app/config
