@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config
+  namespace: "{{ .Release.Namespace }}"
+data:
+  config.yaml: |
+    server:
+      port: 8080
+      read_header_timeout: 10s
+      shutdown_timeout: 30s
+    logging:
+      level: info
+      format: json
+    metrics:
+      enabled: true
+      path: /metrics
+      bearer_token: ""
+    auth:
+      source: k8s_informer
+      admin_names: []
+      kubeconfig: ""
+      kube_context: ""
+    database:
+      host: "{{ .Values.postgres.host }}"
+      port: "{{ .Values.postgres.port }}"
+      user: "{{ .Values.postgres.username }}"
+      password: "{{ .Values.postgres.password }}"
+      dbname: "{{ .Values.postgres.databases.llmgateway }}"
+      # disable is for local dev/compose. Production should use TLS or an
+      # equivalent trusted in-cluster transport policy.
+      sslmode: disable
+      max_open_conns: 25
+      max_idle_conns: 5
+      timeout: 5s
+      migrations_dir: migrations
+    olares:
+      market:
+        mock: false
+        base_url: http://appstore-svc.os-framework:81
+        mock_base_url:
+      user_directory:
+        source: crd # crd | http | mock
+        base_url: ""
+      provider_sync:
+        enabled: true
+        market_url: http://appstore-svc.os-framework:81
+        interval: 30s
+        failure_threshold: 5
+    provider:
+      name: openai
+      base_url: https://api.openai.com/v1
+      api_key: ""
+      timeout: 60s
+      connect_timeout: 5s
+      read_timeout: 30s
+      retry_max: 1
+      retry_backoff: 200ms
+      breaker_min_requests: 10
+      breaker_failure_ratio: 0.5
+      breaker_open_seconds: 30s
+    crypto:
+      encryption_key: ""
+    events:
+      enabled: false
+      nats_url: ""
+      subject_prefix: "olares.llm-gateway"
+      buffer_size: 1024
