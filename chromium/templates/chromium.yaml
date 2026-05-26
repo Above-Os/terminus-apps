@@ -45,33 +45,58 @@ spec:
     spec:
       containers:
         - env:
-            - name: CHROME_CLI
-              value: https://www.linuxserver.io/
-            - name: PGID
-              value: "1000"
             - name: PUID
+              value: "1000"
+            - name: PGID
               value: "1000"
             - name: TZ
               value: Etc/UTC
+            - name: DeviceName
+              value: {{ .Values.deviceName }}
+        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+            # Olares One: Selkies/Wayland 版镜像，启用 Intel iGPU VAAPI 硬件编码
+            - name: CHROME_CLI
+              value: '--ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --use-gl=egl --enable-features=UseOzonePlatform,VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization,ReduceAcceptLanguageHeader'
+            - name: DRINODE
+              value: /dev/dri/renderD128
+            - name: DRI_NODE
+              value: /dev/dri/renderD128
+            - name: LIBVA_DRIVER_NAME
+              value: iHD
+        {{- else }}
+            # 非 Olares One（ARM / Selfhosted / NVIDIA 等）: 沿用旧 KasmVNC 版镜像
+            # KasmVNC 走纯软件 VNC framebuffer，无需 GPU、可在任意架构稳定运行
+            - name: CHROME_CLI
+              value: https://www.linuxserver.io/
             - name: CHROME_FLAGS
               value: '--enable-features=ReduceAcceptLanguageHeader'
+        {{- end }}
+        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+          image: "docker.io/beclab/harveyff-chromium:1e736296-ls34"
+        {{- else }}
           image: "docker.io/beclab/aboveos-kldtks-chromium:version-e3efdad3-cn"
+        {{- end }}
           name: chromium
+          securityContext:
+            privileged: true
           resources:
             requests:
-              cpu: 0.5
-              memory: 256Mi
+              cpu: "500m"
+              memory: 1Gi
             limits:
-              cpu: 1
-              memory: 512Mi
+              cpu: "2"
+              memory: 6Gi
           ports:
             - containerPort: 3000
             - containerPort: 3001
+            - containerPort: 8082
           volumeMounts:
             - mountPath: /config
               name: config
-            # - name: chromium-claim0
-            #   mountPath: /config
+        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+            - mountPath: /dev/dri
+              name: dev-dri
+        {{- end }}
       restartPolicy: Always
       volumes:
         - name: config
@@ -86,9 +111,11 @@ spec:
             {{- else }}
             path: {{ .Values.userspace.appCache }}/chromium/config
             {{- end }}
-        # - name: chromium-claim0
-        #   persistentVolumeClaim:
-        #     claimName: chromium-claim0
+    {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+        - name: dev-dri
+          hostPath:
+            path: /dev/dri
+    {{- end }}
 status: {}
 ---
 apiVersion: v1
@@ -103,6 +130,7 @@ metadata:
   name: chromium
   namespace: {{ .Release.Namespace }}
 spec:
+  type: NodePort
   ports:
     - name: "3000"
       port: 3000
@@ -110,6 +138,10 @@ spec:
     - name: "3001"
       port: 3001
       targetPort: 3001
+      nodePort: 30001
+    - name: "8082"
+      port: 8082
+      targetPort: 8082
   selector:
     io.kompose.service: chromium
 status:
