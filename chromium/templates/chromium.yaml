@@ -54,7 +54,7 @@ spec:
             - name: DeviceName
               value: {{ .Values.deviceName }}
         {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
-            # Olares One: Selkies/Wayland 版镜像，启用 Intel iGPU VAAPI 硬件编码
+            # Olares One (amd64 + Intel iGPU): Selkies variant with VAAPI hardware encoding.
             - name: CHROME_CLI
               value: '--ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --use-gl=egl --enable-features=UseOzonePlatform,VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization,ReduceAcceptLanguageHeader'
             - name: DRINODE
@@ -64,18 +64,23 @@ spec:
             - name: LIBVA_DRIVER_NAME
               value: iHD
         {{- else }}
-            # 非 Olares One（ARM / Selfhosted / NVIDIA 等）: 沿用旧 KasmVNC 版镜像
-            # KasmVNC 走纯软件 VNC framebuffer，无需 GPU、可在任意架构稳定运行
+            # Heterogeneous manifest resolves to Selkies on amd64 and KasmVNC on arm64.
+            # The envs below are the safe intersection that works on both:
+            #   - CHROME_CLI as URL: KasmVNC treats it as homepage, Selkies as positional startup tab.
+            #   - WLR_RENDERER=pixman / LIBGL_ALWAYS_SOFTWARE: force software path so the Selkies
+            #     amd64 variant on a non-iGPU host won't crash on KMS/GBM; KasmVNC (Xorg) ignores them.
             - name: CHROME_CLI
               value: https://www.linuxserver.io/
             - name: CHROME_FLAGS
               value: '--enable-features=ReduceAcceptLanguageHeader'
+            - name: WLR_RENDERER
+              value: pixman
+            - name: WLR_NO_HARDWARE_CURSORS
+              value: "1"
+            - name: LIBGL_ALWAYS_SOFTWARE
+              value: "1"
         {{- end }}
-        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
-          image: "docker.io/beclab/harveyff-chromium:1e736296-ls34"
-        {{- else }}
-          image: "docker.io/beclab/aboveos-kldtks-chromium:version-e3efdad3-cn"
-        {{- end }}
+          image: "docker.io/harveyff/chromium:20260526"
           name: chromium
           securityContext:
             privileged: true
