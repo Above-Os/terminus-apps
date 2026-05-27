@@ -121,6 +121,55 @@ spec:
             - mountPath: /opt/data
               name: app-data-home
 
+        # Materialize Linuxbrew base + stage olares-cli + python3 shim
+        # onto the brew-volume hostPath. Idempotent on .brew-base-build.
+        - name: init-install-brew
+          image: "beclab/harveyff-openclaw-brew-base:2026.5.27-cli"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -uo pipefail
+              if [ ! -d /brew-staging/.linuxbrew ]; then
+                echo "[init-brew] FATAL: /brew-staging/.linuxbrew missing"
+                exit 1
+              fi
+              mkdir -p /home/linuxbrew/.linuxbrew
+              if cmp -s /brew-staging/.linuxbrew/.brew-base-build /home/linuxbrew/.linuxbrew/.brew-base-build 2>/dev/null; then
+                echo "[init-brew] brew base up to date"
+              else
+                echo "[init-brew] materializing brew base..."
+                cp -a /brew-staging/.linuxbrew/. /home/linuxbrew/.linuxbrew/
+              fi
+
+              # Stage olares-cli into brew bin.
+              OLARES_CLI=""
+              for p in /usr/local/bin/olares-cli /brew-staging/.linuxbrew/bin/olares-cli /opt/olares-cli/olares-cli /olares-cli; do
+                [ -x "$p" ] && OLARES_CLI="$p" && break
+              done
+              [ -z "$OLARES_CLI" ] && OLARES_CLI="$(command -v olares-cli 2>/dev/null || find / -maxdepth 5 -type f -name olares-cli -perm -u+x 2>/dev/null | head -1)"
+              if [ -n "$OLARES_CLI" ]; then
+                install -m 0755 "$OLARES_CLI" /home/linuxbrew/.linuxbrew/bin/olares-cli
+              else
+                echo "[init-brew] WARN: olares-cli not found"
+              fi
+
+              # python3 shim -> hermes venv (mounted at /usr/local/bin/python3).
+              printf '#!/bin/sh\nexec /opt/hermes/.venv/bin/python3 "$@"\n' > /cli-bin/python3
+              chmod 0755 /cli-bin/python3
+
+              chown -R 10000:10000 /home/linuxbrew || true
+              echo "[init-brew] done"
+          resources: {}
+          volumeMounts:
+            - mountPath: /home/linuxbrew
+              name: brew-volume
+            - mountPath: /cli-bin
+              name: cli-bin
+
       containers:
         # Gateway sidecar: long-lived messaging gateway + (optional) OpenAI-compat API.
         #
@@ -258,6 +307,10 @@ spec:
               containerPort: 8642
               protocol: TCP
           env:
+            # HOME on shared /opt/data volume so any HOME-respecting CLI
+            # (git, aws, kubectl, ...) auto-persists + auto-shares config.
+            - name: HOME
+              value: /opt/data
             - name: HERMES_HOME
               value: /opt/data
             - name: HERMES_GATEWAY_RESTART_DELAY_SECONDS
@@ -269,6 +322,18 @@ spec:
               value: "2"
             - name: HERMES_GATEWAY_SENTINEL_RESTART_DELAY_SECONDS
               value: "3"
+            - name: HOMEBREW_PREFIX
+              value: /home/linuxbrew/.linuxbrew
+            - name: HOMEBREW_NO_AUTO_UPDATE
+              value: "1"
+            - name: PATH
+              value: "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            # olares-cli config/data — pinned absolute (HOME alone isn't
+            # enough; hermes rewrites HOME for tool subprocesses).
+            - name: OLARES_CLI_HOME
+              value: /opt/data/.olares-cli
+            - name: OLARES_CLI_DATA_DIR
+              value: /opt/data/.olares-cli/data
           startupProbe:
             exec:
               command: ["/bin/sh", "-c", "test -d /opt/data"]
@@ -291,6 +356,12 @@ spec:
           volumeMounts:
             - mountPath: /opt/data
               name: app-data-home
+            - mountPath: /home/linuxbrew
+              name: brew-volume
+            - mountPath: /usr/local/bin/python3
+              name: cli-bin
+              subPath: python3
+              readOnly: true
             - mountPath: /dev/shm
               name: dshm
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
@@ -333,8 +404,22 @@ spec:
               containerPort: 9119
               protocol: TCP
           env:
+            - name: HOME
+              value: /opt/data
             - name: GATEWAY_HEALTH_URL
               value: "http://localhost:8642"
+            # Match gateway PATH so dashboard-side `hermes ...` invocations
+            # (chat-tab PTY, plugin shellouts) see the same brew toolchain.
+            - name: HOMEBREW_PREFIX
+              value: /home/linuxbrew/.linuxbrew
+            - name: HOMEBREW_NO_AUTO_UPDATE
+              value: "1"
+            - name: PATH
+              value: "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            - name: OLARES_CLI_HOME
+              value: /opt/data/.olares-cli
+            - name: OLARES_CLI_DATA_DIR
+              value: /opt/data/.olares-cli/data
           startupProbe:
             tcpSocket:
               port: 9119
@@ -357,6 +442,12 @@ spec:
           volumeMounts:
             - mountPath: /opt/data
               name: app-data-home
+            - mountPath: /home/linuxbrew
+              name: brew-volume
+            - mountPath: /usr/local/bin/python3
+              name: cli-bin
+              subPath: python3
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
 
@@ -383,10 +474,20 @@ spec:
           env:
             - name: TERM
               value: xterm-256color
+            - name: HOME
+              value: /opt/data
             - name: HERMES_HOME
               value: /opt/data
+            - name: HOMEBREW_PREFIX
+              value: /home/linuxbrew/.linuxbrew
+            - name: HOMEBREW_NO_AUTO_UPDATE
+              value: "1"
             - name: PATH
-              value: "/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              value: "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            - name: OLARES_CLI_HOME
+              value: /opt/data/.olares-cli
+            - name: OLARES_CLI_DATA_DIR
+              value: /opt/data/.olares-cli/data
           resources:
             limits:
               cpu: "1"
@@ -397,6 +498,12 @@ spec:
           volumeMounts:
             - mountPath: /opt/data
               name: app-data-home
+            - mountPath: /home/linuxbrew
+              name: brew-volume
+            - mountPath: /usr/local/bin/python3
+              name: cli-bin
+              subPath: python3
+              readOnly: true
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
             - mountPath: /home/userdata/home/
               name: olares-home-dir
@@ -414,6 +521,12 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.appData }}/home"
             type: DirectoryOrCreate
+        - name: brew-volume
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/brew"
+            type: DirectoryOrCreate
+        - name: cli-bin
+          emptyDir: {}
         - name: dshm
           emptyDir:
             medium: Memory
