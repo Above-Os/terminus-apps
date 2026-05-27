@@ -28,6 +28,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
+  minReadySeconds: 10
   selector:
     matchLabels:
       io.kompose.service: chromium
@@ -43,8 +44,19 @@ spec:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: chromium
     spec:
+      {{- $isOlaresOne := and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+      {{- $homepage := "https://www.google.com" }}
+      {{- if and .Values.olaresEnv .Values.olaresEnv.CHROME_HOMEPAGE }}
+      {{- $homepage = .Values.olaresEnv.CHROME_HOMEPAGE }}
+      {{- end }}
       containers:
-        - env:
+        - name: chromium
+          image: "docker.io/beclab/harveyff-chromium:1e736296-ls34"
+          {{- if $isOlaresOne }}
+          securityContext:
+            privileged: true
+          {{- end }}
+          env:
             - name: PUID
               value: "1000"
             - name: PGID
@@ -53,37 +65,21 @@ spec:
               value: Etc/UTC
             - name: DeviceName
               value: {{ .Values.deviceName }}
-        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
-            # Olares One (amd64 + Intel iGPU): Selkies variant with VAAPI hardware encoding.
+            {{- if $isOlaresOne }}
             - name: CHROME_CLI
-              value: '--ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --use-gl=egl --enable-features=UseOzonePlatform,VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization,ReduceAcceptLanguageHeader'
+              value: "--ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --use-gl=egl --enable-features=UseOzonePlatform,VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization,ReduceAcceptLanguageHeader {{ $homepage }}"
             - name: DRINODE
               value: /dev/dri/renderD128
             - name: DRI_NODE
               value: /dev/dri/renderD128
             - name: LIBVA_DRIVER_NAME
               value: iHD
-        {{- else }}
-            # Heterogeneous manifest resolves to Selkies on amd64 and KasmVNC on arm64.
-            # The envs below are the safe intersection that works on both:
-            #   - CHROME_CLI as URL: KasmVNC treats it as homepage, Selkies as positional startup tab.
-            #   - WLR_RENDERER=pixman / LIBGL_ALWAYS_SOFTWARE: force software path so the Selkies
-            #     amd64 variant on a non-iGPU host won't crash on KMS/GBM; KasmVNC (Xorg) ignores them.
+            {{- else }}
             - name: CHROME_CLI
-              value: https://www.linuxserver.io/
+              value: {{ $homepage | quote }}
             - name: CHROME_FLAGS
               value: '--enable-features=ReduceAcceptLanguageHeader'
-            - name: WLR_RENDERER
-              value: pixman
-            - name: WLR_NO_HARDWARE_CURSORS
-              value: "1"
-            - name: LIBGL_ALWAYS_SOFTWARE
-              value: "1"
-        {{- end }}
-          image: "docker.io/harveyff/chromium:20260526"
-          name: chromium
-          securityContext:
-            privileged: true
+            {{- end }}
           resources:
             requests:
               cpu: "500m"
@@ -92,16 +88,42 @@ spec:
               cpu: "2"
               memory: 6Gi
           ports:
-            - containerPort: 3000
+            - name: http
+              containerPort: 3000
+              protocol: TCP
             - containerPort: 3001
+            {{- if $isOlaresOne }}
             - containerPort: 8082
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 3
+            failureThreshold: 40
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 3
           volumeMounts:
             - mountPath: /config
               name: config
-        {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+            - mountPath: /dev/shm
+              name: dshm
+            {{- if $isOlaresOne }}
             - mountPath: /dev/dri
               name: dev-dri
-        {{- end }}
+            {{- end }}
       restartPolicy: Always
       volumes:
         - name: config
@@ -116,11 +138,15 @@ spec:
             {{- else }}
             path: {{ .Values.userspace.appCache }}/chromium/config
             {{- end }}
-    {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+        {{- if $isOlaresOne }}
         - name: dev-dri
           hostPath:
             path: /dev/dri
-    {{- end }}
+        {{- end }}
 status: {}
 ---
 apiVersion: v1
@@ -144,9 +170,6 @@ spec:
       port: 3001
       targetPort: 3001
       nodePort: 30001
-    - name: "8082"
-      port: 8082
-      targetPort: 8082
   selector:
     io.kompose.service: chromium
 status:
