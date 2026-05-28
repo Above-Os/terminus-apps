@@ -29,10 +29,19 @@ spec:
     - Open the `Hermes CLI` entrance and run `hermes setup` to launch the interactive wizard. It writes API keys, model providers, and channel tokens into `/opt/data`.
 
     Gateway Restart
-    - `hermes gateway restart` does NOT work in containerized deployments. Using `touch /opt/data/.gateway-restart-requested` to tears down the running gateway, picks up the latest config, and is back online within ~5 seconds. The same sentinel also short-circuits the post-crash 30-second backoff window.
+    - Run `restart-gateway` to reload the gateway and pick up the latest config (`hermes gateway restart` does NOT work in containerized deployments).
 
   upgradeDescription: |
-    Upgrade Hermes Agent from 0.13.0(2026.5.7) to 0.14.0(2026.5.16)
+    **Packaging changes (1.3.7)**
+    - Exposed the Hermes Gateway OpenAI-compatible API as an internal-only entrance (off by default) — toggle `API_SERVER_ENABLED` + set `HERMES_API_SERVER_KEY` in app settings to let Hermes Workspace / Open WebUI attach.
+
+    **Packaging changes (1.3.6)**
+    - Injected a persistent Linuxbrew toolchain so users can extend the runtime with `brew install` and the additions survive upgrades.
+    - Auto-staged `olares-cli` (see docs for usage).
+    - Injected the Hermes venv `python3` so skill scripts run with their deps available.
+    - Aligned `HOME` so HOME-respecting CLIs share config across containers.
+
+    **Upstream changes — Upgrade Hermes Agent from 0.13.0(2026.5.7) to 0.14.0(2026.5.16)**
 
     **Key Changes**
     - **Native Windows support (early beta)**​ — Full PowerShell installer; runs on cmd.exe/ PowerShell without WSL​ (native PTY, taskkill-based process mgmt, MinGit auto-install, etc.)
