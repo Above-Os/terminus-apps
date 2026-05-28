@@ -6,11 +6,19 @@ metadata:
   description: A self-hostable bookmark-everything app with AI-based automatic tagging and search.
   icon: https://app.cdn.olares.com/appstore/karakeep/icon.png
   appid: karakeep
-  version: '1.0.2'
+  version: '1.0.7'
   title: Karakeep
   categories:
   - Utilities_v112
   - Utilities
+entrances:
+- name: karakeep
+  port: 3000
+  host: karakeep
+  title: Karakeep
+  icon: https://app.cdn.olares.com/appstore/karakeep/icon.png
+  openMethod: window
+  authLevel: internal  
 permission:
   appData: true
   appCache: true
@@ -51,7 +59,11 @@ spec:
   supportArch:
   - amd64
   - arm64
+  supportClient:
+    android: https://play.google.com/store/apps/details?id=app.hoarder.hoardermobile&pcampaignid=web_share
+    ios: https://apps.apple.com/us/app/karakeep-app/id6479258022
 options:
+  apiTimeout: 0 
   dependencies:
   - name: olares
     type: system
@@ -80,15 +92,40 @@ envs:
     required: false
     applyOnChange: true
     editable: true
-    default: "gemma3"
     description: "Model used for text inference (tags, summaries). Defaults to gemma3 for Ollama."
   - envName: INFERENCE_IMAGE_MODEL
     type: string
     required: false
     applyOnChange: true
     editable: true
-    default: "llava"
     description: "Model used for image/vision inference. Must support vision when using Ollama (e.g. llava)."
+  - envName: EMBEDDING_TEXT_MODEL
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    description: "The model to be used for generating embeddings for the text."
+  - envName: CRAWLER_VIDEO_DOWNLOAD
+    required: false
+    applyOnChange: true
+    editable: true
+    type: bool
+    default: "false"
+    description: "Whether to download videos from the page or not (using yt-dlp)"
+  - envName: CRAWLER_VIDEO_DOWNLOAD_MAX_SIZE
+    type: int
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "-1"
+    description: "The maximum file size for the downloaded video. The quality will be chosen accordingly. Use -1 to disable the limit."
+  - envName: CRAWLER_VIDEO_DOWNLOAD_TIMEOUT_SEC
+    type: int
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "600"
+    description: "THow long to wait for the video download to finish"    
   - envName: INFERENCE_OUTPUT_SCHEMA
     type: string
     required: false
@@ -96,6 +133,34 @@ envs:
     editable: true
     default: "plain"
     description: "Inference output format: structured, json, or plain. Use plain for models without structured output support."
+    options:
+    - title: Plain
+      value: "plain"
+    - title: Structured
+      value: "structured"
+    - title: JSON
+      value: "json"
+  - envName: INFERENCE_CONTEXT_LENGTH
+    type: int
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "4096"
+    description: "Max number of tokens passed to the inference model. Content larger than this will be truncated. Also used as num_ctx for Ollama."
+  - envName: INFERENCE_MAX_OUTPUT_TOKENS
+    type: int
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "4096"
+    description: "Maximum number of tokens the inference model is allowed to generate. Higher values increase cost (OpenAI) and processing time (Ollama)."
+  - envName: INFERENCE_JOB_TIMEOUT_SEC
+    type: int
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "180"
+    description: "How long to wait for an inference job to finish before timing out. Increase if running large models on Ollama without powerful GPUs."
   - envName: USE_SYSTEM_SMTP_SETTINGS
     required: false
     applyOnChange: true
@@ -148,10 +213,4 @@ envs:
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_SMTP_SECURITY_PROTOCOLS
-entrances:
-- name: karakeep
-  port: 3000
-  host: karakeep
-  title: Karakeep
-  icon: https://app.cdn.olares.com/appstore/karakeep/icon.png
-  openMethod: window
+

@@ -30,8 +30,26 @@ spec:
             - |
               set -e
               corepack enable
+              corepack prepare pnpm@10.18.0 --activate
               npm i -g @penpot/mcp@2.14.1
               PKG_DIR="$(npm root -g)/@penpot/mcp"
+
+              # pnpm >=10 blocks dependency build scripts by default and pnpm 11
+              # fails the install entirely (the package has no .npmrc/workspace
+              # settings, so we inject one). Allow all builds so the
+              # non-interactive container install can complete.
+              WS_YAML="$PKG_DIR/pnpm-workspace.yaml"
+              if [ -f "$WS_YAML" ]; then
+                if ! grep -q '^dangerouslyAllowAllBuilds' "$WS_YAML"; then
+                  printf '\ndangerouslyAllowAllBuilds: true\n' >> "$WS_YAML"
+                fi
+              else
+                printf 'dangerouslyAllowAllBuilds: true\n' > "$WS_YAML"
+              fi
+              echo "----- pnpm-workspace.yaml -----"
+              cat "$WS_YAML"
+              echo "-------------------------------"
+
               VITE_CFG="$PKG_DIR/packages/plugin/vite.config.ts"
               if [ -f "$VITE_CFG" ]; then
                 sed -i 's/allowedHosts: \[\]/allowedHosts: true/g' "$VITE_CFG"
