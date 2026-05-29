@@ -149,6 +149,52 @@ spec:
             - mountPath: /cli-bin
               name: cli-bin
 
+        # Seed the Olares agent skills baked into the brew-base image at
+        # /skills-staging into hermes's persistent skills dir
+        # ($HERMES_HOME/skills = /opt/data/skills). Runs AFTER init-chmod-data
+        # so /opt/data is already hermes-owned (10000). Runs as root so the
+        # copy can land before the runtime entrypoint's skills_sync, then
+        # chowns everything back to hermes.
+        #
+        # Copies into a dedicated sub-dir (olares/) — NOT a top-level merge —
+        # so we never clobber hermes's own bundled categories (apple/, devops/,
+        # creative/, ...) or its .bundled_manifest. hermes treats olares/ as
+        # another category and discovers its SKILL.md files. `rm -rf` first so
+        # skills dropped from the image also disappear here on next start
+        # (only ever touches olares/, never hermes's own skills).
+        #
+        # Guarded: if the image predates the /skills-staging bake, skip cleanly
+        # instead of crash-looping the pod. Use the brew-base tag that bakes
+        # /skills-staging (the 2026.5.27-cli tag must be the skills-enabled
+        # rebuild for this to do anything).
+        - name: init-skills
+          image: "beclab/harveyff-openclaw-brew-base:2026.5.27-cli"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              if [ ! -d /skills-staging ]; then
+                echo "[init-skills] /skills-staging not in image; skipping (rebuild brew-base with skills to enable)"
+                exit 0
+              fi
+              mkdir -p /opt/data/skills
+              chown 10000:10000 /opt/data/skills || true
+              DEST=/opt/data/skills/olares
+              rm -rf "$DEST"
+              mkdir -p "$DEST"
+              cp -a /skills-staging/. "$DEST/"
+              chown -R 10000:10000 "$DEST"
+              echo "[init-skills] Olares skills synced into $DEST:"
+              ls -1 "$DEST"
+          resources: {}
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+
       containers:
         # Gateway sidecar: long-lived messaging gateway + (optional) OpenAI-compat API.
         #
