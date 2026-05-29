@@ -1,0 +1,133 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: llmgateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llmgateway
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: llmgateway
+    spec:
+      containers:
+        - name: llm-gateway-frontend
+          image: docker.io/beclab/llm-gateway-frontend:v2.0.3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1000Mi
+            limits:
+              cpu: 2000m
+              memory: 2000Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          startupProbe:
+            tcpSocket:
+              port: 80
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+          env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+          ports:
+            - containerPort: 80
+        - name: llm-gateway-backend
+          image: docker.io/beclab/llm-gateway-backend:v2.0.3
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+            - name: LLM_GATEWAY_CONFIG
+              value: "/configs/config.yaml"
+            - name: LLM_GATEWAY_LOGGING_FORMAT
+              value: "json"
+            - name: LLM_GATEWAY_CRYPTO_ENCRYPTION_KEY
+              value: "{{ randAlphaNum 32 | b64enc }}"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1000Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: init-config
+              mountPath: /configs/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: init-config
+          configMap:
+            name: config
+            defaultMode: 438
+            items:
+              - key: config.yaml
+                path: config.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmgateway-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: llm-gateway-frontend
+spec:
+  selector:
+    app: llmgateway
+  ports:
+    - name: llmgateway-frontend
+      port: 80
+      targetPort: 80
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-gateway-backend
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: llm-gateway-backend
+spec:
+  selector:
+    app: llmgateway
+  ports:
+    - name: backend-http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
