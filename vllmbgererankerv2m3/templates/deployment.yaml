@@ -43,10 +43,11 @@ spec:
             runAsUser: 0
       containers:
         - name: vllm
-          image: "docker.io/beclab/vllm-vllm-openai:v0.10.2"
+          image: "docker.io/vllm/vllm-openai:v0.22.0-cu129"
           args:
             - "--model"
             - "BAAI/bge-reranker-v2-m3"
+            - "-O3"
           env:
             - name: PGID
               value: "1000"
@@ -87,10 +88,22 @@ spec:
           volumeMounts:
             - mountPath: /root/.cache/huggingface
               name: data
+            - name: vllm-cache
+              mountPath: /root/.cache/vllm
+            - name: vllm-cache
+              mountPath: /root/.cache/flashinfer
+              subPath: flashinfer
+            - name: vllm-cache
+              mountPath: /root/.cache/torch
+              subPath: torch
       volumes:
         - name: data
           hostPath:
             path: "{{ .Values.sharedlib }}/ai/vllm/bgererankerv2m3"
+            type: DirectoryOrCreate
+        - name: vllm-cache
+          hostPath:
+            path: "{{ .Values.sharedlib }}/ai/vllm/bgererankerv2m3-cache"
             type: DirectoryOrCreate
       restartPolicy: Always
 status: {}
