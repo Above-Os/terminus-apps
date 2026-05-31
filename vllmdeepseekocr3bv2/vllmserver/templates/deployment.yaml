@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: "docker.io/beclab/vllm-vllm-openai:v0.11.2"
+          image: "docker.io/vllm/vllm-openai:v0.22.0-cu129"
           command:
             - /bin/bash
             - -c
@@ -41,6 +41,7 @@ spec:
               echo "[vllm-start] Starting vLLM server..."
               python3 -m vllm.entrypoints.openai.api_server \
                 --model "/models/deepocr" \
+                -O3 \
                 --gpu-memory-utilization 0.95 \
                 --max-model-len 8000 \
                 --tensor-parallel-size 1
@@ -67,6 +68,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /models/deepocr
+            - name: vllm-cache
+              mountPath: /root/.cache
         - name: download-model
           image: "docker.io/beclab/harveyff-hf-downloader:v0.1.0"
           env:
@@ -133,6 +136,10 @@ spec:
         - name: data
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/deepocr"
+            type: DirectoryOrCreate
+        - name: vllm-cache
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Cache/vllm-deepocr"
             type: DirectoryOrCreate
       restartPolicy: Always
 ---
