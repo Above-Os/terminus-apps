@@ -1,14 +1,14 @@
-﻿---
+---
 olaresManifest.version: '0.11.0'
 olaresManifest.type: app
 apiVersion: 'v2'
 metadata:
   name: ollamaqwen3635ba3budq4kmv2
   icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
-  description: Run Qwen3.6-35B-A3B GGUF (Q4_K_M quantization) locally via Ollama.
+  description: "Qwen3.6 35B A3B MoE (Unsloth Dynamic UD-Q4_K_M) for efficient local inference"
   appid: ollamaqwen3635ba3budq4kmv2
-  title: Qwen3.6 35B A3B UD-Q4 (Ollama)
-  version: '1.0.1'
+  title: Qwen3.6 35B A3B UD-KM (Ollama)
+  version: '1.0.2'
   categories:
     - AI
 sharedEntrances:
@@ -28,23 +28,33 @@ entrances:
     openMethod: window
     authLevel: internal
 spec:
-  versionName: 'Qwen3.6-35B-A3B-UD-Q4_K_M'
+  versionName: 'qwen3.6:35b-a3b-ud-q4_k_m'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+    User traffic goes through the proxy to Ollama.
 
     **MODEL**
-    Qwen3.6-35B-A3B is a Mixture-of-Experts model from the Qwen3.6 series by Alibaba. It activates 3B parameters out of 35B total, delivering strong performance with lower resource usage.
+    Uses Unsloth Dynamic quant from `unsloth/Qwen3.6-35B-A3B-GGUF` (`Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` + `mmproj-F16.gguf`).
+    Mixed-precision UD quantization preserves quality near Q5_K_M while keeping decode throughput close to standard Q4_K_M, with full vision (mmproj) retained.
+    Uses the GGUF embedded chat template (single-step files-API create) for reliable tool calling and image input.
 
-    - Model: Qwen3.6-35B-A3B-UD-Q4_K_M
-    - Source: unsloth/Qwen3.6-35B-A3B-GGUF (Hugging Face)
-    - Quantization: Q4_K_M
-    - Context: 131072
-    - Backend: Ollama
+    Qwen3.6-35B-A3B is a Mixture-of-Experts model: 35B total parameters with only 3B activated per token, delivering strong performance with lower resource usage than dense models of similar capability.
+
+    Qwen3.6 features the following enhancement:
+
+    Unified Vision-Language Foundation: Early fusion training on multimodal tokens achieves cross-generational parity with Qwen3 and outperforms Qwen3-VL models across reasoning, coding, agents, and visual understanding benchmarks.
+
+    Efficient Hybrid Architecture: Gated Delta Networks combined with sparse Mixture-of-Experts deliver high-throughput inference with minimal latency and cost overhead.
+
+    Scalable RL Generalization: Reinforcement learning scaled across million-agent environments with progressively complex task distributions for robust real-world adaptability.
+
+    Global Linguistic Coverage: Expanded support to 201 languages and dialects, enabling inclusive, worldwide deployment with nuanced cultural and regional understanding.
+
+    Next-Generation Training Infrastructure: Near-100% multimodal training efficiency compared to text-only training and asynchronous RL frameworks supporting massive-scale agent scaffolds and environment orchestration.
 
   upgradeDescription: |
-    Ollama runtime: ollama/ollama:0.30.0-rc23. CUDA ComputeCache shared at Home/Ollama/.nv (all Ollama apps). Proxy API: beclab/harveyff-olares-ollama:v0.1.20. Context length: 131072 (128k).
-
+    Vision support via `mmproj-F16.gguf`, with tool calling. Proxy v0.1.21, Ollama 0.30.0-rc28. Context 131072, KV cache q8_0.
   developer: Alibaba
   website: https://qwen.ai/home
   submitter: Olares
@@ -57,13 +67,13 @@ spec:
 
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   limitedCpu: 6200m
-  requiredCpu: 150m
+  requiredCpu: 500m
   requiredDisk: 50Mi
-  limitedDisk: 500Gi
+  limitedDisk: 80Gi
   limitedMemory: 40Gi
   requiredMemory: 4200Mi
   requiredGpu: 23.5Gi
-  limitedGpu: 28Gi
+  limitedGpu: 24Gi
   {{- else }}
   requiredMemory: 64Mi
   limitedMemory: 800Mi
@@ -107,6 +117,12 @@ options:
   {{- end }}
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
+  - envName: KEEP_ALIVE
+    required: true
+    type: bool
+    editable: true
+    applyOnChange: true
+    default: "false"
   - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: false
     applyOnChange: true
@@ -117,10 +133,4 @@ envs:
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
-  - envName: KEEP_ALIVE
-    required: false
-    type: bool
-    editable: true
-    applyOnChange: true
-    default: "false"
 {{- end }}
