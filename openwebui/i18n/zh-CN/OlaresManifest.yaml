@@ -27,6 +27,7 @@ spec:
     **升级 Open WebUI 至 v0.9.6（Chart 1.0.30）**
 
     **本 Chart 打包说明（Olares）**
+    - **改用官方镜像 & 持久化会话密钥（默认开启）：** 本 Chart 现使用官方 `openwebui/open-webui` 镜像，**`ENABLE_WEBUI_SECRET_KEY_PERSIST`** 默认 **`true`**，通过 `WEBUI_SECRET_KEY_FILE` 将 WebUI 密钥持久化到 appData 卷的 `data/.webui_secret_key`，使登录态在重启与后续升级后保持有效。若希望每次重启都重新生成密钥、让所有用户登出，可在 **设置 → 应用 → 环境变量** 中将其设为 **`false`**。由于本次升级会初始化该密钥，升级后需重新登录一次，之后即保持稳定。
     - **升级前数据库备份（默认开启）：** **`ENABLE_WEBUI_DB_BACKUP`** 默认 **`true`**。每个新 Chart 版本首次启动前，若存在 `webui.db` 且尚无 `data/backups/webui_chart_<chart 版本>.db`，init 容器会复制一份（仍在同一 appData 卷）；同一 Chart 版本重复重启不会重复生成该文件。若某次升级**不需要**备份，请在升级前在 **设置 → 应用 → 环境变量** 中将该项设为 **`false`**。
     - **库表迁移：** v0.9.6 包含数据库 schema 变更，强烈建议保留默认备份后再升级。多 worker / 多节点 / 负载均衡部署必须**同时**升级，不支持滚动升级。迁移已增强容错，会跳过已存在的表/索引/列。
     - **升级之后：** 保持 **`true`** 则后续 Chart 升级仍会按版本自动备份一次；改为 **`false`** 则之后不再备份，直到再次设为 **`true`**。
