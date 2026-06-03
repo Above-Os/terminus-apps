@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.0.0'
+  version: '1.0.1'
   categories:
     - AI
 sharedEntrances:
@@ -19,9 +19,14 @@ sharedEntrances:
     authLevel: internal
     icon: https://app.cdn.olares.com/appstore/ollama/icon.png
 entrances:
+  # Routes straight to the llm-init download/UI Service (download-svc:8090).
+  # The entrance NAME stays "ollamaclient" so .Values.domain.ollamaclient
+  # (used for APP_URL in llm-init.yaml) keeps resolving after the nginx
+  # clientproxy was removed. llm-init serves its own same-origin dashboard
+  # (polls /api/progress; no websocket/SSE) so no proxy/CORS layer is needed.
   - name: ollamaclient
-    port: 8080
-    host: ollamaclient
+    port: 8090
+    host: download-svc
     title: Ollama LLM
     icon: https://app.cdn.olares.com/appstore/ollama/icon.png
     openMethod: window
@@ -76,7 +81,7 @@ spec:
   upgradeDescription: |
     Generic Ollama + llm-init base (llm-init v1.1.0, ollama/ollama:0.30.0).
     Supports ollama:// Library pulls. Model identity and tuning are env.
-    v1.3.0: models now live in the shared cross-app App Common store
+    v1.0.0: models now live in the shared cross-app App Common store
     appCommon/ollama instead of Home/Ollama — re-pull on upgrade; old
     Home/Ollama copies can be deleted manually.
 
@@ -95,7 +100,8 @@ spec:
   # required* = install floor (low, so small models install easily).
   # limited*  = ceiling (generous). sum(container requests) must be <=
   # required*; bump required* on clone when OLLAMA_*_REQUEST is larger.
-  # Sidecars: llm-init 100m/128Mi + nginx 10m/64Mi ≈ 110m / 192Mi.
+  # Companion llm-init container baseline: 100m / 128Mi (nginx clientproxy
+  # was removed — the entrance points straight at llm-init).
   - mode: nvidia
     limitedCpu: 7000m
     requiredCpu: 1200m
@@ -161,14 +167,16 @@ envs:
       value: chat
     - title: Embedding
       value: embedding
-  - envName: MODEL_SUPPORTS      # example: supports_reasoning  (CSV; "" if none)
-    required: true
+  - envName: MODEL_SUPPORTS      # CSV of supports_* keys (see README); "" if none
+    required: true              # required:true so it shows in the install dialog;
+    default: ""                 # default:"" lets the user leave it empty (= no caps)
     type: string
     editable: true
     applyOnChange: true
   # --- Tuning ---
   - envName: ENGINE_ARGS         # example: OLLAMA_NUM_CTX=8192 OLLAMA_NUM_PARALLEL=2  ("" for daemon defaults)
-    required: true
+    required: true              # required:true so it shows in the install dialog;
+    default: ""                 # default:"" lets the user leave it empty (= daemon defaults)
     type: string
     editable: true
     applyOnChange: true
