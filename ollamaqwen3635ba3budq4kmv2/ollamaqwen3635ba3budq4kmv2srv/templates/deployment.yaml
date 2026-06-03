@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
         - name: ollama
-          image: "docker.io/ollama/ollama:0.30.0-rc23"
+          image: "docker.io/ollama/ollama:0.30.0"
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -44,8 +44,8 @@ spec:
 
               {{- with .Values.olaresEnv }}
               {{- if and .KEEP_ALIVE (eq (lower (toString .KEEP_ALIVE)) "true") }}
-              # Wait for the re-creation to finish before preloading
-              while ! ollama list 2>/dev/null | grep -q "${MODEL_NAME}"; do
+              # Wait for the api proxy to create the model (weights + mmproj), then preload.
+              while ! ollama list 2>/dev/null | grep -q "${MODEL_NAME%%:*}"; do
                 sleep 5
               done
               sleep 5
@@ -62,10 +62,6 @@ spec:
             - configMapRef:
                 name: ollama-env
           env:
-            - name: OLLAMA_NOPRUNE
-              value: "1"
-            - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
 {{- with .Values.olaresEnv }}
 {{- if and .KEEP_ALIVE (eq (lower (toString .KEEP_ALIVE)) "true") }}
             - name: OLLAMA_KEEP_ALIVE
