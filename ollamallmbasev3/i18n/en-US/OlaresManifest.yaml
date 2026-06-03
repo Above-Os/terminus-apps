@@ -1,0 +1,50 @@
+metadata:
+  title: Ollama LLM Base (llm-init)
+  description: "Generic Ollama + llm-init base; choose any model at install time via env"
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app and a generic *base*: it is NOT tied to any specific
+    model. The model to serve is chosen entirely at install time through
+    environment variables, so the same Helm chart can serve any Ollama model.
+
+    **HOW IT WORKS**
+    An Ollama daemon owns the model bytes; the llm-init sidecar drives
+    `/api/pull` on first boot and exposes an OpenAI-compatible `/v1/*`
+    surface plus a unified `/api/progress` + `/healthz` dashboard.
+
+    **Stack**
+    - **Ollama daemon** (`ollama/ollama`, port 11434): pulls + serves the model.
+    - **llm-init** (`beclab/llm-init`, port 8090): OpenAI `/v1/*`, progress UI.
+    - Inter-pod traffic via ClusterIP Service `ollama:11434` (name required by
+      llm-init v1.1.0's derived engine URL).
+
+    **Model storage (App Common)**
+    Models go to the shared, cross-app App Common store `appCommon/ollama` (SSD
+    single-node, JuiceFS multi-node), shared by all ollama apps so blobs dedup
+    by digest with one unified view. CUDA compile cache lives alongside under
+    `appCommon/ollama/.nv`.
+
+    **Install-time parameters (set per model)**
+    - `MODEL_SOURCE` — `ollama://<library-tag>`, e.g. `ollama://qwen3.5:0.8b`.
+    - `MODEL_NAME` — OpenAI client alias, e.g. `qwen3.5-0.8b`.
+    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` (empty for defaults).
+    - `LOG_LEVEL` — `debug | info | warn | error`.
+    - `KEEP_ALIVE` — `true` pins the model in VRAM (`OLLAMA_KEEP_ALIVE=-1`).
+    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` — Ollama pod scheduling floor.
+    - `OLLAMA_CPU_LIMIT` / `OLLAMA_MEMORY_LIMIT` — Ollama pod ceiling (set per model).
+
+    **NOTE ON RESOURCES**
+    Ollama CPU/RAM are install-time env. `required*` is the low install
+    floor; `limited*` is the generous ceiling. Raise `requiredMemory` /
+    `requiredCpu` on clone when `OLLAMA_*_REQUEST` exceeds the floor.
+
+  upgradeDescription: |
+    Generic Ollama + llm-init base (llm-init v1.1.0, ollama/ollama:0.30.0).
+    Supports ollama:// Library pulls. Model identity and tuning are env.
+    v1.3.0: models now live in the shared cross-app App Common store
+    appCommon/ollama instead of Home/Ollama — re-pull on upgrade; old
+    Home/Ollama copies can be deleted manually.
