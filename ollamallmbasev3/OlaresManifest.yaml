@@ -1,0 +1,214 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: ollamallmbasev3
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  description: "Generic Ollama + llm-init base. Pick any model at install via env."
+  appid: ollamallmbasev3
+  title: Ollama LLM Base (llm-init)
+  version: '1.0.0'
+  categories:
+    - AI
+sharedEntrances:
+  - name: ollamallmbasev3
+    host: sharedentrances-api
+    port: 0
+    title: Ollama LLM API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+entrances:
+  - name: ollamaclient
+    port: 8080
+    host: ollamaclient
+    title: Ollama LLM
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+    authLevel: internal
+spec:
+  versionName: '0.30.0'
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app and a generic *base*: it is NOT tied to any specific
+    model. The model to serve is chosen entirely at install time through
+    environment variables, so the same Helm chart can serve any Ollama model.
+
+    **HOW IT WORKS**
+    An Ollama daemon owns the model bytes; the llm-init sidecar drives
+    `/api/pull` on first boot and exposes an OpenAI-compatible `/v1/*`
+    surface plus a unified `/api/progress` + `/healthz` dashboard.
+
+    **Stack**
+    - **Ollama daemon** (`ollama/ollama`, port 11434): pulls + serves the model.
+    - **llm-init** (`beclab/llm-init`, port 8090): OpenAI `/v1/*`, progress UI.
+    - Inter-pod traffic via ClusterIP Service `ollama:11434` (the name is
+      required because llm-init v1.1.0 derives the engine URL from ENGINE_KIND).
+
+    **Model storage (App Common)**
+    Pulled models go to the **shared, cross-app** App Common store
+    `appCommon/ollama` (SSD on single-node, JuiceFS on multi-node). All
+    ollama-based apps share this one dir, so blobs dedup by digest and you get a
+    single unified view of downloaded models. The CUDA JIT compile cache lives
+    alongside them under `appCommon/ollama/.nv`.
+
+    **Install-time parameters (set per model)**
+    - `MODEL_SOURCE` — `ollama://<library-tag>`, e.g. `ollama://qwen3.5:0.8b`.
+    - `MODEL_NAME` — OpenAI client alias, e.g. `qwen3.5-0.8b`.
+    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` (empty for defaults).
+    - `LOG_LEVEL` — `debug | info | warn | error`.
+    - `KEEP_ALIVE` — `true` pins the model in VRAM (`OLLAMA_KEEP_ALIVE=-1`).
+    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` — Ollama pod scheduling floor.
+    - `OLLAMA_CPU_LIMIT` / `OLLAMA_MEMORY_LIMIT` — Ollama pod ceiling (set per model).
+
+    **NOTE ON RESOURCES**
+    - Ollama container CPU/RAM **requests & limits** are install-time env
+      (`OLLAMA_CPU_*` / `OLLAMA_MEMORY_*`); tune per model at install.
+    - `requiredCpu` / `requiredMemory` are the **install floor** (kept low so
+      small models can install on modest hardware). `limited*` are the
+      **ceiling** (generous, fixed). Sum of container requests must stay
+      within `required*` — raise those manifest fields on clone when
+      `OLLAMA_*_REQUEST` exceeds the default floor. GPU memory is
+      manifest-only.
+
+  upgradeDescription: |
+    Generic Ollama + llm-init base (llm-init v1.1.0, ollama/ollama:0.30.0).
+    Supports ollama:// Library pulls. Model identity and tuning are env.
+    v1.3.0: models now live in the shared cross-app App Common store
+    appCommon/ollama instead of Home/Ollama — re-pull on upgrade; old
+    Home/Ollama copies can be deleted manually.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/llm-init
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+  # required* = install floor (low, so small models install easily).
+  # limited*  = ceiling (generous). sum(container requests) must be <=
+  # required*; bump required* on clone when OLLAMA_*_REQUEST is larger.
+  # Sidecars: llm-init 100m/128Mi + nginx 10m/64Mi ≈ 110m / 192Mi.
+  - mode: nvidia
+    limitedCpu: 7000m
+    requiredCpu: 1200m
+    requiredDisk: 50Mi
+    limitedDisk: 500Gi
+    limitedMemory: 40Gi
+    requiredMemory: 5Gi
+    requiredGPUMemory: 1Gi
+    limitedGPUMemory: 24Gi
+  - mode: strix-halo
+    limitedCpu: 7000m
+    requiredCpu: 1200m
+    requiredDisk: 50Mi
+    limitedDisk: 500Gi
+    limitedMemory: 40Gi
+    requiredMemory: 5Gi
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  # Models AND the CUDA JIT compile cache live in the shared cross-app App
+  # Common store (appCommon/ollama). No Home/* userData mount is needed.
+  appCommon: true   # access the shared Common directory
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  # This is a generic base with no bundled model: there is no installable body,
+  # you create an instance (clone) and install that. Matches the base concept.
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  # Clone-configurable surface. Every entry is required with NO default, so
+  # each install must explicitly set every value (the base ships no model).
+  # The `example` comments are an illustrative qwen3.5:0.8b config.
+  #
+  # This base currently supports the ollama:// source shape only
+  # (MODEL_SOURCE=ollama://<library-tag>). hf:// GGUF support is not wired.
+  #
+  # --- Model identity ---
+  - envName: MODEL_SOURCE        # example: ollama://qwen3.5:0.8b
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME          # example: qwen3.5-0.8b
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_MODE          # single-select: chat | embedding
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS      # example: supports_reasoning  (CSV; "" if none)
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  # --- Tuning ---
+  - envName: ENGINE_ARGS         # example: OLLAMA_NUM_CTX=8192 OLLAMA_NUM_PARALLEL=2  ("" for daemon defaults)
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LOG_LEVEL           # single-select: debug | info | warn | error
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: KEEP_ALIVE          # example: false  (true pins the model in VRAM via OLLAMA_KEEP_ALIVE=-1)
+    required: true
+    type: bool
+    editable: true
+    applyOnChange: true
+  # --- Ollama container resources (install-time; must fit spec.accelerator) ---
+  - envName: OLLAMA_CPU_REQUEST    # example: 50m  (K8s quantity)
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: OLLAMA_MEMORY_REQUEST # example: 4Gi
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: OLLAMA_CPU_LIMIT      # example: 4
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: OLLAMA_MEMORY_LIMIT   # example: 35Gi
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
