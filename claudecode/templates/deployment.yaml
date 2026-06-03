@@ -111,6 +111,35 @@ spec:
           volumeMounts:
             - mountPath: /opt/data
               name: app-data-home
+        {{- if eq (toString .Values.olaresEnv.ENABLE_DIND) "true" }}
+        - name: init-docker-cli
+          image: "docker.io/beclab/docker:29.3.0-dind"
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # docker CLI itself
+              cp /usr/local/bin/docker /docker-cli/docker
+              # CLI plugins (docker compose / buildx). The dind image ships
+              # these under one of the standard cli-plugins dirs; copy whatever
+              # exists into the shared dir so the main container can find them.
+              mkdir -p /docker-cli/cli-plugins
+              for d in /usr/local/libexec/docker/cli-plugins \
+                       /usr/local/lib/docker/cli-plugins \
+                       /usr/libexec/docker/cli-plugins \
+                       /usr/lib/docker/cli-plugins; do
+                [ -d "$d" ] || continue
+                cp "$d"/docker-compose /docker-cli/cli-plugins/ 2>/dev/null || true
+                cp "$d"/docker-buildx  /docker-cli/cli-plugins/ 2>/dev/null || true
+              done
+              echo "[init-docker-cli] copied:" && ls -la /docker-cli /docker-cli/cli-plugins
+          resources: {}
+          volumeMounts:
+            - mountPath: /docker-cli
+              name: docker-cli-bin
+        {{- end }}
 
       containers:
         # Workspace container. kubectl exec from the beclab terminal
@@ -182,6 +211,10 @@ spec:
             - name: CLAUDE_CODE_USE_FOUNDRY
               value: "1"
             {{- end }}
+            {{- if eq (toString .Values.olaresEnv.ENABLE_DIND) "true" }}
+            - name: DOCKER_HOST
+              value: "tcp://localhost:2375"
+            {{- end }}
           command:
             - sleep
             - infinity
@@ -203,6 +236,67 @@ spec:
             - mountPath: /home/userdata/external/
               name: olares-external-dir
             {{- end }}
+            {{- if eq (toString .Values.olaresEnv.ENABLE_DIND) "true" }}
+            - mountPath: /usr/local/bin/docker
+              name: docker-cli-bin
+              subPath: docker
+              readOnly: true
+            - mountPath: /usr/local/lib/docker/cli-plugins
+              name: docker-cli-bin
+              subPath: cli-plugins
+              readOnly: true
+            {{- end }}
+        {{- if eq (toString .Values.olaresEnv.ENABLE_DIND) "true" }}
+        - name: docker-dind
+          image: "docker.io/beclab/docker:29.3.0-dind"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          command:
+            - dockerd
+            - --host
+            - tcp://0.0.0.0:2375
+            - --host
+            - unix:///var/run/docker.sock
+            - --mtu=1450
+          ports:
+            - containerPort: 2375
+          startupProbe:
+            exec:
+              command:
+                - docker
+                - info
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - docker
+                - info
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 15
+            failureThreshold: 5
+          resources:
+            limits:
+              cpu: "8"
+              memory: 16Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /var/lib/docker
+              name: dind-storage
+            # Share the workspace at the SAME path so bind-mounts resolve
+            # correctly inside dockerd.
+            - mountPath: /opt/data
+              name: app-data-home
+        {{- end }}
 
       restartPolicy: Always
       volumes:
@@ -220,5 +314,13 @@ spec:
         - name: olares-external-dir
           hostPath:
             path: "{{ .Values.sharedlib }}"
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if eq (toString .Values.olaresEnv.ENABLE_DIND) "true" }}
+        - name: docker-cli-bin
+          emptyDir: {}
+        - name: dind-storage
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/docker"
             type: DirectoryOrCreate
         {{- end }}

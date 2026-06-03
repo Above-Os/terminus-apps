@@ -12,6 +12,7 @@ spec:
     - 支持 Skills、Subagents 及 MCP 兼容工具调用。
     - 兼容 Claude Pro/Max 订阅（OAuth 登录）或 Console API Key，同时支持 Amazon Bedrock 和 Google Vertex AI。
     - 工作区镜像预装常见语言运行时与构建工具链（Python、Node.js、Go、Rust、OpenJDK 21、Ruby、PHP、Lua），以及数据库客户端（PostgreSQL、MySQL/MariaDB、Redis）、git-lfs、protobuf 编译器、Gradle、tmux、dig/ss/nc、shellcheck、clang-format/tidy、graphviz，以及各类常见 -dev 头文件（libpq、MySQL 客户端、curl、ICU、LDAP）等，便于在无 root 下完成常见开发任务。
+    - 可选 Docker-in-Docker 边车（`ENABLE_DIND`，默认开启）：在终端中直接运行 `docker build`、`docker compose` 等容器化开发命令（特权边车容器）。
 
     **首次使用设置**
     打开 `Claude Code CLI` 入口并运行 `claude` 启动 OAuth 登录流程，或在应用环境变量中设置 `ANTHROPIC_API_KEY` 并重启应用。
@@ -26,3 +27,10 @@ spec:
     - `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` = false
 
     上述变量在 chart 中按条件注入：留空字符串或 `false` 时**不会**写入容器环境，Claude Code 会视其为真正"未设置"（必须如此——它对 `CLAUDE_CODE_USE_*` 的判断是按是否存在，而不是按值）。
+  upgradeDescription: |
+    新增功能：
+    - 新增 Docker-in-Docker 支持（`ENABLE_DIND`，默认开启）：通过特权 dockerd 边车容器，在终端中以 `DOCKER_HOST=tcp://localhost:2375` 暴露 `docker` 命令，可直接运行 `docker build`、`docker run`、`docker compose`。
+    - 预装 `docker compose` 与 `docker buildx` CLI 插件。
+
+    资源调整：
+    - 提高资源上限以容纳 dind 边车：内存 17Gi -> 32Gi、CPU 5 -> 12、磁盘 50Gi -> 100Gi（requests 保持较小，这些是 limits 上限）。
