@@ -28,9 +28,15 @@ spec:
 
     上述变量在 chart 中按条件注入：留空字符串或 `false` 时**不会**写入容器环境，Claude Code 会视其为真正"未设置"（必须如此——它对 `CLAUDE_CODE_USE_*` 的判断是按是否存在，而不是按值）。
   upgradeDescription: |
-    新增功能：
-    - 新增 Docker-in-Docker 支持（`ENABLE_DIND`，默认开启）：通过特权 dockerd 边车容器，在终端中以 `DOCKER_HOST=tcp://localhost:2375` 暴露 `docker` 命令，可直接运行 `docker build`、`docker run`、`docker compose`。
-    - 预装 `docker compose` 与 `docker buildx` CLI 插件。
+    基础镜像 `beclab/harveyff-claudecode-base` 升级至 0.5.3。
 
-    资源调整：
-    - 提高资源上限以容纳 dind 边车：内存 17Gi -> 32Gi、CPU 5 -> 12、磁盘 50Gi -> 100Gi（requests 保持较小，这些是 limits 上限）。
+    新增：
+    - 内置 `olares-cli`（vendor 裸二进制，完整子命令）已加入 PATH。
+    - 启动时由 `init-skills` 将 Olares 技能包（cluster、dashboard、files、market、
+      settings、shared）复制到 `~/.claude/skills`，Agent 可开箱操作 Olares。
+    - 扩充工具箱：`gh`、`ping`/`lsof`、`lrzsz`（sz/rz）、`tree`、`nano`、`tcpdump`、
+      `traceroute`、`httpie`、`aria2` 及常用网络/调试工具。
+
+    关于 Skills：`init-skills` 仅按目录名覆盖镜像内置的 Olares 技能（同名目录会
+    在每次 Pod 启动时用镜像版本替换）；`~/.claude/skills` 下其余自定义技能不会被
+    删除。若你曾就地修改过某个 Olares 技能目录，下次重启后会被还原为镜像自带版本。

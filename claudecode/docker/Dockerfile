@@ -17,6 +17,31 @@
 #     --platform linux/amd64,linux/arm64 \
 #     -t beclab/harveyff-claudecode-base:0.2.0 \
 #     --push .
+# syntax=docker/dockerfile:1.7
+
+# ---- Stage 1: olares-cli binary + Olares skills (Claude Code layout) ----
+# @olares/cli postinstall downloads the Go binary; copy vendor binary (not JS
+# wrapper) so the full verb set is available. skills CLI needs git to clone.
+FROM node:24-bookworm-slim AS olares-assets
+ARG OLARES_CLI_NPM_VERSION=1.12.5-cli.8
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @olares/cli@${OLARES_CLI_NPM_VERSION} \
+ && install -D "$(npm root -g)/@olares/cli/vendor/olares-cli" /out/bin/olares-cli \
+ && ( /out/bin/olares-cli --version || /out/bin/olares-cli version || true )
+
+WORKDIR /skills-build
+RUN npx -y skills add beclab/Olares -a claude-code -y --copy \
+ && test -d /skills-build/.claude/skills \
+ && mkdir -p /out/skills \
+ && cp -a /skills-build/.claude/skills/. /out/skills/ \
+ && ls -la /out/skills
+
+# ---- Stage 2: Ubuntu runtime (no Node in final image) ----
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -157,6 +182,14 @@ RUN apt-get update \
  && useradd --create-home --uid 1000 --shell /bin/bash claude \
  && mkdir -p /opt/data \
  && chown -R 1000:1000 /opt/data
+
+COPY --from=olares-assets /out/bin/olares-cli /usr/local/bin/olares-cli
+RUN chmod 755 /usr/local/bin/olares-cli \
+ && ( /usr/local/bin/olares-cli --version || /usr/local/bin/olares-cli version || true )
+
+# Baked skills; init-skills copies into $HOME/.claude/skills on the PVC.
+COPY --from=olares-assets /out/skills /skills-staging
+RUN chown -R 1000:1000 /skills-staging
 
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-current
 
