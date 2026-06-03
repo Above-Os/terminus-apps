@@ -24,11 +24,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=C.UTF-8
 
 RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && mkdir -p -m 755 /etc/apt/keyrings \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
         git-lfs \
+        gh \
         openssh-client \
         jq \
         yq \
@@ -109,12 +118,37 @@ RUN apt-get update \
         htop \
         dnsutils \
         iproute2 \
+        iputils-ping \
+        lsof \
+        net-tools \
+        traceroute \
+        whois \
+        inetutils-telnet \
+        tcpdump \
         netcat-openbsd \
         socat \
         xmlstarlet \
         shellcheck \
         graphviz \
         moreutils \
+        tree \
+        nano \
+        lrzsz \
+        zstd \
+        bzip2 \
+        bash-completion \
+        man-db \
+        strace \
+        ncdu \
+        parallel \
+        time \
+        gdb \
+        ltrace \
+        valgrind \
+        mtr-tiny \
+        expect \
+        aria2 \
+        httpie \
  && ln -sfn "/usr/lib/jvm/java-21-openjdk-$(dpkg --print-architecture)" /usr/lib/jvm/java-21-openjdk-current \
  && rm -rf /var/lib/apt/lists/* \
  && locale-gen C.UTF-8 \

@@ -53,7 +53,7 @@ docker buildx build \
 
 When bumping apt dependencies or base Ubuntu:
 
-1. Increment the tag (e.g. `0.2.0 -> 0.2.1`).
+1. Increment the tag (e.g. `0.3.0 -> 0.4.0`).
 2. Update both references in `claudecode/templates/deployment.yaml`
    (initContainer + main container).
 3. Bump `version` in `claudecode/Chart.yaml` and `metadata.version` in
