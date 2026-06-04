@@ -4,12 +4,14 @@ metadata:
   creationTimestamp: null
   labels:
     io.kompose.service: ollama
-  name: {{ .Release.Name }}
+  # Static name (NOT .Release.Name) so it matches the workloadReplicas key in
+  # OlaresManifest.yaml and values.yaml workloads.<name>.
+  name: ollama
   namespace: {{ .Release.Namespace }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.ollama.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: ollama
@@ -30,11 +32,13 @@ spec:
             - sh
             - "-c"
             - |
-              chown -R 1000:1000 /app-data-root
+              chown -R 1000:1000 /app-data-root /cuda-cache
           resources: {}
           volumeMounts:
-            - name: data
+            - name: ollama-data
               mountPath: /app-data-root
+            - name: cuda-compute-cache
+              mountPath: /cuda-cache
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
@@ -74,11 +78,21 @@ spec:
               memory: 4Gi
           volumeMounts:
             - mountPath: "/root/.ollama"
-              name: data
+              name: ollama-data
+            - mountPath: "/root/.nv/ComputeCache"
+              name: cuda-compute-cache
       volumes:
-        - name: data
+        # App Common shared model store: all ollama-based apps mount the SAME
+        # appCommon/ollama dir so the blob store dedups by digest. appCommon is
+        # SSD on single-node, JuiceFS on multi-node (requires permission.appCommon).
+        - name: ollama-data
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/ollama"
+            path: "{{ .Values.userspace.appCommon }}/ollama"
+            type: DirectoryOrCreate
+        # CUDA JIT compile cache lives alongside the models under appCommon/ollama.
+        - name: cuda-compute-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/ollama/.nv"
             type: DirectoryOrCreate
       restartPolicy: Always
 status: {}
