@@ -1,0 +1,52 @@
+# Engine wrapper mounted into the vLLM container at /llm-init/wrappers. Helpers
+# inlined from llm-init v1.1.0 common.sh + vllm.sh (single engine). llm-init
+# downloads the model and writes a sentinel + model_path under /run/llm-init;
+# the wrapper waits on it, then loads --model from the resolved path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+data:
+  vllm.sh: |
+    #!/bin/sh
+    # Waits for llm-init's sentinel + model_path, then starts vLLM's OpenAI
+    # server with --model from that path. ENGINE_ARGS is word-split and appended
+    # after the baseline flags, e.g. "--max-model-len 8192 --gpu-memory-utilization 0.9".
+    # Do NOT pass --disable-log-stats (llm-init's /api/diag/gpu needs /metrics).
+    set -eu
+
+    ENGINE=vllm
+    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
+    MODEL_PATH_FILE=${MODEL_PATH_FILE:-/run/llm-init/model_path}
+    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
+    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
+    log() { printf '[wrapper-%s] %s\n' "$ENGINE" "$*"; }
+
+    # Block until the sentinel appears (or WAIT_TIMEOUT elapses).
+    elapsed=0
+    while [ ! -f "$SENTINEL" ]; do
+        if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+            log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
+            exit 1
+        fi
+        log "waiting for $SENTINEL (elapsed=${elapsed}s)"
+        sleep "$WAIT_INTERVAL"
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    log "sentinel $SENTINEL found after ${elapsed}s"
+
+    [ -f "$MODEL_PATH_FILE" ] || { log "model path file $MODEL_PATH_FILE not found"; exit 1; }
+    MODEL_PATH=$(tr -d '\r\n' < "$MODEL_PATH_FILE")
+    log "starting vLLM with model=$MODEL_PATH name=${MODEL_NAME:-unset} args=${ENGINE_ARGS:-<empty>}"
+
+    # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
+    exec python3 -m vllm.entrypoints.openai.api_server \
+        --model "$MODEL_PATH" \
+        --served-model-name "${MODEL_NAME:-llm-init-model}" \
+        --host 0.0.0.0 \
+        --port "${VLLM_PORT:-8000}" \
+        ${ENGINE_ARGS:-} \
+        "$@"
