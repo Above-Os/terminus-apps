@@ -10,6 +10,15 @@
 */}}
 {{- $domainDict := .Values.domain | default dict -}}
 {{- $librespeedDomain := index (split "," ($domainDict.librespeed | default "")) "_0" -}}
+{{- /* olares_id = 2nd label of e.g. 9c3cd6cd.<olares_id>.olares.cn */ -}}
+{{- $domainParts := splitList "." $librespeedDomain -}}
+{{- $localDotServer := "" -}}
+{{- $localDashServer := "" -}}
+{{- if and (ge (len $domainParts) 4) (eq (index $domainParts 2) "olares") -}}
+{{- $olaresId := index $domainParts 1 -}}
+{{- $localDotServer = printf "http://%s.%s.olares.local/" (index $domainParts 0) $olaresId -}}
+{{- $localDashServer = printf "http://%s-%s-olares.local/" (index $domainParts 0) $olaresId -}}
+{{- end -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -118,31 +127,87 @@ data:
   servers.json: |
     [
       {
-        "name":        "Local (this Olares)",
-        "server":      "//{{ $librespeedDomain }}/",
-        "dlURL":       "backend/garbage.php",
-        "ulURL":       "backend/empty.php",
-        "pingURL":     "backend/empty.php",
-        "getIpURL":    "backend/getIP.php"
+        "name": "Local (this Olares)",
+        "server": "//{{ $librespeedDomain }}/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php"
+      }{{- if $localDotServer }},
+      {
+        "name": "Local (this Olares .local domain)",
+        "server": "{{ $localDotServer }}",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php"
+      }{{- end }}{{- if $localDashServer }},
+      {
+        "name": "Local (this Olares dash .local domain)",
+        "server": "{{ $localDashServer }}",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php"
+      }{{- end }},
+      {
+        "name": "Los Angeles, USA",
+        "server": "https://laxspeed.sharktech.net/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php",
+        "sponsorName": "Sharktech",
+        "sponsorURL": "https://sharktech.net"
       },
       {
-        "name":        "Los Angeles, USA",
-        "server":      "https://laxspeed.sharktech.net/",
-        "dlURL":       "backend/garbage.php",
-        "ulURL":       "backend/empty.php",
-        "pingURL":     "backend/empty.php",
-        "getIpURL":    "backend/getIP.php",
+        "name": "Amsterdam, Netherlands",
+        "server": "https://amsspeed.sharktech.net/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php",
         "sponsorName": "Sharktech",
-        "sponsorURL":  "https://sharktech.net"
+        "sponsorURL": "https://sharktech.net"
       },
       {
-        "name":        "Amsterdam, Netherlands",
-        "server":      "https://amsspeed.sharktech.net/",
-        "dlURL":       "backend/garbage.php",
-        "ulURL":       "backend/empty.php",
-        "pingURL":     "backend/empty.php",
-        "getIpURL":    "backend/getIP.php",
+        "name": "Chicago, USA (Sharktech)",
+        "server": "https://chispeed.sharktech.net/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php",
         "sponsorName": "Sharktech",
-        "sponsorURL":  "https://sharktech.net"
+        "sponsorURL": "https://sharktech.net"
+      },
+      {
+        "name": "Denver, USA (Sharktech)",
+        "server": "https://denspeed.sharktech.net/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php",
+        "sponsorName": "Sharktech",
+        "sponsorURL": "https://sharktech.net"
+      },
+      {
+        "name": "Las Vegas, USA (Sharktech)",
+        "server": "https://lasspeed.sharktech.net/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php",
+        "sponsorName": "Sharktech",
+        "sponsorURL": "https://sharktech.net"
+      },
+      {
+        "name": "Volzhsky, Russia (PowerNet)",
+        "server": "https://speedtest.powernet.com.ru/",
+        "dlURL": "backend/garbage.php",
+        "ulURL": "backend/empty.php",
+        "pingURL": "backend/empty.php",
+        "getIpURL": "backend/getIP.php",
+        "sponsorName": "PowerNet",
+        "sponsorURL": "https://powernet.com.ru/"
       }
     ]
