@@ -12,7 +12,6 @@ spec:
     - Skills, Subagents and MCP-compatible tool calling.
     - Works with a Claude Pro/Max subscription (OAuth) or a Console API key; also supports Amazon Bedrock and Google Vertex AI.
     - Workspace image ships common language runtimes and build toolchains (Python, Node.js, Go, Rust, OpenJDK 21, Ruby, PHP, Lua) plus database clients (PostgreSQL, MySQL/MariaDB, Redis), git-lfs, protobuf compiler, Gradle, tmux, dig/ss/nc, shellcheck, clang-format/tidy, graphviz, and extra -dev headers (libpq, MySQL client, curl, ICU, LDAP) so agents can run typical dev commands without root.
-    - Optional DinD (`ENABLE_DIND`, default on): `docker` / `docker compose` in the terminal (privileged sidecar).
 
     **First-time Setup**
     Open the `Claude Code CLI` entrance and run `claude` to launch the OAuth login flow, or set `ANTHROPIC_API_KEY` in the app environment variables and restart.
@@ -27,10 +26,3 @@ spec:
     - `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` = false
 
     These vars are conditionally injected: blank strings and `false` toggles are *not* placed into the container env, so Claude Code sees them as truly unset (which is required — it treats `CLAUDE_CODE_USE_*` by presence, not value).
-  upgradeDescription: |
-    New features:
-    - Add Docker-in-Docker support (`ENABLE_DIND`, default on): a privileged dockerd sidecar exposes the `docker` CLI in the terminal via `DOCKER_HOST=tcp://localhost:2375`, so you can run `docker build`, `docker run`, and `docker compose` directly from Claude Code.
-    - Preinstall the `docker compose` and `docker buildx` CLI plugins.
-
-    Resource changes:
-    - Raise the resource ceiling to fit the dind sidecar: memory 17Gi -> 32Gi, CPU 5 -> 12, disk 50Gi -> 100Gi (requests stay small; these are limits).
