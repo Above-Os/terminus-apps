@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.0.1'
+  version: '1.0.2'
   categories:
     - AI
 sharedEntrances:
@@ -31,6 +31,15 @@ entrances:
     icon: https://app.cdn.olares.com/appstore/ollama/icon.png
     openMethod: window
     authLevel: internal
+# Declares every workload's replica count (v3 documented schema):
+#   workloadReplicas.deployments.<name>  — Deployment metadata.name
+#   workloadReplicas.statefulSets.<name> — StatefulSet metadata.name (omit if none)
+# Keys MUST match rendered workload names and values.yaml workloads.<name>:
+#   ollama          — engine Deployment
+#   ollamallmbasev3 — llm-init / entrance Deployment
+workloadReplicas:
+  ollama: 1
+  ollamallmbasev3: 1
 spec:
   versionName: '0.30.0'
   fullDescription: |
@@ -62,9 +71,9 @@ spec:
     - `MODEL_NAME` — OpenAI client alias, e.g. `qwen3.5-0.8b`.
     - `MODEL_MODE` — `chat` or `embedding`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
-    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` (empty for defaults).
+    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` or
+      `OLLAMA_KEEP_ALIVE=-1` to pin the model in VRAM (empty for defaults).
     - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `KEEP_ALIVE` — `true` pins the model in VRAM (`OLLAMA_KEEP_ALIVE=-1`).
     - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` — Ollama pod scheduling floor.
     - `OLLAMA_CPU_LIMIT` / `OLLAMA_MEMORY_LIMIT` — Ollama pod ceiling (set per model).
 
@@ -97,27 +106,27 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
-  # required* = install floor (low, so small models install easily).
-  # limited*  = ceiling (generous). sum(container requests) must be <=
-  # required*; bump required* on clone when OLLAMA_*_REQUEST is larger.
-  # Companion llm-init container baseline: 100m / 128Mi (nginx clientproxy
-  # was removed — the entrance points straight at llm-init).
-  - mode: nvidia
-    limitedCpu: 7000m
-    requiredCpu: 1200m
-    requiredDisk: 50Mi
-    limitedDisk: 500Gi
-    limitedMemory: 40Gi
-    requiredMemory: 5Gi
-    requiredGPUMemory: 1Gi
-    limitedGPUMemory: 24Gi
-  - mode: strix-halo
-    limitedCpu: 7000m
-    requiredCpu: 1200m
-    requiredDisk: 50Mi
-    limitedDisk: 500Gi
-    limitedMemory: 40Gi
-    requiredMemory: 5Gi
+    # required* = install floor (low, so small models install easily).
+    # limited*  = ceiling (generous). sum(container requests) must be <=
+    # required*; bump required* on clone when OLLAMA_*_REQUEST is larger.
+    # Companion llm-init container baseline: 100m / 128Mi (nginx clientproxy
+    # was removed — the entrance points straight at llm-init).
+    - mode: nvidia
+      limitedCpu: 7000m
+      requiredCpu: 1200m
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: 40Gi
+      requiredMemory: 5Gi
+      requiredGPUMemory: 1Gi
+      limitedGPUMemory: 24Gi
+    - mode: strix-halo
+      limitedCpu: 7000m
+      requiredCpu: 1200m
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: 40Gi
+      requiredMemory: 5Gi
 
   supportArch:
     - amd64
@@ -163,10 +172,10 @@ envs:
     editable: true
     applyOnChange: true
     options:
-    - title: Chat
-      value: chat
-    - title: Embedding
-      value: embedding
+      - title: Chat
+        value: chat
+      - title: Embedding
+        value: embedding
   - envName: MODEL_SUPPORTS      # CSV of supports_* keys (see README); "" if none
     required: true              # required:true so it shows in the install dialog;
     default: ""                 # default:"" lets the user leave it empty (= no caps)
@@ -186,19 +195,14 @@ envs:
     editable: true
     applyOnChange: true
     options:
-    - title: Debug
-      value: debug
-    - title: Info
-      value: info
-    - title: Warn
-      value: warn
-    - title: Error
-      value: error
-  - envName: KEEP_ALIVE          # example: false  (true pins the model in VRAM via OLLAMA_KEEP_ALIVE=-1)
-    required: true
-    type: bool
-    editable: true
-    applyOnChange: true
+      - title: Debug
+        value: debug
+      - title: Info
+        value: info
+      - title: Warn
+        value: warn
+      - title: Error
+        value: error
   # --- Ollama container resources (install-time; must fit spec.accelerator) ---
   - envName: OLLAMA_CPU_REQUEST    # example: 50m  (K8s quantity)
     required: true

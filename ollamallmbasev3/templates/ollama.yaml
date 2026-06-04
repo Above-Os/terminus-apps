@@ -1,7 +1,7 @@
 {{- /* ENGINE_ARGS is the v1.1.0 daemon-tuning surface: a KEY=VALUE list of
        OLLAMA_* env that the ollama.sh wrapper exports before `ollama serve`.
-       Clone-configurable via olaresEnv.ENGINE_ARGS; KEEP_ALIVE=true appends
-       OLLAMA_KEEP_ALIVE=-1 (pins the model in VRAM) unless already present.
+       Clone-configurable via olaresEnv.ENGINE_ARGS (e.g.
+       OLLAMA_KEEP_ALIVE=-1 pins the model in VRAM).
        Must stay in sync with the same block in templates/llm-init.yaml. */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
@@ -11,11 +11,6 @@
 {{- $memRequest := trim ($oe.OLLAMA_MEMORY_REQUEST | default "4Gi") -}}
 {{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "4") -}}
 {{- $memLimit := trim ($oe.OLLAMA_MEMORY_LIMIT | default "35Gi") -}}
-{{- if and $oe.KEEP_ALIVE (eq (lower (toString $oe.KEEP_ALIVE)) "true") -}}
-{{- if not (contains "OLLAMA_KEEP_ALIVE" $engineArgs) -}}
-{{- $engineArgs = trim (printf "%s OLLAMA_KEEP_ALIVE=-1" $engineArgs) -}}
-{{- end -}}
-{{- end -}}
 ---
 # Ollama daemon Pod (single container) so the Olares
 # applications.app.bytetrade.io/gpu-inject annotation cleanly targets just
@@ -27,14 +22,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  # Static name (NOT .Release.Name) so it matches the workloadReplicas key in
+  # OlaresManifest.yaml — clone instances get a dynamic release name, which
+  # cannot be pre-declared.
+  name: ollama
   namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: ollama
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.ollama.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: ollama

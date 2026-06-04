@@ -11,14 +11,8 @@
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "" -}}
 {{- /* ENGINE_ARGS is mirrored onto llm-init so /api/config + diagnostics
-       reflect the same OLLAMA_* tuning the ollama.sh wrapper exports.
-       KEEP_ALIVE=true appends OLLAMA_KEEP_ALIVE=-1 unless already present. */ -}}
+       reflect the same OLLAMA_* tuning the ollama.sh wrapper exports. */ -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- if and $oe.KEEP_ALIVE (eq (lower (toString $oe.KEEP_ALIVE)) "true") -}}
-{{- if not (contains "OLLAMA_KEEP_ALIVE" $engineArgs) -}}
-{{- $engineArgs = trim (printf "%s OLLAMA_KEEP_ALIVE=-1" $engineArgs) -}}
-{{- end -}}
-{{- end -}}
 ---
 # llm-init Pod (no GPU). Talks to the ollama daemon via the "ollama"
 # Service on :11434 (defined in templates/ollama.yaml). llm-init v1.1.0
@@ -28,12 +22,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: llm-init
-  namespace: {{ .Release.Namespace }}
+  # Static name matching workloadReplicas.deployments key and values.workloads
+  # (same pattern as the v3 doc affine example).
+  name: ollamallmbasev3
+  namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llm-init
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.ollamallmbasev3.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: llm-init
