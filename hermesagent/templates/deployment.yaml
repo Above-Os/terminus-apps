@@ -6,8 +6,9 @@
 # /opt/data and drops every service to the hermes user via s6-setuidgid.
 # Pinning runAsUser breaks that drop (setgroups EPERM), so we start as root
 # and pass HERMES_UID/HERMES_GID=1000 to match Olares userData ownership.
-# `kubectl exec` attaches as root; /opt/hermes/bin/hermes and the olares-cli
-# wrapper re-exec as hermes (uid 1000) so /opt/data/.olares-cli stays shared.
+# `kubectl exec` attaches as root; interactive shells source drop-to-hermes
+# (profile.d + $HOME/.bashrc) to re-exec as hermes (uid 1000). The hermes
+# CLI shim at /opt/hermes/bin/hermes does the same for non-interactive calls.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -49,6 +50,18 @@ spec:
               mkdir -p /opt/data/.olares-cli/data
               chown -R 1000:1000 /opt/data || true
               chmod -R u+rwX,g+rwX /opt/data || true
+              # Hook interactive shells into drop-to-hermes (kubectl exec is root).
+              MARKER="# hermesagent: drop-to-hermes"
+              for rc in /opt/data/.bashrc /opt/data/.profile; do
+                if [ ! -f "$rc" ] || ! grep -qF "$MARKER" "$rc" 2>/dev/null; then
+                  {
+                    echo ""
+                    echo "$MARKER"
+                    echo '[ -f /etc/profile.d/99-drop-to-hermes.sh ] && . /etc/profile.d/99-drop-to-hermes.sh'
+                  } >> "$rc"
+                fi
+              done
+              chown 1000:1000 /opt/data/.bashrc /opt/data/.profile 2>/dev/null || true
               echo "[init] /opt/data ready (owner=1000:1000, .olares-cli seeded)"
           resources: {}
           volumeMounts:
@@ -86,23 +99,8 @@ spec:
               done
               [ -z "$OLARES_CLI" ] && OLARES_CLI="$(command -v olares-cli 2>/dev/null || find / -maxdepth 5 -type f -name olares-cli -perm -u+x 2>/dev/null | head -1)"
               if [ -n "$OLARES_CLI" ]; then
-                install -m 0755 "$OLARES_CLI" /home/linuxbrew/.linuxbrew/bin/olares-cli.real
-                # Root kubectl exec sessions drop to hermes (uid 1000) so
-                # /opt/data/.olares-cli stays readable by gateway/dashboard.
-                # s6-setuidgid lives at /command/ (not on docker exec PATH).
-                printf '%s\n' \
-                  '#!/bin/sh' \
-                  'REAL="/home/linuxbrew/.linuxbrew/bin/olares-cli.real"' \
-                  'S6_SUID=/command/s6-setuidgid' \
-                  'if [ "$(id -u)" = 0 ] && [ -x "$S6_SUID" ]; then' \
-                  '  export HOME=/opt/data' \
-                  '  export OLARES_CLI_HOME="${OLARES_CLI_HOME:-/opt/data/.olares-cli}"' \
-                  '  export OLARES_CLI_DATA_DIR="${OLARES_CLI_DATA_DIR:-/opt/data/.olares-cli/data}"' \
-                  '  exec "$S6_SUID" hermes "$REAL" "$@"' \
-                  'fi' \
-                  'exec "$REAL" "$@"' \
-                  > /home/linuxbrew/.linuxbrew/bin/olares-cli
-                chmod 0755 /home/linuxbrew/.linuxbrew/bin/olares-cli
+                install -m 0755 "$OLARES_CLI" /home/linuxbrew/.linuxbrew/bin/olares-cli
+                rm -f /home/linuxbrew/.linuxbrew/bin/olares-cli.real
               else
                 echo "[init-brew] WARN: olares-cli not found"
               fi
@@ -128,10 +126,30 @@ spec:
               printf '#!/bin/sh\nF=/opt/hermes/hermes_cli/web_server.py\n[ -f "$F" ] && sed -i "s/return client_host in _LOOPBACK_HOSTS/return True/" "$F"\nexit 0\n' > /cli-bin/03-allow-dashboard-ws
               chmod 0755 /cli-bin/03-allow-dashboard-ws
 
-              # Repair olares-cli state after root kubectl exec writes.
+              # Repair olares-cli state after legacy root kubectl exec writes.
               printf '#!/bin/sh\nD="/opt/data/.olares-cli"\nmkdir -p "$D/data" 2>/dev/null || true\nchown -R 1000:1000 "$D" 2>/dev/null || true\nchmod -R u+rwX,g+rwX "$D" 2>/dev/null || true\nexit 0\n' \
                 > /cli-bin/04-fix-olares-cli-perms
               chmod 0755 /cli-bin/04-fix-olares-cli-perms
+
+              # Interactive kubectl exec drops root → hermes (uid 1000) once per session.
+              # Mounted on the hermesagent container only; $HOME/.bashrc sources it too.
+              printf '%s\n' \
+                '#!/bin/sh' \
+                '# Olares: drop interactive root shells to hermes (UID 1000).' \
+                '[ "${_HERMES_DROP_TO_HERMES:-}" = 1 ] && return 0' \
+                '[ "$(id -u)" != 0 ] && return 0' \
+                'case "$-" in *i*) ;; *) [ -z "${PS1:-}" ] && return 0 ;; esac' \
+                'S6_SUID=/command/s6-setuidgid' \
+                '[ -x "$S6_SUID" ] || return 0' \
+                'export _HERMES_DROP_TO_HERMES=1' \
+                'export HOME=/opt/data' \
+                'export OLARES_CLI_HOME="${OLARES_CLI_HOME:-/opt/data/.olares-cli}"' \
+                'export OLARES_CLI_DATA_DIR="${OLARES_CLI_DATA_DIR:-/opt/data/.olares-cli/data}"' \
+                'DROP_SHELL=/bin/bash' \
+                '[ -x "$DROP_SHELL" ] || DROP_SHELL=/bin/sh' \
+                'exec "$S6_SUID" hermes "$DROP_SHELL" -l' \
+                > /cli-bin/drop-to-hermes
+              chmod 0755 /cli-bin/drop-to-hermes
 
               chown -R 1000:1000 /home/linuxbrew || true
               echo "[init-brew] done"
@@ -517,6 +535,9 @@ spec:
               value: /opt/data/.olares-cli
             - name: OLARES_CLI_DATA_DIR
               value: /opt/data/.olares-cli/data
+            # dash reads $ENV before interactive input (kubectl exec sh).
+            - name: ENV
+              value: /etc/profile.d/99-drop-to-hermes.sh
           resources:
             limits:
               cpu: "2"
@@ -540,6 +561,14 @@ spec:
             - mountPath: /etc/cont-init.d/02-reconcile-profiles
               name: cli-bin
               subPath: 02-reconcile-profiles
+              readOnly: true
+            - mountPath: /etc/profile.d/99-drop-to-hermes.sh
+              name: cli-bin
+              subPath: drop-to-hermes
+              readOnly: true
+            - mountPath: /etc/cont-init.d/04-fix-olares-cli-perms
+              name: cli-bin
+              subPath: 04-fix-olares-cli-perms
               readOnly: true
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
             - mountPath: /home/userdata/home/
