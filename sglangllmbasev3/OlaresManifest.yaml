@@ -7,7 +7,7 @@ metadata:
   description: "Generic SGLang + llm-init base. Pick any HF model at install via env."
   appid: sglangllmbasev3
   title: SGLang LLM Base (llm-init)
-  version: '1.0.0'
+  version: '1.0.1'
   categories:
     - AI
 sharedEntrances:
@@ -40,10 +40,11 @@ spec:
 
     **HOW IT WORKS**
     The llm-init sidecar downloads the configured HF model, writes a readiness
-    sentinel + model path, and exposes an OpenAI-compatible `/v1/*` surface plus
-    a unified `/api/progress` + `/healthz` dashboard. The SGLang container waits
-    for the sentinel, then serves the model. llm-init and SGLang run in separate
-    Deployments and share the HF cache + run-state via hostPath.
+    sentinel, and exposes an OpenAI-compatible `/v1/*` surface plus a unified
+    `/api/progress` + `/healthz` dashboard. The SGLang container waits for the
+    sentinel, then loads `--model-path` from `MODEL_NAME` (HF `owner/repo`, same
+    repo as `MODEL_SOURCE`). llm-init and SGLang run in separate Deployments and
+    share the HF cache + run-state via hostPath.
 
     **Stack**
     - **SGLang** (`lmsysorg/sglang`, port 30000): GPU inference, OpenAI server.
@@ -56,7 +57,8 @@ spec:
 
     **Install-time parameters (set per model)**
     - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
-    - `MODEL_NAME` — OpenAI client alias + SGLang `--served-model-name`.
+    - `MODEL_NAME` — HF `owner/repo` for SGLang `--model-path` and `--served-model-name`
+      (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
     - `MODEL_MODE` — `chat` or `embedding`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — SGLang CLI flags, e.g. `--context-length 8192 --mem-fraction-static 0.8 --tp 1`.
@@ -119,7 +121,7 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-  - envName: MODEL_NAME          # example: qwen3-0.6b
+  - envName: MODEL_NAME          # example: Qwen/Qwen3-0.6B  (--model-path owner/repo)
     required: true
     type: string
     editable: true
