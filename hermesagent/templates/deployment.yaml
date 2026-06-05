@@ -3,11 +3,11 @@
 # as the single source of truth (SQLite, config, .env, skills, memories).
 #
 # The s6-overlay v3 image (/init as PID 1) MUST start as root: s6 chowns /run +
-# /opt/data and drops every service to the hermes user (uid 10000) via
-# s6-setuidgid. Pinning runAsUser:10000 breaks that drop (setgroups EPERM), so
-# we start as root like the upstream docker-compose (HERMES_UID/HERMES_GID).
-# `kubectl exec` then attaches as root, but /opt/hermes/bin/hermes (first on
-# PATH) re-execs the CLI as hermes so files stay uid-10000-owned.
+# /opt/data and drops every service to the hermes user via s6-setuidgid.
+# Pinning runAsUser breaks that drop (setgroups EPERM), so we start as root
+# and pass HERMES_UID/HERMES_GID=1000 to match Olares userData ownership.
+# `kubectl exec` attaches as root; /opt/hermes/bin/hermes and the olares-cli
+# wrapper re-exec as hermes (uid 1000) so /opt/data/.olares-cli stays shared.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -29,14 +29,14 @@ spec:
         io.kompose.service: hermesagent
         bytetrade.io/terminal: hermesagent
     spec:
-      # Start as root so s6 can drop services to uid 10000 itself; do NOT set
+      # Start as root so s6 can drop services to uid 1000 itself; do NOT set
       # runAsUser (breaks s6's privilege drop). fsGroup keeps volumes group-
-      # accessible to 10000.
+      # accessible to 1000 (Olares platform default).
       securityContext:
-        fsGroup: 10000
+        fsGroup: 1000
 
       initContainers:
-        # Chown /opt/data to 10000 before runtime (hostPath may start root-owned).
+        # Chown /opt/data to 1000 before runtime (hostPath may start root-owned).
         - name: init-chmod-data
           image: "beclab/aboveos-busybox:1.37.0"
           securityContext:
@@ -46,10 +46,10 @@ spec:
             - sh
             - "-c"
             - |
-              mkdir -p /opt/data
-              chown -R 10000:10000 /opt/data || true
+              mkdir -p /opt/data/.olares-cli/data
+              chown -R 1000:1000 /opt/data || true
               chmod -R u+rwX,g+rwX /opt/data || true
-              echo "[init] /opt/data ready (owner=10000:10000)"
+              echo "[init] /opt/data ready (owner=1000:1000, .olares-cli seeded)"
           resources: {}
           volumeMounts:
             - mountPath: /opt/data
@@ -86,7 +86,12 @@ spec:
               done
               [ -z "$OLARES_CLI" ] && OLARES_CLI="$(command -v olares-cli 2>/dev/null || find / -maxdepth 5 -type f -name olares-cli -perm -u+x 2>/dev/null | head -1)"
               if [ -n "$OLARES_CLI" ]; then
-                install -m 0755 "$OLARES_CLI" /home/linuxbrew/.linuxbrew/bin/olares-cli
+                install -m 0755 "$OLARES_CLI" /home/linuxbrew/.linuxbrew/bin/olares-cli.real
+                # Root kubectl exec sessions drop to hermes (uid 1000) so
+                # /opt/data/.olares-cli stays readable by gateway/dashboard.
+                printf '#!/bin/sh\nREAL="/home/linuxbrew/.linuxbrew/bin/olares-cli.real"\nif [ "$(id -u)" = 0 ]; then\n  exec s6-setuidgid hermes "$REAL" "$@"\nfi\nexec "$REAL" "$@"\n' \
+                  > /home/linuxbrew/.linuxbrew/bin/olares-cli
+                chmod 0755 /home/linuxbrew/.linuxbrew/bin/olares-cli
               else
                 echo "[init-brew] WARN: olares-cli not found"
               fi
@@ -112,7 +117,12 @@ spec:
               printf '#!/bin/sh\nF=/opt/hermes/hermes_cli/web_server.py\n[ -f "$F" ] && sed -i "s/return client_host in _LOOPBACK_HOSTS/return True/" "$F"\nexit 0\n' > /cli-bin/03-allow-dashboard-ws
               chmod 0755 /cli-bin/03-allow-dashboard-ws
 
-              chown -R 10000:10000 /home/linuxbrew || true
+              # Repair olares-cli state after root kubectl exec writes.
+              printf '#!/bin/sh\nD="/opt/data/.olares-cli"\nmkdir -p "$D/data" 2>/dev/null || true\nchown -R 1000:1000 "$D" 2>/dev/null || true\nchmod -R u+rwX,g+rwX "$D" 2>/dev/null || true\nexit 0\n' \
+                > /cli-bin/04-fix-olares-cli-perms
+              chmod 0755 /cli-bin/04-fix-olares-cli-perms
+
+              chown -R 1000:1000 /home/linuxbrew || true
               echo "[init-brew] done"
           resources: {}
           volumeMounts:
@@ -138,12 +148,12 @@ spec:
                 exit 0
               fi
               mkdir -p /opt/data/skills
-              chown 10000:10000 /opt/data/skills || true
+              chown 1000:1000 /opt/data/skills || true
               for d in /skills-staging/*/; do
                 name="$(basename "$d")"
                 rm -rf "/opt/data/skills/$name"
                 cp -a "$d" "/opt/data/skills/$name"
-                chown -R 10000:10000 "/opt/data/skills/$name"
+                chown -R 1000:1000 "/opt/data/skills/$name"
               done
               echo "[init-skills] Olares skills flattened into /opt/data/skills:"
               ls -1 /skills-staging
@@ -290,12 +300,11 @@ spec:
             # HOME on /opt/data so HOME-respecting CLIs persist + share config.
             - name: HOME
               value: /opt/data
-            # uid/gid s6 maps the hermes user to and drops services to (image
-            # default 10000; matches the chown + hostPath ownership).
+            # uid/gid s6 maps the hermes user to (Olares platform default 1000).
             - name: HERMES_UID
-              value: "10000"
+              value: "1000"
             - name: HERMES_GID
-              value: "10000"
+              value: "1000"
             - name: HERMES_HOME
               value: /opt/data
             - name: HERMES_GATEWAY_RESTART_DELAY_SECONDS
@@ -365,6 +374,10 @@ spec:
               name: cli-bin
               subPath: 02-reconcile-profiles
               readOnly: true
+            - mountPath: /etc/cont-init.d/04-fix-olares-cli-perms
+              name: cli-bin
+              subPath: 04-fix-olares-cli-perms
+              readOnly: true
             - mountPath: /dev/shm
               name: dshm
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
@@ -398,12 +411,11 @@ spec:
           env:
             - name: HOME
               value: /opt/data
-            # uid/gid s6 maps the hermes user to and drops services to (image
-            # default 10000; matches the chown + hostPath ownership).
+            # uid/gid s6 maps the hermes user to (Olares platform default 1000).
             - name: HERMES_UID
-              value: "10000"
+              value: "1000"
             - name: HERMES_GID
-              value: "10000"
+              value: "1000"
             - name: GATEWAY_HEALTH_URL
               value: "http://localhost:8642"
             # Match gateway PATH so dashboard-side `hermes ...` sees brew.
@@ -458,6 +470,10 @@ spec:
               name: cli-bin
               subPath: 03-allow-dashboard-ws
               readOnly: true
+            - mountPath: /etc/cont-init.d/04-fix-olares-cli-perms
+              name: cli-bin
+              subPath: 04-fix-olares-cli-perms
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
 
@@ -473,12 +489,11 @@ spec:
               value: xterm-256color
             - name: HOME
               value: /opt/data
-            # uid/gid s6 maps the hermes user to and drops services to (image
-            # default 10000; matches the chown + hostPath ownership).
+            # uid/gid s6 maps the hermes user to (Olares platform default 1000).
             - name: HERMES_UID
-              value: "10000"
+              value: "1000"
             - name: HERMES_GID
-              value: "10000"
+              value: "1000"
             - name: HERMES_HOME
               value: /opt/data
             - name: HOMEBREW_PREFIX
