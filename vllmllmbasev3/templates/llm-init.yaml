@@ -18,9 +18,9 @@
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # Split into two Deployments to decouple readiness:
-#   - llm-init (this file, no GPU): downloads the HF model, writes the sentinel
-#       + model_path, serves the progress UI + OpenAI /v1/* proxy on :8090.
-#   - vllm (templates/vllm.yaml, GPU): waits on the sentinel, serves on :8000.
+#   - llm-init (this file, no GPU): downloads the HF model, writes the sentinel,
+#       serves the progress UI + OpenAI /v1/* proxy on :8090.
+#   - vllm (templates/vllm.yaml, GPU): waits on the sentinel, loads MODEL_NAME on :8000.
 # The entrance (download-svc) is reachable as soon as llm-init is up, so the
 # dashboard shows download progress instead of sitting in "initializing".
 # emptyDir cannot span Pods, so hf-cache + run-state are hostPath, mounted by
