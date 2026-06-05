@@ -89,7 +89,18 @@ spec:
                 install -m 0755 "$OLARES_CLI" /home/linuxbrew/.linuxbrew/bin/olares-cli.real
                 # Root kubectl exec sessions drop to hermes (uid 1000) so
                 # /opt/data/.olares-cli stays readable by gateway/dashboard.
-                printf '#!/bin/sh\nREAL="/home/linuxbrew/.linuxbrew/bin/olares-cli.real"\nif [ "$(id -u)" = 0 ]; then\n  exec s6-setuidgid hermes "$REAL" "$@"\nfi\nexec "$REAL" "$@"\n' \
+                # s6-setuidgid lives at /command/ (not on docker exec PATH).
+                printf '%s\n' \
+                  '#!/bin/sh' \
+                  'REAL="/home/linuxbrew/.linuxbrew/bin/olares-cli.real"' \
+                  'S6_SUID=/command/s6-setuidgid' \
+                  'if [ "$(id -u)" = 0 ] && [ -x "$S6_SUID" ]; then' \
+                  '  export HOME=/opt/data' \
+                  '  export OLARES_CLI_HOME="${OLARES_CLI_HOME:-/opt/data/.olares-cli}"' \
+                  '  export OLARES_CLI_DATA_DIR="${OLARES_CLI_DATA_DIR:-/opt/data/.olares-cli/data}"' \
+                  '  exec "$S6_SUID" hermes "$REAL" "$@"' \
+                  'fi' \
+                  'exec "$REAL" "$@"' \
                   > /home/linuxbrew/.linuxbrew/bin/olares-cli
                 chmod 0755 /home/linuxbrew/.linuxbrew/bin/olares-cli
               else
