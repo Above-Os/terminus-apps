@@ -3,11 +3,11 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: vllmllmbasev3
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  icon: https://app.cdn.olares.com/appstore/vllm/icon.png
   description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
   appid: vllmllmbasev3
   title: vLLM LLM Base (llm-init)
-  version: '1.0.1'
+  version: '1.0.2'
   categories:
     - AI
 sharedEntrances:
@@ -17,7 +17,7 @@ sharedEntrances:
     title: vLLM LLM API
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    icon: https://app.cdn.olares.com/appstore/vllm/icon.png
 entrances:
   # Routes straight to the llm-init download/UI Service (download-svc:8090).
   # The entrance NAME stays "vllmclient" so .Values.domain.vllmclient (used
@@ -28,7 +28,7 @@ entrances:
     port: 8090
     host: download-svc
     title: vLLM LLM
-    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    icon: https://app.cdn.olares.com/appstore/vllm/icon.png
     openMethod: window
     authLevel: internal
 # Declares every workload's replica count (flat map; keys = Deployment
@@ -50,9 +50,10 @@ spec:
 
     **HOW IT WORKS**
     The llm-init sidecar downloads the configured HF model, writes a readiness
-    sentinel + model path, and exposes an OpenAI-compatible `/v1/*` surface plus
-    a unified `/api/progress` + `/healthz` dashboard. The vLLM container waits
-    for the sentinel, then serves the model. Both containers live in the SAME
+    sentinel, and exposes an OpenAI-compatible `/v1/*` surface plus a unified
+    `/api/progress` + `/healthz` dashboard. The vLLM container waits for the
+    sentinel, then loads `--model` from `MODEL_NAME` (HF `owner/repo`, same repo
+    as `MODEL_SOURCE`). Both containers live in the SAME
     Pod and share the model dir + sentinel.
 
     **Stack**
@@ -70,7 +71,8 @@ spec:
 
     **Install-time parameters (set per model)**
     - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
-    - `MODEL_NAME` — OpenAI client alias + vLLM `--served-model-name`.
+    - `MODEL_NAME` — HF `owner/repo` for vLLM `--model` and `--served-model-name`
+      (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
     - `MODEL_MODE` — `chat` or `embedding`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1` (empty for vLLM defaults).
@@ -174,7 +176,7 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-  - envName: MODEL_NAME          # example: qwen3-0.6b  (OpenAI alias + --served-model-name)
+  - envName: MODEL_NAME          # example: Qwen/Qwen3-0.6B  (--model owner/repo)
     required: true
     type: string
     editable: true
