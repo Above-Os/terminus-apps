@@ -1,0 +1,201 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacppllmbasev3
+  icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+  description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
+  appid: llamacppllmbasev3
+  title: llama.cpp LLM Base (llm-init)
+  version: '1.0.0'
+  categories:
+    - AI
+sharedEntrances:
+  - name: llamacppllmbasev3
+    host: sharedentrances-api
+    port: 0
+    title: llama.cpp LLM API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: llama.cpp LLM
+    icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  llamacpp: 1
+  llamacppllmbasev3: 1
+spec:
+  versionName: 'b9426'
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app and a generic *base*: it is NOT tied to any specific
+    model. The model to serve is chosen entirely at install time through
+    environment variables, so the same Helm chart can serve any GGUF model that
+    llama.cpp supports.
+
+    **HOW IT WORKS**
+    The llm-init sidecar downloads the configured GGUF model, writes a readiness
+    sentinel + model path, and exposes an OpenAI-compatible `/v1/*` surface plus
+    a unified `/api/progress` + `/healthz` dashboard. The llama.cpp container
+    waits for the sentinel, then serves the model. llm-init and llama.cpp run in
+    separate Deployments and share the HF cache + run-state via hostPath.
+
+    **Stack**
+    - **llama.cpp** (`ggml-org/llama.cpp`, port 8081): GGUF inference, OpenAI server.
+    - **llm-init** (`beclab/llm-init`, port 8090): GGUF download, OpenAI `/v1/*`,
+      progress UI; proxies the engine at `http://llamacpp:8081`.
+
+    **Model storage (App Common)**
+    GGUF files go to the shared App Common store `appCommon/huggingface`, mounted
+    at `/cache/hf/hub`. All HF-based apps share it; llm-init writes, llama.cpp reads.
+
+    **Install-time parameters (set per model)**
+    - `MODEL_SOURCE` — `hf://<repo> --include <file>.gguf` (the --include pins the
+      exact quant file; split GGUFs auto-load from the 00001-of-... part). For a
+      VLM, append the projector as a comma-separated second segment, e.g.
+      `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`;
+      llm-init downloads both and wires `--mmproj` automatically.
+    - `MODEL_NAME` — `owner/repo:quant` for `llama-server -hf` (e.g.
+      `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`); also used as OpenAI `--alias`.
+    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
+      offloads all layers to GPU; omit for CPU). Also accepts `LLAMA_ARG_*=val`.
+    - `LOG_LEVEL` — `debug | info | warn | error`.
+    - `LLAMACPP_CPU_REQUEST` / `LLAMACPP_MEMORY_REQUEST` — engine pod scheduling floor.
+    - `LLAMACPP_CPU_LIMIT` / `LLAMACPP_MEMORY_LIMIT` — engine pod ceiling.
+
+    **NOTE ON RESOURCES**
+    - The CUDA server image offloads to GPU with `-ngl all`; GPU memory is
+      governed by `gpu-inject` + manifest `*GPUMemory`. Without `-ngl`, inference
+      runs on CPU (raise the CPU/RAM envs accordingly).
+    - Container CPU/RAM requests & limits are install-time env (`LLAMACPP_CPU_*` /
+      `LLAMACPP_MEMORY_*`). Olares validates sums across llm-init + llamacpp.
+
+  upgradeDescription: |
+    Generic llama.cpp + llm-init base (llm-init v1.2.1, beclab/ggml-org-llama.cpp:server-cuda12-b9426).
+    Loads any GGUF model; model identity, source and tuning are install-time env.
+    Models live in the shared App Common store appCommon/huggingface.
+    Sentinel/model_path are per-instance under appCache/llm-init-run/<release>.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/ggml-org/llama.cpp
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+  - mode: nvidia
+    requiredCpu: 1200m
+    limitedCpu: 16000m
+    requiredMemory: 3Gi
+    limitedMemory: 64Gi
+    requiredDisk: 50Mi
+    limitedDisk: 500Gi
+    requiredGPUMemory: 1Gi
+    limitedGPUMemory: 80Gi
+
+  supportArch:
+    - amd64
+permission:
+  appData: true
+  appCache: true   # sentinel/model_path live under appCache/llm-init-run/<release>
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  # Single value for text models; for VLM append a comma-separated mmproj segment:
+  #   hf://unsloth/Qwen3.5-2B-GGUF --include model.gguf,hf://unsloth/Qwen3.5-2B-GGUF --include mmproj-F16.gguf
+  - envName: MODEL_SOURCE        # example: hf://unsloth/Qwen3-0.6B-GGUF --include Qwen3-0.6B-Q4_K_M.gguf
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME          # example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M (-hf repo:quant)
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS         # example: -c 8192 -ngl all -fa on
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LOG_LEVEL
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST    # example: 500m
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LLAMACPP_MEMORY_REQUEST # example: 2Gi
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LLAMACPP_CPU_LIMIT      # example: 6
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LLAMACPP_MEMORY_LIMIT   # example: 16Gi
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
