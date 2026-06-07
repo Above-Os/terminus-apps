@@ -1,6 +1,8 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.SGLANG_CPU_REQUEST | default "200m") -}}
 {{- $memRequest := trim ($oe.SGLANG_MEMORY_REQUEST | default "2Gi") -}}
 {{- $cpuLimit := trim ($oe.SGLANG_CPU_LIMIT | default "6") -}}
@@ -9,7 +11,8 @@
 ---
 # SGLang engine Deployment (GPU). wrappers/sglang.sh blocks on the sentinel
 # llm-init writes, then execs launch_server with --model-path "$MODEL_NAME" on
-# :30000. llm-init reverse-proxies at http://sglang:30000 — Service name MUST be "sglang".
+# :30000. Engine env pins HF_HUB_CACHE/HF_HOME and HF_HUB_OFFLINE so repo id
+# resolves llm-init's read-only shared cache without Hub metadata writes.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,6 +65,20 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_OFFLINE
+              value: "1"
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: PGID
