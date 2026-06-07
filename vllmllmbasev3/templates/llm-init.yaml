@@ -74,7 +74,7 @@ spec:
               mountPath: /run/llm-init
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.1.0
+          image: docker.io/beclab/llm-init:v1.2.3
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
@@ -138,8 +138,10 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
+              # hf download (4 workers) needs headroom; 256Mi gets OOMKilled
+              # mid-download -> pod restart -> state machine wedges. 1Gi is safe.
               cpu: 500m
-              memory: 256Mi
+              memory: 1Gi
 ---
 # llm-init download/progress + OpenAI proxy surface (app entrance backend).
 apiVersion: v1
