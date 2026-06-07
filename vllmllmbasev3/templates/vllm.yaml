@@ -3,6 +3,8 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- /* Defaults avoid empty K8s quantities. CPU needs "m" (200m = 0.2 core).
        Sums (llm-init + vllm) must fit the manifest accelerator limits. */ -}}
 {{- $cpuRequest := trim ($oe.VLLM_CPU_REQUEST | default "200m") -}}
@@ -16,7 +18,8 @@
 # the shared run-state dir, then serves --model "$MODEL_NAME" on :8000. llm-init
 # reverse-proxies http://vllm:8000 via the "vllm" Service below.
 # Shared hostPath volumes (read-only here, llm-init owns writes): hf-cache
-# (/cache/hf/hub), run-state (sentinel handshake).
+# (/cache/hf/hub). Engine env pins HF_HUB_CACHE/HF_HOME and HF_HUB_OFFLINE so
+# --model "$MODEL_NAME" resolves the llm-init cache without Hub writes.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,6 +72,20 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_OFFLINE
+              value: "1"
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: PGID
