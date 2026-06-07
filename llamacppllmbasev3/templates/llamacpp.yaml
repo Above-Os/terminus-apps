@@ -10,10 +10,8 @@
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # llama.cpp engine Deployment. wrappers/llamacpp.sh blocks on the sentinel
-# (download ready), then execs llama-server -hf "$MODEL_NAME".
-# llm-init reverse-proxies at http://llamacpp:8081 — Service name MUST be
-# "llamacpp". GPU base: CUDA server build + gpu-inject; put `-ngl all` in
-# ENGINE_ARGS to offload all layers to the GPU.
+# (download ready), then execs llama-server -hf "$MODEL_NAME". HF_HUB_CACHE/
+# HF_HOME/HF_HUB_OFFLINE pin the read-only shared cache llm-init populated.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -68,6 +66,10 @@ spec:
               value: "{{ $engineArgs }}"
             - name: HF_HUB_CACHE
               value: /cache/hf/hub
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_OFFLINE
+              value: "1"
 {{- if $hfEndpoint }}
             - name: HF_ENDPOINT
               value: "{{ $hfEndpoint }}"

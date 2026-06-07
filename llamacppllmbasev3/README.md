@@ -4,7 +4,7 @@
 但引擎换成 llama.cpp、模型格式换成 **GGUF**。
 
 - **引擎镜像**: `beclab/ggml-org-llama.cpp:server-cuda12-b9426`（GPU / CUDA 12）
-- **llm-init**: `beclab/llm-init:v1.2.1`
+- **llm-init**: `beclab/llm-init:v1.2.3`
 - **版本**: chart `1.0.0` / appVersion `b9426`
 
 ## 架构
