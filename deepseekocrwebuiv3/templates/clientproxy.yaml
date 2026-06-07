@@ -6,6 +6,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   nginx.conf: |
+{{- `
     upstream app_backend {
       server deepseekocrwebuiv3-svc:8001 max_fails=1 fail_timeout=2s;
       server download-svc:8090 backup;
@@ -67,6 +68,7 @@ data:
         }
       }
     }
+` | nindent 4 }}
 
 ---
 apiVersion: apps/v1
@@ -77,7 +79,7 @@ metadata:
   labels:
     io.kompose.service: deepseekocrwebui
 spec:
-  replicas: {{ .Values.workloads.deepseekocrwebuiv3web.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
       io.kompose.service: deepseekocrwebui
