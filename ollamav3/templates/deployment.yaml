@@ -4,12 +4,14 @@ metadata:
   creationTimestamp: null
   labels:
     io.kompose.service: ollama
-  name: {{ .Release.Name }}
+  # Deployment name MUST match metadata.name / appid (Olares workloadReplicas
+  # contract). Service name stays "ollama" for entrance host resolution.
+  name: ollamav3
   namespace: {{ .Release.Namespace }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.ollamav3.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: ollama
@@ -30,11 +32,14 @@ spec:
             - sh
             - "-c"
             - |
-              chown -R 1000:1000 /app-data-root
+              mkdir -p /cuda-cache/ComputeCache
+              chown -R 1000:1000 /app-data-root /cuda-cache
           resources: {}
           volumeMounts:
-            - name: data
+            - name: ollama-data
               mountPath: /app-data-root
+            - name: cuda-compute-cache
+              mountPath: /cuda-cache
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
@@ -42,7 +47,7 @@ spec:
             runAsUser: 0
       containers:
         - name: ollama
-          image: "docker.io/beclab/ollama-ollama:0.24.0"
+          image: docker.io/ollama/ollama:0.30.6
           envFrom:
             - configMapRef:
                 name: ollama-env
@@ -74,11 +79,22 @@ spec:
               memory: 4Gi
           volumeMounts:
             - mountPath: "/root/.ollama"
-              name: data
+              name: ollama-data
+            - mountPath: "/root/.nv/ComputeCache"
+              name: cuda-compute-cache
+              subPath: ComputeCache
       volumes:
-        - name: data
+        # App Common shared model store: all ollama-based apps mount the SAME
+        # appCommon/ollama dir so the blob store dedups by digest. appCommon is
+        # SSD on single-node, JuiceFS on multi-node (requires permission.appCommon).
+        - name: ollama-data
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/ollama"
+            path: "{{ .Values.userspace.appCommon }}/ollama"
+            type: DirectoryOrCreate
+        # CUDA JIT compile cache lives alongside the models under appCommon/ollama.
+        - name: cuda-compute-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/ollama/.nv"
             type: DirectoryOrCreate
       restartPolicy: Always
 status: {}
