@@ -8,7 +8,7 @@ metadata:
     io.kompose.service: xinference
   # Primary workload: named after the release (== appid xinferencev3) for v3
   # workload verification. The label/selector stays io.kompose.service: xinference
-  # so the Services below and the nginx proxy keep resolving.
+  # so the Services below keep resolving.
   name: '{{ .Release.Name }}'
   namespace: '{{ .Release.Namespace }}'
   annotations:
@@ -68,10 +68,13 @@ spec:
         resources:
           limits:
             cpu: "5"
-            memory: 20Gi
+            # Large-model launch/download can spike well past 20Gi (weights staging,
+            # vLLM worker init, HF/ModelScope cache I/O). 40Gi avoids OOM during
+            # first boot of big checkpoints on typical GPU nodes.
+            memory: 40Gi
           requests:
             cpu: "1"
-            memory: 2Gi
+            memory: 6Gi
         volumeMounts:
         - mountPath: /root
           name: data
@@ -89,7 +92,9 @@ spec:
       - name: shm
         emptyDir:
           medium: Memory
-          sizeLimit: "2Gi"
+          # vLLM / torch multiprocessing uses /dev/shm heavily; 2Gi was tight for
+          # multi-GB models.
+          sizeLimit: "8Gi"
 status: {}
 ---
 apiVersion: v1
