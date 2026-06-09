@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.0.0'
+  version: '1.0.2'
   categories:
     - AI
 sharedEntrances:
@@ -67,21 +67,23 @@ spec:
     - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
       offloads all layers to GPU; omit for CPU). Also accepts `LLAMA_ARG_*=val`.
     - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `LLAMACPP_CPU_REQUEST` / `LLAMACPP_MEMORY_REQUEST` — engine pod scheduling floor.
-    - `LLAMACPP_CPU_LIMIT` / `LLAMACPP_MEMORY_LIMIT` — engine pod ceiling.
+    - `LLAMACPP_CPU_REQUEST` / `LLAMACPP_MEMORY_REQUEST` / `LLAMACPP_CPU_LIMIT` /
+      `LLAMACPP_MEMORY_LIMIT` — engine pod CPU/RAM (fixed per clone template).
+    - `LLAMACPP_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
+      fixed after install). NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024).
 
     **NOTE ON RESOURCES**
-    - The CUDA server image offloads to GPU with `-ngl all`; GPU memory is
-      governed by `gpu-inject` + manifest `*GPUMemory`. Without `-ngl`, inference
-      runs on CPU (raise the CPU/RAM envs accordingly).
-    - Container CPU/RAM requests & limits are install-time env (`LLAMACPP_CPU_*` /
-      `LLAMACPP_MEMORY_*`). Olares validates sums across llm-init + llamacpp.
+    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto) from rendered chart.
+      `requiredDisk` / `limitedDisk` stay fixed.
+    - GPU offload via `-ngl all` in `ENGINE_ARGS`; without `-ngl`, runs on CPU.
 
   upgradeDescription: |
-    Generic llama.cpp + llm-init base (llm-init v1.2.1, beclab/ggml-org-llama.cpp:server-cuda12-b9426).
+    Generic llama.cpp + llm-init base (llm-init v1.2.3, beclab/ggml-org-llama.cpp:server-cuda12-b9426).
     Loads any GGUF model; model identity, source and tuning are install-time env.
     Models live in the shared App Common store appCommon/huggingface.
     Sentinel/model_path are per-instance under appCache/llm-init-run/<release>.
+    v1.0.2: align resource envs with ollamallmbasev3 — gpumem Mi, accelerator -1,
+    LLAMACPP_REQUIRED_GPU_MEMORY install prompt, CPU/RAM envs non-editable.
 
   developer: beclab
   website: https://github.com/beclab/llm-init
@@ -95,15 +97,22 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
-  - mode: nvidia
-    requiredCpu: 1200m
-    limitedCpu: 16000m
-    requiredMemory: 3Gi
-    limitedMemory: 64Gi
-    requiredDisk: 50Mi
-    limitedDisk: 500Gi
-    requiredGPUMemory: 1Gi
-    limitedGPUMemory: 80Gi
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
 
   supportArch:
     - amd64
@@ -179,23 +188,32 @@ envs:
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  - envName: LLAMACPP_CPU_REQUEST    # example: 500m
+  - envName: LLAMACPP_CPU_REQUEST    # default: 500m
+    required: true
+    default: "500m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST # default: 2Gi
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT   # default: 16Gi
+    required: true
+    default: "16Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # nvidia: gpumem Mi; nvidia-gb10: pod memory
     required: true
     type: string
-    editable: true
-    applyOnChange: true
-  - envName: LLAMACPP_MEMORY_REQUEST # example: 2Gi
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
-  - envName: LLAMACPP_CPU_LIMIT      # example: 6
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
-  - envName: LLAMACPP_MEMORY_LIMIT   # example: 16Gi
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
+    editable: false
+    applyOnChange: false
