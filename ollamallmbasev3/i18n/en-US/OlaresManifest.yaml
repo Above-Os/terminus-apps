@@ -32,17 +32,18 @@ spec:
     - `MODEL_MODE` — `chat` or `embedding`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` (empty for defaults).
-    - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` — Ollama pod scheduling floor.
-    - `OLLAMA_CPU_LIMIT` / `OLLAMA_MEMORY_LIMIT` — Ollama pod ceiling (set per model).
+    - `LOG_LEVEL` — `debug | info | warn | error` (default `debug`).
+    - `OLLAMA_CPU_*` / `OLLAMA_MEMORY_*` — ollama pod CPU/RAM (fixed per clone).
+    - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required at install).
+      Discrete NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024); Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
-    Ollama CPU/RAM are install-time env. `required*` is the low install
-    floor; `limited*` is the generous ceiling. Raise `requiredMemory` /
-    `requiredCpu` on clone when `OLLAMA_*_REQUEST` exceeds the floor.
+    CPU/RAM/GPU accelerator fields are `-1` (auto from rendered chart).
+    `requiredDisk` / `limitedDisk` are fixed in the manifest. Tune ollama
+    CPU/RAM and VRAM per model via `OLLAMA_*` env.
 
   upgradeDescription: |
-    Generic Ollama + llm-init base (llm-init v1.2.3, ollama/ollama:0.30.6).
+    Generic Ollama + llm-init base (llm-init v1.1.0, ollama/ollama:0.30.0).
     Supports ollama:// Library pulls. Model identity and tuning are env.
     v1.0.0: models now live in the shared cross-app App Common store
     appCommon/ollama instead of Home/Ollama — re-pull on upgrade; old

@@ -5,12 +5,31 @@
        Must stay in sync with the same block in templates/llm-init.yaml. */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- /* K8s rejects empty resource quantities; fall back to ollamav3-style
-       defaults when env is unset so install/helm render never emits "". */ -}}
-{{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "50m") -}}
-{{- $memRequest := trim ($oe.OLLAMA_MEMORY_REQUEST | default "4Gi") -}}
-{{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "4") -}}
+{{- /* CPU/RAM via olaresEnv (manifest defaults); accelerator -1 sums rendered
+       workloads. Defaults: 200m/2Gi req, 6/35Gi lim (+ llm-init 200m/256Mi). */ -}}
+{{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "200m") -}}
+{{- $memRequest := trim ($oe.OLLAMA_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.OLLAMA_MEMORY_LIMIT | default "35Gi") -}}
+{{- /* Per-instance model memory quota (see unifiedMem branch below). */ -}}
+{{- $gpuMem := trim ($oe.OLLAMA_REQUIRED_GPU_MEMORY | default "4096Mi") -}}
+{{- /* nvidia.com/gpumem must use Mi (Gi×1024), not raw bytes — e.g. 4Gi -> 4096Mi. */ -}}
+{{- $gpuMemMi := $gpuMem -}}
+{{- if hasSuffix "Gi" $gpuMem -}}
+{{- $gpuMemMi = printf "%dMi" (mul (int (trimSuffix "Gi" $gpuMem)) 1024) -}}
+{{- end -}}
+{{- /* Olares injects .Values.gpu / .Values.GPU.Type at install (SelectedGpuType).
+       Discrete NVIDIA: OLLAMA_REQUIRED_GPU_MEMORY -> nvidia.com/gpumem (Mi).
+       Spark (nvidia-gb10) unified memory: same env -> pod memory r/l. */ -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = $gpuMem -}}
+{{- $memLimit = $gpuMem -}}
+{{- end -}}
 ---
 # Ollama daemon Pod (single container) so the Olares
 # applications.app.bytetrade.io/gpu-inject annotation cleanly targets just
@@ -68,7 +87,7 @@ spec:
             defaultMode: 0555
       containers:
         - name: ollama
-          image: docker.io/ollama/ollama:0.30.6
+          image: docker.io/ollama/ollama:0.30.0
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/ollama.sh"]
           env:
@@ -120,6 +139,9 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: "{{ $gpuMemMi }}"
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"

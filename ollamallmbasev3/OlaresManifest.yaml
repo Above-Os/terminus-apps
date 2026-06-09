@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.0.4'
+  version: '1.1.17'
   categories:
     - AI
 sharedEntrances:
@@ -73,23 +73,30 @@ spec:
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` or
       `OLLAMA_KEEP_ALIVE=-1` to pin the model in VRAM (empty for defaults).
-    - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` — Ollama pod scheduling floor.
-    - `OLLAMA_CPU_LIMIT` / `OLLAMA_MEMORY_LIMIT` — Ollama pod ceiling (set per model).
+    - `LOG_LEVEL` — `debug | info | warn | error` (default `debug`).
+    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` / `OLLAMA_CPU_LIMIT` /
+      `OLLAMA_MEMORY_LIMIT` — ollama pod CPU/RAM (fixed per clone template;
+      not editable after install).
+    - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
+      fixed after install). NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024).
 
     **NOTE ON RESOURCES**
-    - Ollama container CPU/RAM **requests & limits** are install-time env
-      (`OLLAMA_CPU_*` / `OLLAMA_MEMORY_*`); tune per model at install.
-    - `requiredCpu` / `requiredMemory` are the **install floor** (kept low so
-      small models can install on modest hardware). `limited*` are the
-      **ceiling** (generous, fixed). Sum of container requests must stay
-      within `required*` — raise those manifest fields on clone when
-      `OLLAMA_*_REQUEST` exceeds the default floor. GPU memory is
-      manifest-only.
+    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto): Olares derives them
+      from the rendered chart. `requiredDisk` / `limitedDisk` stay fixed in the
+      manifest (disk is not auto-summed from workloads). Tune ollama CPU/RAM
+      and VRAM per model via the `OLLAMA_*` env vars above.
 
   upgradeDescription: |
     Generic Ollama + llm-init base (llm-init v1.2.3, ollama/ollama:0.30.6).
     Supports ollama:// Library pulls. Model identity and tuning are env.
+    v1.1.17: raise shared engine MEMORY_LIMIT default to 35Gi.
+    v1.1.16: unify engine CPU/RAM defaults to 200m/2Gi/6/35Gi across llm bases.
+    v1.1.15: OLLAMA_REQUIRED_GPU_MEMORY no manifest default (install dialog).
+    v1.1.14: gpumem as Mi (Gi×1024); resource OLLAMA_* envs non-editable.
+    v1.1.13: drop strix-halo accelerator; Spark (nvidia-gb10) unified memory only.
+    v1.1.11: repackage chart; accelerator auto-resource strings quoted as "-1".
+    v1.0.5: accelerator resources auto (-1); ollama CPU/RAM/VRAM via OLLAMA_*
+    env with defaults; LOG_LEVEL defaults to debug.
     v1.0.4: bump llm-init to v1.2.3, Ollama 0.30.6, raise llm-init memory limit to 1Gi.
     v1.0.0: models now live in the shared cross-app App Common store
     appCommon/ollama instead of Home/Ollama — re-pull on upgrade; old
@@ -107,28 +114,27 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
-    # required* = install floor (low, so small models install easily).
-    # limited*  = ceiling (generous). sum(container requests) must be <=
-    # required*; bump required* on clone when OLLAMA_*_REQUEST is larger.
-    # Companion llm-init container: requests 200m / 256Mi, limits 1 / 1Gi
-    # (1Gi avoids OOMKill during model pull). Sums still fit required*/limited*.
+    # Modes (must match node gpu.bytetrade.io/type / install-time GPU selection):
+    #   nvidia       — discrete GPU; OLLAMA_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    # -1 = auto (CPU/RAM/GPU only): Olares sums rendered workload resources.
+    # Disk is NOT auto-summed — keep requiredDisk/limitedDisk explicit.
     - mode: nvidia
-      limitedCpu: 7000m
-      requiredCpu: 1200m
+      limitedCpu: "-1"
+      requiredCpu: "-1"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      limitedMemory: 40Gi
-      requiredMemory: 5Gi
-      requiredGPUMemory: 1Gi
-      limitedGPUMemory: 24Gi
-    - mode: strix-halo
-      limitedCpu: 7000m
-      requiredCpu: 1200m
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      limitedMemory: 40Gi
-      requiredMemory: 5Gi
-
+      limitedMemory: "-1"
+      requiredMemory: "-1"
   supportArch:
     - amd64
     - arm64
@@ -191,10 +197,11 @@ envs:
     editable: true
     applyOnChange: true
   - envName: LOG_LEVEL           # single-select: debug | info | warn | error
-    required: true
+    required: false
     type: string
     editable: true
     applyOnChange: true
+    default: "debug"
     options:
       - title: Debug
         value: debug
@@ -204,24 +211,33 @@ envs:
         value: warn
       - title: Error
         value: error
-  # --- Ollama container resources (install-time; must fit spec.accelerator) ---
-  - envName: OLLAMA_CPU_REQUEST    # example: 50m  (K8s quantity)
+  # --- Ollama pod resources (fixed per clone template; rendered into ollama.yaml) ---
+  - envName: OLLAMA_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_REQUEST # default: 2Gi
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_LIMIT   # default: 35Gi
+    required: true
+    default: "35Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # nvidia: gpumem Mi; nvidia-gb10: pod memory
     required: true
     type: string
-    editable: true
-    applyOnChange: true
-  - envName: OLLAMA_MEMORY_REQUEST # example: 4Gi
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
-  - envName: OLLAMA_CPU_LIMIT      # example: 4
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
-  - envName: OLLAMA_MEMORY_LIMIT   # example: 35Gi
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
+    editable: false
+    applyOnChange: false
