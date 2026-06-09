@@ -1,0 +1,68 @@
+---
+olaresManifest.version: '0.11.0'
+olaresManifest.type: app
+apiVersion: 'v1'
+metadata:
+  name: debugcli
+  description: In-pod nginx static page (default) + Ubuntu 22.04 web terminal for CLI.
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  appid: debugcli
+  version: '1.0.0'
+  title: Debug CLI
+  categories:
+  - Utilities
+  - Developer
+
+# 默认在 Olares 打开 8080 → 同 Pod 内 nginx 的 index.html；8081 为 Web 终端
+entrances:
+- name: debugcli
+  port: 8080
+  host: debugcliingress
+  title: Debug CLI
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  authLevel: private
+  openMethod: window
+- name: debugcliTerminal
+  port: 8081
+  host: debugcliingress
+  title: Web Terminal
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  authLevel: private
+  openMethod: window
+
+permission:
+  appData: true
+  appCache: false
+
+spec:
+  versionName: '1.0.0'
+  fullDescription: |
+    同 Pod 内包含：
+    - **nginx**：`index.html` 静态页，经入口 **8080** 在 Olares 中默认打开。
+    - **Ubuntu CLI 镜像**（`beclab/debug-cli-ubuntu22.04`）以 `sleep infinity` 常驻，经 **Web Terminal**（`beclab/terminal`，**8081**）进入 `debugcli-shell` 执行命令。
+
+    应用数据目录挂载到容器 **`/workspace`**（`userspace.appData`），便于放置脚本与结果。静态页内容由 Chart 内 `ConfigMap` 提供，可按需改模板 `configmap-nginx-workload.yaml`。
+  developer: Olares
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  requiredMemory: 256Mi
+  # Must exceed sum of all container limits.cpu / limits.memory in templates (see check-chart).
+  limitedMemory: 8Gi
+  requiredDisk: 128Mi
+  limitedDisk: 2Gi
+  requiredCpu: 0.05
+  limitedCpu: "3"
+  supportArch:
+    - amd64
+    - arm64
+
+options:
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      type: system
+      version: '>=1.12.6-0'
+  appScope:
+    clusterScoped: false
