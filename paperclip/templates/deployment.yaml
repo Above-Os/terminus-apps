@@ -63,12 +63,58 @@ spec:
           - sh
           - '-c'
           - |
+            set -e
+            mkdir -p /paperclip/.local/bin /paperclip/.npm-global/bin \
+              /paperclip/.config /paperclip/.local/share /paperclip/.cache
             chown -R 1000:1000 /paperclip || true
+            chmod -R u+rwX,g+rwX /paperclip || true
+            PATH_MARKER="# paperclip: brew-path"
+            for rc in /paperclip/.bashrc /paperclip/.profile; do
+              if ! grep -qF "$PATH_MARKER" "$rc" 2>/dev/null; then
+                {
+                  echo ""
+                  echo "$PATH_MARKER"
+                  echo 'export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"'
+                  echo 'export HOMEBREW_NO_AUTO_UPDATE="${HOMEBREW_NO_AUTO_UPDATE:-1}"'
+                  echo 'export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-/paperclip/.npm-global}"'
+                  echo 'export PATH="/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+                } >> "$rc"
+              fi
+            done
+            chown 1000:1000 /paperclip/.bashrc /paperclip/.profile 2>/dev/null || true
+            echo "[init-permissions] /paperclip ready (owner=1000:1000)"
         volumeMounts:
           - name: data
             mountPath: /paperclip
         securityContext:
           runAsUser: 0
+      - name: init-install-dev
+        image: "beclab/harveyff-openclaw-brew-base:2026.5.29-cli"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -euo pipefail
+            if [ ! -d /brew-staging/.linuxbrew ]; then
+              echo "[init-install-dev] FATAL: /brew-staging/.linuxbrew missing"
+              exit 1
+            fi
+            mkdir -p /home/linuxbrew/.linuxbrew
+            if cmp -s /brew-staging/.linuxbrew/.brew-base-build /home/linuxbrew/.linuxbrew/.brew-base-build 2>/dev/null; then
+              echo "[init-install-dev] brew base up to date, skip copy"
+            else
+              echo "[init-install-dev] materializing brew base to appData..."
+              cp -a /brew-staging/.linuxbrew/. /home/linuxbrew/.linuxbrew/
+            fi
+            chown -R 1000:1000 /home/linuxbrew || true
+            echo "[init-install-dev] done"
+        volumeMounts:
+          - name: brew-volume
+            mountPath: /home/linuxbrew
       - name: wait-for-postgres
         image: "docker.io/beclab/wait-for:0.1.0"
         args:
@@ -106,6 +152,14 @@ spec:
               value: "/paperclip/.local/share"
             - name: XDG_CACHE_HOME
               value: "/paperclip/.cache"
+            - name: HOMEBREW_PREFIX
+              value: "/home/linuxbrew/.linuxbrew"
+            - name: HOMEBREW_NO_AUTO_UPDATE
+              value: "1"
+            - name: NPM_CONFIG_PREFIX
+              value: "/paperclip/.npm-global"
+            - name: PATH
+              value: "/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             - name: PAPERCLIP_DEPLOYMENT_MODE
               value: "local_trusted"
             - name: PAPERCLIP_PUBLIC_URL
@@ -115,8 +169,6 @@ spec:
             - name: PAPERCLIP_ALLOWED_HOSTNAMES
               value: "{{ .Values.domain.paperclip }}"
             - name: PAPERCLIP_API_URL
-              value: "http://127.0.0.1:3101"
-            - name: PAPERCLIP_INTERNAL_URL
               value: "http://127.0.0.1:3101"
             - name: OPENAI_API_KEY
               value: '{{ .Values.olaresEnv.OPENAI_API_KEY }}'
@@ -140,6 +192,8 @@ spec:
           volumeMounts:
             - mountPath: /paperclip
               name: data
+            - mountPath: /home/linuxbrew
+              name: brew-volume
         - name: nginx
           image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
           imagePullPolicy: IfNotPresent
@@ -183,6 +237,15 @@ spec:
           command:
             - sleep
             - infinity
+          startupProbe:
+            exec:
+              command:
+                - /home/linuxbrew/.linuxbrew/bin/python3
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 60
           env:
             - name: TERM
               value: xterm-256color
@@ -196,6 +259,14 @@ spec:
               value: "/paperclip/.local/share"
             - name: XDG_CACHE_HOME
               value: "/paperclip/.cache"
+            - name: HOMEBREW_PREFIX
+              value: "/home/linuxbrew/.linuxbrew"
+            - name: HOMEBREW_NO_AUTO_UPDATE
+              value: "1"
+            - name: NPM_CONFIG_PREFIX
+              value: "/paperclip/.npm-global"
+            - name: PATH
+              value: "/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             - name: PAPERCLIP_PUBLIC_URL
               value: "https://{{ $paperclipDomain }}"
             - name: PAPERCLIP_ALLOWED_HOSTNAMES
@@ -225,11 +296,17 @@ spec:
           volumeMounts:
             - mountPath: /paperclip
               name: data
+            - mountPath: /home/linuxbrew
+              name: brew-volume
       volumes:
         - name: data
           hostPath:
             type: DirectoryOrCreate
             path: '{{ .Values.userspace.appData }}/paperclip'
+        - name: brew-volume
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}/brew'
         - name: nginx-config
           configMap:
             name: paperclip-nginx
