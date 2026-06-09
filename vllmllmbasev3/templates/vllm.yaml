@@ -9,6 +9,20 @@
 {{- $memRequest := trim ($oe.VLLM_MEMORY_REQUEST | default "2Gi") -}}
 {{- $cpuLimit := trim ($oe.VLLM_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.VLLM_MEMORY_LIMIT | default "32Gi") -}}
+{{- $gpuMem := trim ($oe.VLLM_REQUIRED_GPU_MEMORY | default "4096Mi") -}}
+{{- $gpuMemMi := $gpuMem -}}
+{{- if hasSuffix "Gi" $gpuMem -}}
+{{- $gpuMemMi = printf "%dMi" (mul (int (trimSuffix "Gi" $gpuMem)) 1024) -}}
+{{- end -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = $gpuMem -}}
+{{- $memLimit = $gpuMem -}}
+{{- end -}}
 {{- /* Must match llm-init.yaml: per-release run-state hostPath. */ -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
@@ -98,6 +112,9 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: "{{ $gpuMemMi }}"
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
