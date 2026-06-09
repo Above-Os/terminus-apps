@@ -29,17 +29,18 @@ spec:
     - `MODEL_MODE` —— `chat` 或 `embedding`。
     - `MODEL_SUPPORTS` —— `supports_*` 能力位 CSV（无则留空）。
     - `ENGINE_ARGS` —— daemon 调参，如 `OLLAMA_NUM_CTX=8192`（留空用默认）。
-    - `LOG_LEVEL` —— `debug | info | warn | error`。
-    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` —— Ollama Pod 调度下限。
-    - `OLLAMA_CPU_LIMIT` / `OLLAMA_MEMORY_LIMIT` —— Ollama Pod 上限（按模型设置）。
+    - `LOG_LEVEL` —— `debug | info | warn | error`（默认 `debug`）。
+    - `OLLAMA_CPU_*` / `OLLAMA_MEMORY_*` —— Ollama Pod CPU/内存（按 clone 模板固定）。
+    - `OLLAMA_REQUIRED_GPU_MEMORY` —— 模型内存配额（安装时必填）。NVIDIA 独显
+      注入 `nvidia.com/gpumem`（Mi，Gi×1024）；Spark 注入 Pod `memory`。
 
     **资源说明**
-    Ollama CPU/内存为安装时 env。`required*` 是低安装门槛，`limited*` 是宽松
-    上限；`OLLAMA_*_REQUEST` 超过门槛时，clone 后需同步调高 manifest 的
-    `requiredMemory` / `requiredCpu`。
+    manifest `accelerator` 的 CPU/内存/显存为 `-1`（从渲染后的 chart 自动汇总）。
+    `requiredDisk` / `limitedDisk` 需在 manifest 写死（磁盘不会自动汇总）。
+    按模型通过 `OLLAMA_*` 环境变量调整 CPU/内存与显存。
 
   upgradeDescription: |
-    通用 Ollama + llm-init 基座（llm-init v1.2.3，ollama/ollama:0.30.6）。
+    通用 Ollama + llm-init 基座（llm-init v1.1.0，ollama/ollama:0.30.0）。
     支持 ollama:// Library 拉取。模型身份与调参均为安装时环境变量。
     v1.0.0：模型改存到跨应用共享的 App Common 目录 appCommon/ollama，
     不再放 Home/Ollama —— 升级后需重新拉取；旧的 Home/Ollama 副本可手动删除。

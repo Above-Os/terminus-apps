@@ -38,15 +38,14 @@ spec:
     - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9` (empty for defaults).
     - `LOG_LEVEL` — `debug | info | warn | error`.
     - `HF_ENDPOINT` / `HF_TOKEN` — HF mirror / token for private repos (empty if public).
-    - `VLLM_CPU_REQUEST` / `VLLM_MEMORY_REQUEST` — vLLM pod scheduling floor.
-    - `VLLM_CPU_LIMIT` / `VLLM_MEMORY_LIMIT` — vLLM pod ceiling (set per model).
+    - `VLLM_CPU_*` / `VLLM_MEMORY_*` — vLLM pod CPU/RAM (fixed per clone).
+    - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install).
+      NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024); Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
-    vLLM requires a GPU. CPU/RAM are install-time env. `required*` is the low
-    install floor; `limited*` is the generous ceiling. Raise `requiredMemory` /
-    `requiredCpu` on clone when `VLLM_*_REQUEST` exceeds the floor.
+    Manifest `accelerator` CPU/RAM/GPU are `-1` (auto from rendered chart).
 
   upgradeDescription: |
-    Generic vLLM + llm-init base (llm-init v1.2.3, vllm/vllm-openai:v0.22.0).
+    Generic vLLM + llm-init base (llm-init v1.1.0, vllm/vllm-openai:v0.22.0).
     Loads any HF model; model identity, source and tuning are install-time env.
     Models live in the shared cross-app App Common store appCommon/huggingface.

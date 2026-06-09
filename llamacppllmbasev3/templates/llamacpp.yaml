@@ -3,15 +3,31 @@
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
-{{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "500m") -}}
+{{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "200m") -}}
 {{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "2Gi") -}}
 {{- $cpuLimit := trim ($oe.LLAMACPP_CPU_LIMIT | default "6") -}}
-{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "16Gi") -}}
+{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "35Gi") -}}
+{{- $gpuMem := trim ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "4096Mi") -}}
+{{- $gpuMemMi := $gpuMem -}}
+{{- if hasSuffix "Gi" $gpuMem -}}
+{{- $gpuMemMi = printf "%dMi" (mul (int (trimSuffix "Gi" $gpuMem)) 1024) -}}
+{{- end -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = $gpuMem -}}
+{{- $memLimit = $gpuMem -}}
+{{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # llama.cpp engine Deployment. wrappers/llamacpp.sh blocks on the sentinel
-# (download ready), then execs llama-server -hf "$MODEL_NAME". HF_HUB_CACHE/
-# HF_HOME/HF_HUB_OFFLINE pin the read-only shared cache llm-init populated.
+# (download ready), then execs llama-server -hf "$MODEL_NAME".
+# llm-init reverse-proxies at http://llamacpp:8081 — Service name MUST be
+# "llamacpp". GPU base: CUDA server build + gpu-inject; put `-ngl all` in
+# ENGINE_ARGS to offload all layers to the GPU.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -66,10 +82,6 @@ spec:
               value: "{{ $engineArgs }}"
             - name: HF_HUB_CACHE
               value: /cache/hf/hub
-            - name: HF_HOME
-              value: /cache/hf
-            - name: HF_HUB_OFFLINE
-              value: "1"
 {{- if $hfEndpoint }}
             - name: HF_ENDPOINT
               value: "{{ $hfEndpoint }}"
@@ -103,6 +115,9 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: "{{ $gpuMemMi }}"
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
