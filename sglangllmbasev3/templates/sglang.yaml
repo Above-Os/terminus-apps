@@ -104,6 +104,11 @@ spec:
               mountPath: /llm-init/wrappers
               readOnly: true
           resources:
+{{- /* nvidia.com/gpumem is the per-instance GPU memory quota read by the Olares
+       gpu-inject webhook (the accelerator block is -1/auto, so it can't carry it).
+       It's a non-overcommittable extended resource, so it must appear in BOTH
+       requests and limits with the same value. Dropped on gb10 (unified memory
+       uses pod memory instead). */ -}}
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
@@ -113,6 +118,9 @@ spec:
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
