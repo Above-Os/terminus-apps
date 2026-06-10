@@ -137,10 +137,15 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
-              # hf download (4 workers) needs headroom; 256Mi gets OOMKilled
-              # mid-download -> pod restart -> state machine wedges. 1Gi is safe.
+              # hf_xet fetches byte-range chunks in parallel and buffers them in
+              # RAM before flushing to disk (huggingface_hub#3300); the default
+              # 16-way per-file concurrency, times MAX_CONCURRENT_DOWNLOADS
+              # parallel files, can spike well past 1Gi on large sharded models
+              # and OOM-kill this init container mid-download. 4Gi covers the
+              # common single-file / small-sharded GGUF case; very large sharded
+              # models may need more (or the planned llm-init concurrency cap).
               cpu: 500m
-              memory: 1Gi
+              memory: 4Gi
 ---
 # llm-init download/progress + OpenAI proxy surface (app entrance backend).
 apiVersion: v1
