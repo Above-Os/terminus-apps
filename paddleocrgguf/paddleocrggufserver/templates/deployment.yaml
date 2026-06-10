@@ -1,0 +1,126 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
+{{- $deviceType := lower (default "cpu" .Values.olaresEnv.DEVICE_TYPE) -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: llama
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network.chrome-default: "true"
+        io.kompose.service: llama
+{{- if eq $deviceType "cuda" }}
+      annotations:
+        applications.app.bytetrade.io/gpu-inject: "true"
+{{- end }}
+    spec:
+      containers:
+        - name: llama
+{{- if eq $deviceType "cuda" }}
+          image: "ghcr.io/ggml-org/llama.cpp:server-cuda"
+{{- else }}
+          image: "ghcr.io/ggml-org/llama.cpp:server"
+{{- end }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              DONE_FILE="/models/.paddleocr-vl-15-gguf.done"
+              echo "[llama-wait] Waiting for $DONE_FILE ..."
+              while [ ! -f "$DONE_FILE" ]; do
+                echo "[llama-wait] Model not ready, sleeping..."
+                sleep 10
+              done
+              echo "[llama-start] Starting llama-server..."
+{{- if eq $deviceType "cuda" }}
+              exec /app/llama-server \
+                -m /models/PaddleOCR-VL-1.5.gguf \
+                --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
+                --host 0.0.0.0 \
+                --port 8080 \
+                --temp 0 \
+                --n-gpu-layers 999
+{{- else }}
+              # 镜像 ENTRYPOINT 为 /app/llama-server；覆盖 command 后 PATH 中无 llama-server，须写绝对路径
+              exec /app/llama-server \
+                -m /models/PaddleOCR-VL-1.5.gguf \
+                --mmproj /models/PaddleOCR-VL-1.5-mmproj.gguf \
+                --host 0.0.0.0 \
+                --port 8080 \
+                --temp 0
+{{- end }}
+          env:
+{{- if eq $deviceType "cuda" }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "0"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,graphics,utility,video,display"
+{{- end }}
+          ports:
+            - containerPort: 8080
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+
+          volumeMounts:
+            - name: data
+              mountPath: /models
+      volumes:
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Huggingface/paddleocr-vl-15-gguf"
+            type: DirectoryOrCreate
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llama
+spec:
+  selector:
+    io.kompose.service: llama
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+{{- end }}

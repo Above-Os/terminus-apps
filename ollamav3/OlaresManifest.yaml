@@ -1,0 +1,150 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: ollamav3
+  appid: ollamav3
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  description: Get up and running with large language models.
+  title: Ollama V3 for test
+  version: "1.1.1"
+  categories:
+    - Utilities_v112
+    - Productivity
+
+sharedEntrances:
+  - name: ollamav3
+    host: sharedentrances-ollama
+    port: 0
+    title: Ollama API v3
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    invisible: true
+    authLevel: internal
+entrances:
+  - name: terminal
+    port: 80
+    host: terminal
+    title: Ollama V3
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+  - authLevel: internal
+    host: ollama
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    name: ollama
+    openMethod: window
+    port: 11434
+    title: Ollama API V3
+    invisible: true
+
+# Declares every workload's replica count (v3 schema). Keys MUST match the
+# rendered Deployment metadata.name and values.yaml workloads.<name>:
+#   ollamav3 — ollama engine Deployment (must match metadata.name / appid)
+#   terminal — web terminal Deployment
+workloadReplicas:
+  ollamav3: 1
+  terminal: 1
+
+spec:
+  versionName: "0.30.6"
+  featuredImage: https://app.cdn.olares.com/appstore/ollama/1.webp
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/ollama/1.webp
+    - https://app.cdn.olares.com/appstore/ollama/2.webp
+    - https://app.cdn.olares.com/appstore/ollama/3.webp
+
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
+
+    **OVERVIEW**
+    Ollama is a user-friendly interface for running large language models (LLMs) locally. It is a valuable tool for researchers, developers, and anyone who wants to experiment with language models. With Ollama, you can easily download and run LLMs, customize and create your own, and chat with your LLMs using files on your device.
+
+    Ollama supports a wide range of models, including:
+    - Llama 3 8B
+    - Llama 3 70B
+    - Phi 3 Mini 3.8B
+    - Phi 3 Medium 14B
+    - Gemma 2 9B
+    - Gemma 2 27B
+    - Mistral 7B
+    - Moondream 2 1.4B
+    - Neural Chat 7B
+    - Starling 7B
+    - Code Llama 7B
+    - Llama 2 Uncensored 7B
+    - LLaVA 7B
+    - Solar 10.7B
+
+    **Model storage (App Common)**
+    Pulled models are stored in the shared App Common directory
+    `appCommon/ollama` (SSD on single-node, JuiceFS on multi-node). All
+    Ollama-based apps mount the same path so blobs deduplicate by digest.
+    The CUDA JIT compile cache lives alongside them at
+    `appCommon/ollama/.nv`.
+
+  upgradeDescription: |
+    Upgrade Ollama from v0.24.0 to v0.30.6
+
+    **What's Changed**
+
+    - **Runtime**: Ollama engine updated to v0.30.6 (`ollama/ollama:0.30.6`).
+    - **Model storage**: models now use the shared App Common store
+      `appCommon/ollama` instead of per-app `sharedlib/ai/ollama`, so all
+      Ollama apps share one blob store.
+    - **CUDA cache**: NVIDIA ComputeCache is persisted under
+      `appCommon/ollama/.nv` and mounted at `/root/.nv/ComputeCache`.
+    - **Scaling**: `workloadReplicas` declares replica counts for the
+      `ollamav3` engine and `terminal` UI workloads.
+
+    For detailed release notes, visit:
+    https://github.com/ollama/ollama/releases
+
+  developer: ollama
+  website: https://ollama.com/
+  sourceCode: https://github.com/ollama/ollama
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/ollama/ollama/tree/main/docs
+  license:
+    - text: MIT
+      url: https://github.com/ollama/ollama#MIT-1-ov-file
+  accelerator:
+  - mode: nvidia
+    limitedCpu: 7000m
+    requiredCpu: 150m
+    requiredDisk: 50Mi
+    limitedDisk: 500Gi
+    limitedMemory: 40Gi
+    requiredMemory: 5Gi
+    requiredGPUMemory: 1Gi
+    limitedGPUMemory: 24Gi
+  - mode: strix-halo
+    limitedCpu: 7000m
+    requiredCpu: 150m
+    requiredDisk: 50Mi
+    limitedDisk: 500Gi
+    limitedMemory: 40Gi
+    requiredMemory: 5Gi
+
+  supportArch:
+    - amd64
+    - arm64
+  onlyAdmin: false
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+  externalData: true
+options:
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  conflicts:
+    - name: ollamav2
+      type: application
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system

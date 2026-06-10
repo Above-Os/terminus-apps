@@ -1,5 +1,5 @@
-﻿---
-olaresManifest.version: '0.10.0'
+---
+olaresManifest.version: '0.11.0'
 olaresManifest.type: app
 apiVersion: 'v2'
 
@@ -9,7 +9,7 @@ metadata:
   description: The latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models.
   appid: vllmqwen330ba3binstruct4bitv2
   title: Qwen3 30B (vLLM)
-  version: '1.0.12'
+  version: '1.0.20'
   categories:
     - AI
 
@@ -17,7 +17,7 @@ sharedEntrances:
   - name: vllmqwen330ba3binstruct4bitv2
     host: sharedentrances-api
     port: 0
-    tile: Qwen3 30B
+    title: Qwen3 30B
     invisible: true
     authLevel: internal
     icon: https://app.cdn.olares.com/appstore/llm/vllm/llm/qwen3.png
@@ -33,10 +33,10 @@ entrances:
 spec:
   versionName: 'cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit'
   fullDescription: |
-    ## IMPORTANT NOTE ##
+    **IMPORTANT NOTE**
     This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference app.
 
-    ## MODEL OVERVIEW ##
+    **MODEL OVERVIEW**
     Qwen3 is the latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models. Built upon extensive training, Qwen3 delivers groundbreaking advancements in reasoning, instruction-following, agent capabilities, and multilingual support
 
     Key features:
@@ -49,7 +49,9 @@ spec:
     Expertise in agent capabilities, enabling precise integration with external tools in both thinking and unthinking modes and achieving leading performance among open-source models in complex agent-based tasks.
 
     Support of 100+ languages and dialects with strong capabilities for multilingual instruction following and translation.
-    
+  upgradeDescription: |
+    Upgrade vLLM runtime to v0.22.0-cu129; enable -O3 optimization and persist torch.compile / FlashInfer cache.
+
   developer: Alibaba
   website: https://qwen.ai/home
   sourceCode: https://huggingface.co/cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
@@ -62,14 +64,16 @@ spec:
     - text: Apache-2.0
       url: https://huggingface.co/cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
 
+
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   limitedCpu: 20
   requiredCpu: 1
   requiredDisk: 30Gi
   limitedDisk: 50Gi
-  limitedMemory: 30Gi
+  # Host RAM: vLLM 20Gi req / 36Gi lim + download + nginx (~8k ctx; weights on GPU)
+  limitedMemory: 40Gi
   requiredMemory: 22Gi
-  requiredGpu: 16Gi
+  requiredGpu: 23.5Gi
   limitedGpu: 30Gi
   {{- else }}
   requiredMemory: 64Mi
@@ -118,7 +122,7 @@ options:
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 envs:
   - envName: OLARES_USER_HUGGINGFACE_TOKEN
-    required: true
+    required: false
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
@@ -132,11 +136,9 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: "0.95"
   - envName: MAX_MODEL_LEN
     required: false
     type: string
     editable: true
     applyOnChange: true
-    default: "8000"
 {{- end }}

@@ -1,0 +1,51 @@
+metadata:
+  title: vLLM LLM Base (llm-init)
+  description: "Generic vLLM + llm-init base; choose any HF model at install time via env"
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app and a generic *base*: it is NOT tied to any specific
+    model. The model to serve is chosen entirely at install time through
+    environment variables, so the same Helm chart can serve any Hugging Face
+    model that vLLM supports.
+
+    **HOW IT WORKS**
+    The llm-init sidecar downloads the configured HF model, writes a readiness
+    sentinel + model path, and exposes an OpenAI-compatible `/v1/*` surface plus
+    a unified `/api/progress` + `/healthz` dashboard. The vLLM container waits
+    for the sentinel, then serves the model. Both run in the SAME Pod and share
+    the model dir + sentinel.
+
+    **Stack**
+    - **vLLM** (`vllm/vllm-openai`, port 8000): GPU inference, OpenAI server.
+    - **llm-init** (`beclab/llm-init`, port 8090): HF download, OpenAI `/v1/*`,
+      progress UI; proxies the in-pod vLLM server.
+
+    **Model storage (App Common)**
+    HF models go to the shared, cross-app App Common store `appCommon/huggingface`,
+    mounted at the fixed container path `/cache/hf/hub` (SSD single-node, JuiceFS
+    multi-node), shared by all HF apps for one unified view; the standard
+    `models--owner--repo/snapshots/<sha>/` layout dedups by digest. llm-init writes
+    the cache; the vLLM engine mounts it read-only.
+
+    **Install-time parameters (set per model)**
+    - `MODEL_SOURCE` — `hf://<repo>` (`--include` / `--revision` optional).
+    - `MODEL_NAME` — HF `owner/repo` for vLLM `--model` and `--served-model-name`
+      (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
+    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9` (empty for defaults).
+    - `LOG_LEVEL` — `debug | info | warn | error`.
+    - `HF_ENDPOINT` / `HF_TOKEN` — HF mirror / token for private repos (empty if public).
+    - `VLLM_CPU_*` / `VLLM_MEMORY_*` — vLLM pod CPU/RAM (fixed per clone).
+    - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install).
+      NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024); Spark: pod `memory`.
+
+    **NOTE ON RESOURCES**
+    Manifest `accelerator` CPU/RAM/GPU are `-1` (auto from rendered chart).
+
+  upgradeDescription: |
+    Generic vLLM + llm-init base (llm-init v1.1.0, vllm/vllm-openai:v0.22.0).
+    Loads any HF model; model identity, source and tuning are install-time env.
+    Models live in the shared cross-app App Common store appCommon/huggingface.

@@ -1,0 +1,27 @@
+metadata:
+  title: llama.cpp LLM 基座 (llm-init)
+  description: "通用 llama.cpp + llm-init 基座；安装时通过环境变量指定任意 GGUF 模型"
+
+spec:
+  fullDescription: |
+    **重要说明**
+    这是一个集群共享应用，也是一个**通用基座**：它不绑定任何具体模型。要服务哪个
+    GGUF 模型完全由安装时的环境变量决定，因此同一套 Helm chart 可服务 llama.cpp
+    支持的任意 GGUF 模型。
+
+    **技术栈**
+    - **llama.cpp**（`ggml-org/llama.cpp`，8081）：GGUF 推理、OpenAI 服务。
+    - **llm-init**（`beclab/llm-init`，8090）：GGUF 下载、OpenAI `/v1/*`、进度面板；
+      代理引擎 `http://llamacpp:8081`。
+
+    **安装时参数**
+    - `MODEL_SOURCE` —— `hf://<repo> --include <file>.gguf`。VLM 在同一变量后追加逗号
+      分隔的 mmproj 段（`...,hf://<repo> --include mmproj-*.gguf`）。
+    - `MODEL_NAME` —— 传给 `llama-server -hf` 的 Hugging Face 仓库 id，格式
+      `owner/repo:quant`（推荐，如 `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`）。仅当仓库
+      含默认 `Q4_K_M` 量化时可省略 `:quant`。同时作为 OpenAI `/v1/models` 的
+      `--alias`。须与 `MODEL_SOURCE` 中的 repo 一致；引擎在 llm-init 下载完成
+      （哨兵就绪）后从 HF 缓存加载，不读哨兵里的 path。
+    - `ENGINE_ARGS` —— llama.cpp 参数，如 `-c 8192 -ngl all -fa on`（`-ngl all` 全量卸载到 GPU）。
+    - `LLAMACPP_CPU_*` / `LLAMACPP_MEMORY_*` —— 引擎 Pod CPU/内存（按 clone 固定）。
+    - `LLAMACPP_REQUIRED_GPU_MEMORY` —— 模型内存配额（安装时必填）。

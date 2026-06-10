@@ -1,0 +1,46 @@
+metadata:
+  title: Ollama LLM 基座 (llm-init)
+  description: "通用 Ollama + llm-init 基座；安装时通过环境变量指定任意模型"
+
+spec:
+  fullDescription: |
+    **重要说明**
+    这是一个集群共享应用，也是一个**通用基座**：它不绑定任何具体模型。要服务哪个
+    模型完全由安装时的环境变量决定，因此同一套 Helm chart 可服务任意 Ollama 模型。
+
+    **工作方式**
+    Ollama 守护进程负责模型字节；llm-init sidecar 在首次启动时驱动 `/api/pull`，
+    并暴露 OpenAI 兼容的 `/v1/*` 接口以及统一的 `/api/progress`、`/healthz` 面板。
+
+    **技术栈**
+    - **Ollama 守护**（`ollama/ollama`，11434）：拉取并服务模型。
+    - **llm-init**（`beclab/llm-init`，8090）：OpenAI `/v1/*`、进度面板。
+    - 两 Pod 通过 ClusterIP Service `ollama:11434` 通信（该名称是必须的，因为
+      llm-init v1.1.0 由 ENGINE_KIND 推导引擎地址）。
+
+    **模型存储（App Common）**
+    模型写入**跨应用共享**的 App Common 目录 `appCommon/ollama`（单节点在 SSD，
+    多节点在 JuiceFS），所有 ollama 应用共用同一目录，按 digest 去重、统一视角
+    管理。CUDA 编译缓存放在同目录下的 `appCommon/ollama/.nv`。
+
+    **安装时参数（按模型设置）**
+    - `MODEL_SOURCE` —— `ollama://<library-tag>`，如 `ollama://qwen3.5:0.8b`。
+    - `MODEL_NAME` —— OpenAI 客户端别名，如 `qwen3.5-0.8b`。
+    - `MODEL_MODE` —— `chat` 或 `embedding`。
+    - `MODEL_SUPPORTS` —— `supports_*` 能力位 CSV（无则留空）。
+    - `ENGINE_ARGS` —— daemon 调参，如 `OLLAMA_NUM_CTX=8192`（留空用默认）。
+    - `LOG_LEVEL` —— `debug | info | warn | error`（默认 `debug`）。
+    - `OLLAMA_CPU_*` / `OLLAMA_MEMORY_*` —— Ollama Pod CPU/内存（按 clone 模板固定）。
+    - `OLLAMA_REQUIRED_GPU_MEMORY` —— 模型内存配额（安装时必填）。NVIDIA 独显
+      注入 `nvidia.com/gpumem`（Mi，Gi×1024）；Spark 注入 Pod `memory`。
+
+    **资源说明**
+    manifest `accelerator` 的 CPU/内存/显存为 `-1`（从渲染后的 chart 自动汇总）。
+    `requiredDisk` / `limitedDisk` 需在 manifest 写死（磁盘不会自动汇总）。
+    按模型通过 `OLLAMA_*` 环境变量调整 CPU/内存与显存。
+
+  upgradeDescription: |
+    通用 Ollama + llm-init 基座（llm-init v1.1.0，ollama/ollama:0.30.0）。
+    支持 ollama:// Library 拉取。模型身份与调参均为安装时环境变量。
+    v1.0.0：模型改存到跨应用共享的 App Common 目录 appCommon/ollama，
+    不再放 Home/Ollama —— 升级后需重新拉取；旧的 Home/Ollama 副本可手动删除。

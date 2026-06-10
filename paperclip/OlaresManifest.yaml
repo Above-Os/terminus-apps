@@ -1,0 +1,138 @@
+olaresManifest.version: '0.11.0'
+olaresManifest.type: app
+metadata:
+  name: paperclip
+  description: Open-source orchestration platform for AI agent companies.
+  icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
+  appid: paperclip
+  version: '1.0.8'
+  title: Paperclip
+  categories:
+  - Productivity_v112
+  - Productivity
+  - Developer Tools
+spec:
+  versionName: '2026.6.4'
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/paperclip/1.webp
+    - https://app.cdn.olares.com/appstore/paperclip/2.webp
+    - https://app.cdn.olares.com/appstore/paperclip/3.webp
+    - https://app.cdn.olares.com/appstore/paperclip/4.webp
+  fullDescription: |
+    **First-time admin setup**
+    After the first startup, run `pnpm paperclipai auth bootstrap-ceo"` inside the Paperclip container to generate the first admin invite URL.
+    See [Paperclip Usecase](https://docs.olares.com/use-cases/paperclip.html) for more details.
+
+    **Overview**
+    Paperclip is a Node.js server and React UI that orchestrates a team of AI agents to run a business. Bring your own agents, assign goals, and track your agents' work and costs from one dashboard.
+
+    If OpenClaw is an employee, Paperclip is the company.
+
+    **Features**
+    - Bring Your Own Agent - any agent, any runtime, one org chart (OpenClaw, Claude Code, Codex, Cursor)
+    - Goal Alignment - every task traces back to the company mission
+    - Heartbeats - agents wake on a schedule, check work, and act
+    - Cost Control - monthly budgets per agent with automatic enforcement
+    - Multi-Company - one deployment, many companies with complete data isolation
+    - Ticket System - every conversation traced with full tool-call tracing and audit log
+    - Governance - approve hires, override strategy, pause or terminate any agent
+    - Org Chart - hierarchies, roles, reporting lines for your agent team
+    - Mobile Ready - monitor and manage from anywhere
+    - External PostgreSQL support for production deployments
+  upgradeDescription: |
+    Stability & Hermes adapter fixes (v1.0.8)
+
+    App upgrade:
+    - Upgraded container image to beclab/paperclip:v1.0.1 (built from Above-Os/paperclip feat/build_0604), bundling the latest Hermes Agent (npm hermes-agent v0.15.x) and other built-in adapters: Claude Code, Codex, OpenCode, Pi Coding Agent
+    - Tracks upstream paperclip ~2026.6.4 (date-based versioning)
+
+    Bug fixes:
+    - Fixed Hermes adapter "ModuleNotFoundError: No module named 'hermes_cli'" by prepending the bundled Python venv (/opt/venvs/hermes/bin) to PATH so spawned hermes subprocesses resolve python3 to the venv interpreter that has hermes_cli installed
+
+    Resource sizing (aligned with upstream recommendations):
+    - Memory: required 512Mi -> 1Gi, limit 2Gi -> 6Gi (prevents OOMKilled when running Hermes/Claude/Codex subprocesses and processing large heartbeat run logs)
+    - CPU: required 0.25 -> 0.5 cores, limit 2 -> 3 cores (reduces startup throttling, handles concurrent agent runs and Hermes subprocess bursts)
+    - Disk: limit 5Gi -> 20Gi (hourly DB backups with 30-day retention + heartbeat run logs accumulate quickly)
+
+    Previous: v0.3.1 highlights
+    - Gemini CLI adapter - full local adapter support for Google's Gemini CLI
+    - Run transcript polish - markdown rendering, stdout folding, identity redaction
+    - Inbox refinements - improved tabs, badge counts, mobile layout
+    - Improved onboarding wizard
+    - Default max turns raised to 300
+
+    Full release notes at: https://github.com/paperclipai/paperclip/releases/tag/v0.3.1
+  developer: Paperclip AI
+  website: https://paperclip.ing/
+  sourceCode: https://github.com/paperclipai/paperclip
+  submitter: Olares
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://github.com/paperclipai/paperclip#readme
+  license:
+  - text: MIT
+    url: https://github.com/paperclipai/paperclip/blob/master/LICENSE
+  requiredMemory: 1Gi
+  limitedMemory: 6Gi
+  requiredDisk: 256Mi
+  limitedDisk: 20Gi
+  requiredCpu: 0.5
+  limitedCpu: 3
+  supportArch:
+  - amd64
+  - arm64
+permission:
+  appData: true
+  appCache: true
+middleware:
+  postgres:
+    username: paperclip
+    password: paperclip
+    databases:
+    - name: paperclip
+      distributed: true
+options:
+  apiTimeout: 0
+  allowedOutboundPorts:
+    - 443
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.3-0'
+envs:
+  - envName: OPENAI_API_KEY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "secret API key for the OpenAI API"
+  - envName: ANTHROPIC_API_KEY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "secret API key for the Anthropic API"
+  - envName: GEMINI_API_KEY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "secret API key for the Google Gemini API"
+  - envName: CURSOR_API_KEY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "secret API key for the Cursor"
+entrances:
+- name: paperclip
+  port: 3100
+  host: paperclip
+  title: Paperclip
+  icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
+  openMethod: window

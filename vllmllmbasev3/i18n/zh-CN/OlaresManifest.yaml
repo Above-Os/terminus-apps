@@ -1,0 +1,47 @@
+metadata:
+  title: vLLM LLM 基座 (llm-init)
+  description: "通用 vLLM + llm-init 基座；安装时通过环境变量指定任意 HF 模型"
+
+spec:
+  fullDescription: |
+    **重要说明**
+    这是一个集群共享应用，也是一个**通用基座**：它不绑定任何具体模型。要服务哪个
+    模型完全由安装时的环境变量决定，因此同一套 Helm chart 可服务 vLLM 支持的任意
+    Hugging Face 模型。
+
+    **工作方式**
+    llm-init sidecar 下载配置的 HF 模型，写出就绪 sentinel 与模型路径，并暴露 OpenAI
+    兼容的 `/v1/*` 接口以及统一的 `/api/progress`、`/healthz` 面板。vLLM 容器等待
+    sentinel 后加载模型。两个容器在**同一个 Pod** 内，共享模型目录与 sentinel。
+
+    **技术栈**
+    - **vLLM**（`vllm/vllm-openai`，8000）：GPU 推理、OpenAI 服务。
+    - **llm-init**（`beclab/llm-init`，8090）：HF 下载、OpenAI `/v1/*`、进度面板；
+      代理 Pod 内的 vLLM 服务。
+
+    **模型存储（App Common）**
+    HF 模型写入**跨应用共享**的 App Common 目录 `appCommon/huggingface`，挂到固定容器
+    路径 `/cache/hf/hub`（单节点在 SSD，多节点在 JuiceFS），所有 HF 应用共用同一目录、
+    统一视角管理；标准 `models--owner--repo/snapshots/<sha>/` 布局按 digest 去重。
+    llm-init 读写缓存，vLLM 引擎只读挂载。
+
+    **安装时参数（按模型设置）**
+    - `MODEL_SOURCE` —— `hf://<repo>`（`--include` / `--revision` 可选）。
+    - `MODEL_NAME` —— HF `owner/repo`，用于 vLLM `--model` 与 `--served-model-name`
+      （须与 `MODEL_SOURCE` 中的仓库一致，如 `Qwen/Qwen3-0.6B`）。
+    - `MODEL_MODE` —— `chat` 或 `embedding`。
+    - `MODEL_SUPPORTS` —— `supports_*` 能力位 CSV（无则留空）。
+    - `ENGINE_ARGS` —— vLLM CLI 参数，如 `--max-model-len 8192 --gpu-memory-utilization 0.9`（留空用默认）。
+    - `LOG_LEVEL` —— `debug | info | warn | error`。
+    - `HF_ENDPOINT` / `HF_TOKEN` —— HF 镜像 / 私有库 token（公开库可留空）。
+    - `VLLM_CPU_*` / `VLLM_MEMORY_*` —— vLLM Pod CPU/内存（按 clone 固定）。
+    - `VLLM_REQUIRED_GPU_MEMORY` —— 模型内存配额（安装时必填）。NVIDIA 独显
+      注入 `nvidia.com/gpumem`（Mi，Gi×1024）；Spark 注入 Pod `memory`。
+
+    **资源说明**
+    manifest `accelerator` CPU/内存/GPU 为 `-1`（从渲染 chart 自动汇总）。
+
+  upgradeDescription: |
+    通用 vLLM + llm-init 基座（llm-init v1.1.0，vllm/vllm-openai:v0.22.0）。
+    加载任意 HF 模型；模型身份、来源与调参均为安装时环境变量。
+    模型存于跨应用共享的 App Common 目录 appCommon/huggingface。

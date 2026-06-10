@@ -1,10 +1,13 @@
-olaresManifest.version: '0.10.0'
+---
+olaresManifest.type: app
+olaresManifest.version: '0.11.0'
+apiVersion: 'v1'
 metadata:
   name: coder
   description: Self-Hosted Cloud Development Environments.
   icon: https://app.cdn.olares.com/appstore/coder/icon.png
   appid: coder
-  version: '1.0.7'
+  version: '1.0.12'
   title: Coder
   categories:
   - Developer Tools
@@ -15,7 +18,7 @@ permission:
   userData:
   - Home
 spec:
-  versionName: '2.19.0'
+  versionName: '2.31.9'
   featuredImage: https://app.cdn.olares.com/appstore/coder/1.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/coder/1.webp
@@ -27,13 +30,23 @@ spec:
     
     Coder enables organizations to set up development environments in their public or private cloud infrastructure. Cloud development environments are defined with Terraform, connected through a secure high-speed Wireguard® tunnel, and automatically shut down when not used to save on costs. Coder gives engineering teams the flexibility to use the cloud for workloads most beneficial to them.
 
-    Features
-    Define cloud development environments in Terraform
-    - EC2 VMs, Kubernetes Pods, Docker Containers, etc.
+    - Define cloud development environments in Terraform
+      - EC2 VMs, Kubernetes Pods, Docker Containers, etc.
+    - Automatically shutdown idle resources to save on costs
+    - Onboard developers in seconds instead of days
+
+  upgradeDescription: |
+    Upgrade app version from 2.31.5 to 2.31.9
+
+    **Changelog**
+    Performance improvements
+    - Cap count queries, use native UUID ops for audit/conn logs (backport #23835) (#24129, 2f5d21d)
     
-    Automatically shutdown idle resources to save on costs
-    
-    Onboard developers in seconds instead of days
+    Chores
+    - Backport Go 1.25.8 bump to release/2.31 (#23941, 2587364)
+    - Backport high and critical Iron Bank dependency fixes (#24110, 960b8e7)
+
+    Full release notes: https://github.com/coder/coder/releases/tag/v2.31.9
 
   developer: Coder Technologies, Inc.
   website: https://coder.com/
@@ -47,11 +60,11 @@ spec:
   - en-US
   - zh-CN
   requiredMemory: 1000Mi
-  limitedMemory: 3Gi
+  limitedMemory: 4Gi
   requiredDisk: 128Mi
-  limitedDisk: 256Mi
-  requiredCpu: 0.5
-  limitedCpu: 3
+  limitedDisk: 10Gi
+  requiredCpu: 1000m
+  limitedCpu: 4
   supportArch:
   - amd64
   - arm64
@@ -60,14 +73,21 @@ options:
   - name: olares
     type: system
     version: '>=1.10.1-0'
+envs:
+  - envName: ANTHROPIC_API_KEY
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: ""
+    description: "secret API key for the Anthropic API"
 entrances:
-- name: http
-  port: 7080
-  host: coder
+- name: coder
+  port: 8080
+  host: coderingress
   title: Coder
   icon: https://app.cdn.olares.com/appstore/coder/icon.png
   openMethod: window
-olaresManifest.type: app
 middleware:
   postgres:
     username: coder

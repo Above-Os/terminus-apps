@@ -1,0 +1,62 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: {{ .Release.Name }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    io.kompose.service: {{ .Release.Name }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.bfl.username }}:search3-frontend-domain-texttoimagesearch
+  annotations:
+    provider-registry-ref: {{ .Values.bfl.username }}/878fd17d
+    provider-service-ref: search3.os-framework:80
+rules:
+- nonResourceURLs: 
+  - "/task/*"
+  - "/search/*"
+  - "/monitorsetting/*"
+  - "/image/*"
+  verbs: ["*"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: user:{{ .Values.bfl.username }}:search3-frontend-domain-texttoimagesearch
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.bfl.username }}:search3-frontend-domain-texttoimagesearch
+subjects:
+- kind: User
+  name: '{{ .Values.bfl.username }}'  
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search3-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ExternalName
+  externalName: system-server.user-system-{{ .Values.bfl.username }}.svc.cluster.local
+  ports:
+    - protocol: TCP
+      port: 28080
+      targetPort: 28080

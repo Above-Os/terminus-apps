@@ -1,0 +1,127 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $cpuRequest := trim ($oe.SGLANG_CPU_REQUEST | default "200m") -}}
+{{- $memRequest := trim ($oe.SGLANG_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.SGLANG_CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.SGLANG_MEMORY_LIMIT | default "35Gi") -}}
+{{- $gpuMem := trim ($oe.SGLANG_REQUIRED_GPU_MEMORY | default "4096Mi") -}}
+{{- $gpuMemMi := $gpuMem -}}
+{{- if hasSuffix "Gi" $gpuMem -}}
+{{- $gpuMemMi = printf "%dMi" (mul (int (trimSuffix "Gi" $gpuMem)) 1024) -}}
+{{- end -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = $gpuMem -}}
+{{- $memLimit = $gpuMem -}}
+{{- end -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+---
+# SGLang engine Deployment (GPU). wrappers/sglang.sh blocks on the sentinel
+# llm-init writes, reads model_path, then execs launch_server on :30000.
+# llm-init reverse-proxies at http://sglang:30000 — Service name MUST be "sglang".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Primary workload: named after the release (== appid sglangllmbasev3) for v3
+  # allowMultipleInstall. Label/selector stays io.kompose.service: sglang.
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: sglang
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "sglang"
+spec:
+  replicas: {{ .Values.workloads.sglangllmbasev3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: sglang
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: sglang
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: llm-init-wrappers
+            defaultMode: 0555
+      containers:
+        - name: sglang
+          image: docker.io/lmsysorg/sglang:v0.5.12.post1-cu130
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/llm-init/wrappers/sglang.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: sglang
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: SGLANG_PORT
+              value: "30000"
+            - name: WAIT_TIMEOUT
+              value: "3600"
+            - name: ENGINE_ARGS
+              value: "{{ $engineArgs }}"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+          ports:
+            - name: sglang
+              containerPort: 30000
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+              readOnly: true
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /llm-init/wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: "{{ $gpuMemMi }}"
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: sglang
+spec:
+  selector:
+    io.kompose.service: sglang
+  ports:
+    - name: sglang
+      port: 30000
+      targetPort: 30000
+  type: ClusterIP

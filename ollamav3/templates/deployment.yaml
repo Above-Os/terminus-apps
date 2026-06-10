@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    io.kompose.service: ollama
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: {{ .Values.workloads.ollamav3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: ollama
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: ollama
+        bytetrade.io/terminal: ollama
+    spec:
+      initContainers:
+        - name: init-chmod-data
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - "-c"
+            - |
+              mkdir -p /cuda-cache/ComputeCache
+              chown -R 1000:1000 /app-data-root /cuda-cache
+          resources: {}
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /app-data-root
+            - name: cuda-compute-cache
+              mountPath: /cuda-cache
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: ollama
+          image: docker.io/ollama/ollama:0.30.6
+          envFrom:
+            - configMapRef:
+                name: ollama-env
+          ports:
+            - containerPort: 11434
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 11434
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 60
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          startupProbe:
+            tcpSocket:
+              port: 11434
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            limits:
+              cpu: "4"
+              memory: 38Gi
+            requests:
+              cpu: 50m
+              memory: 4Gi
+          volumeMounts:
+            - mountPath: "/root/.ollama"
+              name: ollama-data
+            - mountPath: "/root/.nv/ComputeCache"
+              name: cuda-compute-cache
+              subPath: ComputeCache
+      volumes:
+        # App Common shared model store: all ollama-based apps mount the SAME
+        # appCommon/ollama dir so the blob store dedups by digest. appCommon is
+        # SSD on single-node, JuiceFS on multi-node (requires permission.appCommon).
+        - name: ollama-data
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/ollama"
+            type: DirectoryOrCreate
+        # CUDA JIT compile cache lives alongside the models under appCommon/ollama.
+        - name: cuda-compute-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/ollama/.nv"
+            type: DirectoryOrCreate
+      restartPolicy: Always
+status: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  labels:
+    io.kompose.service: ollama
+  name: ollama
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  ports:
+    - name: "http"
+      port: 11434
+      targetPort: 11434
+  selector:
+    io.kompose.service: ollama
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  labels:
+    io.kompose.service: ollama
+  name: sharedentrances-ollama
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  ports:
+    - name: "http"
+      port: 80
+      targetPort: 11434
+  selector:
+    io.kompose.service: ollama
+status:
+  loadBalancer: {}
