@@ -1,10 +1,28 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- /* MODEL_MODE=embedding -> auto-add SGLang's --is-embedding so it works out
+       of the box; skipped if the user already passed it in ENGINE_ARGS. */ -}}
+{{- $modelMode := $oe.MODEL_MODE | default "" -}}
+{{- if and (eq $modelMode "embedding") (not (contains "--is-embedding" $engineArgs)) -}}
+{{- $engineArgs = trim (printf "%s --is-embedding" $engineArgs) -}}
+{{- end -}}
 {{- $cpuRequest := trim ($oe.SGLANG_CPU_REQUEST | default "200m") -}}
 {{- $memRequest := trim ($oe.SGLANG_MEMORY_REQUEST | default "2Gi") -}}
 {{- $cpuLimit := trim ($oe.SGLANG_CPU_LIMIT | default "6") -}}
-{{- $memLimit := trim ($oe.SGLANG_MEMORY_LIMIT | default "32Gi") -}}
+{{- $memLimit := trim ($oe.SGLANG_MEMORY_LIMIT | default "35Gi") -}}
+{{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
+       same value as pod memory ("<MiB>Mi"). Accepts 8Gi / 8192 / 8192Mi. */ -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.SGLANG_REQUIRED_GPU_MEMORY | default "4096") -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # SGLang engine Deployment (GPU). wrappers/sglang.sh blocks on the sentinel
@@ -13,14 +31,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sglang
+  # Primary workload: named after the release (== appid sglangllmbasev3) for v3
+  # allowMultipleInstall. Label/selector stays io.kompose.service: sglang.
+  name: '{{ .Release.Name }}'
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: sglang
   annotations:
     applications.app.bytetrade.io/gpu-inject: "sglang"
 spec:
-  replicas: {{ .Values.workloads.sglang.replicaCount }}
+  replicas: {{ .Values.workloads.sglangllmbasev3.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: sglang
@@ -87,6 +107,9 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"

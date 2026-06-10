@@ -54,7 +54,7 @@ spec:
         imagePullPolicy: IfNotPresent
       containers:
         - name: paperclip
-          image: beclab/paperclip:v1.0.0
+          image: beclab/paperclip:v1.0.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3100
@@ -66,7 +66,10 @@ spec:
 
               export HOME="/paperclip"
               export NPM_CONFIG_PREFIX="/paperclip/.npm-global"
-              export PATH="/paperclip/.local/bin:/paperclip/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+              # /opt/venvs/hermes/bin must come first so the `hermes` shim resolves
+              # python3 to the bundled venv (which has hermes_cli installed) and not
+              # to the system /usr/bin/python3 (which would raise ModuleNotFoundError).
+              export PATH="/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:${PATH}"
               mkdir -p "/paperclip/.local/bin" "/paperclip/.npm-global/bin" \
                 "/paperclip/.config" "/paperclip/.local/share" "/paperclip/.cache"
 
@@ -137,11 +140,11 @@ spec:
               value: "http://localhost:3100"
           resources:
             requests:
-              cpu: 250m
-              memory: 512Mi
+              cpu: 500m
+              memory: 1Gi
             limits:
-              cpu: 2000m
-              memory: 2Gi
+              cpu: 3000m
+              memory: 6Gi
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000

@@ -8,7 +8,7 @@
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- $logLevel := $oe.LOG_LEVEL | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- /* HF_ENDPOINT / HF_TOKEN come from the user's system HF account via
        OlaresManifest valueFrom; empty -> huggingface.co with no auth. */ -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
@@ -18,9 +18,9 @@
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # Split into two Deployments to decouple readiness:
-#   - llm-init (this file, no GPU): downloads the HF model, writes the sentinel
-#       + model_path, serves the progress UI + OpenAI /v1/* proxy on :8090.
-#   - vllm (templates/vllm.yaml, GPU): waits on the sentinel, serves on :8000.
+#   - llm-init (this file, no GPU): downloads the HF model, writes the sentinel,
+#       serves the progress UI + OpenAI /v1/* proxy on :8090.
+#   - vllm (templates/vllm.yaml, GPU): waits on the sentinel, loads MODEL_NAME on :8000.
 # The entrance (download-svc) is reachable as soon as llm-init is up, so the
 # dashboard shows download progress instead of sitting in "initializing".
 # emptyDir cannot span Pods, so hf-cache + run-state are hostPath, mounted by
@@ -28,14 +28,13 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name matching workloadReplicas + values.workloads. Label stays
-  # io.kompose.service: llm-init so the Service selectors still resolve here.
-  name: vllmllmbasev3
+  # Static name — engine Deployment uses {{ .Release.Name }} for allowMultipleInstall.
+  name: llminit
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llm-init
 spec:
-  replicas: {{ .Values.workloads.vllmllmbasev3.replicaCount }}
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: llm-init
@@ -74,7 +73,7 @@ spec:
               mountPath: /run/llm-init
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.1.0
+          image: docker.io/beclab/llm-init:v1.2.3
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
@@ -138,8 +137,10 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
+              # hf download (4 workers) needs headroom; 256Mi gets OOMKilled
+              # mid-download -> pod restart -> state machine wedges. 1Gi is safe.
               cpu: 500m
-              memory: 256Mi
+              memory: 1Gi
 ---
 # llm-init download/progress + OpenAI proxy surface (app entrance backend).
 apiVersion: v1

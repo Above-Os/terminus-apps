@@ -1,0 +1,164 @@
+{{- $llamacppclientDomainENV := split "," .Values.domain.llamacppclient -}}
+{{- $llamacppclientDomain := index $llamacppclientDomainENV "_0" -}}
+{{- /* Clone-configurable surface via olaresEnv. llama.cpp loads GGUF from HF cache.
+       MODEL_SOURCE drives llm-init download (hf://<repo> --include <file>.gguf).
+       MODEL_NAME is owner/repo[:quant] passed to llama-server -hf (not sentinel path).
+       For VLM, append a comma-separated mmproj segment in MODEL_SOURCE.
+       ENGINE_ARGS is a string of raw llama.cpp flags (wrappers/llamacpp.sh). */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelMode := $oe.MODEL_MODE | default "" -}}
+{{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+---
+# llm-init Pod (no GPU). Downloads GGUF models, writes sentinel + model_path,
+# serves progress UI + OpenAI /v1/* proxy on :8090, reverse-proxies the engine
+# at http://llamacpp:8081 (llm-init v1.1.0 derives URL from ENGINE_KIND).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Static name — engine Deployment uses {{ .Release.Name }} for allowMultipleInstall.
+  name: llminit
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: llm-init
+spec:
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: llm-init
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: llm-init
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-chown
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - "chown 1000:1000 /cache/hf/hub /run/llm-init || true"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+      containers:
+        - name: llm-init
+          image: docker.io/beclab/llm-init:v1.2.3
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ENGINE_KIND
+              value: llamacpp
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_MODE
+              value: "{{ $modelMode }}"
+{{- if $modelSupports }}
+            - name: MODEL_SUPPORTS
+              value: "{{ $modelSupports }}"
+{{- end }}
+            - name: ENGINE_ARGS
+              value: "{{ $engineArgs }}"
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_LEVEL
+              value: "{{ $logLevel }}"
+            - name: LOG_FORMAT
+              value: json
+            - name: APP_URL
+              value: "https://{{ $llamacppclientDomain }}"
+          ports:
+            - name: http
+              containerPort: 8090
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              # hf download (4 workers) needs headroom; 256Mi gets OOMKilled
+              # mid-download -> pod restart -> state machine wedges. 1Gi is safe.
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+  type: ClusterIP

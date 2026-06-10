@@ -27,19 +27,19 @@ spec:
 
     **安装时参数（按模型设置）**
     - `MODEL_SOURCE` —— `hf://<repo>`（`--include` / `--revision` 可选）。
-    - `MODEL_NAME` —— OpenAI 客户端别名 + vLLM `--served-model-name`。
+    - `MODEL_NAME` —— HF `owner/repo`，用于 vLLM `--model` 与 `--served-model-name`
+      （须与 `MODEL_SOURCE` 中的仓库一致，如 `Qwen/Qwen3-0.6B`）。
     - `MODEL_MODE` —— `chat` 或 `embedding`。
     - `MODEL_SUPPORTS` —— `supports_*` 能力位 CSV（无则留空）。
     - `ENGINE_ARGS` —— vLLM CLI 参数，如 `--max-model-len 8192 --gpu-memory-utilization 0.9`（留空用默认）。
     - `LOG_LEVEL` —— `debug | info | warn | error`。
     - `HF_ENDPOINT` / `HF_TOKEN` —— HF 镜像 / 私有库 token（公开库可留空）。
-    - `VLLM_CPU_REQUEST` / `VLLM_MEMORY_REQUEST` —— vLLM Pod 调度下限。
-    - `VLLM_CPU_LIMIT` / `VLLM_MEMORY_LIMIT` —— vLLM Pod 上限（按模型设置）。
+    - `VLLM_CPU_*` / `VLLM_MEMORY_*` —— vLLM Pod CPU/内存（按 clone 固定）。
+    - `VLLM_REQUIRED_GPU_MEMORY` —— 模型内存配额（安装时必填）。NVIDIA 独显
+      注入裸 MiB 整数的 `nvidia.com/gpumem`（支持 8Gi/8192/8192Mi）；Spark 注入 Pod `memory`。
 
     **资源说明**
-    vLLM 需要 GPU。CPU/内存为安装时 env。`required*` 是低安装门槛，`limited*` 是宽松
-    上限；`VLLM_*_REQUEST` 超过门槛时，clone 后需同步调高 manifest 的 `requiredMemory`
-    / `requiredCpu`。
+    manifest `accelerator` CPU/内存/GPU 为 `-1`（从渲染 chart 自动汇总）。
 
   upgradeDescription: |
     通用 vLLM + llm-init 基座（llm-init v1.1.0，vllm/vllm-openai:v0.22.0）。

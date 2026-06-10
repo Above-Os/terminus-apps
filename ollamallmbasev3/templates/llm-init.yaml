@@ -9,27 +9,27 @@
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
-{{- $logLevel := $oe.LOG_LEVEL | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- /* ENGINE_ARGS is mirrored onto llm-init so /api/config + diagnostics
        reflect the same OLLAMA_* tuning the ollama.sh wrapper exports. */ -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
 ---
 # llm-init Pod (no GPU). Talks to the ollama daemon via the "ollama"
-# Service on :11434 (defined in templates/ollama.yaml). llm-init v1.1.0
-# derives that URL from ENGINE_KIND, so the Service name must be "ollama".
+# Service on :11434 (defined in templates/ollama.yaml). llm-init derives
+# that URL from ENGINE_KIND, so the Service name must be "ollama".
 # Exposes the OpenAI-compatible /v1/*
 # surface and the unified /api/progress + /healthz endpoints on :8090.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name matching workloadReplicas.deployments key and values.workloads
-  # (same pattern as the v3 doc affine example).
-  name: ollamallmbasev3
+  # Static name (llminit) — engine Deployment uses {{ .Release.Name }} for
+  # allowMultipleInstall. Label stays io.kompose.service: llm-init.
+  name: llminit
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llm-init
 spec:
-  replicas: {{ .Values.workloads.ollamallmbasev3.replicaCount }}
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: llm-init
@@ -44,7 +44,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.1.0
+          image: docker.io/beclab/llm-init:v1.2.3
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
@@ -87,11 +87,13 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
+              cpu: 200m
               memory: 256Mi
+            limits:
+              # model pull needs headroom; 256Mi can get OOMKilled mid-pull
+              # -> pod restart -> state machine wedges. 1Gi is safe.
+              cpu: "1"
+              memory: 1Gi
 ---
 apiVersion: v1
 kind: Service

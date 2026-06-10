@@ -3,9 +3,9 @@
 # deploy/wrappers/{common.sh,sglang.sh} are inlined (this chart runs one engine).
 #
 # SGLang's deployment model: llm-init downloads the HF model into the shared
-# /cache/hf/hub cache and writes a readiness sentinel + model_path under
-# /run/llm-init; the engine waits on the sentinel and loads --model-path from
-# the resolved snapshot path.
+# /cache/hf/hub cache and writes a readiness sentinel under /run/llm-init; the
+# engine waits on the sentinel and loads --model-path from MODEL_NAME (the HF
+# owner/repo id), resolving against the shared cache.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,9 +19,9 @@ data:
     # SGLang engine wrapper (single file; helpers inlined from llm-init v1.1.0
     # common.sh + sglang.sh).
     #
-    # Waits for llm-init to publish the sentinel + model_path files, then
-    # launches SGLang's OpenAI-compatible server with --model-path pointed at
-    # the path llm-init wrote.
+    # Waits for llm-init to publish the sentinel, then launches SGLang's
+    # OpenAI-compatible server with --model-path set to MODEL_NAME (HF
+    # owner/repo); SGLang resolves it against the shared /cache/hf/hub cache.
     #
     # v1.1.0 ENGINE_ARGS contract (docs/engine-args.md): a cmdline-style string
     # in SGLang's native flag syntax. Shell-word-split and appended after the
@@ -34,10 +34,26 @@ data:
 
     ENGINE=sglang
     SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
-    MODEL_PATH_FILE=${MODEL_PATH_FILE:-/run/llm-init/model_path}
     WAIT_INTERVAL=${WAIT_INTERVAL:-5}
     WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
     log() { printf '[wrapper-%s] %s\n' "$ENGINE" "$*"; }
+
+    looks_like_hf_repo_id() {
+        s=$1
+        case "$s" in
+            ""|/*|./*|*://*) return 1 ;;
+        esac
+        case "$s" in
+            */*)
+                rest=${s#*/}
+                case "$rest" in
+                    */*|*:*) return 1 ;;
+                esac
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    }
 
     elapsed=0
     while [ ! -f "$SENTINEL" ]; do
@@ -51,14 +67,16 @@ data:
     done
     log "sentinel $SENTINEL found after ${elapsed}s"
 
-    [ -f "$MODEL_PATH_FILE" ] || { log "model path file $MODEL_PATH_FILE not found"; exit 1; }
-    MODEL_PATH=$(tr -d '\r\n' < "$MODEL_PATH_FILE")
-    log "starting SGLang with model-path=$MODEL_PATH name=${MODEL_NAME:-unset} args=${ENGINE_ARGS:-<empty>}"
+    if ! looks_like_hf_repo_id "${MODEL_NAME:-}"; then
+        log "MODEL_NAME must be owner/repo for --model-path (got ${MODEL_NAME:-<empty>})"
+        exit 1
+    fi
+    log "starting SGLang with model-path=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
 
     # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
     exec python3 -m sglang.launch_server \
-        --model-path "$MODEL_PATH" \
-        --served-model-name "${MODEL_NAME:-llm-init-model}" \
+        --model-path "$MODEL_NAME" \
+        --served-model-name "$MODEL_NAME" \
         --host 0.0.0.0 \
         --port "${SGLANG_PORT:-30000}" \
         --enable-metrics \

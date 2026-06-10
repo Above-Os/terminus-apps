@@ -10,23 +10,24 @@
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- $logLevel := $oe.LOG_LEVEL | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
-# llm-init Pod (no GPU). Downloads HF models, writes sentinel + model_path,
+# llm-init Pod (no GPU). Downloads HF models, writes the readiness sentinel,
 # serves progress UI + OpenAI /v1/* proxy on :8090, reverse-proxies the engine
 # at http://sglang:30000 (llm-init v1.1.0 derives URL from ENGINE_KIND).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sglangllmbasev3
+  # Static name — engine Deployment uses {{ .Release.Name }} for allowMultipleInstall.
+  name: llminit
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llm-init
 spec:
-  replicas: {{ .Values.workloads.sglangllmbasev3.replicaCount }}
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: llm-init
@@ -62,7 +63,7 @@ spec:
               mountPath: /run/llm-init
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.2.1
+          image: docker.io/beclab/llm-init:v1.2.3
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
