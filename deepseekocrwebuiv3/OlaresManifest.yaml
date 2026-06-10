@@ -6,7 +6,7 @@ metadata:
   description: Ready-to-use DeepSeek-OCR-2 Web UI
   icon: https://app.cdn.olares.com/appstore/deepseekocr/icon.png
   appid: deepseekocrwebuiv3
-  version: '1.1.5'
+  version: '1.1.6'
   title: DeepSeek-OCR2 WebUI V3
   categories:
     - AI
@@ -68,6 +68,8 @@ spec:
 
     **What's Changed**
 
+    - **Accelerator**: declared the GPU requirement via the accelerator modes list and added nvidia-gb10 (GB10/Spark) support.
+
     - **Multi-install**: the main Deployment now uses {{ .Release.Name }} so allowMultipleInstall installs don't collide on workload names.
 
     - **Architecture**: flattened sub-charts into a single chart; nginx clientproxy
@@ -87,14 +89,26 @@ spec:
     - text: MIT License
       url: https://github.com/neosun100/DeepSeek-OCR-WebUI?tab=License-1-ov-file
 
-  requiredMemory: 6Gi
-  limitedMemory: 25Gi
-  requiredDisk: 8Gi
-  limitedDisk: 20Gi
-  requiredCpu: 1
-  limitedCpu: 5
-  requiredGpu: 10Gi
-  limitedGpu: 16Gi
+  accelerator:
+  # nvidia      — discrete GPU; GPU memory via nvidia.com/gpumem.
+  # nvidia-gb10 — GB10/Spark (arm64) unified memory; GPU memory comes from pod RAM,
+  #               so the GPU-memory fields are dropped.
+  - mode: nvidia
+    requiredCpu: 1
+    limitedCpu: 5
+    requiredMemory: 6Gi
+    limitedMemory: 25Gi
+    requiredDisk: 8Gi
+    limitedDisk: 20Gi
+    requiredGPUMemory: 10Gi
+    limitedGPUMemory: 16Gi
+  - mode: nvidia-gb10
+    requiredCpu: 1
+    limitedCpu: 5
+    requiredMemory: 6Gi
+    limitedMemory: 25Gi
+    requiredDisk: 8Gi
+    limitedDisk: 20Gi
 
   supportArch:
     - amd64
