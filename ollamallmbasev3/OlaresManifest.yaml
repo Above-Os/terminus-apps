@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.2.0'
+  version: '1.2.1'
   categories:
     - AI
 sharedEntrances:
@@ -78,7 +78,8 @@ spec:
       `OLLAMA_MEMORY_LIMIT` — ollama pod CPU/RAM (fixed per clone template;
       not editable after install).
     - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024).
+      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
     - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto): Olares derives them
@@ -89,6 +90,8 @@ spec:
   upgradeDescription: |
     Generic Ollama + llm-init base (llm-init v1.2.3, ollama/ollama:0.30.6).
     Supports ollama:// Library pulls. Model identity and tuning are env.
+    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
+    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
     v1.2.0: version bump (no functional change).
     v1.1.18: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
     v1.1.17: raise shared engine MEMORY_LIMIT default to 35Gi.
@@ -239,7 +242,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # nvidia: gpumem Mi; nvidia-gb10: pod memory
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
     required: true
     type: string
     editable: false
