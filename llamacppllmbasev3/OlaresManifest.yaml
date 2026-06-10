@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.2.0'
+  version: '1.2.1'
   categories:
     - AI
 sharedEntrances:
@@ -64,7 +64,8 @@ spec:
       llm-init downloads both and wires `--mmproj` automatically.
     - `MODEL_NAME` — `owner/repo:quant` for `llama-server -hf` (e.g.
       `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`); also used as OpenAI `--alias`.
-    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
+      chart auto-adds `--embedding`, no need to set it in `ENGINE_ARGS`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
       offloads all layers to GPU; omit for CPU). Also accepts `LLAMA_ARG_*=val`.
@@ -72,7 +73,8 @@ spec:
     - `LLAMACPP_CPU_REQUEST` / `LLAMACPP_MEMORY_REQUEST` / `LLAMACPP_CPU_LIMIT` /
       `LLAMACPP_MEMORY_LIMIT` — engine pod CPU/RAM (fixed per clone template).
     - `LLAMACPP_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024).
+      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
     - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto) from rendered chart.
@@ -85,6 +87,10 @@ spec:
     v1.2.0: version bump (no functional change).
     Models live in the shared App Common store appCommon/huggingface.
     Sentinel/model_path are per-instance under appCache/llm-init-run/<release>.
+    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
+    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
+    MODEL_MODE=embedding now auto-adds --embedding (no ENGINE_ARGS needed).
+    LOG_LEVEL is optional and defaults to debug.
     v1.0.5: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
     v1.0.4: raise shared engine MEMORY_LIMIT default to 35Gi.
     v1.0.3: unify engine CPU/RAM defaults to 200m/2Gi/6/35Gi across llm bases.
@@ -172,11 +178,12 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-  - envName: LOG_LEVEL
-    required: true
+  - envName: LOG_LEVEL           # single-select: debug | info | warn | error
+    required: false
     type: string
     editable: true
     applyOnChange: true
+    default: "debug"
     options:
     - title: Debug
       value: debug
@@ -220,7 +227,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # nvidia: gpumem Mi; nvidia-gb10: pod memory
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
     required: true
     type: string
     editable: false

@@ -7,7 +7,7 @@ metadata:
   description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
   appid: vllmllmbasev3
   title: vLLM LLM Base (llm-init)
-  version: '1.2.0'
+  version: '1.2.1'
   categories:
     - AI
 sharedEntrances:
@@ -73,7 +73,8 @@ spec:
     - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
     - `MODEL_NAME` — HF `owner/repo` for vLLM `--model` and `--served-model-name`
       (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
-    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
+      chart auto-adds `--task embed`, no need to set it in `ENGINE_ARGS`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1` (empty for vLLM defaults).
     - `LOG_LEVEL` — `debug | info | warn | error`.
@@ -82,7 +83,8 @@ spec:
     - `VLLM_CPU_REQUEST` / `VLLM_MEMORY_REQUEST` / `VLLM_CPU_LIMIT` /
       `VLLM_MEMORY_LIMIT` — vLLM pod CPU/RAM (fixed per clone template).
     - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). NVIDIA: `nvidia.com/gpumem` in Mi (Gi×1024).
+      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
     - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto): Olares derives them
@@ -92,6 +94,10 @@ spec:
   upgradeDescription: |
     Generic vLLM + llm-init base (llm-init v1.2.3, vllm/vllm-openai:v0.22.0).
     Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
+    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
+    MODEL_MODE=embedding now auto-adds --task embed (no ENGINE_ARGS needed).
+    LOG_LEVEL is optional and defaults to debug.
     v1.2.0: version bump (no functional change).
     Models live in the shared cross-app App Common store appCommon/huggingface.
     v1.0.7: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
@@ -195,10 +201,11 @@ envs:
     editable: true
     applyOnChange: true
   - envName: LOG_LEVEL           # single-select: debug | info | warn | error
-    required: true
+    required: false
     type: string
     editable: true
     applyOnChange: true
+    default: "debug"
     options:
     - title: Debug
       value: debug
@@ -250,7 +257,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: VLLM_REQUIRED_GPU_MEMORY  # nvidia: gpumem Mi; nvidia-gb10: pod memory
+  - envName: VLLM_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
     required: true
     type: string
     editable: false
