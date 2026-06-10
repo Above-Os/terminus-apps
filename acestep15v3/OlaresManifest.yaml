@@ -25,11 +25,11 @@ entrances:
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
 #   acestep15v3    — nginx entrance Deployment (must match metadata.name / appid)
-#   acestep-server — ACE-Step 1.5 gradio engine Deployment
+#   acestepserver  — ACE-Step 1.5 gradio engine Deployment
 # The download Job carries no replica count.
 workloadReplicas:
   acestep15v3: 1
-  acestep-server: 1
+  acestepserver: 1
 
 permission:
   appData: true
@@ -85,14 +85,14 @@ spec:
     **What's Changed**
 
     - **Multi-install**: the acestepweb Deployment now uses {{ .Release.Name }} so allowMultipleInstall installs don't collide on workload names.
-    - **Accelerator**: declared the GPU requirement via the accelerator modes list and added nvidia-gb10 (GB10/Spark) support.
+    - **Accelerator**: declared the GPU requirement via the accelerator modes list (nvidia only; amd64-only app).
 
     - **Architecture**: flattened the acestep15v2/acestep15v2server sub-charts
       into a single chart; renamed the nginx entrance Deployment to `acestep15v3`
       so it matches appid for v3 workload verification. Cross-namespace backend
       references now resolve within the release namespace.
     - **Scaling**: `workloadReplicas` declares replica counts for the
-      `acestep15v3` entrance and `acestep-server` gradio engine workloads.
+      `acestep15v3` entrance and `acestepserver` gradio engine workloads.
       The model-download Job carries no replicas.
     - **Runtime**: container image `beclab/ace-step-ace-step-1.5:0.1.8`,
       default preset acestep-v15-xl-sft + acestep-5Hz-lm-4B with CPU offload.
@@ -110,9 +110,7 @@ spec:
       url: https://github.com/ace-step/ACE-Step-1.5?tab=MIT-1-ov-file
 
   accelerator:
-  # nvidia      — discrete GPU; GPU memory via nvidia.com/gpumem.
-  # nvidia-gb10 — GB10/Spark (arm64) unified memory; GPU memory comes from pod RAM,
-  #               so the GPU-memory fields are dropped.
+  # nvidia — discrete GPU; GPU memory via nvidia.com/gpumem. amd64 only.
   - mode: nvidia
     requiredCpu: "1"
     limitedCpu: "7"
@@ -122,17 +120,9 @@ spec:
     limitedDisk: 100Gi
     requiredGPUMemory: 12Gi
     limitedGPUMemory: 24Gi
-  - mode: nvidia-gb10
-    requiredCpu: "1"
-    limitedCpu: "7"
-    requiredMemory: 13Gi
-    limitedMemory: 31Gi
-    requiredDisk: 36Gi
-    limitedDisk: 100Gi
 
   supportArch:
     - amd64
-    - arm64
   onlyAdmin: true
 
 envs:
