@@ -68,7 +68,7 @@ spec:
 
     **What's Changed**
 
-    - **Accelerator**: declared the GPU requirement via the accelerator modes list and added nvidia-gb10 (GB10/Spark) support.
+    - **Accelerator**: declared the GPU requirement via the accelerator modes list and added nvidia-gb10 (GB10/Spark) support; on GB10 unified memory the GPU is carved from requiredMemory, so nvidia-gb10 requiredMemory is 16Gi (6Gi OOM'd the OCR model).
 
     - **Multi-install**: the main Deployment now uses {{ .Release.Name }} so allowMultipleInstall installs don't collide on workload names.
 
@@ -91,8 +91,11 @@ spec:
 
   accelerator:
   # nvidia      — discrete GPU; GPU memory via nvidia.com/gpumem.
-  # nvidia-gb10 — GB10/Spark (arm64) unified memory; GPU memory comes from pod RAM,
-  #               so the GPU-memory fields are dropped.
+  # nvidia-gb10 — GB10/Spark (arm64) unified memory. There are no GPU-memory
+  #               fields here; GPU memory is carved from requiredMemory (the
+  #               OOM showed GPU capacity == requiredMemory). 6Gi only left the
+  #               OCR model ~6Gi and it OOM'd, so requiredMemory is raised to
+  #               16Gi to give the GPU enough headroom on the unified pool.
   - mode: nvidia
     requiredCpu: "1"
     limitedCpu: "6"
@@ -105,7 +108,7 @@ spec:
   - mode: nvidia-gb10
     requiredCpu: "1"
     limitedCpu: "6"
-    requiredMemory: 6Gi
+    requiredMemory: 16Gi
     limitedMemory: 25Gi
     requiredDisk: 8Gi
     limitedDisk: 20Gi
