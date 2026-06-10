@@ -1,10 +1,30 @@
 {{- $isNewVersion := and .Values.sysVersion (semverCompare ">=1.12.3-0" (toString .Values.sysVersion)) -}}
 {{- $modelPath := "/app/models" -}}
+{{- /* Accelerator type (Olares-injected, same detection as the llm* base charts).
+       On GB10/Spark the GPU has no separate VRAM: gpu-inject carves GPU memory
+       from the pod's RAM (gpumem == accelerator.requiredMemory), so that memory
+       shows up in this container's cgroup. The discrete-GPU requests (5Gi/20Gi)
+       only cover the Python/OCR process and would OOM on Spark, so on nvidia-gb10
+       we raise requests/limits to also hold the GPU working set. */ -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $memRequest := "5Gi" -}}
+{{- $memLimit := "20Gi" -}}
+{{- if $unifiedMem -}}
+{{- /* GPU (up to gpumem == requiredMemory 16Gi) is carved from pod RAM. Keep
+       sums within the nvidia-gb10 accelerator envelope: requests <= 16Gi
+       requiredMemory, limits <= 25Gi limitedMemory (download 1Gi + nginx 0.5Gi). */ -}}
+{{- $memRequest = "13Gi" -}}
+{{- $memLimit = "23Gi" -}}
+{{- end -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: deepseekocrwebuiv3
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: deepseekocrwebuiv3
@@ -65,10 +85,10 @@ spec:
           resources:
             requests:
               cpu: "500m"
-              memory: 5Gi
+              memory: {{ $memRequest }}
             limits:
               cpu: "4"
-              memory: 20Gi
+              memory: {{ $memLimit }}
           volumeMounts:
             - name: models
               mountPath: {{ $modelPath }}

@@ -7,7 +7,7 @@ metadata:
   description: OpenAI-compatible TTS/STT server
   appid: speachesv3
   title: Speaches V3 for test
-  version: '1.1.1'
+  version: '1.1.3'
   categories:
     - Utilities_v112
     - AI
@@ -108,6 +108,7 @@ spec:
       url: https://github.com/speaches-ai/speaches/blob/main/LICENSE
   upgradeDescription: |
     V3 shared-app migration of Speaches (engine 0.8.2).
+    - Added nvidia-gb10 (GB10/Spark) accelerator support; on Spark unified memory the GPU is carved from requiredMemory, so nvidia-gb10 requiredMemory is 12Gi (>= the 8Gi GPU need). On nvidia-gb10 the speaches container also raises its memory request/limit (10Gi/19Gi) since the GPU working set lives in pod RAM; discrete GPU keeps 6Gi/18Gi.
     - Flattened the speachesserver / speaches sub-charts into a single chart.
     - The engine Deployment is now named after the appid (speachesv3); the nginx
       entrance (speachesingress) and terminal are separate workloads, all declared
@@ -140,6 +141,17 @@ spec:
     limitedDisk: 100Gi
     requiredGPUMemory: 8Gi
     limitedGPUMemory: 16Gi
+  # GB10/Spark (arm64) unified memory: there are no GPU-memory fields; GPU
+  # memory is carved from requiredMemory (HAMi gpumem == requiredMemory on
+  # Spark). The nvidia mode needs 8Gi GPU, so requiredMemory is 12Gi here
+  # (>= 8Gi GPU + inference/process headroom); 6.5Gi would OOM the STT/TTS model.
+  - mode: nvidia-gb10
+    requiredCpu: 700m
+    limitedCpu: 5000m
+    requiredMemory: 12Gi
+    limitedMemory: 21Gi
+    requiredDisk: 2Gi
+    limitedDisk: 100Gi
   # CPU mode: the manifest is validated against the SAME rendered container
   # resources as nvidia (the default render uses SPEACHES_GPU=true -> the GPU
   # branch, 4000m/18Gi lim, 500m/6Gi req), so this mode's CPU/RAM ceilings must
