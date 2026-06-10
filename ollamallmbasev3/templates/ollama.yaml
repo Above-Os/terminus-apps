@@ -41,17 +41,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name (NOT .Release.Name) so it matches the workloadReplicas key in
-  # OlaresManifest.yaml — clone instances get a dynamic release name, which
-  # cannot be pre-declared.
-  name: ollama
+  # Primary workload: named after the release (== appid ollamallmbasev3) for v3
+  # allowMultipleInstall. Label/selector stays io.kompose.service: ollama so
+  # the ClusterIP Service below keeps resolving.
+  name: '{{ .Release.Name }}'
   namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: ollama
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: {{ .Values.workloads.ollama.replicaCount }}
+  replicas: {{ .Values.workloads.ollamallmbasev3.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: ollama
