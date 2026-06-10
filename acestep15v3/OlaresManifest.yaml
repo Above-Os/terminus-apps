@@ -6,7 +6,7 @@ metadata:
   description: The most powerful local music generation model that outperforms most commercial alternatives
   icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
   appid: acestep15v3
-  version: '1.1.1'
+  version: '1.1.2'
   title: ACE-Step 1.5 V3 for test
   categories:
     - Creativity
@@ -85,6 +85,7 @@ spec:
     **What's Changed**
 
     - **Multi-install**: the acestepweb Deployment now uses {{ .Release.Name }} so allowMultipleInstall installs don't collide on workload names.
+    - **Accelerator**: declared the GPU requirement via the accelerator modes list and added nvidia-gb10 (GB10/Spark) support.
 
     - **Architecture**: flattened the acestep15v2/acestep15v2server sub-charts
       into a single chart; renamed the nginx entrance Deployment to `acestep15v3`
@@ -108,17 +109,30 @@ spec:
     - text: MIT License
       url: https://github.com/ace-step/ACE-Step-1.5?tab=MIT-1-ov-file
 
-  requiredMemory: 11Gi
-  limitedMemory: 30Gi
-  requiredDisk: 36Gi
-  limitedDisk: 100Gi
-  requiredCpu: 1
-  limitedCpu: 6
-  requiredGpu: 12Gi
-  limitedGpu: 24Gi
+  accelerator:
+  # nvidia      — discrete GPU; GPU memory via nvidia.com/gpumem.
+  # nvidia-gb10 — GB10/Spark (arm64) unified memory; GPU memory comes from pod RAM,
+  #               so the GPU-memory fields are dropped.
+  - mode: nvidia
+    requiredCpu: 1
+    limitedCpu: 6
+    requiredMemory: 11Gi
+    limitedMemory: 30Gi
+    requiredDisk: 36Gi
+    limitedDisk: 100Gi
+    requiredGPUMemory: 12Gi
+    limitedGPUMemory: 24Gi
+  - mode: nvidia-gb10
+    requiredCpu: 1
+    limitedCpu: 6
+    requiredMemory: 11Gi
+    limitedMemory: 30Gi
+    requiredDisk: 36Gi
+    limitedDisk: 100Gi
 
   supportArch:
     - amd64
+    - arm64
   onlyAdmin: true
 
 envs:
