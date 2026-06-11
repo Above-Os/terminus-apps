@@ -5,12 +5,27 @@
        Must stay in sync with the same block in templates/llm-init.yaml. */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- /* K8s rejects empty resource quantities; fall back to ollamav3-style
-       defaults when env is unset so install/helm render never emits "". */ -}}
-{{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "50m") -}}
-{{- $memRequest := trim ($oe.OLLAMA_MEMORY_REQUEST | default "4Gi") -}}
-{{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "4") -}}
+{{- /* CPU/RAM via olaresEnv (manifest defaults); accelerator -1 sums rendered
+       workloads. Defaults: 200m/2Gi req, 6/35Gi lim (+ llm-init 200m/256Mi). */ -}}
+{{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "200m") -}}
+{{- $memRequest := trim ($oe.OLLAMA_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.OLLAMA_MEMORY_LIMIT | default "35Gi") -}}
+{{- /* Per-instance model memory quota. nvidia.com/gpumem needs a BARE MiB int;
+       Spark unified memory reuses the same value as pod memory ("<MiB>Mi"). */ -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.OLLAMA_REQUIRED_GPU_MEMORY | default "4096") -}}
+{{- /* Olares injects .Values.gpu / .Values.GPU.Type at install (SelectedGpuType).
+       Discrete NVIDIA: OLLAMA_REQUIRED_GPU_MEMORY -> nvidia.com/gpumem (Mi).
+       Spark (nvidia-gb10) unified memory: same env -> pod memory r/l. */ -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
 ---
 # Ollama daemon Pod (single container) so the Olares
 # applications.app.bytetrade.io/gpu-inject annotation cleanly targets just
@@ -22,17 +37,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name (NOT .Release.Name) so it matches the workloadReplicas key in
-  # OlaresManifest.yaml — clone instances get a dynamic release name, which
-  # cannot be pre-declared.
-  name: ollama
+  # Primary workload: named after the release (== appid ollamallmbasev3) for v3
+  # allowMultipleInstall. Label/selector stays io.kompose.service: ollama so
+  # the ClusterIP Service below keeps resolving.
+  name: '{{ .Release.Name }}'
   namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: ollama
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: {{ .Values.workloads.ollama.replicaCount }}
+  replicas: {{ .Values.workloads.ollamallmbasev3.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: ollama
@@ -68,7 +83,7 @@ spec:
             defaultMode: 0555
       containers:
         - name: ollama
-          image: docker.io/ollama/ollama:0.30.6
+          image: docker.io/ollama/ollama:0.30.0
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/ollama.sh"]
           env:
@@ -117,12 +132,23 @@ spec:
               mountPath: /llm-init/wrappers
               readOnly: true
           resources:
+            # nvidia.com/gpumem is the per-instance GPU memory quota read by the
+            # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
+            # It's a non-overcommittable extended resource, so it must be in BOTH
+            # requests and limits with the same value. Dropped on gb10 (unified
+            # memory uses pod memory instead).
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

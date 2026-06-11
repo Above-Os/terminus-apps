@@ -7,7 +7,7 @@ metadata:
   description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
   appid: vllmllmbasev3
   title: vLLM LLM Base (llm-init)
-  version: '1.0.4'
+  version: '1.2.5'
   categories:
     - AI
 sharedEntrances:
@@ -34,11 +34,11 @@ entrances:
 # Declares every workload's replica count (flat map; keys = Deployment
 # metadata.name). Keys MUST match rendered workload names and values.yaml
 # workloads.<name>:
-#   vllm          — engine Deployment
-#   vllmllmbasev3 — llm-init / entrance Deployment
+#   vllmllmbasev3 — engine Deployment (== appid / Release.Name)
+#   llminit        — llm-init / entrance Deployment
 workloadReplicas:
-  vllm: 1
   vllmllmbasev3: 1
+  llminit: 1
 spec:
   versionName: '0.22.0'
   fullDescription: |
@@ -73,37 +73,47 @@ spec:
     - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
     - `MODEL_NAME` — HF `owner/repo` for vLLM `--model` and `--served-model-name`
       (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
-    - `MODEL_MODE` — `chat` or `embedding`.
+    - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
+      chart auto-adds `--task embed`, no need to set it in `ENGINE_ARGS`.
     - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
     - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1` (empty for vLLM defaults).
     - `LOG_LEVEL` — `debug | info | warn | error`.
     - `HF_ENDPOINT` — HF mirror, e.g. `https://hf-mirror.com` (empty = huggingface.co).
     - `HF_TOKEN` — HF access token for private/gated repos (empty if public).
-    - `VLLM_CPU_REQUEST` / `VLLM_MEMORY_REQUEST` — vLLM pod scheduling floor.
-    - `VLLM_CPU_LIMIT` / `VLLM_MEMORY_LIMIT` — vLLM pod ceiling (set per model).
+    - `VLLM_CPU_REQUEST` / `VLLM_MEMORY_REQUEST` / `VLLM_CPU_LIMIT` /
+      `VLLM_MEMORY_LIMIT` — vLLM pod CPU/RAM (fixed per clone template).
+    - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
+      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
-    - vLLM requires a GPU. GPU memory is governed by `gpu-inject` + the manifest
-      `*GPUMemory` fields and vLLM's `--gpu-memory-utilization`.
-    - vLLM container CPU/RAM **requests & limits** are install-time env
-      (`VLLM_CPU_*` / `VLLM_MEMORY_*`); tune per model at install.
-    - Olares validates the **sum across all app containers**: Σ requests.cpu ≤
-      `requiredCpu`, Σ requests.memory ≤ `requiredMemory`, Σ limits.cpu ≤
-      `limitedCpu`, Σ limits.memory ≤ `limitedMemory`.
-    - **request = scheduling floor** (reserved) → keep small so `required*` stays
-      low and the app installs on modest hardware. **limit = burst ceiling** →
-      `limited*` is generous. Defaults (vLLM 200m/2Gi req, 6/32Gi lim) fit with
-      headroom; only when you exceed it must you bump the matching
-      `required*`/`limited*` on clone.
+    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto): Olares derives them
+      from the rendered chart. `requiredDisk` / `limitedDisk` stay fixed.
+    - vLLM also honors `--gpu-memory-utilization` via `ENGINE_ARGS`.
 
   upgradeDescription: |
-    Generic vLLM + llm-init base (llm-init v1.2.3, vllm/vllm-openai:v0.22.0).
+    Generic vLLM + llm-init base (llm-init v1.2.4, vllm/vllm-openai:v0.22.0).
     Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
+    (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
+    OOM on large sharded models (huggingface_hub#3300). No resource-value change.
+    v1.2.4: fix Helm render — the v1.2.3 gpumem comment used a Go-template comment
+    whose trim markers ({{- ... -}}) collapsed resources:/requests: onto one line;
+    switched to a plain YAML (#) comment. No resource-value change.
+    v1.2.3: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
+    extended resource; the gpu-inject webhook / auto-gpumem template apps read it
+    from limits). gb10 unaffected (unified memory uses pod memory).
+    v1.2.2: raise llm-init download memory limit to 4Gi (hf_xet chunk buffering OOM, huggingface_hub#3300).
+    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
+    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
+    MODEL_MODE=embedding now auto-adds --task embed (no ENGINE_ARGS needed).
+    LOG_LEVEL is optional and defaults to debug.
+    v1.2.0: version bump (no functional change).
     Models live in the shared cross-app App Common store appCommon/huggingface.
-    v1.0.16: sentinel/model_path now live under appCache/llm-init-run/<instance>
-    per release (fixes cross-instance handshake collisions). After upgrade, Retry
-    once or restart both workloads so vLLM picks up the new model_path.
-    v1.0.4: bump llm-init to v1.2.3, raise memory limit to 1Gi, pin HF cache env on engine.
+    v1.0.7: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
+    v1.0.6: raise shared engine MEMORY_LIMIT default to 35Gi.
+    v1.0.5: align resource envs with ollamallmbasev3 — gpumem Mi, accelerator -1,
+    VLLM_REQUIRED_GPU_MEMORY install prompt, CPU/RAM envs non-editable.
 
   developer: beclab
   website: https://github.com/beclab/llm-init
@@ -117,35 +127,29 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
-  # Olares validates (mode=nvidia), summing ALL app containers (llm-init +
-  # vllm; initContainers excluded):
-  #   Σ requests.cpu    <= requiredCpu      Σ limits.cpu    <= limitedCpu
-  #   Σ requests.memory <= requiredMemory   Σ limits.memory <= limitedMemory
-  # request = scheduling floor (reserved) -> keep LOW so required* stays small
-  #           and the app installs on modest hardware.
-  # limit   = ceiling (burst cap) -> limited* is generous so models can grow.
-  # Baseline with DEFAULT env (VLLM_CPU_REQUEST=200m / VLLM_MEMORY_REQUEST=2Gi /
-  # VLLM_CPU_LIMIT=6 / VLLM_MEMORY_LIMIT=32Gi):
-  #   container        req cpu / mem     lim cpu / mem
-  #   llm-init         100m / 128Mi      500m  / 256Mi
-  #   vllm (default)   200m / 2Gi        6000m / 32Gi
-  #   ----------------------------------------------------
-  #   Σ                300m / ~2.13Gi    6500m / ~32.25Gi
-  # Headroom to raise VLLM_* at install WITHOUT editing this block:
-  #   req cpu +900m, req mem +~0.87Gi, lim cpu +9500m, lim mem +~31.75Gi.
-  # Exceeding that -> bump the matching required*/limited* on clone.
-  - mode: nvidia
-    requiredCpu: 1200m
-    limitedCpu: 16000m
-    requiredMemory: 3Gi
-    limitedMemory: 64Gi
-    requiredDisk: 50Mi
-    limitedDisk: 500Gi
-    requiredGPUMemory: 1Gi
-    limitedGPUMemory: 80Gi
+    #   nvidia       — discrete GPU; VLLM_REQUIRED_GPU_MEMORY -> gpumem (Mi)
+    #   nvidia-gb10  — Spark unified memory; same env -> pod memory
+    # -1 = auto from rendered workloads; disk stays explicit.
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
 
   supportArch:
     - amd64
+    - arm64
 permission:
   appData: true
   appCache: true   # sentinel/model_path live under appCache/llm-init-run/<release>
@@ -157,6 +161,7 @@ options:
   apiTimeout: 0
   LLMGatewaySupported: true
   allowMultipleInstall: true
+  shared: true
   # This is a generic base with no bundled model: there is no installable body,
   # you create an instance (clone) and install that. Matches the base concept.
   templateOnly: true
@@ -206,10 +211,11 @@ envs:
     editable: true
     applyOnChange: true
   - envName: LOG_LEVEL           # single-select: debug | info | warn | error
-    required: true
+    required: false
     type: string
     editable: true
     applyOnChange: true
+    default: "debug"
     options:
     - title: Debug
       value: debug
@@ -236,30 +242,33 @@ envs:
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  # --- vLLM container resources (install-time; Σ must fit spec.accelerator) ---
-  # request = reserved floor (keep small); limit = burst ceiling. CPU MUST carry
-  # "m" for millicores (e.g. 200m = 0.2 core); a bare "200" means 200 CORES and
-  # will exceed the limit. No default here on purpose — leaving these blank keeps
-  # them shown as required fields in the install dialog (a real default would
-  # hide them / pre-fill instead of prompting). Template falls back to safe
-  # values (200m / 2Gi / 6 / 32Gi) only when left empty.
-  - envName: VLLM_CPU_REQUEST    # example: 200m  (K8s quantity; MUST be <= VLLM_CPU_LIMIT)
+  # --- vLLM container resources (fixed per clone; rendered into vllm.yaml) ---
+  - envName: VLLM_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_MEMORY_REQUEST # default: 2Gi
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_MEMORY_LIMIT   # default: 35Gi
+    required: true
+    default: "35Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
     required: true
     type: string
-    editable: true
-    applyOnChange: true
-  - envName: VLLM_MEMORY_REQUEST # example: 2Gi  (reserved floor; MUST be <= VLLM_MEMORY_LIMIT)
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
-  - envName: VLLM_CPU_LIMIT      # example: 6  (burst ceiling in cores; bare integer = whole cores)
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
-  - envName: VLLM_MEMORY_LIMIT   # example: 32Gi  (burst ceiling; set per model)
-    required: true
-    type: string
-    editable: true
-    applyOnChange: true
+    editable: false
+    applyOnChange: false

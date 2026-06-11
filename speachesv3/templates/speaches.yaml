@@ -7,6 +7,32 @@
 {{- $userChatUrl := index $env "CHAT_COMPLETION_BASE_URL" | default "" | trim -}}
 {{- $hfEndpoint := $env.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $env.HF_TOKEN | default "" -}}
+{{- /* Accelerator type (Olares-injected, same detection as the llm* base charts).
+       On GB10/Spark the GPU has no separate VRAM: gpu-inject carves GPU memory
+       from the pod's RAM (gpumem == accelerator.requiredMemory), so the 8Gi GPU
+       working set shows up in this container's cgroup. The discrete-GPU
+       requests/limits only size the process RAM and would under-reserve on Spark,
+       so on nvidia-gb10 we raise them to also hold the GPU memory. */ -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- /* Only the memory request/limit varies across modes (cpu is always 500m/4):
+       CPU-only 4Gi/12Gi; discrete GPU 6Gi/18Gi (VRAM is separate); nvidia-gb10
+       10Gi/19Gi to also hold the 8Gi GPU working set carved from pod RAM, while
+       staying within the nvidia-gb10 envelope (requiredMemory 12Gi, limitedMemory
+       21Gi) given the llm-init downloader (req 128Mi / lim 1Gi). */ -}}
+{{- $memRequest := "4Gi" -}}
+{{- $memLimit := "12Gi" -}}
+{{- if $speachesGpu -}}
+{{- $memRequest = "6Gi" -}}
+{{- $memLimit = "18Gi" -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = "10Gi" -}}
+{{- $memLimit = "19Gi" -}}
+{{- end -}}
+{{- end -}}
 
 ---
 apiVersion: apps/v1
@@ -386,21 +412,12 @@ spec:
             - containerPort: 8000
               protocol: TCP
           resources:
-            {{- if $speachesGpu }}
-            limits:
-              cpu: "4"
-              memory: 18Gi
             requests:
               cpu: 500m
-              memory: 6Gi
-            {{- else }}
+              memory: {{ $memRequest }}
             limits:
               cpu: "4"
-              memory: 12Gi
-            requests:
-              cpu: 500m
-              memory: 4Gi
-            {{- end }}
+              memory: {{ $memLimit }}
           volumeMounts:
             - name: speaches-hf-cache
               mountPath: /home/ubuntu/.cache/huggingface/hub

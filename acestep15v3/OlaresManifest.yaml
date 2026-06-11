@@ -6,7 +6,7 @@ metadata:
   description: The most powerful local music generation model that outperforms most commercial alternatives
   icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
   appid: acestep15v3
-  version: '1.1.0'
+  version: '1.1.3'
   title: ACE-Step 1.5 V3 for test
   categories:
     - Creativity
@@ -24,16 +24,20 @@ entrances:
 
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   acestep15v3    — nginx entrance Deployment (must match metadata.name / appid)
-#   acestep-server — ACE-Step 1.5 gradio engine Deployment
-# The download Job carries no replica count.
+#   acestep15v3        — nginx entrance Deployment (must match metadata.name / appid)
+#   acestepserver      — ACE-Step 1.5 gradio engine Deployment
+#   acestepdownloader  — llm-init download-only model fetcher
 workloadReplicas:
   acestep15v3: 1
-  acestep-server: 1
+  acestepserver: 1
+  acestepdownloader: 1
 
 permission:
   appData: true
-  appCache: true
+  appCache: true   # llm-init sentinel/run-state under appCache/llm-init-run/<release>
+  # ACE-Step HF models live in the shared cross-app App Common store
+  # (appCommon/huggingface, mounted at the fixed /cache/hf/hub container path).
+  appCommon: true
   externalData: true
   userData:
     - Home
@@ -77,22 +81,40 @@ spec:
 
     **ACE-Step 1.5 XL (4B DiT)**
     - acestep-v15-xl-base, acestep-v15-xl-sft, acestep-v15-xl-turbo — higher audio quality with 4B-parameter DiT decoder
-    - Requires ≥12GB VRAM (with offload) or ≥20GB recommended; all LM models remain compatible
+    - Requires ≥12GB VRAM; all LM models remain compatible
 
   upgradeDescription: |
     Migrated ACE-Step 1.5 to apiVersion v3 shared app pattern (acestep15v2 → acestep15v3).
 
     **What's Changed**
 
+    - **Download architecture**: replaced the bespoke downloader image + Job with
+      the shared `llm-init` download-only Deployment (`acestepdownloader`),
+      matching speachesv3. Models now land in the shared cross-app HF cache
+      (App Common) and the engine gates on the downloader's `/readyz` instead of
+      per-repo `.done` sentinels. `/app/checkpoints` is now an ephemeral symlink
+      farm over the cached snapshots, so model bytes are de-duplicated and reused
+      across apps. Declared `permission.appCommon: true` for the shared HF store.
+      Downloader image bumped to `llm-init:v1.2.4` (default LFS; chart no longer
+      sets `HF_HUB_DISABLE_XET`).
+    - **Entrance routing**: rewrote nginx to match speachesv3 — llm-init API paths
+      (`/api/progress`, `/healthz`, …) pin to download-svc; `/` gates on model
+      download + Gradio readiness and auto-reloads into the app via `/__app_ready`.
+    - **Resources**: raised nvidia `limitedMemory` to 34Gi so the llm-init downloader
+      (4Gi) + engine (29Gi) + entrance (256Mi) limits sum within the envelope.
+    - **Multi-install**: the acestepweb Deployment now uses {{ .Release.Name }} so allowMultipleInstall installs don't collide on workload names.
+    - **Accelerator**: declared the GPU requirement via the accelerator modes list (nvidia only; amd64-only app).
+
     - **Architecture**: flattened the acestep15v2/acestep15v2server sub-charts
       into a single chart; renamed the nginx entrance Deployment to `acestep15v3`
       so it matches appid for v3 workload verification. Cross-namespace backend
       references now resolve within the release namespace.
     - **Scaling**: `workloadReplicas` declares replica counts for the
-      `acestep15v3` entrance and `acestep-server` gradio engine workloads.
+      `acestep15v3` entrance and `acestepserver` gradio engine workloads.
       The model-download Job carries no replicas.
-    - **Runtime**: container image `beclab/ace-step-ace-step-1.5:0.1.8`,
-      default preset acestep-v15-xl-sft + acestep-5Hz-lm-4B with CPU offload.
+    - **Runtime**: manual service initialization in Gradio Settings (disabled
+      `--service_mode` / `--init_service` auto-load); nvidia `requiredGPUMemory`
+      set to 12Gi for acestep-v15-xl-sft + acestep-5Hz-lm-4B.
 
   developer: ace-step
   website: https://acemusic.ai/
@@ -106,14 +128,17 @@ spec:
     - text: MIT License
       url: https://github.com/ace-step/ACE-Step-1.5?tab=MIT-1-ov-file
 
-  requiredMemory: 11Gi
-  limitedMemory: 30Gi
-  requiredDisk: 36Gi
-  limitedDisk: 100Gi
-  requiredCpu: 1
-  limitedCpu: 6
-  requiredGpu: 12Gi
-  limitedGpu: 24Gi
+  accelerator:
+  # nvidia — discrete GPU; GPU memory via nvidia.com/gpumem. amd64 only.
+  - mode: nvidia
+    requiredCpu: "1"
+    limitedCpu: "7"
+    requiredMemory: 13Gi
+    limitedMemory: 34Gi
+    requiredDisk: 36Gi
+    limitedDisk: 100Gi
+    requiredGPUMemory: 12Gi
+    limitedGPUMemory: 24Gi
 
   supportArch:
     - amd64
@@ -127,6 +152,7 @@ envs:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
 
 options:
+  shared: true
   allowMultipleInstall: true
   apiTimeout: 0
   conflicts:

@@ -9,7 +9,7 @@
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
-{{- $logLevel := $oe.LOG_LEVEL | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- /* ENGINE_ARGS is mirrored onto llm-init so /api/config + diagnostics
        reflect the same OLLAMA_* tuning the ollama.sh wrapper exports. */ -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
@@ -22,14 +22,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name matching workloadReplicas.deployments key and values.workloads
-  # (same pattern as the v3 doc affine example).
-  name: ollamallmbasev3
+  # Static name (llminit) — engine Deployment uses {{ .Release.Name }} for
+  # allowMultipleInstall. Label stays io.kompose.service: llm-init.
+  name: llminit
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llm-init
 spec:
-  replicas: {{ .Values.workloads.ollamallmbasev3.replicaCount }}
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: llm-init
@@ -44,7 +44,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.2.3
+          image: docker.io/beclab/llm-init:v1.2.4
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
