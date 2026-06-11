@@ -73,7 +73,10 @@ spec:
               mountPath: /run/llm-init
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.2.3
+          # v1.2.4 defaults to the stable LFS download path (hf_xet disabled
+          # unless HF_ENABLE_XET=true); LFS streams each file to disk with a
+          # bounded RAM footprint, avoiding the hf_xet OOM (huggingface_hub#3300).
+          image: docker.io/beclab/llm-init:v1.2.4
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
@@ -137,13 +140,10 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
-              # hf_xet fetches byte-range chunks in parallel and buffers them in
-              # RAM before flushing to disk (huggingface_hub#3300); the default
-              # 16-way per-file concurrency, times MAX_CONCURRENT_DOWNLOADS
-              # parallel files, can spike well past 1Gi on large sharded models
-              # and OOM-kill this init container mid-download. 4Gi covers the
-              # common single-file / small-sharded GGUF case; very large sharded
-              # models may need more (or the planned llm-init concurrency cap).
+              # LFS download (v1.2.4 default) streams each file to disk with a
+              # bounded footprint, but `hf download` still runs a python
+              # subprocess in this cgroup; 4Gi gives the huggingface_hub CLI
+              # comfortable headroom on large sharded models.
               cpu: 500m
               memory: 4Gi
 ---
