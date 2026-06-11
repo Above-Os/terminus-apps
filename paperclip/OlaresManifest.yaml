@@ -5,14 +5,14 @@ metadata:
   description: Open-source orchestration platform for AI agent companies.
   icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
   appid: paperclip
-  version: '1.0.8'
+  version: '1.0.21'
   title: Paperclip
   categories:
   - Productivity_v112
   - Productivity
   - Developer Tools
 spec:
-  versionName: '2026.6.4'
+  versionName: '2026.609.0'
   promoteImage:
     - https://app.cdn.olares.com/appstore/paperclip/1.webp
     - https://app.cdn.olares.com/appstore/paperclip/2.webp
@@ -20,8 +20,7 @@ spec:
     - https://app.cdn.olares.com/appstore/paperclip/4.webp
   fullDescription: |
     **First-time admin setup**
-    After the first startup, run `pnpm paperclipai auth bootstrap-ceo"` inside the Paperclip container to generate the first admin invite URL.
-    See [Paperclip Usecase](https://docs.olares.com/use-cases/paperclip.html) for more details.
+    After the first startup, open the Paperclip URL in your browser, sign in or create an account, then choose **Claim this instance** on the setup screen to become the first admin.
 
     **Overview**
     Paperclip is a Node.js server and React UI that orchestrates a team of AI agents to run a business. Bring your own agents, assign goals, and track your agents' work and costs from one dashboard.
@@ -40,28 +39,12 @@ spec:
     - Mobile Ready - monitor and manage from anywhere
     - External PostgreSQL support for production deployments
   upgradeDescription: |
-    Stability & Hermes adapter fixes (v1.0.8)
+    Authenticated private deployment mode (v1.0.20)
 
-    App upgrade:
-    - Upgraded container image to beclab/paperclip:v1.0.1 (built from Above-Os/paperclip feat/build_0604), bundling the latest Hermes Agent (npm hermes-agent v0.15.x) and other built-in adapters: Claude Code, Codex, OpenCode, Pi Coding Agent
-    - Tracks upstream paperclip ~2026.6.4 (date-based versioning)
-
-    Bug fixes:
-    - Fixed Hermes adapter "ModuleNotFoundError: No module named 'hermes_cli'" by prepending the bundled Python venv (/opt/venvs/hermes/bin) to PATH so spawned hermes subprocesses resolve python3 to the venv interpreter that has hermes_cli installed
-
-    Resource sizing (aligned with upstream recommendations):
-    - Memory: required 512Mi -> 1Gi, limit 2Gi -> 6Gi (prevents OOMKilled when running Hermes/Claude/Codex subprocesses and processing large heartbeat run logs)
-    - CPU: required 0.25 -> 0.5 cores, limit 2 -> 3 cores (reduces startup throttling, handles concurrent agent runs and Hermes subprocess bursts)
-    - Disk: limit 5Gi -> 20Gi (hourly DB backups with 30-day retention + heartbeat run logs accumulate quickly)
-
-    Previous: v0.3.1 highlights
-    - Gemini CLI adapter - full local adapter support for Google's Gemini CLI
-    - Run transcript polish - markdown rendering, stdout folding, identity redaction
-    - Inbox refinements - improved tabs, badge counts, mobile layout
-    - Improved onboarding wizard
-    - Default max turns raised to 300
-
-    Full release notes at: https://github.com/paperclipai/paperclip/releases/tag/v0.3.1
+    Changes:
+    - Switched to `authenticated` + `private` mode; first admin is claimed in the browser (no CLI bootstrap)
+    - Server starts from environment variables only; no config.json required
+    - Aligned with official Docker Compose defaults
   developer: Paperclip AI
   website: https://paperclip.ing/
   sourceCode: https://github.com/paperclipai/paperclip
@@ -73,12 +56,12 @@ spec:
   license:
   - text: MIT
     url: https://github.com/paperclipai/paperclip/blob/master/LICENSE
-  requiredMemory: 1Gi
-  limitedMemory: 6Gi
+  requiredMemory: 2Gi
+  limitedMemory: 10Gi
   requiredDisk: 256Mi
   limitedDisk: 20Gi
-  requiredCpu: 0.5
-  limitedCpu: 3
+  requiredCpu: 1
+  limitedCpu: 6
   supportArch:
   - amd64
   - arm64
@@ -136,3 +119,11 @@ entrances:
   title: Paperclip
   icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
   openMethod: window
+  authLevel: internal
+- name: terminal
+  port: 80
+  host: terminal
+  title: Paperclip CLI
+  icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
+  openMethod: window
+  authLevel: internal  
