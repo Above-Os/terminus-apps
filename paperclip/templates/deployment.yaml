@@ -34,6 +34,13 @@ spec:
           - '-c'
           - |
             set -e
+            fix_dir() {
+              for d in "$@"; do
+                [ -e "$d" ] || continue
+                chown -R 1000:1000 "$d" 2>/dev/null || true
+                chmod -R u+rwX,g+rwX "$d" 2>/dev/null || true
+              done
+            }
             mkdir -p /paperclip/.local/bin /paperclip/.npm-global/bin \
               /paperclip/.config /paperclip/.local/share /paperclip/.cache \
               /paperclip/instances/default/logs \
@@ -41,8 +48,6 @@ spec:
               /paperclip/instances/default/secrets
             printf '%s\n' '#!/bin/sh' 'cd /app && exec pnpm paperclipai "$@"' > /paperclip/.local/bin/paperclipai
             chmod 755 /paperclip/.local/bin/paperclipai
-            chown -R 1000:1000 /paperclip || true
-            chmod -R u+rwX,g+rwX /paperclip || true
             PATH_MARKER="# paperclip: brew-path"
             for rc in /paperclip/.bashrc /paperclip/.profile; do
               if ! grep -qF "$PATH_MARKER" "$rc" 2>/dev/null; then
@@ -56,14 +61,7 @@ spec:
                 } >> "$rc"
               fi
             done
-            chown 1000:1000 /paperclip/.bashrc /paperclip/.profile 2>/dev/null || true
-            fix_dir() {
-              d="$1"
-              [ -e "$d" ] || return 0
-              chown -R 1000:1000 "$d" 2>/dev/null || true
-              chmod -R u+rwX,g+rwX "$d" 2>/dev/null || true
-            }
-            fix_dir /tmp
+            fix_dir /paperclip /tmp
             echo "[init-permissions] /paperclip and /tmp ready (owner=1000:1000)"
         volumeMounts:
           - name: data
@@ -72,34 +70,6 @@ spec:
             mountPath: /tmp
         securityContext:
           runAsUser: 0
-      - name: init-seed-app
-        image: beclab/paperclipai-paperclip:sha-a0f7d3d
-        imagePullPolicy: IfNotPresent
-        securityContext:
-          runAsUser: 0
-          runAsGroup: 0
-        command:
-          - sh
-          - '-c'
-          - |
-            set -e
-            APP_VERSION="{{ .Chart.AppVersion }}"
-            SENTINEL="/work/app/.paperclip-app-version"
-            mkdir -p /work/app
-            if [ -f "$SENTINEL" ] && [ "$(cat "$SENTINEL")" = "$APP_VERSION" ] && [ -f /work/app/server/dist/index.js ]; then
-              echo "[init-seed-app] app up to date (${APP_VERSION}), skip copy"
-            else
-              echo "[init-seed-app] seeding /app from image (${APP_VERSION})..."
-              rm -rf /work/app/*
-              cp -a /app/. /work/app/
-              echo "$APP_VERSION" > "$SENTINEL"
-            fi
-            chown -R 1000:1000 /work/app
-            chmod -R u+rwX,g+rwX /work/app
-            echo "[init-seed-app] /work/app ready (owner=1000:1000)"
-        volumeMounts:
-          - name: app-volume
-            mountPath: /work/app
       - name: init-install-dev
         image: "beclab/harveyff-openclaw-brew-base:2026.5.29-cli"
         imagePullPolicy: IfNotPresent
@@ -214,8 +184,6 @@ spec:
           volumeMounts:
             - mountPath: /paperclip
               name: data
-            - mountPath: /app
-              name: app-volume
             - mountPath: /home/linuxbrew
               name: brew-volume
             - mountPath: /tmp
@@ -311,8 +279,6 @@ spec:
           volumeMounts:
             - mountPath: /paperclip
               name: data
-            - mountPath: /app
-              name: app-volume
             - mountPath: /home/linuxbrew
               name: brew-volume
             - mountPath: /tmp
@@ -320,10 +286,6 @@ spec:
       volumes:
         - name: tmp-volume
           emptyDir: {}
-        - name: app-volume
-          hostPath:
-            type: DirectoryOrCreate
-            path: '{{ .Values.userspace.appData }}/app'
         - name: data
           hostPath:
             type: DirectoryOrCreate
