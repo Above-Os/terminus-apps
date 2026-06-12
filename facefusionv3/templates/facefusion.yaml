@@ -1,0 +1,164 @@
+﻿---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: facefusion
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: facefusion
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: facefusion
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: facefusion
+    spec:
+      containers:
+        - name: facefusion
+          image: "docker.io/facefusion/facefusion:3.6.1-cuda"
+          workingDir: /facefusion
+          command:
+            - /bin/bash
+            - -c
+            - |
+              MODEL_DIR="/facefusion/.assets/models"
+              MODEL_VERSIONS="3.0.0 3.1.0 3.2.0 3.3.0 3.4.0 3.5.0 3.6.0"
+
+              echo "[wait] Waiting for FaceFusion model files in ${MODEL_DIR} ..."
+              for ver in $MODEL_VERSIONS; do
+                DONE_FILE="${MODEL_DIR}/.facefusion-models-${ver}.done"
+                while [ ! -f "$DONE_FILE" ]; do
+                  echo "[wait] $DONE_FILE not ready, sleeping..."
+                  sleep 10
+                done
+                echo "[wait] Detected $DONE_FILE"
+              done
+              echo "[wait] All model files are ready."
+
+              echo "[start] Starting FaceFusion..."
+              python facefusion.py run --execution-providers cuda
+          ports:
+            - containerPort: 7860
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: GRADIO_SERVER_NAME
+              value: "0.0.0.0"
+          envFrom:
+            - configMapRef:
+                name: facefusion-config
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 3Gi
+            limits:
+              cpu: "4"
+              memory: 16Gi
+          volumeMounts:
+            - name: data
+              mountPath: /facefusion/.assets
+            - name: caches
+              mountPath: /facefusion/.caches
+            - name: outputs
+              mountPath: /tmp
+      volumes:
+        - name: data
+          hostPath:
+            path: "{{ .Values.sharedlib }}/ai/{{ .Release.Name }}/assets"
+            type: DirectoryOrCreate
+        - name: caches
+          emptyDir: {}
+        - name: outputs
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/AI/output/{{ .Release.Name }}"
+            type: DirectoryOrCreate
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-download-models
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-download-models
+spec:
+  ttlSecondsAfterFinished: 100
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-download-models
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: download-model
+          image: "docker.io/beclab/harveyff-hf-downloader-only:v0.0.6"
+          env:
+            - name: HF_ENDPOINT
+              value: "{{ if .Values.olaresEnv }}{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE | default "" }}{{ end }}"
+            - name: HF_TOKEN
+              value: "{{ if .Values.olaresEnv }}{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN | default "" }}{{ end }}"
+          args:
+            - "--tasks"
+            - '{"tasks":[{"repo":"facefusion/models-3.0.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.0.0.done"},{"repo":"facefusion/models-3.1.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.1.0.done"},{"repo":"facefusion/models-3.2.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.2.0.done"},{"repo":"facefusion/models-3.3.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.3.0.done"},{"repo":"facefusion/models-3.4.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.4.0.done"},{"repo":"facefusion/models-3.5.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.5.0.done"},{"repo":"facefusion/models-3.6.0","file":"","ref":"main","outDir":"/data/models","doneNameTpl":".facefusion-models-3.6.0.done"}]}'
+            - "--static"
+            - "/app/static"
+            - "--port"
+            - "8090"
+            - "--probe-url"
+            - "/gradio_api/info"
+          ports:
+            - containerPort: 8090
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "200Mi"
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      volumes:
+        - name: data
+          hostPath:
+            path: "{{ .Values.sharedlib }}/ai/{{ .Release.Name }}/assets"
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: facefusion-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: facefusion
+  ports:
+    - name: api
+      port: 7860
+      targetPort: 7860
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: {{ .Release.Name }}-download-models
+  ports:
+    - name: download-status
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
