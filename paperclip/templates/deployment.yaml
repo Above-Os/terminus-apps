@@ -34,13 +34,13 @@ spec:
           - '-c'
           - |
             set -e
-            mkdir -p /paperclip/.npm-global/bin \
+            mkdir -p /paperclip/.local/bin /paperclip/.npm-global/bin \
               /paperclip/.config /paperclip/.local/share /paperclip/.cache \
               /paperclip/instances/default/logs \
               /paperclip/instances/default/data/storage \
               /paperclip/instances/default/secrets
-            chown -R 1000:1000 /paperclip || true
-            chmod -R u+rwX,g+rwX /paperclip || true
+            printf '%s\n' '#!/bin/sh' 'cd /app && exec pnpm paperclipai "$@"' > /paperclip/.local/bin/paperclipai
+            chmod 755 /paperclip/.local/bin/paperclipai
             PATH_MARKER="# paperclip: brew-path"
             for rc in /paperclip/.bashrc /paperclip/.profile; do
               if ! grep -qF "$PATH_MARKER" "$rc" 2>/dev/null; then
@@ -50,15 +50,24 @@ spec:
                   echo 'export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"'
                   echo 'export HOMEBREW_NO_AUTO_UPDATE="${HOMEBREW_NO_AUTO_UPDATE:-1}"'
                   echo 'export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-/paperclip/.npm-global}"'
-                  echo 'export PATH="/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+                  echo 'export PATH="/app/node_modules/.bin:/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
                 } >> "$rc"
               fi
             done
-            chown 1000:1000 /paperclip/.bashrc /paperclip/.profile 2>/dev/null || true
-            echo "[init-permissions] /paperclip ready (owner=1000:1000)"
+            fix_dir() {
+              for d in "$@"; do
+                [ -e "$d" ] || continue
+                chown -R 1000:1000 "$d" 2>/dev/null || true
+                chmod -R u+rwX,g+rwX "$d" 2>/dev/null || true
+              done
+            }
+            fix_dir /paperclip /tmp
+            echo "[init-permissions] /paperclip and /tmp ready (owner=1000:1000)"
         volumeMounts:
           - name: data
             mountPath: /paperclip
+          - name: tmp-volume
+            mountPath: /tmp
         securityContext:
           runAsUser: 0
       - name: init-install-dev
@@ -130,7 +139,7 @@ spec:
             - name: NPM_CONFIG_PREFIX
               value: "/paperclip/.npm-global"
             - name: PATH
-              value: "/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              value: "/app/node_modules/.bin:/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             - name: PAPERCLIP_DEPLOYMENT_MODE
               value: "authenticated"
             - name: PAPERCLIP_DEPLOYMENT_EXPOSURE
@@ -177,6 +186,8 @@ spec:
               name: data
             - mountPath: /home/linuxbrew
               name: brew-volume
+            - mountPath: /tmp
+              name: tmp-volume
           readinessProbe:
             tcpSocket:
               port: 3100
@@ -226,7 +237,7 @@ spec:
             - name: NPM_CONFIG_PREFIX
               value: "/paperclip/.npm-global"
             - name: PATH
-              value: "/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              value: "/app/node_modules/.bin:/opt/venvs/hermes/bin:/paperclip/.local/bin:/paperclip/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             - name: PAPERCLIP_DEPLOYMENT_MODE
               value: "authenticated"
             - name: PAPERCLIP_DEPLOYMENT_EXPOSURE
@@ -270,7 +281,11 @@ spec:
               name: data
             - mountPath: /home/linuxbrew
               name: brew-volume
+            - mountPath: /tmp
+              name: tmp-volume
       volumes:
+        - name: tmp-volume
+          emptyDir: {}
         - name: data
           hostPath:
             type: DirectoryOrCreate
