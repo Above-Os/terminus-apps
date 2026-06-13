@@ -58,13 +58,42 @@ spec:
           - -c
           - |
             set -e
-            DONE_FILE="/app/checkpoints/s2-pro/.s2-pro.done"
-            echo "[wait] Waiting for $DONE_FILE ..."
-            while [ ! -f "$DONE_FILE" ]; do
-              echo "[wait] Model not ready, sleeping..."
+            CACHE=/cache/hf/hub
+            READYZ="http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz"
+
+            # Gate on the llm-init downloader (download-only mode) reporting the
+            # repo present. /readyz flips to 200 only once the fishaudio/s2-pro
+            # repo is fully on disk, replacing the old .s2-pro.done sentinel.
+            echo "[wait] Waiting for llm-init downloader (/readyz)..."
+            until /app/.venv/bin/python - "$READYZ" <<'RDY_EOF' 2>/dev/null
+            import sys, urllib.request
+            try:
+                with urllib.request.urlopen(sys.argv[1], timeout=5) as r:
+                    sys.exit(0 if r.status == 200 else 1)
+            except Exception:
+                sys.exit(1)
+            RDY_EOF
+            do
+              echo "[wait] downloader not ready yet..."
               sleep 10
             done
-            echo "[wait] Detected $DONE_FILE, starting fishspeech webui."
+            echo "[wait] downloader ready; materialising /app/checkpoints/s2-pro from HF cache."
+
+            # llm-init writes the standard HF cache snapshot layout
+            # ($CACHE/models--fishaudio--s2-pro/snapshots/<sha>/...), but the
+            # webui loads a flat checkpoints/s2-pro dir. Point that path at the
+            # resolved snapshot; the snapshot's internal blob symlinks are
+            # relative to $CACHE (mounted here at the same path) so codec.pth and
+            # the rest resolve transparently.
+            REPO_DIR="$CACHE/models--fishaudio--s2-pro"
+            if [ -f "$REPO_DIR/refs/main" ]; then
+              SNAP="$REPO_DIR/snapshots/$(cat "$REPO_DIR/refs/main")"
+            else
+              SNAP="$(ls -d "$REPO_DIR"/snapshots/*/ 2>/dev/null | head -1)"
+            fi
+            mkdir -p /app/checkpoints
+            ln -sfn "${SNAP%/}" /app/checkpoints/s2-pro
+            echo "[wait] checkpoint ready at /app/checkpoints/s2-pro, starting fishspeech webui."
             mkdir -p "${TORCHINDUCTOR_CACHE_DIR:-/app-cache/torch-inductor}" "${TRITON_CACHE_DIR:-/app-cache/triton}" || true
             FP_FILE="/app-cache/.fingerprint"
             TORCH_VERSION_FILE="/app/.venv/lib/python3.12/site-packages/torch/version.py"
@@ -135,6 +164,10 @@ spec:
           name: data
         - mountPath: /app/checkpoints
           name: checkpoints
+        # Shared cross-app HF Hub cache (App Common), populated by the llm-init
+        # downloader. Read here to point checkpoints/s2-pro at the snapshot.
+        - mountPath: /cache/hf/hub
+          name: hf-cache
         - mountPath: /app/references
           name: references
         - mountPath: /tmp/gradio
@@ -152,10 +185,14 @@ spec:
           path: '{{ .Values.userspace.appCache }}/data'
           type: DirectoryOrCreate
         name: data
-      - hostPath:
-          path: '{{ .Values.userspace.appData }}/checkpoints'
+      # checkpoints/s2-pro is now an ephemeral symlink into the shared HF cache,
+      # rebuilt on every start; the real model bytes live in hf-cache below.
+      - name: checkpoints
+        emptyDir: {}
+      - name: hf-cache
+        hostPath:
+          path: '{{ .Values.userspace.appCommon }}/huggingface'
           type: DirectoryOrCreate
-        name: checkpoints
       - hostPath:
           path: '{{ .Values.userspace.appData }}/references'
           type: DirectoryOrCreate
@@ -172,73 +209,150 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: "2Gi"
+{{/* llm-init in download-only mode (ENGINE_KIND empty): no engine is started
+       or proxied; llm-init degrades to a pure model downloader that drops the
+       fishaudio/s2-pro repo into the shared cross-app HF Hub cache (App Common,
+       fixed /cache/hf/hub). The webui mounts the same store and waits on /readyz
+       before pointing checkpoints/s2-pro at the snapshot (see above). This
+       replaces the bespoke harveyff-hf-downloader Job. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- /* Per-release run-state hostPath so concurrent clones on the same node do
+       not collide on the sentinel. */ -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
-apiVersion: batch/v1
-kind: Job
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-download-models
+  name: fishspeechv3download
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Release.Name }}-download-models
+    app: fishspeechv3download
 spec:
-  ttlSecondsAfterFinished: 100
-  backoffLimit: 3
+  replicas: {{ .Values.workloads.fishspeechv3download.replicaCount }}
+  selector:
+    matchLabels:
+      app: fishspeechv3download
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}-download-models
+        app: fishspeechv3download
     spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: download-model
-          image: "docker.io/beclab/harveyff-hf-downloader-only:v0.0.7"
-          env:
-            - name: HF_ENDPOINT
-              value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
-            - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.HF_TOKEN }}"
-          args:
-            - "--tasks"
-            - '{"tasks":[{"repo":"fishaudio/s2-pro","file":"","ref":"main","outDir":"/data/models/s2-pro","doneNameTpl":".s2-pro.done"}]}'
-            - "--static"
-            - "/app/static"
-            - "--port"
-            - "8090"
-            - "--probe-url"
-            - "/gradio_api/info"
-          ports:
-            - containerPort: 8090
-              name: http
+      restartPolicy: Always
+      volumes:
+        # Shared cross-app HF Hub cache (App Common); image bakes HF_HUB_CACHE=/cache/hf/hub.
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        # Per-release sentinel / run-state dir (App Cache).
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+      initContainers:
+        # hostPath dirs are created root-owned; llm-init runs as UID 1000.
+        - name: init-chown
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - "chown 1000:1000 /cache/hf/hub /run/llm-init || true"
           volumeMounts:
-            - name: models
-              mountPath: /data/models
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: llm-init
+          # v1.2.4: nullengine download-only, default LFS (hf_xet off unless
+          # HF_ENABLE_XET=true) for stable download memory.
+          image: docker.io/beclab/llm-init:v1.2.4
+          imagePullPolicy: IfNotPresent
+          env:
+            # Empty ENGINE_KIND selects download-only mode (nullengine).
+            - name: ENGINE_KIND
+              value: ""
+            # TEMPORARY (llm-init v1.2.4 image): download-only still requires
+            # MODEL_NAME + MODEL_MODE placeholders; the repo to fetch comes
+            # entirely from MODEL_SOURCE. Drop both once the make-optional patch ships.
+            - name: MODEL_NAME
+              value: "fishaudio/s2-pro"
+            - name: MODEL_MODE
+              value: "chat"
+            # Single full repo (no --include); must be hf://.
+            - name: MODEL_SOURCE
+              value: "hf://fishaudio/s2-pro"
+            # Always wire the Olares HF mirror (manifest requires HF_ENDPOINT).
+            - name: HF_ENDPOINT
+              value: "{{ $oe.HF_ENDPOINT }}"
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            # Keep concurrency low; LFS is the image default in v1.2.4.
+            - name: MAX_CONCURRENT_DOWNLOADS
+              value: "1"
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_FORMAT
+              value: json
+          ports:
+            - name: http
+              containerPort: 8090
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          # Readiness on /livez (process up), not /readyz (model ready), so the
+          # downloader stays scheduled and serving progress while downloading.
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
           resources:
             requests:
               cpu: 100m
-              memory: 200Mi
+              memory: 128Mi
             limits:
-              cpu: "1"
-              memory: 1Gi
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          imagePullPolicy: IfNotPresent
-      volumes:
-        - name: models
-          hostPath:
-            path: "{{ .Values.userspace.appData }}/checkpoints"
-            type: DirectoryOrCreate
+              cpu: 500m
+              # `hf download` runs a python subprocess in this cgroup; 4Gi gives
+              # the huggingface_hub CLI headroom on multi-GB model downloads.
+              memory: 4Gi
 
 ---
+# Internal progress / health surface (no entrance). The webui waits on /readyz
+# here before reading the shared cache; the nginx entrance uses this Service as
+# the download dashboard upstream until the app comes up.
 apiVersion: v1
 kind: Service
 metadata:
   name: download-svc
   namespace: {{ .Release.Namespace }}
+  labels:
+    app: fishspeechv3download
 spec:
   selector:
-    app: {{ .Release.Name }}-download-models
+    app: fishspeechv3download
   ports:
-    - name: download-status
+    - name: http
       port: 8090
       targetPort: 8090
   type: ClusterIP
