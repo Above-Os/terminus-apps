@@ -7,7 +7,7 @@ metadata:
   description: SOTA Open Source TTS
   appid: fishspeechv3
   title: Fish Speech V3 for test
-  version: '1.1.1'
+  version: '1.1.2'
   categories:
     - AI
 
@@ -31,16 +31,20 @@ entrances:
 
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   fishspeechv3     — Fish Speech WebUI engine Deployment (name: {{ .Release.Name }} == appid)
-#   fishspeechclient — nginx entrance Deployment
-# The download Job carries no replica count.
+#   fishspeechv3         — Fish Speech WebUI engine Deployment (name: {{ .Release.Name }} == appid)
+#   fishspeechv3download — llm-init download-only Deployment (shared HF cache)
+#   fishspeechclient     — nginx entrance Deployment
 workloadReplicas:
   fishspeechv3: 1
+  fishspeechv3download: 1
   fishspeechclient: 1
 
 permission:
   appData: true
   appCache: true
+  # appCommon: shared cross-app HF Hub cache (/cache/hf/hub) populated by the
+  # llm-init downloader and read by the WebUI to materialise checkpoints/s2-pro.
+  appCommon: true
   userData:
     - Home
 
@@ -75,22 +79,31 @@ spec:
     - GUI Inference: Offers a PyQt6 graphical interface that works seamlessly with the API server. Supports Linux, Windows, and macOS.
 
   upgradeDescription: |
-    Migrated Fish Speech to apiVersion v3 shared app pattern (fishspeechv2 → fishspeechv3).
+    Switched model provisioning to the shared llm-init downloader.
 
     **What's Changed**
 
-    - **Accelerator**: moved the GPU requirement into the accelerator modes list (nvidia only; amd64-only app).
+    - **Download architecture**: replaced the bespoke `harveyff-hf-downloader`
+      Job with an `llm-init:v1.2.4` download-only Deployment
+      (`fishspeechv3download`). The fishaudio/s2-pro checkpoint now lands in the
+      shared cross-app Hugging Face cache (App Common, `/cache/hf/hub`) instead
+      of a per-app App Data copy, so it is de-duplicated across apps and survives
+      reinstalls. Defaults to stable LFS downloads (hf_xet off).
+    - **Readiness gate**: the WebUI waits on the downloader's `/readyz` (repo on
+      disk) instead of the old `.s2-pro.done` sentinel, then points
+      `checkpoints/s2-pro` at the resolved HF snapshot via symlink.
+    - **Entrance**: the `fishspeechclient` nginx entrance now serves the llm-init
+      download dashboard while the model downloads and auto-reloads into the
+      Gradio WebUI once both the model is on disk and the app is answering;
+      llm-init control-plane paths are pinned to the downloader.
+    - **Permissions**: added `appCommon` for the shared HF cache.
 
-    - **Architecture**: flattened the fishspeechv2/fishspeechv2server sub-charts
-      into a single chart; the WebUI engine Deployment is now named after the
-      release (`{{ .Release.Name }}` == appid) for v3 workload verification, and
-      the nginx entrance Deployment is `fishspeechclient`. Backend references now
-      resolve within the release namespace instead of the old `*-shared` cross-namespace names.
-    - **Scaling**: `workloadReplicas` declares replica counts for the
-      `fishspeechv3` WebUI engine and `fishspeechclient` nginx entrance workloads.
-      The model-download Job carries no replicas.
-    - **Runtime**: image `beclab/harveyff-fishaudio-fish-speech:webui-cuda-cu129-20260422`,
-      bundled checkpoint fishaudio/s2-pro, CUDA 12.9 (cu129) for Blackwell (sm_120) support.
+    Previously: migrated Fish Speech to the apiVersion v3 shared app pattern
+    (fishspeechv2 → fishspeechv3), flattening the sub-charts into a single chart
+    with the WebUI engine Deployment named after the release and a
+    `fishspeechclient` nginx entrance. Runtime image
+    `beclab/harveyff-fishaudio-fish-speech:webui-cuda-cu129-20260422`, bundled
+    checkpoint fishaudio/s2-pro, CUDA 12.9 (cu129) for Blackwell (sm_120) support.
 
   developer: Fish Audio
   website: https://speech.fish.audio/
