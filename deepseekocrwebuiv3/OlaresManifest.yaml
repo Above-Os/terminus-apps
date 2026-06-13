@@ -6,7 +6,7 @@ metadata:
   description: Ready-to-use DeepSeek-OCR-2 Web UI
   icon: https://app.cdn.olares.com/appstore/deepseekocr/icon.png
   appid: deepseekocrwebuiv3
-  version: '1.1.7'
+  version: '1.1.8'
   title: DeepSeek-OCR2 WebUI V3
   categories:
     - AI
@@ -34,7 +34,10 @@ workloadReplicas:
 
 permission:
   appData: true
-  appCache: true
+  appCache: true   # llm-init sentinel/run-state under appCache/llm-init-run/<release>
+  # DeepSeek-OCR-2 HF model lives in the shared cross-app App Common store
+  # (appCommon/huggingface, mounted at the fixed /cache/hf/hub container path).
+  appCommon: true
   userData:
     - Home
 
@@ -64,6 +67,19 @@ spec:
     - ModelScope Fallback - Auto-switch to ModelScope when HuggingFace is unavailable
 
   upgradeDescription: |
+    v1.1.8: **Download architecture** — replaced the bespoke harveyff-hf-downloader
+    image with the shared `llm-init` download-only Deployment (`deepseekocrwebuiv3download`,
+    image llm-init:v1.2.4, default LFS). The DeepSeek-OCR-2 model now lands in the
+    shared cross-app HF cache (App Common, /cache/hf/hub) and is de-duplicated/reused
+    across apps. The OCR engine gates on the downloader's `/readyz` instead of the
+    `.DeepSeek-OCR-2.done` sentinel, and `/app/models` is now an ephemeral symlink farm
+    over the cached snapshot. Declared `permission.appCommon: true`. Raised nvidia-gb10
+    `limitedMemory` to 28Gi so the engine (23Gi) + downloader (4Gi) + nginx (0.5Gi)
+    limits sum within the envelope.
+    Entrance: rewrote the nginx clientproxy to the llm-init dashboard pattern — API
+    paths (/api/, /healthz, /readyz, …) pin to download-svc; `/` gates on model
+    download + OCR-app readiness and auto-reloads into the app via `/__app_ready`.
+
     Migrated DeepSeek-OCR-2 WebUI to apiVersion v3 shared app pattern (deepseekocrwebuiv2 → deepseekocrwebuiv3).
 
     **What's Changed**
@@ -109,7 +125,7 @@ spec:
     requiredCpu: "1"
     limitedCpu: "6"
     requiredMemory: 16Gi
-    limitedMemory: 25Gi
+    limitedMemory: 28Gi
     requiredDisk: 8Gi
     limitedDisk: 20Gi
 
