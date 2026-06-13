@@ -1,0 +1,37 @@
+metadata:
+  title: Rembg
+  description: Rembg is a tool to remove images background
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app. Only one service will be installed across the entire Olares system. Every user can install a desktop entry to access or use the shared entrance to call the service API.
+
+    **PREREQUISITES**
+    Configure **HF_ENDPOINT** (mapped from your Olares Hugging Face mirror URL). **HF_TOKEN** is optional for this app — models are fetched from the public mirror repo `tomjackson2023/rembg`.
+
+    Models are downloaded at install time via llm-init into the shared HF cache and symlinked into `/root/.u2net` before the rembg server starts:
+    - `u2net.onnx`, `u2netp.onnx`, `u2net_human_seg.onnx`, `u2net_cloth_seg.onnx`
+    - `silueta.onnx`, `isnet-general-use.onnx`, `isnet-anime.onnx`
+
+    **OVERVIEW**
+    Rembg is a tool to remove image backgrounds. The bundled ONNX models cover the standard rembg model set (u2net family, silueta, isnet). Some newer models from upstream rembg releases (e.g. bria-rmbg-2.0, SAM) are not included in the HF mirror.
+  upgradeDescription: |
+    Migrated Rembg to the apiVersion v3 shared app pattern and switched
+    model provisioning to the shared llm-init downloader (rembgv2 → rembgv3).
+
+    **What's Changed**
+
+    - **Model download**: replaced the CDN `downloader-init` tar.zst bundle with
+      an `llm-init:v1.2.4` download-only Deployment (`rembgv3download`) that fetches
+      `tomjackson2023/rembg` (public HF mirror of official rembg ONNX release assets)
+      into the shared cross-app HF cache (App Common, `/cache/hf/hub`). The engine
+      symlinks `*.onnx` into `/root/.u2net` and gates on `/readyz`.
+    - **Entrance routing**: nginx gates the UI/API on model download + engine
+      readiness with auto-reload; llm-init API paths pin to `download-svc`.
+    - **Architecture**: flattened the rembgv2 / rembgv2server sub-charts into a
+      single chart; backends resolve within the release namespace (dropping the
+      `*-shared` admin / non-admin split).
+    - **Accelerator**: moved the GPU requirement into the accelerator modes list
+      (nvidia only; amd64-only app).
+    - **Scaling**: `workloadReplicas` declares the engine, downloader, and nginx
+      client workloads.

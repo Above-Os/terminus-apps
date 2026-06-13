@@ -1,0 +1,27 @@
+metadata:
+  title: Rembg
+  description: Rembg 是一个用于去除图片背景的工具
+spec:
+  fullDescription: |
+    **使用须知**
+    该应用为共享应用，在 Olares 内部仅会部署一个服务。每个用户可以安装一个桌面入口进行访问或使用共享入口进行 API 调用。
+
+    **前置条件**
+    请配置 **HF_ENDPOINT**（映射自 Olares 的 Hugging Face 镜像地址）。本应用的模型来自公开镜像仓库 `tomjackson2023/rembg`，**HF_TOKEN** 为可选项。
+
+    安装时 llm-init 会将模型下载到共享 HF 缓存，并在 rembg 服务启动前 symlink 到 `/root/.u2net`：
+    - `u2net.onnx`、`u2netp.onnx`、`u2net_human_seg.onnx`、`u2net_cloth_seg.onnx`
+    - `silueta.onnx`、`isnet-general-use.onnx`、`isnet-anime.onnx`
+
+    **概述**
+    Rembg 是一个用于去除图片背景的工具。内置 ONNX 模型覆盖标准 rembg 模型集（u2net 系列、silueta、isnet）。上游 rembg 较新的模型（如 bria-rmbg-2.0、SAM）未包含在此 HF 镜像中。
+  upgradeDescription: |
+    将 Rembg 迁移至 apiVersion v3 共享应用模式，并使用共享 llm-init 下载器替代 CDN 模型包（rembgv2 → rembgv3）。
+
+    **更新内容**
+
+    - **模型下载**：用 `llm-init:v1.2.4` 下载 Deployment（`rembgv3download`）替代 CDN `downloader-init` tar.zst，从公开仓库 `tomjackson2023/rembg` 拉取官方 rembg ONNX 资源到共享 HF 缓存（App Common，`/cache/hf/hub`）。引擎将 `*.onnx` symlink 到 `/root/.u2net` 并等待 `/readyz`。
+    - **入口路由**：nginx 在模型下载与引擎就绪前拦截请求并展示下载页，就绪后自动刷新；llm-init API 路径固定转发至 `download-svc`。
+    - **架构**：合并 rembgv2 / rembgv2server 子 chart 为单一 chart；后端服务在 release 命名空间内解析（移除 `*-shared` 管理员/非管理员拆分）。
+    - **加速器**：GPU 要求写入 accelerator modes（仅 nvidia；仅 amd64）。
+    - **扩缩**：`workloadReplicas` 声明引擎、下载器与 nginx 客户端 workload。

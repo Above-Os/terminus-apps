@@ -1,0 +1,248 @@
+{{- /* rembg HTTP server. ONNX models live in a flat ~/.u2net layout; llm-init
+       fetches hf://tomjackson2023/rembg (mirror of official GitHub release assets)
+       into the shared HF cache, then the engine symlinks *.onnx into /root/.u2net
+       after /readyz. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rembgv3
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: {{ .Values.workloads.rembgv3.replicaCount }}
+  selector:
+    matchLabels:
+      app: rembgv3
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: rembgv3
+    spec:
+      containers:
+        - name: rembgv3
+          image: "docker.io/beclab/harveyff-rembg-cuda:v1.0.1"
+          ports:
+            - containerPort: 7000
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: HF_ENDPOINT
+              value: "{{ $oe.HF_ENDPOINT }}"
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              READYZ="http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz"
+              echo "[wait] Waiting for llm-init downloader (/readyz)..."
+              until curl -sf "$READYZ" >/dev/null 2>&1; do
+                echo "[wait] models not ready yet..."
+                sleep 10
+              done
+              echo "[wait] models ready; linking ONNX files into /root/.u2net"
+
+              CACHE=/cache/hf/hub
+              U2NET_DIR=/root/.u2net
+              mkdir -p "$U2NET_DIR"
+              SNAP=$(ls -d "${CACHE}/models--tomjackson2023--rembg/snapshots/"* 2>/dev/null | head -1)
+              if [ -z "$SNAP" ] || [ ! -d "$SNAP" ]; then
+                echo "[error] HF snapshot for tomjackson2023/rembg not found under ${CACHE}"
+                exit 1
+              fi
+              for f in "$SNAP"/*.onnx; do
+                [ -f "$f" ] || continue
+                base=$(basename "$f")
+                rm -f "${U2NET_DIR}/${base}" 2>/dev/null || true
+                ln -sfn "$f" "${U2NET_DIR}/${base}"
+                echo "[link] ${U2NET_DIR}/${base} -> ${f}"
+              done
+              echo "Starting rembg server..."
+              exec rembg s
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 5Gi
+            limits:
+              cpu: "4"
+              memory: 18Gi
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: models
+              mountPath: /root/.u2net
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: models
+          hostPath:
+            path: "{{ .Values.userspace.appCache }}/u2net"
+            type: DirectoryOrCreate
+
+---
+{{/* llm-init download-only: tomjackson2023/rembg mirrors the official rembg ONNX
+       release assets (u2net, u2netp, silueta, isnet-*, etc.) as flat LFS files. */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rembgv3download
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rembgv3download
+spec:
+  replicas: {{ .Values.workloads.rembgv3download.replicaCount }}
+  selector:
+    matchLabels:
+      app: rembgv3download
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: rembgv3download
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-chown
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - "chown 1000:1000 /cache/hf/hub /run/llm-init || true"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: llm-init
+          image: docker.io/beclab/llm-init:v1.2.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ENGINE_KIND
+              value: ""
+            - name: MODEL_NAME
+              value: "tomjackson2023/rembg"
+            - name: MODEL_MODE
+              value: "chat"
+            - name: MODEL_SOURCE
+              value: "hf://tomjackson2023/rembg"
+            - name: HF_ENDPOINT
+              value: "{{ $oe.HF_ENDPOINT }}"
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: MAX_CONCURRENT_DOWNLOADS
+              value: "1"
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_FORMAT
+              value: json
+          ports:
+            - name: http
+              containerPort: 8090
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rembgv3-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: rembgv3
+  ports:
+    - name: api
+      port: 7000
+      targetPort: 7000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-ai
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rembgv3
+spec:
+  selector:
+    app: rembgv3
+  ports:
+    - name: api
+      port: 80
+      targetPort: 7000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rembgv3download
+spec:
+  selector:
+    app: rembgv3download
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
