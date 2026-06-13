@@ -6,7 +6,7 @@ metadata:
   description: Rembg is a tool to remove images background
   icon: https://app.cdn.olares.com/appstore/rembg/icon.png
   appid: rembgv3
-  version: '1.1.0'
+  version: '1.1.1'
   title: Rembg
   categories:
     - AI
@@ -33,18 +33,16 @@ entrances:
 
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   rembgv3         — rembg HTTP server Deployment (name: {{ .Release.Name }} == appid)
-#   rembgv3download — llm-init download-only Deployment (shared HF cache)
-#   rembgv3client   — nginx entrance Deployment
+#   rembgv3       — rembg HTTP server Deployment (name: {{ .Release.Name }} == appid)
+#   rembgv3client — nginx entrance Deployment
+# The CDN download Job carries no replica count.
 workloadReplicas:
   rembgv3: 1
-  rembgv3download: 1
   rembgv3client: 1
 
 permission:
   appData: true
   appCache: true
-  appCommon: true
   userData:
     - Home
 
@@ -54,36 +52,28 @@ spec:
     **IMPORTANT NOTE**
     This is a shared app. Only one service will be installed across the entire Olares system. Every user can install a desktop entry to access or use the shared entrance to call the service API.
 
-    **PREREQUISITES**
-    Configure **HF_ENDPOINT** (mapped from your Olares Hugging Face mirror URL). **HF_TOKEN** is optional for this app — models are fetched from the public mirror repo `tomjackson2023/rembg`.
-
-    Models are downloaded at install time via llm-init into the shared HF cache and symlinked into `/root/.u2net` before the rembg server starts:
-    - `u2net.onnx`, `u2netp.onnx`, `u2net_human_seg.onnx`, `u2net_cloth_seg.onnx`
-    - `silueta.onnx`, `isnet-general-use.onnx`, `isnet-anime.onnx`
-
     **OVERVIEW**
-    Rembg is a tool to remove image backgrounds. The bundled ONNX models cover the standard rembg model set (u2net family, silueta, isnet). Some newer models from upstream rembg releases (e.g. bria-rmbg-2.0, SAM) are not included in the HF mirror.
+    Rembg is a tool to remove image backgrounds.
+
+    ONNX models are downloaded at install time from the Olares CDN bundle
+    (`rembgv2_models_20251203.tar.zst`) via `downloader-init` and extracted into
+    `/root/.u2net` before the rembg server starts. No Hugging Face token is required.
 
   upgradeDescription: |
-    Migrated Rembg to the apiVersion v3 shared app pattern and switched
-    model provisioning to the shared llm-init downloader (rembgv2 → rembgv3).
+    Migrated Rembg to the apiVersion v3 shared app pattern (rembgv2 → rembgv3).
 
     **What's Changed**
 
-    - **Model download**: replaced the CDN `downloader-init` tar.zst bundle with
-      an `llm-init:v1.2.4` download-only Deployment (`rembgv3download`) that fetches
-      `tomjackson2023/rembg` (public HF mirror of official rembg ONNX release assets)
-      into the shared cross-app HF cache (App Common, `/cache/hf/hub`). The engine
-      symlinks `*.onnx` into `/root/.u2net` and gates on `/readyz`.
-    - **Entrance routing**: nginx gates the UI/API on model download + engine
-      readiness with auto-reload; llm-init API paths pin to `download-svc`.
+    - **Model download**: kept the CDN `downloader-init` tar.zst bundle unchanged;
+      no Hugging Face / llm-init migration.
+    - **Entrance routing**: nginx upstream backup sends traffic to the download
+      dashboard until the rembg engine is healthy; `/gradio_api/info` pins to the engine.
     - **Architecture**: flattened the rembgv2 / rembgv2server sub-charts into a
       single chart; backends resolve within the release namespace (dropping the
       `*-shared` admin / non-admin split).
     - **Accelerator**: moved the GPU requirement into the accelerator modes list
       (nvidia only; amd64-only app).
-    - **Scaling**: `workloadReplicas` declares the engine, downloader, and nginx
-      client workloads.
+    - **Scaling**: `workloadReplicas` declares the engine and nginx client workloads.
 
   developer: danielgatis
   website: https://github.com/danielgatis/rembg
@@ -102,14 +92,14 @@ spec:
   # excluded): Σ requests.memory <= requiredMemory, Σ limits.memory <= limitedMemory.
   #   container              req mem    lim mem
   #   rembg (gpu)            5Gi        18Gi
-  #   llm-init               128Mi      1Gi
+  #   downloader-init Job    500Mi      1Gi
   #   nginx client           64Mi       500Mi
   #   --------------------------------------------------------
-  #   Σ                      ~5.19Gi    ~19.5Gi
+  #   Σ                      ~5.56Gi    ~19.5Gi
   - mode: nvidia
     requiredCpu: "1"
     limitedCpu: "5"
-    requiredMemory: 5.5Gi
+    requiredMemory: 6Gi
     limitedMemory: 20Gi
     requiredDisk: 8Gi
     limitedDisk: 20Gi
@@ -119,18 +109,6 @@ spec:
   supportArch:
     - amd64
   onlyAdmin: true
-
-envs:
-  - envName: HF_ENDPOINT
-    required: true
-    applyOnChange: true
-    valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_SERVICE
-  - envName: HF_TOKEN
-    required: false
-    applyOnChange: true
-    valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_TOKEN
 
 options:
   allowMultipleInstall: true

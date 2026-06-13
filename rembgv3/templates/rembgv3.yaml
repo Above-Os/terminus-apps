@@ -6,85 +6,30 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   nginx.conf: |
-    # Rembg HTTP entrance: gate on llm-init /readyz AND engine readiness
-    # (/gradio_api/info). llm-init API paths pin to download-svc; the dashboard
-    # auto-reloads once /__app_ready flips 200.
+    # Rembg entrance: upstream backup sends traffic to downloader-init (:8090)
+    # until rembg engine (:7000) is healthy. /gradio_api/info always pins to engine.
+    upstream app_backend {
+        server rembgv3-svc.{{ .Release.Namespace }}.svc.cluster.local:7000 max_fails=1 fail_timeout=2s;
+        server download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090 backup;
+    }
+
     server {
         listen 8080;
         access_log /opt/bitnami/openresty/nginx/logs/access.log;
         error_log /opt/bitnami/openresty/nginx/logs/error.log;
 
         client_max_body_size 500m;
-        proxy_buffering off;
-        proxy_redirect off;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 1800s;
+        proxy_connect_timeout 600s;
         proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $http_host;
         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-
-        resolver coredns.kube-system.svc.cluster.local valid=10s;
-
-        location /api/ {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090;
-        }
-        location /static/ {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090;
-        }
-        location = /healthz {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/healthz;
-        }
-        location = /livez {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/livez;
-        }
-        location = /readyz {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz;
-        }
-        location = /progress {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/api/progress;
-        }
-
-        location = /__models_ready {
-            internal;
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz;
-            proxy_pass_request_body off;
-            proxy_set_header Content-Length "";
-            proxy_connect_timeout 3s;
-            proxy_read_timeout 5s;
-            proxy_send_timeout 5s;
-        }
-        location = /__main_ready {
-            internal;
-            proxy_pass http://rembgv3-svc.{{ .Release.Namespace }}.svc.cluster.local:7000/gradio_api/info;
-            proxy_pass_request_body off;
-            proxy_set_header Content-Length "";
-            proxy_connect_timeout 3s;
-            proxy_read_timeout 5s;
-            proxy_send_timeout 5s;
-        }
-        location = /__app_ready {
-            default_type text/plain;
-            content_by_lua_block {
-                local models = ngx.location.capture("/__models_ready")
-                if models.status ~= 200 then
-                    ngx.status = 503
-                    return
-                end
-                local main = ngx.location.capture("/__main_ready")
-                if main.status < 200 or main.status >= 500 then
-                    ngx.status = 503
-                    return
-                end
-                ngx.status = 200
-                ngx.say("ok")
-            }
-        }
 
         location /gradio_api/info {
             proxy_pass http://rembgv3-svc.{{ .Release.Namespace }}.svc.cluster.local:7000;
@@ -108,13 +53,8 @@ data:
         }
 
         location / {
-            auth_request /__models_ready;
-            error_page 401 403 500 502 503 504 = @downloader;
-            proxy_pass http://rembgv3-svc.{{ .Release.Namespace }}.svc.cluster.local:7000;
+            proxy_pass http://app_backend;
             proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
-            proxy_connect_timeout 600s;
-            proxy_read_timeout 1800s;
-            proxy_send_timeout 1800s;
             proxy_hide_header Access-Control-Allow-Origin;
             proxy_hide_header Access-Control-Allow-Methods;
             proxy_hide_header Access-Control-Allow-Headers;
@@ -127,17 +67,6 @@ data:
               add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
               return 204;
             }
-        }
-
-        location @downloader {
-            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090;
-            proxy_set_header Accept-Encoding "";
-            sub_filter_once on;
-            sub_filter_types text/html;
-            sub_filter '</body>' '<script>(function(){function c(){fetch("/__app_ready",{cache:"no-store"}).then(function(r){if(r.ok){location.reload();}}).catch(function(){});}setInterval(c,3000);})();</script></body>';
-            proxy_connect_timeout 10s;
-            proxy_read_timeout 120s;
-            proxy_send_timeout 120s;
         }
     }
 
