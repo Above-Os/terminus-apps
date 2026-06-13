@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.2.5'
+  version: '1.2.6'
   categories:
     - AI
 sharedEntrances:
@@ -32,7 +32,7 @@ workloadReplicas:
   llamacppllmbasev3: 1
   llminit: 1
 spec:
-  versionName: 'b9426'
+  versionName: 'b9603'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -82,14 +82,19 @@ spec:
     - GPU offload via `-ngl all` in `ENGINE_ARGS`; without `-ngl`, runs on CPU.
 
   upgradeDescription: |
-    Generic llama.cpp + llm-init base (llm-init v1.2.4, beclab/ggml-org-llama.cpp:server-cuda12-b9426).
+    Generic llama.cpp + llm-init base (llm-init v1.2.4, beclab/ggml-org-llama.cpp:server-cuda12-b9603).
     Loads any GGUF model; model identity, source and tuning are install-time env.
+    v1.2.6: bump llama.cpp engine to server-cuda12-b9603 (build b9603, kept on
+    CUDA 12 for driver compatibility) from server-cuda12-b9426. Adds Multi-Token
+    Prediction (MTP) speculative decoding for MTP-capable GGUFs (e.g. Qwen3.6 *-MTP);
+    enable at install via ENGINE_ARGS: --spec-type draft-mtp --spec-draft-n-max 2.
+    No resource-value change.
     v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
     (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
     OOM on large sharded models (huggingface_hub#3300). No resource-value change.
     v1.2.4: fix Helm render — the v1.2.3 gpumem comment used a Go-template comment
-    whose trim markers ({{- ... -}}) collapsed resources:/requests: onto one line;
-    switched to a plain YAML (#) comment. No resource-value change.
+    whose trim markers collapsed resources/requests onto one line; switched to a
+    plain YAML (#) comment. No resource-value change.
     v1.2.3: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
     extended resource; the gpu-inject webhook / auto-gpumem template apps read it
     from limits). gb10 unaffected (unified memory uses pod memory).
