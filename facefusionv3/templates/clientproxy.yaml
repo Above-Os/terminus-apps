@@ -6,91 +6,152 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   nginx.conf: |
-    upstream facefusion_backend {
-      {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-      server {{ .Release.Name }}-svc:7860 max_fails=1 fail_timeout=2s;
-      server download-svc:8090 backup;
-      {{- else }}
-      server {{ .Release.Name }}-svc.{{ .Release.Name }}-{{ .Values.admin }}:7860 max_fails=1 fail_timeout=2s;
-      server download-svc.{{ .Release.Name }}-{{ .Values.admin }}:8090 backup;
-      {{- end }}
-    }
-
+    # FaceFusion entrance: gate the Gradio app on (a) llm-init /readyz (all
+    # model packs downloaded) AND (b) Gradio answering /gradio_api/info, then
+    # auto-reload off the downloader dashboard into the app. llm-init API
+    # paths (/api/*, /healthz, /livez, /readyz, /static/*) are pinned to
+    # download-svc so they never fall through to Gradio (404).
     server {
-      listen 8080;
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
+        listen 8080;
+        access_log /opt/bitnami/openresty/nginx/logs/access.log;
+        error_log /opt/bitnami/openresty/nginx/logs/error.log;
 
-      location /gradio_api/info {
-        {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-        proxy_pass http://{{ .Release.Name }}-svc:7860;
-        {{- else }}
-        proxy_pass http://{{ .Release.Name }}-svc.{{ .Release.Name }}-{{ .Values.admin }}:7860;
-        {{- end }}
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Host $http_host;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        proxy_hide_header Access-Control-Allow-Origin;
-        proxy_hide_header Access-Control-Allow-Methods;
-        proxy_hide_header Access-Control-Allow-Headers;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
-        add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
-
-        if ($request_method = 'OPTIONS') {
-          add_header Access-Control-Allow-Origin *;
-          add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
-          add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
-          return 204;
-        }
-      }
-
-      location / {
-        proxy_pass http://facefusion_backend;
-        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
+        client_max_body_size 500m;
+        proxy_buffering off;
+        proxy_redirect off;
+        proxy_connect_timeout 60s;
         proxy_send_timeout 600s;
-
-        proxy_http_version 1.1;
+        proxy_read_timeout 600s;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        proxy_hide_header Access-Control-Allow-Origin;
-        proxy_hide_header Access-Control-Allow-Methods;
-        proxy_hide_header Access-Control-Allow-Headers;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
-        add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
+        resolver coredns.kube-system.svc.cluster.local valid=10s;
 
-        if ($request_method = 'OPTIONS') {
-          add_header Access-Control-Allow-Origin *;
-          add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
-          add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
-          return 204;
+        # llm-init control-plane API — always reach the downloader, not Gradio.
+        location /api/ {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090;
         }
-      }
+        location /static/ {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090;
+        }
+        location = /healthz {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/healthz;
+        }
+        location = /livez {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/livez;
+        }
+        location = /readyz {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz;
+        }
+        # Legacy harveyff progress path -> llm-init progress snapshot. Lets
+        # any external tooling that was polling the old /progress keep working.
+        location = /progress {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/api/progress;
+        }
+
+        # Internal gates for auth_request / auto-reload polling.
+        location = /__models_ready {
+            internal;
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 5s;
+            proxy_send_timeout 5s;
+        }
+        location = /__main_ready {
+            internal;
+            proxy_pass http://facefusion-svc.{{ .Release.Namespace }}.svc.cluster.local:7860/gradio_api/info;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 5s;
+            proxy_send_timeout 5s;
+        }
+        # Public: 200 once models are on disk AND Gradio is answering. The
+        # dashboard's injected auto-reload script polls this to flip back to
+        # the app once both gates are green.
+        location = /__app_ready {
+            default_type text/plain;
+            content_by_lua_block {
+                local models = ngx.location.capture("/__models_ready")
+                if models.status ~= 200 then
+                    ngx.status = 503
+                    return
+                end
+                local main = ngx.location.capture("/__main_ready")
+                if main.status ~= 200 then
+                    ngx.status = 503
+                    return
+                end
+                ngx.status = 200
+                ngx.say("ok")
+            }
+        }
+
+        # Pin /gradio_api/info to the engine even while gated (preserves CORS
+        # so external Olares apps probing the API don't get the dashboard).
+        location /gradio_api/info {
+            proxy_pass http://facefusion-svc.{{ .Release.Namespace }}.svc.cluster.local:7860;
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_hide_header Access-Control-Allow-Methods;
+            proxy_hide_header Access-Control-Allow-Headers;
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
+            add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
+            if ($request_method = 'OPTIONS') {
+              add_header Access-Control-Allow-Origin *;
+              add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
+              add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
+              return 204;
+            }
+        }
+
+        location / {
+            auth_request /__models_ready;
+            error_page 401 403 500 502 503 504 = @downloader;
+            proxy_pass http://facefusion-svc.{{ .Release.Namespace }}.svc.cluster.local:7860;
+            add_header X-Frame-Options "";
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
+            add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
+            if ($request_method = 'OPTIONS') {
+              add_header Access-Control-Allow-Origin *;
+              add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD";
+              add_header Access-Control-Allow-Headers "deviceType,token,authorization,content-type,x-csrftoken";
+              return 204;
+            }
+        }
+
+        # llm-init download dashboard + auto-reload once /__app_ready flips 200.
+        location @downloader {
+            proxy_pass http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090;
+            proxy_set_header Accept-Encoding "";
+            sub_filter_once on;
+            sub_filter_types text/html;
+            sub_filter '</body>' '<script>(function(){function c(){fetch("/__app_ready",{cache:"no-store"}).then(function(r){if(r.ok){location.reload();}}).catch(function(){});}setInterval(c,3000);})();</script></body>';
+            proxy_connect_timeout 10s;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+        }
     }
 
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   name: facefusionproxy
-  {{- else }}
-  name: facefusion
-  {{- end }}
   namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: facefusionweb
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.facefusionproxy.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: facefusionweb
@@ -99,12 +160,14 @@ spec:
   template:
     metadata:
       labels:
+        io.kompose.network/chrome-default: "true"
         io.kompose.service: facefusionweb
     spec:
       volumes:
         - name: nginx-config
           configMap:
             name: nginx-config
+            defaultMode: 438
             items:
               - key: nginx.conf
                 path: nginx.conf
@@ -132,8 +195,8 @@ spec:
             failureThreshold: 60
           resources:
             limits:
-              cpu: 500m
-              memory: 500Mi
+              cpu: 100m
+              memory: 256Mi
             requests:
               cpu: 10m
               memory: 64Mi
