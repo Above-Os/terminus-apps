@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-bff
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: assisthub-bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: assisthub-bff
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        app: assisthub-bff
+    spec:
+      volumes:
+        - name: olares-pod-logs
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.userData }}/pod_logs
+      containers:
+        - name: bff
+          image: "{{ .Values.images.bff.repository }}:{{ .Values.images.bff.tag }}"
+          imagePullPolicy: {{ .Values.images.bff.pullPolicy }}
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "4200"
+            - name: OLARESD_BASE_URL
+              value: "{{ .Values.olaresEnv.OLARESD_BASE_URL }}"
+            - name: TICKET_API_BASE_URL
+              value: "{{ .Values.olaresEnv.SERVER_API_URL }}"
+            - name: BFF_REQUIRE_AUTH
+              value: "{{ .Values.bff.requireAuth }}"
+            - name: OLARESD_LOG_ROOT
+              value: "{{ .Values.bff.logRoot }}"
+            - name: BFF_REQUEST_TIMEOUT_MS
+              value: "{{ .Values.bff.requestTimeoutMs }}"
+            - name: BFF_UPLOAD_TIMEOUT_MS
+              value: "{{ .Values.bff.uploadTimeoutMs }}"
+          ports:
+            - containerPort: 4200
+              protocol: TCP
+          volumeMounts:
+            - name: olares-pod-logs
+              mountPath: {{ .Values.bff.logRoot }}
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 4200
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 4200
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
