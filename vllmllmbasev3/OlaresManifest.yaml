@@ -7,17 +7,9 @@ metadata:
   description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
   appid: vllmllmbasev3
   title: vLLM LLM Base (llm-init)
-  version: '1.2.5'
+  version: '1.2.6'
   categories:
     - AI
-sharedEntrances:
-  - name: vllmllmbasev3
-    host: sharedentrances-api
-    port: 0
-    title: vLLM LLM API
-    invisible: true
-    authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/vllm/icon.png
 entrances:
   # Routes straight to the llm-init download/UI Service (download-svc:8090).
   # The entrance NAME stays "vllmclient" so .Values.domain.vllmclient (used
@@ -40,7 +32,7 @@ workloadReplicas:
   vllmllmbasev3: 1
   llminit: 1
 spec:
-  versionName: '0.22.0'
+  versionName: '0.23.0'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -73,9 +65,11 @@ spec:
     - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
     - `MODEL_NAME` — HF `owner/repo` for vLLM `--model` and `--served-model-name`
       (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
-    - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
-      chart auto-adds `--task embed`, no need to set it in `ENGINE_ARGS`.
-    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `MODEL_MODE` — `chat` or `embedding`. For embedding, set `--task embed` in
+      `ENGINE_ARGS` yourself.
+    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
+      Embedding); each expands to the `supports_*` CSV seed. Pick Embedding (or just
+      the chat caps) when the model advertises no extras — the field is required.
     - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1` (empty for vLLM defaults).
     - `LOG_LEVEL` — `debug | info | warn | error`.
     - `HF_ENDPOINT` — HF mirror, e.g. `https://hf-mirror.com` (empty = huggingface.co).
@@ -92,7 +86,7 @@ spec:
     - vLLM also honors `--gpu-memory-utilization` via `ENGINE_ARGS`.
 
   upgradeDescription: |
-    Generic vLLM + llm-init base (llm-init v1.2.4, vllm/vllm-openai:v0.22.0).
+    Generic vLLM + llm-init base (llm-init v1.2.4, vllm/vllm-openai:v0.23.0).
     Loads any HF model; model identity, source and tuning are install-time env.
     v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
     (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
@@ -197,12 +191,23 @@ envs:
       value: chat
     - title: Embedding
       value: embedding
-  - envName: MODEL_SUPPORTS      # CSV of supports_* keys (see README); "" if none
+  - envName: MODEL_SUPPORTS      # multi-select capability keys; joined CSV -> supports_* seed
     required: true              # required:true so it shows in the install dialog;
     default: ""                 # default:"" lets the user leave it empty (= no caps)
     type: string
     editable: true
     applyOnChange: true
+    multiSelect: true           # user ticks capability groups; values joined by splitter
+    splitter: ","               # llm-init.yaml expands each group token into supports_* keys
+    options:                    # coarse capability groups -> expanded one-to-many in chart
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: Embedding          # required-field fallback; expands to no supports_* keys
+      value: embedding
   # --- Tuning ---
   - envName: ENGINE_ARGS         # vLLM CLI flags, e.g. --max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1
     required: true              # required:true so it shows in the install dialog;
