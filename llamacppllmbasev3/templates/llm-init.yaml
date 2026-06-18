@@ -9,7 +9,34 @@
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
+{{- /* MODEL_SUPPORTS is a multi-select of coarse capability GROUPS (vision /
+       tools / thinking / embedding). Expand each group one-to-many into the
+       supports_* keys llm-init validates against its gateway AllSupports mirror,
+       then re-join into the CSV the container env expects. "embedding" is the
+       required-field fallback and maps to NO keys (an embedding model advertises
+       none). Unknown tokens pass through verbatim so a raw supports_* key still
+       works. */ -}}
+{{- $supportsGroups := dict
+      "vision" "supports_vision"
+      "tools" "supports_function_calling,supports_parallel_function_calling,supports_tool_choice"
+      "thinking" "supports_reasoning,supports_reasoning_effort"
+      "embedding" "" -}}
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
+{{- $expandedSupports := list -}}
+{{- range $tok := splitList "," $modelSupports -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- if hasKey $supportsGroups $tok -}}
+{{- $mapped := index $supportsGroups $tok -}}
+{{- if $mapped -}}
+{{- $expandedSupports = append $expandedSupports $mapped -}}
+{{- end -}}
+{{- else -}}
+{{- $expandedSupports = append $expandedSupports $tok -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $modelSupports = join "," $expandedSupports -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}

@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.2.6'
+  version: '1.2.7'
   categories:
     - AI
 sharedEntrances:
@@ -32,7 +32,7 @@ workloadReplicas:
   llamacppllmbasev3: 1
   llminit: 1
 spec:
-  versionName: 'b9603'
+  versionName: 'b9692'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -66,7 +66,9 @@ spec:
       `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`); also used as OpenAI `--alias`.
     - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
       chart auto-adds `--embedding`, no need to set it in `ENGINE_ARGS`.
-    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
+      Embedding); each expands to the `supports_*` CSV seed. The field is required;
+      pick Embedding when the model advertises no extra capabilities.
     - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
       offloads all layers to GPU; omit for CPU). Also accepts `LLAMA_ARG_*=val`.
     - `LOG_LEVEL` — `debug | info | warn | error`.
@@ -187,6 +189,17 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: Embedding
+      value: embedding
   - envName: ENGINE_ARGS         # example: -c 8192 -ngl all -fa on
     required: true
     default: ""

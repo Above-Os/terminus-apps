@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.2.4'
+  version: '1.2.5'
   categories:
     - AI
 sharedEntrances:
@@ -41,7 +41,7 @@ workloadReplicas:
   ollamallmbasev3: 1
   llminit: 1
 spec:
-  versionName: '0.30.6'
+  versionName: '0.30.10'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -70,7 +70,9 @@ spec:
     - `MODEL_SOURCE` — `ollama://<library-tag>`, e.g. `ollama://qwen3.5:0.8b`.
     - `MODEL_NAME` — OpenAI client alias, e.g. `qwen3.5-0.8b`.
     - `MODEL_MODE` — `chat` or `embedding`.
-    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
+      Embedding); each expands to the `supports_*` CSV seed. The field is required;
+      pick Embedding when the model advertises no extra capabilities.
     - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` or
       `OLLAMA_KEEP_ALIVE=-1` to pin the model in VRAM (empty for defaults).
     - `LOG_LEVEL` — `debug | info | warn | error` (default `debug`).
@@ -195,12 +197,23 @@ envs:
         value: chat
       - title: Embedding
         value: embedding
-  - envName: MODEL_SUPPORTS      # CSV of supports_* keys (see README); "" if none
+  - envName: MODEL_SUPPORTS      # multi-select capability groups; expanded to supports_* CSV in chart
     required: true              # required:true so it shows in the install dialog;
     default: ""                 # default:"" lets the user leave it empty (= no caps)
     type: string
     editable: true
     applyOnChange: true
+    multiSelect: true           # user ticks capability groups; values joined by splitter
+    splitter: ","               # llm-init.yaml expands each group token into supports_* keys
+    options:                    # coarse capability groups -> expanded one-to-many in chart
+      - title: Vision
+        value: vision
+      - title: Tools
+        value: tools
+      - title: Thinking
+        value: thinking
+      - title: Embedding        # required-field fallback; expands to no supports_* keys
+        value: embedding
   # --- Tuning ---
   - envName: ENGINE_ARGS         # example: OLLAMA_NUM_CTX=8192 OLLAMA_NUM_PARALLEL=2  ("" for daemon defaults)
     required: true              # required:true so it shows in the install dialog;

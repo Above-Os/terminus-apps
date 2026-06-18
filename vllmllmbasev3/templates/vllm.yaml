@@ -3,12 +3,6 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- /* MODEL_MODE=embedding -> auto-add vLLM's embedding flag so it works out of
-       the box; skipped if the user already set a --task in ENGINE_ARGS. */ -}}
-{{- $modelMode := $oe.MODEL_MODE | default "" -}}
-{{- if and (eq $modelMode "embedding") (not (contains "--task" $engineArgs)) -}}
-{{- $engineArgs = trim (printf "%s --task embed" $engineArgs) -}}
-{{- end -}}
 {{- /* Defaults avoid empty K8s quantities. CPU needs "m" (200m = 0.2 core).
        Sums (llm-init + vllm) must fit the manifest accelerator limits. */ -}}
 {{- $cpuRequest := trim ($oe.VLLM_CPU_REQUEST | default "200m") -}}
@@ -75,7 +69,7 @@ spec:
             defaultMode: 0555
       containers:
         - name: vllm
-          image: docker.io/vllm/vllm-openai:v0.22.0-cu129
+          image: docker.io/vllm/vllm-openai:v0.23.0-cu129
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/vllm.sh"]
           env:

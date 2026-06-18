@@ -7,7 +7,7 @@ metadata:
   description: "Generic SGLang + llm-init base. Pick any HF model at install via env."
   appid: sglangllmbasev3
   title: SGLang LLM Base (llm-init)
-  version: '1.2.5'
+  version: '1.2.6'
   categories:
     - AI
 sharedEntrances:
@@ -32,7 +32,7 @@ workloadReplicas:
   sglangllmbasev3: 1
   llminit: 1
 spec:
-  versionName: '0.5.12.post1'
+  versionName: '0.5.13.post1'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -63,7 +63,9 @@ spec:
       (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
     - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
       chart auto-adds `--is-embedding`, no need to set it in `ENGINE_ARGS`.
-    - `MODEL_SUPPORTS` — CSV of `supports_*` capability keys (empty if none).
+    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
+      Embedding); each expands to the `supports_*` CSV seed. The field is required;
+      pick Embedding when the model advertises no extra capabilities.
     - `ENGINE_ARGS` — SGLang CLI flags, e.g. `--context-length 8192 --mem-fraction-static 0.8 --tp 1`.
     - `LOG_LEVEL` — `debug | info | warn | error`.
     - `SGLANG_CPU_REQUEST` / `SGLANG_MEMORY_REQUEST` / `SGLANG_CPU_LIMIT` /
@@ -175,6 +177,17 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: Embedding
+      value: embedding
   - envName: ENGINE_ARGS         # example: --context-length 8192 --mem-fraction-static 0.8 --max-running-requests 32
     required: true
     default: ""
