@@ -1,0 +1,24 @@
+metadata:
+  title: SGLang LLM Base (llm-init)
+  description: "Generic SGLang + llm-init base; choose any HF model at install time via env"
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app and a generic *base*: it is NOT tied to any specific
+    model. The model to serve is chosen entirely at install time through
+    environment variables, so the same Helm chart can serve any Hugging Face
+    model that SGLang supports.
+
+    **Stack**
+    - **SGLang** (`lmsysorg/sglang`, port 30000): GPU inference, OpenAI server.
+    - **llm-init** (`beclab/llm-init`, port 8090): HF download, OpenAI `/v1/*`,
+      progress UI; proxies the engine at `http://sglang:30000`.
+
+    **Install-time parameters**
+    - `MODEL_SOURCE` — `hf://<repo>` (`--include` / `--revision` optional).
+    - `MODEL_NAME` — OpenAI alias + `--served-model-name`.
+    - `ENGINE_ARGS` — SGLang flags, e.g. `--context-length 8192 --mem-fraction-static 0.8`.
+    - `SGLANG_CPU_*` / `SGLANG_MEMORY_*` — engine pod CPU/RAM (fixed per clone).
+    - `SGLANG_REQUIRED_GPU_MEMORY` — model memory quota (required at install).
+      NVIDIA: `nvidia.com/gpumem` in Mi; Spark: pod `memory`.

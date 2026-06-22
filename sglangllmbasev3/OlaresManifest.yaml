@@ -1,0 +1,242 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: sglangllmbasev3
+  icon: https://app.cdn.olares.com/appstore/sglang/icon.png
+  description: "Generic SGLang + llm-init base. Pick any HF model at install via env."
+  appid: sglangllmbasev3
+  title: SGLang LLM Base (llm-init)
+  version: '1.2.7'
+  categories:
+    - AI
+entrances:
+  - name: sglangclient
+    port: 8090
+    host: download-svc
+    title: SGLang LLM
+    icon: https://app.cdn.olares.com/appstore/sglang/icon.png
+    openMethod: window
+    authLevel: internal
+#   sglangllmbasev3 — engine Deployment (== appid / Release.Name)
+#   llminit          — llm-init / entrance Deployment
+workloadReplicas:
+  sglangllmbasev3: 1
+  llminit: 1
+spec:
+  versionName: '0.5.13.post1'
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This is a shared app and a generic *base*: it is NOT tied to any specific
+    model. The model to serve is chosen entirely at install time through
+    environment variables, so the same Helm chart can serve any Hugging Face
+    model that SGLang supports.
+
+    **HOW IT WORKS**
+    The llm-init sidecar downloads the configured HF model, writes a readiness
+    sentinel, and exposes an OpenAI-compatible `/v1/*` surface plus a unified
+    `/api/progress` + `/healthz` dashboard. The SGLang container waits for the
+    sentinel, then loads `--model-path` from `MODEL_NAME` (HF `owner/repo`, same
+    repo as `MODEL_SOURCE`). llm-init and SGLang run in separate Deployments and
+    share the HF cache + run-state via hostPath.
+
+    **Stack**
+    - **SGLang** (`lmsysorg/sglang`, port 30000): GPU inference, OpenAI server.
+    - **llm-init** (`beclab/llm-init`, port 8090): HF download, OpenAI `/v1/*`,
+      progress UI; proxies the engine at `http://sglang:30000`.
+
+    **Model storage (App Common)**
+    HF models go to the shared App Common store `appCommon/huggingface`, mounted
+    at `/cache/hf/hub`. All HF-based apps share it; llm-init writes, SGLang reads.
+
+    **Install-time parameters (set per model)**
+    - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
+    - `MODEL_NAME` — HF `owner/repo` for SGLang `--model-path` and `--served-model-name`
+      (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
+    - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
+      chart auto-adds `--is-embedding`, no need to set it in `ENGINE_ARGS`.
+    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
+      Embedding); each expands to the `supports_*` CSV seed. The field is required;
+      pick Embedding when the model advertises no extra capabilities.
+    - `ENGINE_ARGS` — SGLang CLI flags, e.g. `--context-length 8192 --mem-fraction-static 0.8 --tp 1`.
+    - `LOG_LEVEL` — `debug | info | warn | error`.
+    - `SGLANG_CPU_REQUEST` / `SGLANG_MEMORY_REQUEST` / `SGLANG_CPU_LIMIT` /
+      `SGLANG_MEMORY_LIMIT` — SGLang pod CPU/RAM (fixed per clone template).
+    - `SGLANG_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
+      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
+
+    **NOTE ON RESOURCES**
+    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto) from rendered chart.
+      `requiredDisk` / `limitedDisk` stay fixed.
+    - SGLang also honors `--mem-fraction-static` via `ENGINE_ARGS`.
+
+  upgradeDescription: |
+    Generic SGLang + llm-init base (llm-init v1.2.4, lmsysorg/sglang:v0.5.12.post1-cu130).
+    Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
+    (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
+    OOM on large sharded models (huggingface_hub#3300). No resource-value change.
+    v1.2.4: fix Helm render — the v1.2.3 gpumem comment used a Go-template comment
+    whose trim markers ({{- ... -}}) collapsed resources:/requests: onto one line;
+    switched to a plain YAML (#) comment. No resource-value change.
+    v1.2.3: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
+    extended resource; the gpu-inject webhook / auto-gpumem template apps read it
+    from limits). gb10 unaffected (unified memory uses pod memory).
+    v1.2.2: raise llm-init download memory limit to 4Gi (hf_xet chunk buffering OOM, huggingface_hub#3300).
+    v1.2.0: version bump (no functional change).
+    Models live in the shared App Common store appCommon/huggingface.
+    Sentinel/model_path are per-instance under appCache/llm-init-run/<release>.
+    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
+    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
+    MODEL_MODE=embedding now auto-adds --is-embedding (no ENGINE_ARGS needed).
+    LOG_LEVEL is optional and defaults to debug.
+    v1.0.5: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
+    v1.0.4: raise shared engine MEMORY_LIMIT default to 35Gi.
+    v1.0.3: align resource envs with ollamallmbasev3 — gpumem Mi, accelerator -1,
+    SGLANG_REQUIRED_GPU_MEMORY install prompt, CPU/RAM envs non-editable.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/sgl-project/sglang
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true   # sentinel/model_path live under appCache/llm-init-run/<release>
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE        # example: hf://Qwen/Qwen3-0.6B
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME          # example: Qwen/Qwen3-0.6B  (--model-path owner/repo)
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: Embedding
+      value: embedding
+  - envName: ENGINE_ARGS         # example: --context-length 8192 --mem-fraction-static 0.8 --max-running-requests 32
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LOG_LEVEL           # single-select: debug | info | warn | error
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "debug"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: SGLANG_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: SGLANG_MEMORY_REQUEST # default: 2Gi
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: SGLANG_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: SGLANG_MEMORY_LIMIT   # default: 35Gi
+    required: true
+    default: "35Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: SGLANG_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
