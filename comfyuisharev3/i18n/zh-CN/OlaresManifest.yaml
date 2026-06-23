@@ -76,15 +76,15 @@ spec:
     共享模型库位于 App Common 目录 `appCommon/comfyui/model`
     （单节点 SSD，多节点 JuiceFS），所有 ComfyUI 应用挂载同一路径以实现模型共享。
 
+    **数据目录**
+    - 程序安装（插件、缓存、配置）：`appData/comfyui`（宿主机 `/app/comfyui`）
+    - 输入 / 输出：`appCommon/comfyui/input` 与 `appCommon/comfyui/output`
+
   upgradeDescription: |
-    ComfyUI 共享版 apiVersion v3 发布（comfyuisharev3）。
+    ComfyUI 共享版存储目录调整。
 
     **本次变更**
-    - **架构**：单 engine Pod；`comfyuientrance` Service 将入口 8080 映射到 ComfyUI
-      代理 :8190、8081 映射到 Launcher gateway :8080（内部处理 `/api` → :3000），
-      不再需要独立 nginx client。
-    - **资源**：GPU 通过 spec.accelerator（nvidia / nvidia-gb10）声明；GB10
-      统一内存模式下引擎 memory request 提升至 22Gi。
-    - **运行时**：ComfyUI 0.24.0 + launcher 0.2.43。
-    - **模型存储**：模型改用共享 App Common 目录 `appCommon/comfyui/model`（替代原 `sharedlib/ai/model`）。
-    - **升级迁移**：init 容器将 `sharedlib/ai/model` 复制到新目录，把旧版 `main/` 重命名为 `checkpoints/`，逐文件校验大小一致后删除旧目录中的副本；校验失败则 Pod 不启动，旧文件保留。
+    - **程序安装**：从 `sharedlib/ai/comfyui` 迁至 `appData/comfyui`（宿主机 `/app/comfyui`）。
+    - **输入 / 输出**：迁至 App Common 目录 `appCommon/comfyui/input` 与
+      `appCommon/comfyui/output`（替代原 `sharedlib/ai/output/comfyui` 及 appdata 内的 input）。
+    - **升级迁移**：init 容器将旧目录数据复制到新位置，逐文件校验大小一致后删除旧副本；校验失败则 Pod 不启动，旧文件保留。

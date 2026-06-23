@@ -6,7 +6,7 @@ metadata:
   description: The most powerful and modular stable diffusion GUI and backend.
   icon: https://app.cdn.olares.com/appstore/comfyui/icon2.png
   appid: comfyuisharev3
-  version: '1.1.7'
+  version: '1.1.8'
   title: ComfyUI Shared
   categories:
   - Creativity
@@ -135,23 +135,21 @@ spec:
     `appCommon/comfyui/model` (SSD on single-node, JuiceFS on multi-node).
     All ComfyUI-based apps mount the same path so models deduplicate across apps.
 
+    **Data layout**
+    - App install (plugins, cache, config): `appData/comfyui` (host `/app/comfyui`)
+    - Input / output: `appCommon/comfyui/input` and `appCommon/comfyui/output`
+
   upgradeDescription: |
-    ComfyUI Shared apiVersion v3 release (comfyuisharev3).
+    ComfyUI Shared storage layout update.
 
     **What's Changed**
-    - **Architecture**: single engine pod; `comfyuientrance` Service maps entrance
-      8080 → ComfyUI proxy :8190 and 8081 → Launcher gateway :8080 (handles `/api`
-      → :3000 internally). No separate nginx client workload.
-    - **Resources**: GPU declared via `spec.accelerator` (nvidia / nvidia-gb10).
-      GB10 unified-memory mode raises the engine memory request to 22Gi.
-    - **Runtime**: ComfyUI 0.24.0 with launcher 0.2.43.
-    - **Model storage**: models now use the shared App Common store
-      `appCommon/comfyui/model` instead of `sharedlib/ai/model`.
-    - **Upgrade migration**: on first start after upgrade, an init container
-      copies models from `sharedlib/ai/model` into `appCommon/comfyui/model`,
-      renames legacy `main/` to `checkpoints/`, verifies each file by size,
-      then removes the legacy copies. If verification fails the pod will not
-      start and legacy files are kept.
+    - **App install**: moved from `sharedlib/ai/comfyui` to `appData/comfyui` (host `/app/comfyui`).
+    - **Input / output**: moved to App Common `appCommon/comfyui/input` and
+      `appCommon/comfyui/output` (replacing `sharedlib/ai/output/comfyui` and
+      input inside app data).
+    - **Upgrade migration**: init containers copy legacy data into the new stores,
+      verify each file by size, then remove legacy copies. If verification fails
+      the pod will not start and legacy files are kept.
 
   developer: Comfy Org
   website: https://www.comfy.org/
