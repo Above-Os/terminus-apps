@@ -6,9 +6,36 @@
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
+{{- /* MODEL_SUPPORTS is a multi-select of coarse capability GROUPS (vision /
+       tools / thinking / embedding). Expand each group one-to-many into the
+       supports_* keys llm-init validates against its gateway AllSupports mirror,
+       then re-join into the CSV the container env expects. "embedding" is the
+       required-field fallback and maps to NO keys (an embedding model advertises
+       none). Unknown tokens pass through verbatim so a raw supports_* key still
+       works. */ -}}
+{{- $supportsGroups := dict
+      "vision" "supports_vision"
+      "tools" "supports_function_calling,supports_parallel_function_calling,supports_tool_choice"
+      "thinking" "supports_reasoning,supports_reasoning_effort"
+      "embedding" "" -}}
 {{- $modelSupports := $oe.MODEL_SUPPORTS | default "" -}}
+{{- $expandedSupports := list -}}
+{{- range $tok := splitList "," $modelSupports -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- if hasKey $supportsGroups $tok -}}
+{{- $mapped := index $supportsGroups $tok -}}
+{{- if $mapped -}}
+{{- $expandedSupports = append $expandedSupports $mapped -}}
+{{- end -}}
+{{- else -}}
+{{- $expandedSupports = append $expandedSupports $tok -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $modelSupports = join "," $expandedSupports -}}
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- $logLevel := $oe.LOG_LEVEL | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- /* HF_ENDPOINT / HF_TOKEN come from the user's system HF account via
        OlaresManifest valueFrom; empty -> huggingface.co with no auth. */ -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
@@ -28,14 +55,13 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name matching workloadReplicas + values.workloads. Label stays
-  # io.kompose.service: llm-init so the Service selectors still resolve here.
-  name: vllmllmbasev3
+  # Static name — engine Deployment uses {{ .Release.Name }} for allowMultipleInstall.
+  name: llminit
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llm-init
 spec:
-  replicas: {{ .Values.workloads.vllmllmbasev3.replicaCount }}
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: llm-init
@@ -66,7 +92,7 @@ spec:
           command:
             - sh
             - -c
-            - "chown 1000:1000 /cache/hf/hub /run/llm-init || true"
+            - "mkdir -p /cache/hf/hub/vllm-cache /cache/hf/hub/.nv/ComputeCache && chown 1000:1000 /cache/hf/hub /cache/hf/hub/vllm-cache /cache/hf/hub/.nv /cache/hf/hub/.nv/ComputeCache /run/llm-init || true"
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
@@ -74,7 +100,10 @@ spec:
               mountPath: /run/llm-init
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.2.3
+          # v1.2.4 defaults to the stable LFS download path (hf_xet disabled
+          # unless HF_ENABLE_XET=true); LFS streams each file to disk with a
+          # bounded RAM footprint, avoiding the hf_xet OOM (huggingface_hub#3300).
+          image: docker.io/beclab/llm-init:v1.2.4
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
@@ -138,10 +167,12 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
-              # hf download (4 workers) needs headroom; 256Mi gets OOMKilled
-              # mid-download -> pod restart -> state machine wedges. 1Gi is safe.
+              # LFS download (v1.2.4 default) streams each file to disk with a
+              # bounded footprint, but `hf download` still runs a python
+              # subprocess in this cgroup; 4Gi gives the huggingface_hub CLI
+              # comfortable headroom on large sharded models.
               cpu: 500m
-              memory: 1Gi
+              memory: 4Gi
 ---
 # llm-init download/progress + OpenAI proxy surface (app entrance backend).
 apiVersion: v1

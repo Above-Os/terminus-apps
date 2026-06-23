@@ -7,7 +7,7 @@ spec:
 
     **Tips**
     Gateway Restart
-    - Run `restart-gateway` to reload the gateway and pick up the latest config (`hermes gateway restart` does NOT work in containerized deployments).
+    - Run `hermes gateway restart` from the Hermes CLI terminal (same container as the supervised gateway). Config changes are picked up after restart.
 
     Storage
     - All Hermes state — config, API keys, sessions (SQLite + FTS5), skills, memories, cron, logs, checkpoints — lives in `/opt/data` (`HERMES_HOME`). No external database is required. The directory is persisted across pod restarts and upgrades by the host volume.
@@ -30,8 +30,10 @@ spec:
     - Localized into 7 languages (中文 / 日本語 / Deutsch / Español / Français / Українська / Türkçe) plus a Chinese dashboard.
 
   upgradeDescription: |
-    Config changes: Change HERMUES_UID 1000:1000
-    
-    Change Details: 
-    - Align Hermes runtime identity to Olares UID 1000:1000 (replacing 10000), with automatic ownership migration on upgrade.
-    - Fix Terminal and Dashboard access: unified shell privilege drop for interactive sessions, persistent brew PATH, and Home/External volume mounts on the dashboard container.
+    Architecture change: merge gateway, dashboard, and CLI into one s6-supervised container (Hermes v0.17.0 upstream layout).
+
+    Change Details:
+    - Single container runs `gateway run` with s6 auto-restart and `HERMES_DASHBOARD=1`; Channels, Profiles, and Terminal now share the same gateway PID namespace and agree on status.
+    - Dashboard binds 0.0.0.0 without Hermes login (`HERMES_DASHBOARD_INSECURE=1` behind Olares internal ingress).
+    - Remove cross-container workarounds (`restart-gateway` sentinel, health-relay stub, `HERMES_GATEWAY_NO_SUPERVISE`). Use `hermes gateway restart` from the CLI instead.
+    - Raise resource limits to 8 CPU / 20 GiB for the combined workload.

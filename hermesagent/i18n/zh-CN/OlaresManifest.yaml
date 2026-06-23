@@ -7,7 +7,7 @@ spec:
 
     **使用提示**
     网关重启
-    - 运行 `restart-gateway` 即可重启网关并加载最新配置（`hermes gateway restart` 在容器化部署中无法工作）。
+    - 在 Hermes CLI 终端中运行 `hermes gateway restart`（与受监督的 gateway 在同一容器内），即可重启网关并加载最新配置。
 
     存储
     - 所有Hermes状态——配置、API密钥、会话（SQLite + FTS5）、技能、记忆、定时任务、日志、检查点——均存储于`/opt/data`（`HERMES_HOME`）。无需外部数据库。该目录通过主机卷在Pod重启和升级时持久化保留。
@@ -30,8 +30,10 @@ spec:
     - 已本地化为 7 种语言（中文 / 日本語 / Deutsch / Español / Français / Українська / Türkçe），Dashboard 已支持中文。
 
   upgradeDescription: |
-    配置变更：将 HERMES_UID 更改为 1000:1000
+    架构变更：将 gateway、dashboard 与 CLI 合并为单个 s6 受监督容器（对齐 Hermes v0.17.0 上游布局）。
 
     具体变更说明：
-    - 统一 Hermes 运行身份为 Olares 平台的 UID 1000:1000（由原 10000 替换），升级时自动迁移已有文件属主。
-    - 修复终端和 Dashboard 访问：统一交互式会话降权方案，brew 路径永久有效，Dashboard 容器支持 Home/External 卷挂载。
+    - 单容器运行 `gateway run`（s6 崩溃自动重启）+ `HERMES_DASHBOARD=1`；Channels、Profiles 与 Terminal 共享 gateway PID 命名空间，状态一致。
+    - Dashboard 绑定 0.0.0.0 且无需 Hermes 登录（`HERMES_DASHBOARD_INSECURE=1`，经 Olares internal 入口访问）。
+    - 移除跨容器变通方案（`restart-gateway` 哨兵、health-relay stub、`HERMES_GATEWAY_NO_SUPERVISE`）；请改用 CLI 中的 `hermes gateway restart`。
+    - 资源上限提升至 8 CPU / 20 GiB，适配合并后的工作负载。

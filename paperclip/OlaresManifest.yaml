@@ -5,24 +5,20 @@ metadata:
   description: Open-source orchestration platform for AI agent companies.
   icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
   appid: paperclip
-  version: '1.0.8'
+  version: '1.0.22'
   title: Paperclip
   categories:
   - Productivity_v112
   - Productivity
   - Developer Tools
 spec:
-  versionName: '2026.6.4'
+  versionName: '2026.609.0'
   promoteImage:
     - https://app.cdn.olares.com/appstore/paperclip/1.webp
     - https://app.cdn.olares.com/appstore/paperclip/2.webp
     - https://app.cdn.olares.com/appstore/paperclip/3.webp
     - https://app.cdn.olares.com/appstore/paperclip/4.webp
   fullDescription: |
-    **First-time admin setup**
-    After the first startup, run `pnpm paperclipai auth bootstrap-ceo"` inside the Paperclip container to generate the first admin invite URL.
-    See [Paperclip Usecase](https://docs.olares.com/use-cases/paperclip.html) for more details.
-
     **Overview**
     Paperclip is a Node.js server and React UI that orchestrates a team of AI agents to run a business. Bring your own agents, assign goals, and track your agents' work and costs from one dashboard.
 
@@ -40,28 +36,19 @@ spec:
     - Mobile Ready - monitor and manage from anywhere
     - External PostgreSQL support for production deployments
   upgradeDescription: |
-    Stability & Hermes adapter fixes (v1.0.8)
+    Paperclip version update: upgrade to v2026.609.0
+    Config update: add built-in dependencies packages for local agents
 
-    App upgrade:
-    - Upgraded container image to beclab/paperclip:v1.0.1 (built from Above-Os/paperclip feat/build_0604), bundling the latest Hermes Agent (npm hermes-agent v0.15.x) and other built-in adapters: Claude Code, Codex, OpenCode, Pi Coding Agent
-    - Tracks upstream paperclip ~2026.6.4 (date-based versioning)
+    Highlights:
+    - Company Artifacts - Files, media, and documents your agents produce are now first-class. A new company-scoped Artifacts page indexes every work product across issues and runs, groups them by task stack by default, and supports upload and rich playback — including video artifact thumbnails — so you can inspect what your agents made without opening each issue one by one. (#7621, #7654, #7667, #7248, @cryppadotta)
+    - Collapsible sidebar rail and takeover panes - The primary navigation can now collapse to a persisted rail with hover/focus peek, giving contextual pages — especially company settings and plugin routes — far more horizontal room while keeping global navigation one click away. (#7824, @cryppadotta)
+    - Rich issue attachments with video - Issues now accept video attachments and render rich inline previews, including standalone PWA browser controls and inline video playback, so screen recordings and media land directly in the thread instead of as opaque downloads. (#7361, #7360, @cryppadotta)
+    - Checkbox confirmation interactions - Issue-thread interactions can now ask the board or user to confirm one or more options via a structured checkbox payload, with consistent validation across the API, CLI, plugin helpers, and UI — and free-text "other" answers now render as proper links. (#7649, @cryppadotta)
+    - Information Architecture refresh (experimental) - An opt-in visual refresh of the project and agent surfaces makes high-frequency workflows easier to scan, and instance settings now live under company settings so configuration is discoverable from one place. (#7543, @scotttong; #7680, @cryppadotta)
+    - Automated PR quality and security gates - commitperclip now runs automated quality and security gates on incoming PRs — checking for a linked issue, test coverage, a complete template, and a clean lockfile, plus a dedup-search check — so contributors get fast, consistent feedback and maintainers spend review time where it counts. Paired with new low-trust review containment that gives reviewers of untrusted content a narrowly-scoped, prompt-injection-resistant authority preset. (#6469, @brandonburr; #7632, #7530, @cryppadotta)
 
-    Bug fixes:
-    - Fixed Hermes adapter "ModuleNotFoundError: No module named 'hermes_cli'" by prepending the bundled Python venv (/opt/venvs/hermes/bin) to PATH so spawned hermes subprocesses resolve python3 to the venv interpreter that has hermes_cli installed
+    Full release notes: https://github.com/paperclipai/paperclip/releases/tag/v2026.609.0
 
-    Resource sizing (aligned with upstream recommendations):
-    - Memory: required 512Mi -> 1Gi, limit 2Gi -> 6Gi (prevents OOMKilled when running Hermes/Claude/Codex subprocesses and processing large heartbeat run logs)
-    - CPU: required 0.25 -> 0.5 cores, limit 2 -> 3 cores (reduces startup throttling, handles concurrent agent runs and Hermes subprocess bursts)
-    - Disk: limit 5Gi -> 20Gi (hourly DB backups with 30-day retention + heartbeat run logs accumulate quickly)
-
-    Previous: v0.3.1 highlights
-    - Gemini CLI adapter - full local adapter support for Google's Gemini CLI
-    - Run transcript polish - markdown rendering, stdout folding, identity redaction
-    - Inbox refinements - improved tabs, badge counts, mobile layout
-    - Improved onboarding wizard
-    - Default max turns raised to 300
-
-    Full release notes at: https://github.com/paperclipai/paperclip/releases/tag/v0.3.1
   developer: Paperclip AI
   website: https://paperclip.ing/
   sourceCode: https://github.com/paperclipai/paperclip
@@ -73,12 +60,12 @@ spec:
   license:
   - text: MIT
     url: https://github.com/paperclipai/paperclip/blob/master/LICENSE
-  requiredMemory: 1Gi
-  limitedMemory: 6Gi
+  requiredMemory: 2Gi
+  limitedMemory: 10Gi
   requiredDisk: 256Mi
   limitedDisk: 20Gi
-  requiredCpu: 0.5
-  limitedCpu: 3
+  requiredCpu: 1
+  limitedCpu: 6
   supportArch:
   - amd64
   - arm64
@@ -136,3 +123,11 @@ entrances:
   title: Paperclip
   icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
   openMethod: window
+  authLevel: internal
+- name: terminal
+  port: 80
+  host: terminal
+  title: Paperclip CLI
+  icon: https://app.cdn.olares.com/appstore/paperclip/icon.png
+  openMethod: window
+  authLevel: internal  

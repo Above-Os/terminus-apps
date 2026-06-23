@@ -3,9 +3,9 @@
 通用 **llama.cpp + llm-init** 基座，结构与 `vllmllmbasev3` / `sglangllmbasev3` 平行，
 但引擎换成 llama.cpp、模型格式换成 **GGUF**。
 
-- **引擎镜像**: `beclab/ggml-org-llama.cpp:server-cuda12-b9426`（GPU / CUDA 12）
-- **llm-init**: `beclab/llm-init:v1.2.3`
-- **版本**: chart `1.0.0` / appVersion `b9426`
+- **引擎镜像**: `beclab/ggml-org-llama.cpp:server-cuda12-b9603`（GPU / CUDA 12）
+- **llm-init**: `beclab/llm-init:v1.2.4`
+- **版本**: chart `1.2.6` / appVersion `b9603`
 
 ## 架构
 
@@ -38,10 +38,10 @@ MODEL_MODE=chat
 MODEL_SUPPORTS=
 ENGINE_ARGS=-c 8192 -ngl all -fa on
 LOG_LEVEL=info
-LLAMACPP_CPU_REQUEST=500m
+LLAMACPP_CPU_REQUEST=200m
 LLAMACPP_MEMORY_REQUEST=2Gi
 LLAMACPP_CPU_LIMIT=6
-LLAMACPP_MEMORY_LIMIT=16Gi
+LLAMACPP_MEMORY_LIMIT=35Gi
 ```
 
 ### 示例 B：大模型部分卸载（显存不够时）

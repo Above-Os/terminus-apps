@@ -6,7 +6,7 @@ metadata:
   description: The agent that grows with you
   appid: hermesagent
   title: Hermes Agent
-  version: 1.3.14
+  version: 1.3.19
   categories:
   - Productivity_v112
   - Developer Tools
@@ -24,7 +24,7 @@ entrances:
   title: Dashboard
   icon: https://app.cdn.olares.com/appstore/hermesagent/icon.png
   openMethod: window
-  authLevel: private
+  authLevel: internal
 - name: api
   host: hermesgateway
   port: 8642
@@ -33,13 +33,13 @@ entrances:
   invisible: true
   authLevel: internal
 spec:
-  versionName: '0.15.2'
+  versionName: '0.17.0'
   fullDescription: |
     **The self-improving AI agent built by [Nous Research](https://nousresearch.com).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
 
     **Tips**
     Gateway Restart
-    - Run `restart-gateway` to reload the gateway and pick up the latest config (`hermes gateway restart` does NOT work in containerized deployments).
+    - Run `hermes gateway restart` from the Hermes CLI terminal (same container as the supervised gateway). Config changes are picked up after restart.
 
     Storage
     - All Hermes state — config, API keys, sessions (SQLite + FTS5), skills, memories, cron, logs, checkpoints — lives in `/opt/data` (`HERMES_HOME`). No external database is required. The directory is persisted across pod restarts and upgrades by the host volume.
@@ -62,11 +62,13 @@ spec:
     - Localized into 7 languages (中文 / 日本語 / Deutsch / Español / Français / Українська / Türkçe) plus a Chinese dashboard.
 
   upgradeDescription: |
-    Config changes: Change HERMUES_UID 1000:1000
-    
-    Change Details: 
-    - Align Hermes runtime identity to Olares UID 1000:1000 (replacing 10000), with automatic ownership migration on upgrade.
-    - Fix Terminal and Dashboard access: unified shell privilege drop for interactive sessions, persistent brew PATH, and Home/External volume mounts on the dashboard container.
+    Architecture change: merge gateway, dashboard, and CLI into one s6-supervised container (Hermes v0.17.0 upstream layout).
+
+    Change Details:
+    - Single container runs `gateway run` with s6 auto-restart and `HERMES_DASHBOARD=1`; Channels, Profiles, and Terminal now share the same gateway PID namespace and agree on status.
+    - Dashboard binds 0.0.0.0 without Hermes login (`HERMES_DASHBOARD_INSECURE=1` behind Olares internal ingress).
+    - Remove cross-container workarounds (`restart-gateway` sentinel, health-relay stub, `HERMES_GATEWAY_NO_SUPERVISE`). Use `hermes gateway restart` from the CLI instead.
+    - Raise resource limits to 8 CPU / 20 GiB for the combined workload.
 
   developer: Nous Research
   website: https://hermes-agent.nousresearch.com
@@ -79,8 +81,8 @@ spec:
   license:
   - text: MIT
     url: https://github.com/NousResearch/hermes-agent/blob/main/LICENSE
-  requiredMemory: 4Gi
-  limitedMemory: 20Gi
+  requiredMemory: 5Gi
+  limitedMemory: 22Gi
   requiredDisk: 5Gi
   limitedDisk: 20Gi
   requiredCpu: 4

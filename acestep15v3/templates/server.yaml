@@ -2,14 +2,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: acestep-server
+  name: acestepserver
   namespace: {{ .Release.Namespace }}
   labels:
     app: multi-port
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: {{ (index .Values.workloads "acestep-server").replicaCount }}
+  replicas: {{ (index .Values.workloads "acestepserver").replicaCount }}
   selector:
     matchLabels:
       app: multi-port
@@ -43,32 +43,71 @@ spec:
             - '-c'
             - |
               set -e
-              MAIN_DONE="/app/checkpoints/.Ace-Step1.5.done"
-              XL_DONE="/app/checkpoints/acestep-v15-xl-sft/.acestep-v15-xl-sft.done"
-              LM_DONE="/app/checkpoints/acestep-5Hz-lm-4B/.acestep-5Hz-lm-4B.done"
-              echo "[wait] Waiting for model downloads..."
-              while [ ! -f "$MAIN_DONE" ] || [ ! -f "$XL_DONE" ] || [ ! -f "$LM_DONE" ]; do
-                echo "[wait] main=$([ -f "$MAIN_DONE" ] && echo ok || echo pending) xl-sft=$([ -f "$XL_DONE" ] && echo ok || echo pending) lm-4b=$([ -f "$LM_DONE" ] && echo ok || echo pending)"
+              CACHE=/cache/hf/hub
+              READYZ="http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz"
+
+              # Gate on the llm-init downloader (download-only mode) reporting all
+              # repos present. /readyz flips to 200 only once every MODEL_SOURCE
+              # repo is fully on disk, so this replaces the old per-repo .done
+              # sentinel files written by the bespoke downloader.
+              echo "[wait] Waiting for llm-init downloader (/readyz)..."
+              until python3 - "$READYZ" <<'RDY_EOF' 2>/dev/null
+              import sys, urllib.request
+              try:
+                  with urllib.request.urlopen(sys.argv[1], timeout=5) as r:
+                      sys.exit(0 if r.status == 200 else 1)
+              except Exception:
+                  sys.exit(1)
+              RDY_EOF
+              do
+                echo "[wait] downloader not ready yet..."
                 sleep 10
               done
-              echo "[wait] All required models ready, starting ACE-Step server."
+              echo "[wait] downloader ready; materialising /app/checkpoints from HF cache."
+
+              # llm-init writes the standard HF cache snapshot layout
+              # ($CACHE/models--ACE-Step--<repo>/snapshots/<sha>/...), but ACE-Step
+              # loads flat dirs under /app/checkpoints. Rebuild that flat view as a
+              # symlink farm pointing at the resolved snapshots. The snapshot's
+              # internal blob symlinks are relative to $CACHE (mounted here at the
+              # same path), so they resolve transparently.
+              snap() {  # $1 = models--ACE-Step--<repo> dir name -> prints snapshot dir
+                ref="$CACHE/$1/refs/main"
+                if [ -f "$ref" ]; then
+                  echo "$CACHE/$1/snapshots/$(cat "$ref")"
+                else
+                  ls -d "$CACHE/$1"/snapshots/*/ 2>/dev/null | head -1
+                fi
+              }
+              MAIN_SNAP="$(snap models--ACE-Step--Ace-Step1.5)"
+              XL_SNAP="$(snap models--ACE-Step--acestep-v15-xl-sft)"
+              LM_SNAP="$(snap models--ACE-Step--acestep-5Hz-lm-4B)"
+              mkdir -p /app/checkpoints
+              # Ace-Step1.5 base model lands at the checkpoints root: link each
+              # top-level entry (visible + dotfiles) individually.
+              for f in "$MAIN_SNAP"/* "$MAIN_SNAP"/.[!.]*; do
+                [ -e "$f" ] || continue
+                ln -sfn "$f" "/app/checkpoints/$(basename "$f")"
+              done
+              # The XL-SFT and LM repos are referenced as their own subdirs
+              # (ACESTEP_CONFIG_PATH / ACESTEP_LM_MODEL_PATH).
+              ln -sfn "${XL_SNAP%/}" /app/checkpoints/acestep-v15-xl-sft
+              ln -sfn "${LM_SNAP%/}" /app/checkpoints/acestep-5Hz-lm-4B
+              echo "[wait] checkpoints ready, starting ACE-Step server."
 
               cd /app
               if [ -x /app/docker-entrypoint.sh ]; then
                 export ACESTEP_MODE=gradio
-                export ACESTEP_INIT_SERVICE=true
+                export ACESTEP_INIT_SERVICE=false
                 export GRADIO_SERVER_NAME=0.0.0.0
                 export GRADIO_PORT=7860
-                export ACESTEP_EXTRA_ARGS="--service_mode true --language ${ACESTEP_UI_LANGUAGE:-en} --device ${ACESTEP_DEVICE:-auto}"
+                export ACESTEP_EXTRA_ARGS="--language ${ACESTEP_UI_LANGUAGE:-en} --device ${ACESTEP_DEVICE:-auto}"
                 exec /app/docker-entrypoint.sh
               fi
 
               exec uv run python -m acestep.acestep_v15_pipeline \
                 --server-name 0.0.0.0 \
                 --port 7860 \
-                --init_service true \
-                --service_mode true \
-                --init_llm true \
                 --config_path "${ACESTEP_CONFIG_PATH}" \
                 --lm_model_path "${ACESTEP_LM_MODEL_PATH}" \
                 --backend "${ACESTEP_LLM_BACKEND:-pt}" \
@@ -86,7 +125,7 @@ spec:
             - name: ACESTEP_CONFIG_PATH
               value: "acestep-v15-xl-sft"
             - name: ACESTEP_INIT_SERVICE
-              value: "true"
+              value: "false"
             - name: ACESTEP_LM_MODEL_PATH
               value: "acestep-5Hz-lm-4B"
             - name: ACESTEP_LLM_BACKEND
@@ -124,15 +163,23 @@ spec:
           volumeMounts:
             - name: checkpoints
               mountPath: /app/checkpoints
+            # Shared cross-app HF Hub cache (App Common), populated by the
+            # llm-init downloader. Read here to build the checkpoints symlink farm.
+            - name: hf-cache
+              mountPath: /cache/hf/hub
             - name: outputs
               mountPath: /app/gradio_outputs
             - name: logs
               mountPath: /app/logs
           imagePullPolicy: IfNotPresent
       volumes:
+        # /app/checkpoints is now an ephemeral symlink farm rebuilt on every
+        # start; the real model bytes persist in the shared HF cache below.
         - name: checkpoints
+          emptyDir: {}
+        - name: hf-cache
           hostPath:
-            path: "{{ .Values.sharedlib }}/ai/acestep15v3"
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
             type: DirectoryOrCreate
         - name: outputs
           hostPath:

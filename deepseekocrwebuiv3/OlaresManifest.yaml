@@ -6,8 +6,8 @@ metadata:
   description: Ready-to-use DeepSeek-OCR-2 Web UI
   icon: https://app.cdn.olares.com/appstore/deepseekocr/icon.png
   appid: deepseekocrwebuiv3
-  version: '1.1.3'
-  title: DeepSeek-OCR-2 WebUI V3 for test
+  version: '1.1.8'
+  title: DeepSeek-OCR2 WebUI V3
   categories:
     - AI
     - Utilities_v112
@@ -34,7 +34,10 @@ workloadReplicas:
 
 permission:
   appData: true
-  appCache: true
+  appCache: true   # llm-init sentinel/run-state under appCache/llm-init-run/<release>
+  # DeepSeek-OCR-2 HF model lives in the shared cross-app App Common store
+  # (appCommon/huggingface, mounted at the fixed /cache/hf/hub container path).
+  appCommon: true
   userData:
     - Home
 
@@ -64,9 +67,26 @@ spec:
     - ModelScope Fallback - Auto-switch to ModelScope when HuggingFace is unavailable
 
   upgradeDescription: |
+    v1.1.8: **Download architecture** — replaced the bespoke harveyff-hf-downloader
+    image with the shared `llm-init` download-only Deployment (`deepseekocrwebuiv3download`,
+    image llm-init:v1.2.4, default LFS). The DeepSeek-OCR-2 model now lands in the
+    shared cross-app HF cache (App Common, /cache/hf/hub) and is de-duplicated/reused
+    across apps. The OCR engine gates on the downloader's `/readyz` instead of the
+    `.DeepSeek-OCR-2.done` sentinel, and `/app/models` is now an ephemeral symlink farm
+    over the cached snapshot. Declared `permission.appCommon: true`. Raised nvidia-gb10
+    `limitedMemory` to 28Gi so the engine (23Gi) + downloader (4Gi) + nginx (0.5Gi)
+    limits sum within the envelope.
+    Entrance: rewrote the nginx clientproxy to the llm-init dashboard pattern — API
+    paths (/api/, /healthz, /readyz, …) pin to download-svc; `/` gates on model
+    download + OCR-app readiness and auto-reloads into the app via `/__app_ready`.
+
     Migrated DeepSeek-OCR-2 WebUI to apiVersion v3 shared app pattern (deepseekocrwebuiv2 → deepseekocrwebuiv3).
 
     **What's Changed**
+
+    - **Accelerator**: declared the GPU requirement via the accelerator modes list and added nvidia-gb10 (GB10/Spark) support; on GB10 unified memory the GPU is carved from requiredMemory, so nvidia-gb10 requiredMemory is 16Gi (6Gi OOM'd the OCR model). On nvidia-gb10 the main container now raises its memory request/limit (13Gi/23Gi) since the GPU working set lives in pod RAM; discrete GPU keeps 5Gi/20Gi.
+
+    - **Multi-install**: the main Deployment now uses {{ .Release.Name }} so allowMultipleInstall installs don't collide on workload names.
 
     - **Architecture**: flattened sub-charts into a single chart; nginx clientproxy
       upstreams now target in-namespace Services.
@@ -85,14 +105,29 @@ spec:
     - text: MIT License
       url: https://github.com/neosun100/DeepSeek-OCR-WebUI?tab=License-1-ov-file
 
-  requiredMemory: 6Gi
-  limitedMemory: 25Gi
-  requiredDisk: 8Gi
-  limitedDisk: 20Gi
-  requiredCpu: 1
-  limitedCpu: 5
-  requiredGpu: 10Gi
-  limitedGpu: 16Gi
+  accelerator:
+  # nvidia      — discrete GPU; GPU memory via nvidia.com/gpumem.
+  # nvidia-gb10 — GB10/Spark (arm64) unified memory. There are no GPU-memory
+  #               fields here; GPU memory is carved from requiredMemory (the
+  #               OOM showed GPU capacity == requiredMemory). 6Gi only left the
+  #               OCR model ~6Gi and it OOM'd, so requiredMemory is raised to
+  #               16Gi to give the GPU enough headroom on the unified pool.
+  - mode: nvidia
+    requiredCpu: "1"
+    limitedCpu: "6"
+    requiredMemory: 6Gi
+    limitedMemory: 25Gi
+    requiredDisk: 8Gi
+    limitedDisk: 20Gi
+    requiredGPUMemory: 10Gi
+    limitedGPUMemory: 16Gi
+  - mode: nvidia-gb10
+    requiredCpu: "1"
+    limitedCpu: "6"
+    requiredMemory: 16Gi
+    limitedMemory: 28Gi
+    requiredDisk: 8Gi
+    limitedDisk: 20Gi
 
   supportArch:
     - amd64
@@ -100,6 +135,7 @@ spec:
   onlyAdmin: true
 
 options:
+  shared: true
   apiTimeout: 0
   allowMultipleInstall: true
   conflicts:
