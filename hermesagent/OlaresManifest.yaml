@@ -24,7 +24,7 @@ entrances:
   title: Dashboard
   icon: https://app.cdn.olares.com/appstore/hermesagent/icon.png
   openMethod: window
-  authLevel: private
+  authLevel: internal
 - name: api
   host: hermesgateway
   port: 8642
@@ -40,10 +40,6 @@ spec:
     **Tips**
     Gateway Restart
     - Run `hermes gateway restart` from the Hermes CLI terminal (same container as the supervised gateway). Config changes are picked up after restart.
-
-    Dashboard Login
-    - Set **Dashboard Username** and **Dashboard Password** in the Olares install dialog (required). These are stored as app environment variables and synced into Hermes on every pod start.
-    - To change later: open the app's **Settings** in Olares, edit the same fields, and save — the app restarts automatically (`applyOnChange`) and picks up the new credentials. You will need to sign in again on the Web UI.
 
     Storage
     - All Hermes state — config, API keys, sessions (SQLite + FTS5), skills, memories, cron, logs, checkpoints — lives in `/opt/data` (`HERMES_HOME`). No external database is required. The directory is persisted across pod restarts and upgrades by the host volume.
@@ -70,7 +66,7 @@ spec:
 
     Change Details:
     - Single container runs `gateway run` with s6 auto-restart and `HERMES_DASHBOARD=1`; Channels, Profiles, and Terminal now share the same gateway PID namespace and agree on status.
-    - Dashboard basic auth is required at install (Olares env vars); credentials sync into `/opt/data/.env` on every pod start. Edit username/password in app Settings anytime (`applyOnChange` restarts the app).
+    - Dashboard binds 0.0.0.0 without Hermes login (`HERMES_DASHBOARD_INSECURE=1` behind Olares internal ingress).
     - Remove cross-container workarounds (`restart-gateway` sentinel, health-relay stub, `HERMES_GATEWAY_NO_SUPERVISE`). Use `hermes gateway restart` from the CLI instead.
     - Raise resource limits to 8 CPU / 20 GiB for the combined workload.
 
@@ -135,24 +131,3 @@ envs:
     editable: true
     regex: '^[\w\-!@#$%^&*()+={}\[\]:,.?~]{8,}$'
     description: "Auth token for the OpenAI-compatible API server. Required when API_SERVER_ENABLED is true. Must be at least 8 characters and contain only letters, numbers, and common symbols. Pass the same value as HERMES_API_TOKEN on the client side."
-  - envName: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
-    type: string
-    required: true
-    applyOnChange: true
-    editable: true
-    regex: '^[\w\-]{2,32}$'
-    description: "Dashboard login username (required). Shown on the Web UI sign-in page. Change anytime in app Settings; the app restarts to apply."
-  - envName: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
-    type: password
-    required: true
-    applyOnChange: true
-    editable: true
-    regex: '^[\w\-!@#$%^&*()+={}\[\]:,.?~]{8,}$'
-    description: "Dashboard login password (required, min 8 characters). Change anytime in app Settings; the app restarts to apply and existing Web UI sessions are invalidated."
-  - envName: HERMES_DASHBOARD_BASIC_AUTH_SECRET
-    type: password
-    required: false
-    applyOnChange: true
-    editable: true
-    regex: '^[\w\-!@#$%^&*()+={}\[\]:,.?~]{16,}$'
-    description: "Optional session signing secret (min 16 characters). Leave empty to keep the auto-generated stable secret across password changes. Set explicitly only if you need a fixed value across reinstalls."

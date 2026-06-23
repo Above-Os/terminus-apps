@@ -19,9 +19,6 @@
 # identity (1000) can write the Olares user-data mounts.
 {{- $hermesImage := "beclab/harveyff-hermes-agent:v2026.6.19-uid1000" -}}
 {{- $oe := .Values.olaresEnv | default dict }}
-{{- $dashUser := index $oe "HERMES_DASHBOARD_BASIC_AUTH_USERNAME" | default "" }}
-{{- $dashPass := index $oe "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" | default "" }}
-{{- $dashSecret := index $oe "HERMES_DASHBOARD_BASIC_AUTH_SECRET" | default "" }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -54,15 +51,6 @@ spec:
           securityContext:
             runAsUser: 0
             runAsGroup: 0
-          env:
-            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
-              value: {{ $dashUser | quote }}
-            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
-              value: {{ $dashPass | quote }}
-            {{- if $dashSecret }}
-            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
-              value: {{ $dashSecret | quote }}
-            {{- end }}
           command:
             - sh
             - "-c"
@@ -95,40 +83,6 @@ spec:
                 fi
               done
               chown 1000:1000 /opt/data/.bashrc /opt/data/.profile 2>/dev/null || true
-              # Dashboard on 0.0.0.0 requires basic auth; sync Olares env into dotenv.
-              if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] || [ -z "${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}" ]; then
-                echo "[init] FATAL: set HERMES_DASHBOARD_BASIC_AUTH_USERNAME and HERMES_DASHBOARD_BASIC_AUTH_PASSWORD in Olares app settings" >&2
-                exit 1
-              fi
-              ENV_FILE=/opt/data/.env
-              ENV_MARKER="# hermesagent: dashboard-basic-auth"
-              if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}" ] && [ -f "$ENV_FILE" ]; then
-                OLD_SECRET="$(grep '^HERMES_DASHBOARD_BASIC_AUTH_SECRET=' "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
-                [ -n "$OLD_SECRET" ] && HERMES_DASHBOARD_BASIC_AUTH_SECRET="$OLD_SECRET"
-              fi
-              if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}" ]; then
-                HERMES_DASHBOARD_BASIC_AUTH_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; echo)"
-              fi
-              umask 077
-              touch "$ENV_FILE"
-              if grep -qF "$ENV_MARKER" "$ENV_FILE" 2>/dev/null; then
-                awk -v m="$ENV_MARKER" '
-                  $0 == m { skip=1; next }
-                  skip && /^HERMES_DASHBOARD_BASIC_AUTH_/ { next }
-                  skip && NF == 0 { skip=0 }
-                  { print }
-                ' "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
-              fi
-              {
-                echo ""
-                echo "$ENV_MARKER"
-                echo "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=$HERMES_DASHBOARD_BASIC_AUTH_USERNAME"
-                echo "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=$HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"
-                echo "HERMES_DASHBOARD_BASIC_AUTH_SECRET=$HERMES_DASHBOARD_BASIC_AUTH_SECRET"
-              } >> "$ENV_FILE"
-              chown 1000:1000 "$ENV_FILE"
-              chmod 600 "$ENV_FILE"
-              echo "[init] synced dashboard basic auth into $ENV_FILE"
               echo "[init] /opt/data ready (owner=1000:1000, .olares-cli seeded)"
           resources: {}
           volumeMounts:
@@ -252,16 +206,8 @@ spec:
               value: "0.0.0.0"
             - name: HERMES_DASHBOARD_PORT
               value: "9119"
-            # Required Olares app env vars (install dialog). Init also syncs them
-            # into /opt/data/.env for the s6-supervised dashboard dotenv loader.
-            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
-              value: {{ $dashUser | quote }}
-            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
-              value: {{ $dashPass | quote }}
-            {{- if $dashSecret }}
-            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
-              value: {{ $dashSecret | quote }}
-            {{- end }}
+            - name: HERMES_DASHBOARD_INSECURE
+              value: "1"
             - name: HOMEBREW_PREFIX
               value: /home/linuxbrew/.linuxbrew
             - name: HOMEBREW_NO_AUTO_UPDATE
