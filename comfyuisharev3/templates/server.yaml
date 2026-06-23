@@ -18,9 +18,9 @@
 {{- if $isGb10 -}}
 {{- $memRequest = "22Gi" -}}
 {{- end -}}
-{{- $image := "beclab/comfyui:v0.24.0-fe1.47.1-launcher0.2.46-build118" -}}
+{{- $image := "beclab/comfyui:v0.25.0-fe1.47.2-launcher0.2.47" -}}
 {{- if $isGb10 -}}
-{{- $image = "beclab/comfyui_launcher-arm64:v0.24.0-feunknown-launcher0.2.46-arm64" -}}
+{{- $image = "beclab/comfyui_launcher-arm64:v0.25.0-fe1.47.2-launcher0.2.47-arm64" -}}
 {{- end -}}
 
 ---
@@ -49,6 +49,116 @@ spec:
         io.kompose.service: comfyui
     spec:
       initContainers:
+      - name: migrate-io
+        image: {{ $image }}
+        command:
+          - sh
+          - '-c'
+          - |
+            set -e
+            migrate_dir() {
+              LEGACY="$1"
+              NEW="$2"
+              LABEL="$3"
+              if [ ! -d "$LEGACY" ] || [ -z "$(ls -A "$LEGACY" 2>/dev/null)" ]; then
+                echo "migrate-io: $LABEL legacy empty, skip"
+                return 0
+              fi
+              mkdir -p "$NEW"
+              echo "migrate-io: rsync $LABEL sharedlib -> appCommon"
+              rsync -a --ignore-existing "$LEGACY/" "$NEW/"
+              echo "migrate-io: verifying $LABEL"
+              find "$LEGACY" -type f -exec sh -c '
+                src="$1"
+                NEW="$2"
+                LEGACY="$3"
+                rel="${src#$LEGACY/}"
+                dst="$NEW/$rel"
+                if [ ! -f "$dst" ]; then
+                  echo "migrate-io: verify failed, missing in new store: $rel (expected $dst)"
+                  exit 1
+                fi
+                src_size=$(wc -c < "$src" | tr -d " ")
+                dst_size=$(wc -c < "$dst" | tr -d " ")
+                if [ "$src_size" != "$dst_size" ]; then
+                  echo "migrate-io: verify failed, size mismatch: $rel ($src_size vs $dst_size)"
+                  exit 1
+                fi
+              ' _ {} "$NEW" "$LEGACY" \;
+              echo "migrate-io: verification passed for $LABEL, removing legacy files"
+              find "$LEGACY" -mindepth 1 -depth -exec rm -rf {} +
+              echo "migrate-io: $LABEL done"
+            }
+            migrate_dir /legacy-output /new-output output
+            migrate_dir /legacy-appdata/ComfyUI/input /new-input input
+        resources: {}
+        volumeMounts:
+          - name: legacy-output
+            mountPath: /legacy-output
+          - name: output
+            mountPath: /new-output
+          - name: legacy-appdata
+            mountPath: /legacy-appdata
+          - name: input
+            mountPath: /new-input
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+      - name: migrate-appdata
+        image: {{ $image }}
+        command:
+          - sh
+          - '-c'
+          - |
+            set -e
+            LEGACY=/legacy-appdata
+            NEW=/new-appdata
+            if [ ! -d "$LEGACY" ] || [ -z "$(ls -A "$LEGACY" 2>/dev/null)" ]; then
+              echo "migrate-appdata: legacy store empty, skip"
+              exit 0
+            fi
+            mkdir -p "$NEW"
+            echo "migrate-appdata: rsync sharedlib/ai/comfyui -> appData/comfyui (excluding input/output)"
+            rsync -a --ignore-existing \
+              --exclude='ComfyUI/output/' \
+              --exclude='ComfyUI/output' \
+              --exclude='ComfyUI/input/' \
+              --exclude='ComfyUI/input' \
+              "$LEGACY/" "$NEW/"
+            echo "migrate-appdata: verifying every legacy file exists in new store with same size"
+            find "$LEGACY" -type f ! -path "$LEGACY/ComfyUI/output/*" ! -path "$LEGACY/ComfyUI/input/*" -exec sh -c '
+              src="$1"
+              NEW="$2"
+              LEGACY="$3"
+              rel="${src#$LEGACY/}"
+              dst="$NEW/$rel"
+              if [ ! -f "$dst" ]; then
+                echo "migrate-appdata: verify failed, missing in new store: $rel (expected $dst)"
+                exit 1
+              fi
+              src_size=$(wc -c < "$src" | tr -d " ")
+              dst_size=$(wc -c < "$dst" | tr -d " ")
+              if [ "$src_size" != "$dst_size" ]; then
+                echo "migrate-appdata: verify failed, size mismatch: $rel ($src_size vs $dst_size)"
+                exit 1
+              fi
+            ' _ {} "$NEW" "$LEGACY" \;
+            echo "migrate-appdata: verification passed, removing legacy appdata files"
+            find "$LEGACY" -mindepth 1 -depth -exec rm -rf {} +
+            echo "migrate-appdata: done"
+        resources: {}
+        volumeMounts:
+          - name: legacy-appdata
+            mountPath: /legacy-appdata
+          - name: appdata
+            mountPath: /new-appdata
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
       - name: upversion
         image: {{ $image }}
         command:
@@ -64,6 +174,8 @@ spec:
             mountPath: /root
           - name: output
             mountPath: /root/ComfyUI/output
+          - name: input
+            mountPath: /root/ComfyUI/input
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         imagePullPolicy: IfNotPresent
@@ -83,6 +195,8 @@ spec:
             mountPath: /root
           - name: output
             mountPath: /root/ComfyUI/output
+          - name: input
+            mountPath: /root/ComfyUI/input
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         imagePullPolicy: IfNotPresent
@@ -160,6 +274,8 @@ spec:
           - |
             chown -R 1000:1000 /root
             chown -R 1000:1000 /mnt/olares-shared-model
+            chown -R 1000:1000 /root/ComfyUI/output
+            chown -R 1000:1000 /root/ComfyUI/input
         resources: {}
         volumeMounts:
           - name: appdata
@@ -168,22 +284,8 @@ spec:
             mountPath: /mnt/olares-shared-model
           - name: output
             mountPath: /root/ComfyUI/output
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: File
-        imagePullPolicy: IfNotPresent
-        securityContext:
-          runAsUser: 0
-      - name: update-chmod-data-ai
-        image: "docker.io/beclab/aboveos-busybox:1.37.0"
-        command:
-          - sh
-          - '-c'
-          - |
-            chown -R 1000:1000 /ai
-        resources: {}
-        volumeMounts:
-          - name: ai
-            mountPath: /ai
+          - name: input
+            mountPath: /root/ComfyUI/input
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         imagePullPolicy: IfNotPresent
@@ -233,7 +335,7 @@ spec:
             - name: TZ
               value: Etc/UTC
             - name: CLI_ARGS
-              value: '--disable-xformers --disable-smart-memory --disable-cuda-malloc --disable-dynamic-vram --front-end-version Comfy-Org/ComfyUI_frontend@v1.47.1'
+              value: '--disable-xformers --disable-smart-memory --disable-cuda-malloc --disable-dynamic-vram --front-end-version Comfy-Org/ComfyUI_frontend@v1.47.2'
             - name: HOME
               value: /root
             - name: PIP_CACHE_DIR
@@ -258,6 +360,12 @@ spec:
               value: '/root/ComfyUI/launchercache'
             - name: COMFYUI_PATH
               value: '/root/ComfyUI'
+            - name: APP_FILES_PATH
+              value: '/App/comfyui/'
+            - name: IO_FILES_PATH
+              value: '/Common/comfyui/'
+            - name: MODEL_FILES_PATH
+              value: '/Common/comfyui/model/'
             - name: NODE_ENV
               value: 'production'
             - name: API_PROTOCOL
@@ -306,6 +414,8 @@ spec:
               mountPath: /mnt/olares-shared-model
             - name: output
               mountPath: /root/ComfyUI/output
+            - name: input
+              mountPath: /root/ComfyUI/input
           # Entrances route via comfyuientrance Service (8080->8190, 8081->8080 gateway).
           # Gate readiness on the Launcher ComfyUI proxy (:8190) so Olares does not
           # publish the entrance before the "please start" page can be served.
@@ -333,15 +443,25 @@ spec:
         - name: output
           hostPath:
             type: DirectoryOrCreate
-            path:  {{ .Values.sharedlib }}/ai/output/comfyui
-        - name: ai
+            path: {{ .Values.userspace.appCommon }}/comfyui/output
+        - name: input
           hostPath:
             type: DirectoryOrCreate
-            path: {{ .Values.sharedlib }}/ai
-        - name: appdata
+            path: {{ .Values.userspace.appCommon }}/comfyui/input
+        # Legacy paths (pre appData/appCommon layout). migrate-* init containers
+        # rsync into the new stores, verify sizes, then remove legacy files.
+        - name: legacy-output
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.sharedlib }}/ai/output/comfyui
+        - name: legacy-appdata
           hostPath:
             type: DirectoryOrCreate
             path: {{ .Values.sharedlib }}/ai/comfyui
+        - name: appdata
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.appData }}/comfyui
         - name: appcache
           hostPath:
             type: DirectoryOrCreate

@@ -77,14 +77,16 @@ spec:
     The shared model hub lives in the App Common directory
     `appCommon/comfyui/model` (SSD on single-node, JuiceFS on multi-node).
 
+    **Data layout**
+    - App install (plugins, cache, config): `appData/comfyui` (host `/app/comfyui`)
+    - Input / output: `appCommon/comfyui/input` and `appCommon/comfyui/output`
+
   upgradeDescription: |
-    ComfyUI Shared apiVersion v3 release (comfyuisharev3).
+    ComfyUI Shared storage layout update.
 
     **What's Changed**
-    - **Architecture**: single engine pod; `comfyuientrance` Service maps entrance
-      8080 → ComfyUI proxy :8190 and 8081 → Launcher gateway :8080 (handles `/api`
-      → :3000 internally). No separate nginx client workload.
-    - **Resources**: GPU declared via `spec.accelerator` (nvidia / nvidia-gb10).
-    - **Runtime**: ComfyUI 0.24.0 with launcher 0.2.43.
-    - **Model storage**: models use the shared App Common store `appCommon/comfyui/model`.
-    - **Upgrade migration**: init container copies from `sharedlib/ai/model`, renames legacy `main/` to `checkpoints/`, verifies by file size, then removes legacy copies (pod fails if verify fails).
+    - **App install**: moved from `sharedlib/ai/comfyui` to `appData/comfyui` (host `/app/comfyui`).
+    - **Input / output**: moved to App Common `appCommon/comfyui/input` and
+      `appCommon/comfyui/output`.
+    - **Upgrade migration**: init containers copy legacy data, verify by file size,
+      then remove legacy copies (pod fails if verify fails).
