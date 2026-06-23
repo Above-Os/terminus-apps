@@ -95,31 +95,21 @@ spec:
                 fi
               done
               chown 1000:1000 /opt/data/.bashrc /opt/data/.profile 2>/dev/null || true
-              # Dashboard binds 0.0.0.0; upstream requires basic auth on non-loopback.
-              # Olares injects username/password as required app env vars; sync them
-              # into persisted files so the s6-supervised dashboard loads via dotenv.
+              # Dashboard on 0.0.0.0 requires basic auth; sync Olares env into dotenv.
               if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] || [ -z "${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}" ]; then
                 echo "[init] FATAL: set HERMES_DASHBOARD_BASIC_AUTH_USERNAME and HERMES_DASHBOARD_BASIC_AUTH_PASSWORD in Olares app settings" >&2
                 exit 1
               fi
-              AUTH_FILE=/opt/data/.dashboard-basic-auth.env
               ENV_FILE=/opt/data/.env
               ENV_MARKER="# hermesagent: dashboard-basic-auth"
-              if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}" ] && [ -f "$AUTH_FILE" ]; then
-                OLD_SECRET="$(grep '^HERMES_DASHBOARD_BASIC_AUTH_SECRET=' "$AUTH_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
+              if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}" ] && [ -f "$ENV_FILE" ]; then
+                OLD_SECRET="$(grep '^HERMES_DASHBOARD_BASIC_AUTH_SECRET=' "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
                 [ -n "$OLD_SECRET" ] && HERMES_DASHBOARD_BASIC_AUTH_SECRET="$OLD_SECRET"
               fi
               if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}" ]; then
                 HERMES_DASHBOARD_BASIC_AUTH_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; echo)"
               fi
               umask 077
-              {
-                echo "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=$HERMES_DASHBOARD_BASIC_AUTH_USERNAME"
-                echo "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=$HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"
-                echo "HERMES_DASHBOARD_BASIC_AUTH_SECRET=$HERMES_DASHBOARD_BASIC_AUTH_SECRET"
-              } > "$AUTH_FILE"
-              chown 1000:1000 "$AUTH_FILE"
-              chmod 600 "$AUTH_FILE"
               touch "$ENV_FILE"
               if grep -qF "$ENV_MARKER" "$ENV_FILE" 2>/dev/null; then
                 awk -v m="$ENV_MARKER" '
@@ -138,7 +128,7 @@ spec:
               } >> "$ENV_FILE"
               chown 1000:1000 "$ENV_FILE"
               chmod 600 "$ENV_FILE"
-              echo "[init] synced dashboard basic auth from Olares env into $AUTH_FILE and $ENV_FILE"
+              echo "[init] synced dashboard basic auth into $ENV_FILE"
               echo "[init] /opt/data ready (owner=1000:1000, .olares-cli seeded)"
           resources: {}
           volumeMounts:
@@ -168,15 +158,6 @@ spec:
                 cp -a /brew-staging/.linuxbrew/. /home/linuxbrew/.linuxbrew/
               fi
 
-              # olares-cli ships in the brew base and arrives via the cp above.
-
-              # NOTE: single-container layout removes the old cross-container
-              # shims (python3 venv shim, restart-gateway sentinel, and the
-              # 02-reconcile-profiles neutralizer). The gateway is now s6-
-              # supervised in-container, so `hermes gateway restart` dispatches
-              # natively to s6-svc, and the reconciler runs unmodified (no cross-
-              # container log-lock race when only one container shares /opt/data).
-
               # drop-to-hermes: interactive root kubectl exec re-execs as hermes (1000).
               printf '%s\n' \
                 '#!/bin/sh' \
@@ -198,37 +179,6 @@ spec:
                 'exec "$S6_SUID" hermes "$DROP_SHELL" -l' \
                 > /cli-bin/drop-to-hermes
               chmod 0755 /cli-bin/drop-to-hermes
-
-              # Inject persisted dashboard basic-auth into s6 container_environment
-              # when Olares env overrides are unset (s6 services don't inherit
-              # a runtime bash export).
-              printf '%s\n' \
-                '#!/bin/sh' \
-                'AUTH_FILE=/opt/data/.dashboard-basic-auth.env' \
-                'if [ -n "${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] && [ -n "${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}" ]; then' \
-                '  exit 0' \
-                'fi' \
-                'AUTH_FILE=/opt/data/.dashboard-basic-auth.env' \
-                'if [ ! -f "$AUTH_FILE" ]; then' \
-                '  echo "[05-dashboard-basic-auth] FATAL: $AUTH_FILE missing (init-chmod-data should seed it)" >&2' \
-                '  exit 1' \
-                'fi' \
-                'set -a' \
-                '. "$AUTH_FILE"' \
-                'set +a' \
-                'if [ -z "${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] || [ -z "${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}" ]; then' \
-                '  echo "[05-dashboard-basic-auth] FATAL: incomplete basic auth in $AUTH_FILE" >&2' \
-                '  exit 1' \
-                'fi' \
-                'mkdir -p /run/s6/container_environment' \
-                'printf %s "$HERMES_DASHBOARD_BASIC_AUTH_USERNAME" > /run/s6/container_environment/HERMES_DASHBOARD_BASIC_AUTH_USERNAME' \
-                'printf %s "$HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" > /run/s6/container_environment/HERMES_DASHBOARD_BASIC_AUTH_PASSWORD' \
-                'if [ -n "${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}" ]; then' \
-                '  printf %s "$HERMES_DASHBOARD_BASIC_AUTH_SECRET" > /run/s6/container_environment/HERMES_DASHBOARD_BASIC_AUTH_SECRET' \
-                'fi' \
-                'exit 0' \
-                > /cli-bin/05-dashboard-basic-auth
-              chmod 0755 /cli-bin/05-dashboard-basic-auth
 
               chown -R 1000:1000 /home/linuxbrew || true
               echo "[init-brew] done"
@@ -365,10 +315,6 @@ spec:
             - mountPath: /etc/profile.d/99-drop-to-hermes.sh
               name: cli-bin
               subPath: drop-to-hermes
-              readOnly: true
-            - mountPath: /etc/cont-init.d/05-dashboard-basic-auth
-              name: cli-bin
-              subPath: 05-dashboard-basic-auth
               readOnly: true
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
             - mountPath: /home/userdata/home/
