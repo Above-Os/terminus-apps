@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: crawl4ai
-          image: "docker.io/beclab/unclecode-crawl4ai:0.7.4"
+          image: "docker.io/unclecode/crawl4ai:0.9.0"
           env:
             - name: PGID
               value: "1000"
@@ -34,9 +34,18 @@ spec:
               value: ":0"
             - name: SHM_SIZE
               value: 2G
+            - name: CRAWL4AI_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: crawl4ai
+                  key: api-token
           envFrom:
             - configMapRef:
                 name: crawl4ai-config
+          volumeMounts:
+            - name: crawl4ai-config-file
+              mountPath: /app/config.yml
+              subPath: config.yml
           resources:
             requests:
               cpu: 500m
@@ -48,6 +57,10 @@ spec:
             - name: http
               containerPort: 11235
               protocol: TCP
+      volumes:
+        - name: crawl4ai-config-file
+          configMap:
+            name: crawl4ai-config
 
 ---
 apiVersion: v1
