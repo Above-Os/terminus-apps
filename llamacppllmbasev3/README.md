@@ -15,7 +15,7 @@
 | **llama.cpp** | `llamacpp` | 8081 | GGUF 推理（Service 名必须为 `llamacpp`） |
 
 - HF/GGUF 缓存：`appCommon/huggingface` → `/cache/hf/hub`（共享）
-- sentinel：`appCache/llm-init-run/<release>` → `/run/llm-init`（按实例隔离）
+- sentinel：`appCommon/llm-init-run/<release>` → `/run/llm-init`（按实例隔离，跨节点共享）
 
 ## 与 vLLM / SGLang 的关键区别
 

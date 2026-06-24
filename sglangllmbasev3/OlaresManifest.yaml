@@ -7,9 +7,17 @@ metadata:
   description: "Generic SGLang + llm-init base. Pick any HF model at install via env."
   appid: sglangllmbasev3
   title: SGLang LLM Base (llm-init)
-  version: '1.2.8'
+  version: '1.2.11'
   categories:
     - AI
+sharedEntrances:
+  - name: sglangllmbasev3
+    host: sharedentrances-api
+    port: 0
+    title: SGLang LLM API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/sglang/icon.png
 entrances:
   - name: sglangclient
     port: 8090
@@ -74,6 +82,9 @@ spec:
   upgradeDescription: |
     Generic SGLang + llm-init base (llm-init v1.2.4, lmsysorg/sglang:v0.5.12.post1-cu130).
     Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
+    shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
+    v1.2.9: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access.
     v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
     (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
     OOM on large sharded models (huggingface_hub#3300). No resource-value change.
@@ -86,7 +97,7 @@ spec:
     v1.2.2: raise llm-init download memory limit to 4Gi (hf_xet chunk buffering OOM, huggingface_hub#3300).
     v1.2.0: version bump (no functional change).
     Models live in the shared App Common store appCommon/huggingface.
-    Sentinel/model_path are per-instance under appCache/llm-init-run/<release>.
+    Sentinel/model_path are per-instance under appCommon/llm-init-run/<release>.
     v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
     Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
     MODEL_MODE=embedding now auto-adds --is-embedding (no ENGINE_ARGS needed).
@@ -130,7 +141,6 @@ spec:
     - arm64
 permission:
   appData: true
-  appCache: true   # sentinel/model_path live under appCache/llm-init-run/<release>
   appCommon: true
 options:
   apiTimeout: 0
