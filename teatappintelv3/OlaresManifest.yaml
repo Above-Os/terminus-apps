@@ -1,11 +1,10 @@
-olaresManifest:
-  version: "0.12.0"
-  type: app
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: teatappintelv3
   icon: https://app.cdn.olares.com/appstore/ollama/icon.png
-  description: "支持Intel加速器的测试app"
+  description: "Test app supporting Intel accelerators via IREmbeddingServer (OpenVINO / ONNX)"
   appid: teatappintelv3
   title: Intel APP
   version: '1.0.0'
@@ -52,50 +51,21 @@ workloadReplicas:
 spec:
   versionName: 'v0.1.0'
   fullDescription: |
-    **Intel APP** 测试应用，支持 Intel 加速器。
+    **Intel APP** test application supporting Intel accelerators.
 
     **Accelerator modes**
-    | Olares mode | Image | Backend | `EMBED_DEVICE` |
-    |-------------|-------|---------|----------------|
-    | `cpu` | `embed-server:*-ov-intel` | OpenVINO IR | `auto` (iGPU → CPU) |
-    | `nvidia` | `embed-server:*-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
-    | `nvidia-gb10` | `embed-server:*-onnx-cuda13` (unified memory) | ONNX CUDA EP | `cuda` |
-    | `strix-halo` | `embed-server:*-onnx-rocm-amd64` | ONNX ROCm EP | `rocm` |
+    - `cpu` — ov-intel image, OpenVINO IR, `EMBED_DEVICE=auto`
+    - `nvidia` — onnx-cuda12/13, `EMBED_DEVICE=cuda`
+    - `nvidia-gb10` — onnx-cuda13 unified memory
+    - `strix-halo` — onnx-rocm, `EMBED_DEVICE=rocm`
 
-    CPU mode intentionally uses the **ov-intel** image (not onnx-cpu).
+    llm-init downloads both HF repos (OV + ONNX) into the shared App Common cache.
+    Check `GET /v1/capabilities` → `configured_device_kind` for the actual device.
 
-    **Model download (llm-init)**
-    On first start, llm-init downloads both Hugging Face repos into the shared
-    App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
-    - [wangzhong/embeddinggemma-300m-ov](https://huggingface.co/wangzhong/embeddinggemma-300m-ov) — OpenVINO IR
-    - [wangzhong/embeddinggemma-300m-onnx-export](https://huggingface.co/wangzhong/embeddinggemma-300m-onnx-export) — ONNX
-
-    The embed-server wrapper waits for `model_download_finish`, resolves HF
-    snapshot paths, then starts `embed_server` with the backend matching the
-    selected accelerator.
-
-    **Device mounts**
-    - `cpu` (ov-intel): `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
-    - `strix-halo` (ROCm): `/dev/dri`, `/sys/class/drm`, `/dev/kfd`
-    - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
-
-    **Diagnostics**
-    `GET /v1/capabilities` reports `configured_device_kind` (actual runtime device:
-    `cpu`, `igpu`, `cuda`, `rocm`, …).
-
-    **Stack**
-    - **embed-server** (`beclab/embed-server`, port 8080): Rust embedding inference.
-    - **llm-init** (`beclab/llm-init`, port 8090): model download + progress UI.
-    - **embedconsole** (`beclab/embed-server:*-ui`, port 80): Web Console — Playground,
-      similarity compare, device diagnostics, and API settings. Browser requests use
-      same-origin `/api`, proxied by nginx to `embedserver:8080` (no direct backend URL
-      in the UI). Open the **Embedding Console** entrance after the engine is healthy;
-      use **embedclient** to monitor model download if the engine is still waiting.
-
-  upgradeDescription: |
-    Adds **Embedding Console** (`console` entrance): Playground, compare, diagnostics,
-    and optional API key — nginx `/api` proxy to embed-server. Third workload
-    `embedconsole` alongside llm-init and embed-server.
+    **Web Console** (`console` entrance): Playground, text similarity compare,
+    device/capability diagnostics, and optional API key. All API calls go through
+    `/api` on the console host; nginx forwards to embed-server. Use **embedclient**
+    while models are still downloading.
 
   developer: beclab
   website: https://huggingface.co/google/embeddinggemma-300m
