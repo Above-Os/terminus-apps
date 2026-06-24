@@ -40,9 +40,9 @@
        OlaresManifest valueFrom; empty -> huggingface.co with no auth. */ -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
-{{- /* Per-release hostPath so concurrent clones on the same node do not
-       overwrite each other's sentinel / model_path. */ -}}
-{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- /* Per-release hostPath under App Common so concurrent clones and multi-node
+       engine pods share the same sentinel / model_path. */ -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
 ---
 # Split into two Deployments to decouple readiness:
 #   - llm-init (this file, no GPU): downloads the HF model, writes the sentinel,
@@ -80,7 +80,7 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.appCommon }}/huggingface"
             type: DirectoryOrCreate
-        # Per-release sentinel + model_path handshake dir (App Cache).
+        # Per-release sentinel + model_path handshake dir (App Common).
         - name: run-state
           hostPath:
             path: "{{ $runStateHostPath }}"
@@ -88,16 +88,18 @@ spec:
       initContainers:
         # hostPath dirs are created root-owned; llm-init runs as UID 1000.
         - name: init-chown
-          image: busybox:1.36
+          image: docker.io/beclab/aboveos-busybox:1.37.0
           command:
             - sh
             - -c
-            - "mkdir -p /cache/hf/hub/vllm-cache /cache/hf/hub/.nv/ComputeCache && chown 1000:1000 /cache/hf/hub /cache/hf/hub/vllm-cache /cache/hf/hub/.nv /cache/hf/hub/.nv/ComputeCache /run/llm-init || true"
+            - "mkdir -p /cache/hf/hub/.locks /cache/hf/hub/vllm-cache /cache/hf/hub/.nv/ComputeCache && chown -R 1000:1000 /cache/hf/hub /run/llm-init || true"
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
             - name: run-state
               mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
       containers:
         - name: llm-init
           # v1.2.4 defaults to the stable LFS download path (hf_xet disabled

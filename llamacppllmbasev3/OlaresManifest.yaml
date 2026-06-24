@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.2.9'
+  version: '1.2.11'
   categories:
     - AI
 sharedEntrances:
@@ -86,6 +86,8 @@ spec:
   upgradeDescription: |
     Generic llama.cpp + llm-init base (llm-init v1.2.4, beclab/ggml-org-llama.cpp:server-cuda12-b9776).
     Loads any GGUF model; model identity, source and tuning are install-time env.
+    v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
+    shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
     v1.2.9: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access; bump llama.cpp engine to server-cuda12-b9776 from server-cuda12-b9692.
     v1.2.6: bump llama.cpp engine to server-cuda12-b9603 (build b9603, kept on
     CUDA 12 for driver compatibility) from server-cuda12-b9426. Adds Multi-Token
@@ -104,7 +106,7 @@ spec:
     v1.2.2: raise llm-init download memory limit to 4Gi (hf_xet chunk buffering OOM, huggingface_hub#3300).
     v1.2.0: version bump (no functional change).
     Models live in the shared App Common store appCommon/huggingface.
-    Sentinel/model_path are per-instance under appCache/llm-init-run/<release>.
+    Sentinel/model_path are per-instance under appCommon/llm-init-run/<release>.
     v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
     Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
     MODEL_MODE=embedding now auto-adds --embedding (no ENGINE_ARGS needed).
@@ -149,7 +151,6 @@ spec:
     - arm64
 permission:
   appData: true
-  appCache: true   # sentinel/model_path live under appCache/llm-init-run/<release>
   appCommon: true
 options:
   apiTimeout: 0
