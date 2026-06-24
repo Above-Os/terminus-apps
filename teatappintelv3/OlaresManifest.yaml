@@ -1,0 +1,184 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: teatappintelv3
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  description: "Test app supporting Intel accelerators via IREmbeddingServer (OpenVINO / ONNX)"
+  appid: teatappintelv3
+  title: Intel APP
+  version: '1.0.0'
+  categories:
+    - AI
+sharedEntrances:
+  - name: teatappintelv3
+    host: sharedentrances-api
+    port: 0
+    title: Intel APP API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+entrances:
+  - name: embedclient
+    port: 8090
+    host: download-svc
+    title: Intel APP
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+    authLevel: internal
+  - name: embedapi
+    port: 8080
+    host: embedserver
+    title: Intel APP API
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    invisible: true
+    openMethod: window
+    authLevel: internal
+  - name: console
+    port: 80
+    host: console-svc
+    title: Embedding Console
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+    authLevel: internal
+#   teatappintelv3 — embed-server engine Deployment (== appid / Release.Name)
+#   llminit            — llm-init download-only sidecar
+#   embedconsole       — Web Console (nginx + React SPA)
+workloadReplicas:
+  teatappintelv3: 1
+  llminit: 1
+  embedconsole: 1
+spec:
+  versionName: 'v0.1.0'
+  fullDescription: |
+    **Intel APP** test application supporting Intel accelerators.
+
+    **Accelerator modes**
+    - `cpu` — ov-intel image, OpenVINO IR, `EMBED_DEVICE=auto`
+    - `nvidia` — onnx-cuda12/13, `EMBED_DEVICE=cuda`
+    - `nvidia-gb10` — onnx-cuda13 unified memory
+    - `strix-halo` — onnx-rocm, `EMBED_DEVICE=rocm`
+
+    llm-init downloads both HF repos (OV + ONNX) into the shared App Common cache.
+    Check `GET /v1/capabilities` → `configured_device_kind` for the actual device.
+
+    **Web Console** (`console` entrance): Playground, text similarity compare,
+    device/capability diagnostics, and optional API key. All API calls go through
+    `/api` on the console host; nginx forwards to embed-server. Use **embedclient**
+    while models are still downloading.
+
+  developer: beclab
+  website: https://huggingface.co/google/embeddinggemma-300m
+  sourceCode: https://github.com/beclab/IREmbeddingServer
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Gemma
+      url: https://huggingface.co/google/embeddinggemma-300m
+
+  accelerator:
+    - mode: cpu
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 3Gi
+      limitedMemory: 5Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+    - mode: nvidia
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 3Gi
+      limitedMemory: 5Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+      requiredGPUMemory: 2048Mi
+      limitedGPUMemory: 4096Mi
+    - mode: nvidia-gb10
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 3Gi
+      limitedMemory: 4Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+    - mode: intel
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 3Gi
+      limitedMemory: 5Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: EMBED_CPU_REQUEST
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: EMBED_MEMORY_REQUEST
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: EMBED_CPU_LIMIT
+    required: true
+    default: "4"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: EMBED_MEMORY_LIMIT
+    required: true
+    default: "8Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: EMBED_REQUIRED_GPU_MEMORY
+    required: true
+    default: "2048Mi"
+    type: string
+    editable: false
+    applyOnChange: false
