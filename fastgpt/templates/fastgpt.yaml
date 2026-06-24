@@ -77,25 +77,35 @@ spec:
         - name: code-sandbox
           image: "docker.io/beclab/labring-fastgpt-code-sandbox:v4.14.23"
           env:
+            - name: SANDBOX_PORT
+              value: "3001"
             - name: SANDBOX_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: fastgpt-secrets
                   key: CODE_SANDBOX_TOKEN
+            - name: SANDBOX_POOL_SIZE
+              value: "5"
+            - name: SANDBOX_MAX_MEMORY_MB
+              value: "256"
+            - name: SANDBOX_MAX_TIMEOUT
+              value: "60000"
+            - name: CHECK_INTERNAL_IP
+              value: "false"
             - name: LOG_ENABLE_CONSOLE
               value: "true"
             - name: LOG_CONSOLE_LEVEL
-              value: "warn"
+              value: "warning"
           ports:
             - name: sandbox
-              containerPort: 3000
+              containerPort: 3001
           resources:
             requests:
-              cpu: "10m"
-              memory: "100Mi"
+              cpu: "100m"
+              memory: "512Mi"
             limits:
-              cpu: "200m"
-              memory: "500Mi"
+              cpu: "1"
+              memory: "3Gi"
 
       volumes:
         - name: appdata-config
