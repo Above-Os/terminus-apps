@@ -16,8 +16,44 @@ data:
     WAIT_INTERVAL=${WAIT_INTERVAL:-5}
     WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
     HF_HUB=${HF_HUB_CACHE:-/cache/hf/hub}
+    EMPTY_EMBED_SERVER=${EMPTY_EMBED_SERVER:-/usr/local/bin/empty_embed_server}
 
     log() { printf '[wrapper-%s] %s\n' "$ENGINE" "$*" >&2; }
+
+    FAKE_PID=""
+
+    start_fake_embed_server() {
+        if [ -n "$FAKE_PID" ] && kill -0 "$FAKE_PID" 2>/dev/null; then
+            return 0
+        fi
+        if [ ! -x "$EMPTY_EMBED_SERVER" ]; then
+            log "missing executable: $EMPTY_EMBED_SERVER"
+            return 1
+        fi
+        log "starting empty_embed_server (GET /health -> modelNotReady)"
+        "$EMPTY_EMBED_SERVER" &
+        FAKE_PID=$!
+        sleep 1
+        if ! kill -0 "$FAKE_PID" 2>/dev/null; then
+            log "empty_embed_server exited immediately (pid=$FAKE_PID)"
+            FAKE_PID=""
+            return 1
+        fi
+        log "empty_embed_server running (pid=$FAKE_PID)"
+        return 0
+    }
+
+    stop_fake_embed_server() {
+        if [ -z "$FAKE_PID" ]; then
+            return 0
+        fi
+        if kill -0 "$FAKE_PID" 2>/dev/null; then
+            log "stopping empty_embed_server (pid=$FAKE_PID)"
+            kill "$FAKE_PID" 2>/dev/null || true
+            wait "$FAKE_PID" 2>/dev/null || true
+        fi
+        FAKE_PID=""
+    }
 
     resolve_snapshot() {
         slug="$1"
@@ -37,9 +73,14 @@ data:
         printf '%s\n' "$dir"
     }
 
+    if [ ! -f "$SENTINEL" ]; then
+        start_fake_embed_server || true
+    fi
+
     elapsed=0
     while [ ! -f "$SENTINEL" ]; do
         if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+            stop_fake_embed_server
             log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
             exit 1
         fi
@@ -48,6 +89,10 @@ data:
         elapsed=$((elapsed + WAIT_INTERVAL))
     done
     log "sentinel $SENTINEL found after ${elapsed}s"
+
+
+
+    stop_fake_embed_server
 
     case "${EMBED_BACKEND:-openvino}" in
         openvino)
