@@ -1,4 +1,16 @@
-﻿---
+﻿apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-config
+  namespace: {{ .Release.Namespace }}
+data:
+  init.sh: |
+    #!/bin/sh
+    set -e
+
+    chown -R 1000:1000 /olares/userdata/home /config
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,11 +23,31 @@ spec:
   selector:
     matchLabels:
       app: readarr
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
         app: readarr
     spec:
+      initContainers:
+      - name: init-readarr
+        image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        command:
+          - sh
+          - '-c'
+          - |
+            chmod +x /init.sh && sh /init.sh
+        volumeMounts:
+        - mountPath: /olares/userdata/home
+          name: home
+        - mountPath: /config
+          name: readarr-config
+        - name: init-config
+          mountPath: /init.sh
+          subPath: init.sh
+        securityContext:
+          runAsUser: 0
       containers:
       - env:
         - name: PGID
@@ -27,7 +59,7 @@ spec:
         - name: TZ
           value: Etc/UTC
         name: readarr
-        image: "beclab/harveyff-hotio-readarr:v0.0.1"
+        image: "linuxserver/readarr:0.4.19-nightly"
         resources:
           requests:
             cpu: 100m
@@ -37,6 +69,29 @@ spec:
             memory: 256Mi
         ports:
         - containerPort: 8787
+        volumeMounts:
+        - mountPath: /config
+          name: readarr-config
+        - name: home
+          mountPath: /olares/userdata/home
+        - name: home
+          mountPath: /home
+      volumes:
+      - name: readarr-config
+        hostPath:
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.appData }}
+      - name: home
+        hostPath:
+          type: Directory
+          path: {{ .Values.userspace.userData }}
+      - name: init-config
+        configMap:
+          name: init-config
+          defaultMode: 438
+          items:
+          - key: init.sh
+            path: init.sh
 
 ---
 apiVersion: v1
