@@ -1,58 +1,55 @@
 apiVersion: v1
-data:
-  nginx.conf: |
-    stream {
-      server {
-        listen 8001;  
-        proxy_pass 127.0.0.1:8080;
-      }
-    }
-
-    events {
-      # Your event-related configurations go here
-    }
-
-    http {
-      # Your HTTP server configurations go here
-    }
 kind: ConfigMap
 metadata:
-  name: nginx-config
+  name: qbittorrent-config
   namespace: {{ .Release.Namespace }}
----
-apiVersion: v1
 data:
   init.sh: |
-    #!/bin/bash
+    #!/bin/sh
+    set -e
 
+    homeDir="/olares/userdata/home"
+    externalDir="/olares/userdata/external"
     appDataDir="/appData"
-    configDir="/config/qBittorrent"
     confFile="$appDataDir/qBittorrent.conf"
+    defaultConf="/chart-defaults/qBittorrent.conf"
 
-    if [ "$(ls -A $appDataDir)" ]; then
-      echo "$appDataDir not empty"
+    mkdir -p "$homeDir/Downloads/qBittorrent"
+    chown -R 1000:1000 "$homeDir" "$appDataDir" "$externalDir"
+
+    # Seed the default config ONCE from the chart default if absent, then leave it
+    # alone. Upgrades and restarts never overwrite user-edited qBittorrent.conf.
+    if [ ! -f "$confFile" ]; then
+      echo "First-time setup: copying default qBittorrent.conf into appData."
+      mkdir -p "$(dirname "$confFile")"
+      cp "$defaultConf" "$confFile"
     else
-      echo "$appDataDir is empty"
-      cp -r $configDir/. $appDataDir
-      echo "copy succeed"
+      echo "Existing qBittorrent.conf found in appData, leaving user edits intact."
     fi
+  # linuxserver/docker-qbittorrent@libtorrentv1-release-5.1.4_v1.2.20-ls112
+  # root/defaults/qBittorrent.conf + Olares path/WebUI overrides
+  qBittorrent.conf: |
+    [AutoRun]
+    enabled=false
+    program=
 
-    mkdir -p "$(dirname "$confFile")"
-    touch "$confFile"
+    [LegalNotice]
+    Accepted=true
 
-    grep -q "^\[Preferences\]" "$confFile" || echo "[Preferences]" >> "$confFile"
-    grep -q "^WebUI\\\\CSRFProtection=" "$confFile" || echo "WebUI\\CSRFProtection=false" >> "$confFile"
-    grep -q "^WebUI\\\\HostHeaderValidation=" "$confFile" || echo "WebUI\\HostHeaderValidation=false" >> "$confFile"
-    grep -q "^WebUI\\\\Authentication=" "$confFile" || echo "WebUI\\Authentication=false" >> "$confFile"
-    grep -q "^WebUI\\\\LocalHostAuth=" "$confFile" || echo "WebUI\\LocalHostAuth=false" >> "$confFile"
+    [Preferences]
+    Connection\UPnP=false
+    Connection\PortRangeMin=6881
+    Downloads\SavePath=/olares/userdata/home/Downloads/qBittorrent
+    Downloads\ScanDirsV2=@Variant(\0\0\0\x1c\0\0\0\0)
+    Downloads\TempPath=/olares/userdata/home/Downloads/qBittorrent/incomplete/
+    WebUI\Address=*
+    WebUI\ServerDomains=*
+    WebUI\Port=8080
+    WebUI\CSRFProtection=false
+    WebUI\HostHeaderValidation=false
+    WebUI\Authentication=false
+    WebUI\LocalHostAuth=false
 
-    grep -q "^Downloads\\\\SavePath=" "$confFile" || echo "Downloads\\SavePath=/downloads/home/Downloads/qBittorrent" >> "$confFile"
-
-    echo "qBittorrent config ensured"
-kind: ConfigMap
-metadata:
-  name: init-config
-  namespace: {{ .Release.Namespace }}
 ---
 kind: Deployment
 apiVersion: apps/v1
@@ -92,76 +89,44 @@ spec:
             {{- else }}
             path: {{ .Values.userspace.appData }}/qbittorrent
             {{- end }}
-        - name: nginx-config
+        - name: qbittorrent-config
           configMap:
-            name: nginx-config
-            defaultMode: 438
-            items:
-              - key: nginx.conf
-                path: nginx.conf
-        - name: init-config
-          configMap:
-            name: init-config
+            name: qbittorrent-config
             defaultMode: 438
             items:
               - key: init.sh
                 path: init.sh
+              - key: qBittorrent.conf
+                path: qBittorrent.conf
       initContainers:
-        - name: init-chmod-data
+        - name: init-qbittorrent
           image: "docker.io/beclab/aboveos-busybox:1.37.0"
           command:
             - sh
             - '-c'
             - |
-              mkdir -p /home-data/Downloads/qBittorrent
-              chown -R 1000:1000 /home-data; chown -R 1000:1000 /appdata; chown -R 1000:1000 /external-data
+              chmod +x /chart-defaults/init.sh && sh /chart-defaults/init.sh
           resources: {}
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: home-downloads
-              mountPath: /home-data
-            - name: appdata
-              mountPath: /appdata
+              mountPath: /olares/userdata/home
+            - name: home-downloads
+              mountPath: /downloads/home
             - name: external-downloads
-              mountPath: /external-data
-          securityContext:
-            runAsUser: 0
-        - name: init-qbittorrent-config
-          image: "docker.io/beclab/linuxserver-qbittorrent:5.1.4"
-          command:
-            - sh
-            - '-c'
-            - |
-              chmod +x /init.sh & bash /init.sh
-          resources: {}
-          imagePullPolicy: IfNotPresent
-          volumeMounts:
+              mountPath: /olares/userdata/external
+            - name: external-downloads
+              mountPath: /downloads/external
             - name: appdata
               mountPath: /appData
-            - name: init-config
-              mountPath: /init.sh
-              subPath: init.sh
+            - name: qbittorrent-config
+              mountPath: /chart-defaults
+              readOnly: true
           securityContext:
             runAsUser: 0
       containers:
-        - name: nginx
-          image: "docker.io/beclab/aboveos-nginx:1.27.0"
-          volumeMounts:
-            - name: nginx-config 
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-          ports:
-            - containerPort: 8001
-          imagePullPolicy: IfNotPresent
-          resources:
-            requests:
-              cpu: 10m
-              memory: 64Mi
-            limits:
-              cpu: 100m
-              memory: 128Mi
         - name: qbittorrent
-          image: "docker.io/beclab/linuxserver-qbittorrent:5.1.4"
+          image: "docker.io/beclab/linuxserver-qbittorrent:5.2.2"
           resources:
             requests:
               cpu: 100m
@@ -182,9 +147,19 @@ spec:
               value: "002" 
             - name: TZ
               value: UTC
+            - name: WEBUI_PORT
+              value: "8080"
+            - name: TORRENTING_PORT
+              value: "6881"
           volumeMounts:
             - name: home-downloads
+              mountPath: /olares/userdata/home
+            - name: home-downloads
               mountPath: /downloads/home
+            - name: home-downloads
+              mountPath: /home
+            - name: external-downloads
+              mountPath: /olares/userdata/external
             - name: external-downloads
               mountPath: /downloads/external
             - name: appdata
