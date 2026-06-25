@@ -1,4 +1,17 @@
-﻿---
+﻿apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transmission-init
+  namespace: {{ .Release.Namespace }}
+data:
+  init.sh: |
+    #!/bin/sh
+    set -e
+
+    homeDir="/olares/userdata/home"
+    mkdir -p "$homeDir/Downloads/transmission" /appdata-root/config /appdata-root/watch
+    chown -R 1000:1000 "$homeDir" /appdata-root
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,40 +32,35 @@ spec:
         app: transmission
     spec:
       initContainers:
-      - name: init-chmod-data
+      - name: init-transmission
         image: "docker.io/beclab/aboveos-busybox:1.37.0"
         command:
           - sh
           - '-c'
           - |
-            chown -R 1000:1000 /app-data-root; chown -R 1000:1000 /config
+            sh /chart-init/init.sh
         resources: {}
+        imagePullPolicy: IfNotPresent
         volumeMounts:
-          - name: downloads
-            mountPath: /app-data-root
-          - mountPath: /config
-            name: transmission-data
-          - mountPath: /subpathconfig
-            name: transmission-data
-            subPath: config
-          - mountPath: /subpathwatch
-            name: transmission-data  
-            subPath: watch
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: File
-        imagePullPolicy: Always
+        - name: home-downloads
+          mountPath: /olares/userdata/home
+        - name: transmission-data
+          mountPath: /appdata-root
+        - name: transmission-init
+          mountPath: /chart-init
+          readOnly: true
         securityContext:
           runAsUser: 0
       containers:
       - name: transmission
         env:
         - name: PGID
-          value: "1000"  
+          value: "1000"
         - name: PUID
-          value: "1000" 
+          value: "1000"
         - name: TZ
-          value: Asia/Shanghai
-        image: "docker.io/beclab/linuxserver-transmission:4.0.6"
+          value: UTC
+        image: "linuxserver/transmission:4.1.2"
         resources:
           requests:
             cpu: 100m
@@ -71,30 +79,36 @@ spec:
         - mountPath: /config
           name: transmission-data
           subPath: config
-        - mountPath: /downloads
-          name: downloads
         - mountPath: /watch
-          name: transmission-data  
+          name: transmission-data
           subPath: watch
-        
+        - mountPath: /olares/userdata/home
+          name: home-downloads
+        - mountPath: /olares/userdata/external
+          name: external-downloads
+        - mountPath: /downloads
+          name: home-downloads
+          subPath: Downloads
       volumes:
       - name: transmission-data
         hostPath:
           type: DirectoryOrCreate
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: {{ .Values.userspace.appData }}
-            {{- else }}
-          path: {{ .Values.userspace.appData }}/transmission
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appData }}/transmission
-          {{- end }}
-      - name: downloads
+      - name: home-downloads
         hostPath:
-          type: Directory
-          path: {{ .Values.userspace.userData }}/Downloads
-
+          type: DirectoryOrCreate
+          path: {{ .Values.userspace.userData }}
+      - name: external-downloads
+        hostPath:
+          type: DirectoryOrCreate
+          path: "{{ .Values.sharedlib }}"
+      - name: transmission-init
+        configMap:
+          name: transmission-init
+          defaultMode: 438
+          items:
+          - key: init.sh
+            path: init.sh
 ---
 apiVersion: v1
 kind: Service
@@ -107,8 +121,8 @@ spec:
     app: {{ .Release.Name }}
   ports:
     - name: webui-port
-      port: 9091            
-      targetPort: 9091       
+      port: 9091
+      targetPort: 9091
       protocol: TCP
     - name: torrent-port
       port: 51413
