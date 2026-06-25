@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.2.12'
+  version: '1.2.13'
   categories:
     - AI
 sharedEntrances:
@@ -73,8 +73,6 @@ spec:
     - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
       offloads all layers to GPU; omit for CPU). Also accepts `LLAMA_ARG_*=val`.
     - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `LLAMACPP_CPU_REQUEST` / `LLAMACPP_MEMORY_REQUEST` / `LLAMACPP_CPU_LIMIT` /
-      `LLAMACPP_MEMORY_LIMIT` — engine pod CPU/RAM (fixed per clone template).
     - `LLAMACPP_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
       fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
@@ -85,8 +83,9 @@ spec:
     - GPU offload via `-ngl all` in `ENGINE_ARGS`; without `-ngl`, runs on CPU.
 
   upgradeDescription: |
-    Generic llama.cpp + llm-init base (llm-init v1.2.4, beclab/ggml-org-llama.cpp:server-cuda12-b9776).
+    Generic llama.cpp + llm-init base (llm-init v1.2.6, beclab/ggml-org-llama.cpp:server-cuda12-b9776).
     Loads any GGUF model; model identity, source and tuning are install-time env.
+    v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list; remove README.
     v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
     shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
     v1.2.9: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access; bump llama.cpp engine to server-cuda12-b9776 from server-cuda12-b9692.
@@ -112,7 +111,7 @@ spec:
     Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
     MODEL_MODE=embedding now auto-adds --embedding (no ENGINE_ARGS needed).
     LOG_LEVEL is optional and defaults to debug.
-    v1.0.5: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
+    v1.0.5: engine Deployment name uses Helm Release.Name for allowMultipleInstall.
     v1.0.4: raise shared engine MEMORY_LIMIT default to 35Gi.
     v1.0.3: unify engine CPU/RAM defaults to 200m/2Gi/6/35Gi across llm bases.
     v1.0.2: align resource envs with ollamallmbasev3 — gpumem Mi, accelerator -1,
