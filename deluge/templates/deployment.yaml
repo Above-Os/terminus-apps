@@ -1,4 +1,17 @@
-﻿---
+﻿apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deluge-init
+  namespace: {{ .Release.Namespace }}
+data:
+  init.sh: |
+    #!/bin/sh
+    set -e
+
+    homeDir="/olares/userdata/home"
+    mkdir -p "$homeDir/Downloads/deluge"
+    chown -R 1000:1000 "$homeDir" /config
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,16 +31,38 @@ spec:
       labels:
         app: deluge
     spec:
+      initContainers:
+      - name: init-deluge
+        image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        command:
+          - sh
+          - '-c'
+          - |
+            sh /chart-init/init.sh
+        resources: {}
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: home-downloads
+          mountPath: /olares/userdata/home
+        - name: external-downloads
+          mountPath: /olares/userdata/external
+        - name: deluge-config
+          mountPath: /config
+        - name: deluge-init
+          mountPath: /chart-init
+          readOnly: true
+        securityContext:
+          runAsUser: 0
       containers:
       - env:
         - name: PGID
-          value: "1000" 
+          value: "1000"
         - name: PUID
-          value: "1000" 
+          value: "1000"
         - name: TZ
-          value: Europe/London
+          value: UTC
         name: deluge
-        image: "docker.io/beclab/aboveos-linuxserver-deluge:2.1.1"
+        image: "linuxserver/deluge:2.1.1"
         resources:
           requests:
             cpu: 100m
@@ -45,29 +80,39 @@ spec:
         volumeMounts:
         - mountPath: /config
           name: deluge-config
+        - mountPath: /olares/userdata/home
+          name: home-downloads
+        - mountPath: /downloads/home
+          name: home-downloads
+        - mountPath: /home
+          name: home-downloads
+        - mountPath: /olares/userdata/external
+          name: external-downloads
+        - mountPath: /downloads/external
+          name: external-downloads
         - mountPath: /downloads
-          name: deluge-downloads
-        securityContext:
-          runAsUser: 0
+          name: home-downloads
+          subPath: Downloads/deluge
       volumes:
       - name: deluge-config
         hostPath:
           type: DirectoryOrCreate
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
           path: {{ .Values.userspace.appData }}
-            {{- else }}
-          path: {{ .Values.userspace.appData }}/deluge
-            {{- end }}
-          {{- else }}
-          path: {{ .Values.userspace.appData }}/deluge
-          {{- end }}
-      - name: deluge-downloads
+      - name: home-downloads
         hostPath:
           type: DirectoryOrCreate
-          path: {{ .Values.userspace.userData }}/Downloads    
-        
-
+          path: {{ .Values.userspace.userData }}
+      - name: external-downloads
+        hostPath:
+          type: DirectoryOrCreate
+          path: "{{ .Values.sharedlib }}"
+      - name: deluge-init
+        configMap:
+          name: deluge-init
+          defaultMode: 438
+          items:
+          - key: init.sh
+            path: init.sh
 ---
 apiVersion: v1
 kind: Service
