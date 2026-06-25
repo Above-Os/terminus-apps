@@ -7,7 +7,7 @@ metadata:
   description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
   appid: vllmllmbasev3
   title: vLLM LLM Base (llm-init)
-  version: '1.2.12'
+  version: '1.2.13'
   categories:
     - AI
 sharedEntrances:
@@ -83,8 +83,6 @@ spec:
     - `LOG_LEVEL` — `debug | info | warn | error`.
     - `HF_ENDPOINT` — HF mirror, e.g. `https://hf-mirror.com` (empty = huggingface.co).
     - `HF_TOKEN` — HF access token for private/gated repos (empty if public).
-    - `VLLM_CPU_REQUEST` / `VLLM_MEMORY_REQUEST` / `VLLM_CPU_LIMIT` /
-      `VLLM_MEMORY_LIMIT` — vLLM pod CPU/RAM (fixed per clone template).
     - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
       fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
@@ -95,8 +93,9 @@ spec:
     - vLLM also honors `--gpu-memory-utilization` via `ENGINE_ARGS`.
 
   upgradeDescription: |
-    Generic vLLM + llm-init base (llm-init v1.2.4, vllm/vllm-openai:v0.23.0).
+    Generic vLLM + llm-init base (llm-init v1.2.6, vllm/vllm-openai:v0.23.0).
     Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list.
     v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
     shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
     v1.2.9: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access.
@@ -245,7 +244,7 @@ envs:
   # v3 forbids referencing OLARES_USER_* names inside chart template files. The
   # sanctioned pattern: declare our OWN env names here and pull the system value
   # in via valueFrom; the OLARES_USER_* name appears ONLY in valueFrom below, and
-  # templates reference .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE / .HF_TOKEN. No editable /
+  # templates reference .Values.olaresEnv.HF_ENDPOINT / .HF_TOKEN. No editable /
   # default, so these are auto-populated from the user's system HF account and do
   # NOT show in the install dialog. Empty (no HF account) -> huggingface.co, no auth.
   - envName: HF_ENDPOINT
