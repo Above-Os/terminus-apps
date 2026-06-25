@@ -10,32 +10,15 @@ data:
 
     homeDir="/olares/userdata/home"
     confFile="/config/nzbget.conf"
-    template="/app/nzbget/share/nzbget/nzbget.conf"
-    overrides="/chart-defaults/nzbget-overrides.conf"
+    defaultConf="/chart-defaults/nzbget.conf"
 
     mkdir -p "$homeDir/Downloads/nzbget/inter" \
       /config/nzb /config/queue /config/tmp /config/scripts
-    chown -R 1000:1000 "$homeDir" /config
 
     if [ -f "$confFile" ]; then
       echo "Existing nzbget.conf found, skipping first-time path setup."
       exit 0
     fi
 
-    echo "First-time setup: seeding nzbget.conf from nzbgetcom template."
-    cp "$template" "$confFile"
-
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in
-        ''|'#'*) continue ;;
-      esac
-      key="${line%%=*}"
-      val="${line#*=}"
-      if grep -q "^${key}=" "$confFile"; then
-        sed -i "s|^${key}=.*|${key}=${val}|" "$confFile"
-      else
-        echo "${key}=${val}" >> "$confFile"
-      fi
-    done < "$overrides"
-
-    chown 1000:1000 "$confFile"
+    echo "First-time setup: copying default nzbget.conf into /config."
+    cp "$defaultConf" "$confFile"

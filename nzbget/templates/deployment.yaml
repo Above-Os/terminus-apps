@@ -19,10 +19,12 @@ spec:
     spec:
       initContainers:
       - name: init-nzbget
-        image: "nzbgetcom/nzbget:v26.2"
+        image: "docker.io/beclab/aboveos-busybox:1.37.0"
         command:
-          - /bin/sh
-          - /chart-init/init.sh
+          - sh
+          - '-c'
+          - |
+            sh /chart-init/init.sh
         resources: {}
         imagePullPolicy: IfNotPresent
         volumeMounts:
@@ -37,7 +39,8 @@ spec:
           mountPath: /chart-defaults
           readOnly: true
         securityContext:
-          runAsUser: 0
+          runAsUser: 1000
+          runAsGroup: 1000
       containers:
       - env:
         - name: PGID
@@ -96,8 +99,8 @@ spec:
           name: nzbget-defaults
           defaultMode: 420
           items:
-          - key: nzbget-overrides.conf
-            path: nzbget-overrides.conf
+          - key: nzbget.conf
+            path: nzbget.conf
 ---
 apiVersion: v1
 kind: Service
