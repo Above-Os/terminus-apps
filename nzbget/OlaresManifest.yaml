@@ -9,7 +9,7 @@ metadata:
   description: Efficient Usenet downloader.
   icon: https://app.cdn.olares.com/appstore/nzbget/icon.png
   appid: nzbget
-  version: '1.0.13'
+  version: '1.0.14'
   title: Nzbget
   categories:
   - Utilities_v112
@@ -21,7 +21,7 @@ permission:
   - Home
   externalData: true
 spec:
-  versionName: '25.4'
+  versionName: '26.2'
   promoteImage:
   - https://app.cdn.olares.com/appstore/nzbget/1.webp
   - https://app.cdn.olares.com/appstore/nzbget/2.webp
@@ -30,24 +30,28 @@ spec:
   fullDescription: |
     NZBGet is a binary downloader, which downloads files from Usenet based on information given in nzb-files.
 
-    **Default credentials**
-    Username: nzbget
-    Password: tegbzn6789
-    Please change username and password as soon as possible.
+    **About this app**
+
+    The original NZBGet project was maintained at [nzbget/nzbget](https://github.com/nzbget/nzbget) (hugbug). Development continues under the community successor [nzbgetcom/nzbget](https://github.com/nzbgetcom/nzbget), which this Olares app uses.
+
+    - Original project: https://github.com/nzbget/nzbget
+    - Active successor: https://github.com/nzbgetcom/nzbget
+
+    **Credentials**
+
+    Set your NZBGet web username and password when installing this app.
 
   upgradeDescription: |
-    Config changes: unified download directory & entrance auth level.
-    - Change default Olares Home Directory mount path to /olares/userdata/home
-    - Add Olares External Directory mount path to /olares/userdata/external
-    - Keep legacy /downloads mount for existing configurations
-    - Default download path for new installs: Home/Downloads/nzbget
-    - Fix incomplete nzbget.conf leaving logs/state under /root/downloads
-    - Entrance auth level changed to internal
-    - Switch container image to linuxserver/nzbget
+    Major update: switch to nzbgetcom successor and v26.2.
+    - Switch container image to official nzbgetcom/nzbget:v26.2
+    - Seed Olares download paths via ConfigMap on first install
+    - Web credentials configured at install time (no hardcoded defaults)
+    - Unified Olares Home/External directory mounts; legacy /downloads compat retained
+    - Entrance auth level: internal
 
-  developer: NZBGet
-  website: https://nzbget.net/
-  sourceCode: https://github.com/nzbget/nzbget
+  developer: nzbgetcom
+  website: https://nzbget.com/
+  sourceCode: https://github.com/nzbgetcom/nzbget/pkgs/container/nzbget
   submitter: Olares
   locale:
   - en-US
@@ -58,10 +62,10 @@ spec:
   limitedDisk: 256Mi
   requiredCpu: 0.1
   limitedCpu: 0.5
-  doc: https://nzbget.net/documentation
+  doc: https://nzbget.com/documentation
   license:
   - text: GPL-2.0
-    url: https://github.com/nzbget/nzbget/blob/develop/COPYING
+    url: https://github.com/nzbgetcom/nzbget/blob/develop/COPYING
   supportArch:
   - amd64
   - arm64
@@ -78,3 +82,14 @@ entrances:
   icon: https://app.cdn.olares.com/appstore/nzbget/icon.png
   openMethod: window
   authLevel: internal
+envs:
+  - envName: NZBGET_USER
+    type: string
+    required: true
+    editable: false
+  - envName: NZBGET_PASS
+    type: password
+    required: true
+    editable: false
+    description: "Password must be at least 6 characters long"
+    regex: '^[\w\-!@#$%^&*()+={}\[\]:,.?~]{6,}$'

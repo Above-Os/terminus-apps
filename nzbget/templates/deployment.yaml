@@ -19,12 +19,10 @@ spec:
     spec:
       initContainers:
       - name: init-nzbget
-        image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        image: "nzbgetcom/nzbget:v26.2"
         command:
-          - sh
-          - '-c'
-          - |
-            sh /chart-init/init.sh
+          - /bin/sh
+          - /chart-init/init.sh
         resources: {}
         imagePullPolicy: IfNotPresent
         volumeMounts:
@@ -48,8 +46,12 @@ spec:
           value: "1000"
         - name: TZ
           value: UTC
+        - name: NZBGET_USER
+          value: {{ .Values.olaresEnv.NZBGET_USER | default "nzbget" | quote }}
+        - name: NZBGET_PASS
+          value: {{ .Values.olaresEnv.NZBGET_PASS | default "tegbzn6789" | quote }}
         name: nzbget
-        image: "linuxserver/nzbget:version-v25.4"
+        image: "nzbgetcom/nzbget:v26.2"
         resources:
           requests:
             cpu: 100m
@@ -92,10 +94,10 @@ spec:
       - name: nzbget-defaults
         configMap:
           name: nzbget-defaults
-          defaultMode: 438
+          defaultMode: 420
           items:
-          - key: nzbget.conf
-            path: nzbget.conf
+          - key: nzbget-overrides.conf
+            path: nzbget-overrides.conf
 ---
 apiVersion: v1
 kind: Service
