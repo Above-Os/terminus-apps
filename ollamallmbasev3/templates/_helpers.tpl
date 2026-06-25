@@ -17,3 +17,16 @@
 {{- int $g -}}
 {{- end -}}
 {{- end -}}
+{{- /* ollamallmbasev3.engineArgs: merge clone ENGINE_ARGS with chart defaults.
+       OLLAMA_KEEP_ALIVE=-1 (pin model in VRAM) unless the user already set it.
+       Usage: {{ include "ollamallmbasev3.engineArgs" ($oe.ENGINE_ARGS | default "") }} */ -}}
+{{- define "ollamallmbasev3.engineArgs" -}}
+{{- $args := trim (. | default "") -}}
+{{- if contains "OLLAMA_KEEP_ALIVE" $args -}}
+{{- $args -}}
+{{- else if $args -}}
+{{- printf "%s OLLAMA_KEEP_ALIVE=-1" $args -}}
+{{- else -}}
+OLLAMA_KEEP_ALIVE=-1
+{{- end -}}
+{{- end -}}
