@@ -9,16 +9,18 @@ data:
     set -e
 
     homeDir="/olares/userdata/home"
-    downloadDir="$homeDir/Downloads/nzbget"
     confFile="/config/nzbget.conf"
     defaultConf="/chart-defaults/nzbget.conf"
 
-    mkdir -p "$downloadDir/inter"
+    mkdir -p "$homeDir/Downloads/nzbget/inter" \
+      /config/nzb /config/queue /config/tmp /config/scripts
+    touch /config/nzbget.log
     chown -R 1000:1000 "$homeDir" /config
 
-    if [ ! -f "$confFile" ]; then
-      echo "First-time setup: copying default nzbget.conf into /config."
-      cp "$defaultConf" "$confFile"
-    else
+    if [ -f "$confFile" ]; then
       echo "Existing nzbget.conf found in /config."
+      exit 0
     fi
+
+    echo "First-time setup: copying default nzbget.conf into /config."
+    cp "$defaultConf" "$confFile"
