@@ -1,3 +1,4 @@
+{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -18,6 +19,7 @@ spec:
     type: Recreate
   template:
     metadata:
+      creationTimestamp: null
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: testappv2
@@ -42,23 +44,15 @@ spec:
             runAsUser: 0
       containers:
         - name: testappv2
-          image: "docker.io/beclab/ollama-ollama:0.17.5"
-          env:
-            - name: PGID
-              value: "1000"
-            - name: PUID
-              value: "1000"
-            - name: TZ
-              value: Etc/UTC
-            - name: GGML_CUDA_DISABLE_GRAPHS
-              value: "1"
-            - name: OLLAMA_ORIGINS
-              value: "*"
+          image: "docker.io/ollama/ollama:0.30.6"
+          envFrom:
+            - configMapRef:
+                name: testappv2-env
           ports:
             - containerPort: 11434
           livenessProbe:
             httpGet:
-              path: /
+              path: /api/version
               port: 11434
               scheme: HTTP
             initialDelaySeconds: 30
@@ -83,10 +77,17 @@ spec:
           volumeMounts:
             - mountPath: "/root/.ollama"
               name: data
+            - name: cuda-compute-cache
+              mountPath: /root/.nv/ComputeCache
+              subPath: ComputeCache
       volumes:
         - name: data
           hostPath:
             path: "{{ .Values.sharedlib }}/ai/ollama"
+            type: DirectoryOrCreate
+        - name: cuda-compute-cache
+          hostPath:
+            path: "{{ .Values.userspace.userData }}/Ollama/.nv"
             type: DirectoryOrCreate
       restartPolicy: Always
 status: {}
@@ -95,6 +96,7 @@ status: {}
 apiVersion: v1
 kind: Service
 metadata:
+  creationTimestamp: null
   labels:
     io.kompose.service: testappv2
   name: testappv2
@@ -112,6 +114,7 @@ status:
 apiVersion: v1
 kind: Service
 metadata:
+  creationTimestamp: null
   labels:
     io.kompose.service: testappv2
   name: sharedentrances-testappv2
@@ -125,3 +128,4 @@ spec:
     io.kompose.service: testappv2
 status:
   loadBalancer: {}
+{{- end }}
