@@ -1,18 +1,4 @@
-﻿apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: deluge-init
-  namespace: {{ .Release.Namespace }}
-data:
-  init.sh: |
-    #!/bin/sh
-    set -e
-
-    homeDir="/olares/userdata/home"
-    mkdir -p "$homeDir/Downloads/deluge"
-    chown -R 1000:1000 "$homeDir" /config
----
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}
@@ -44,12 +30,13 @@ spec:
         volumeMounts:
         - name: home-downloads
           mountPath: /olares/userdata/home
-        - name: external-downloads
-          mountPath: /olares/userdata/external
         - name: deluge-config
           mountPath: /config
         - name: deluge-init
           mountPath: /chart-init
+          readOnly: true
+        - name: deluge-defaults
+          mountPath: /chart-defaults
           readOnly: true
         securityContext:
           runAsUser: 0
@@ -82,17 +69,11 @@ spec:
           name: deluge-config
         - mountPath: /olares/userdata/home
           name: home-downloads
-        - mountPath: /downloads/home
-          name: home-downloads
-        - mountPath: /home
-          name: home-downloads
         - mountPath: /olares/userdata/external
-          name: external-downloads
-        - mountPath: /downloads/external
           name: external-downloads
         - mountPath: /downloads
           name: home-downloads
-          subPath: Downloads/deluge
+          subPath: Downloads
       volumes:
       - name: deluge-config
         hostPath:
@@ -113,6 +94,13 @@ spec:
           items:
           - key: init.sh
             path: init.sh
+      - name: deluge-defaults
+        configMap:
+          name: deluge-defaults
+          defaultMode: 438
+          items:
+          - key: core.conf
+            path: core.conf
 ---
 apiVersion: v1
 kind: Service
