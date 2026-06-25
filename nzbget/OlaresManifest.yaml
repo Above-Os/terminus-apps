@@ -9,7 +9,7 @@ metadata:
   description: Efficient Usenet downloader.
   icon: https://app.cdn.olares.com/appstore/nzbget/icon.png
   appid: nzbget
-  version: '1.0.17'
+  version: '1.0.18'
   title: Nzbget
   categories:
   - Utilities_v112
@@ -42,12 +42,13 @@ spec:
     Set your NZBGet web username and password when installing this app.
 
   upgradeDescription: |
-    Major update: switch to nzbgetcom successor and v26.2.
-    - Switch container image to official nzbgetcom/nzbget:v26.2
-    - Seed Olares download paths via ConfigMap on first install
-    - Web credentials configured at install time (no hardcoded defaults)
-    - Unified Olares Home/External directory mounts; legacy /downloads compat retained
-    - Entrance auth level: internal
+    Upgrade NZBGet to version 26.2 (2026-06-26)
+    Config changes: unified download directory & entrance auth level.
+    - Change default Olares Home Directory mount path to /olares/userdata/home
+    - Add Olares External Directory mount path to /olares/userdata/external
+    - Keep legacy /downloads mount for existing configurations
+    - Default download path for new installs: Home/Downloads/nzbget
+    - Entrance auth level changed to internal
 
   developer: nzbgetcom
   website: https://nzbget.com/
@@ -56,8 +57,8 @@ spec:
   locale:
   - en-US
   - zh-CN
-  requiredMemory: 32Mi
-  limitedMemory: 64Mi
+  requiredMemory: 128Mi
+  limitedMemory: 256Mi
   requiredDisk: 128Mi
   limitedDisk: 256Mi
   requiredCpu: 0.1
@@ -87,6 +88,8 @@ envs:
     type: string
     required: true
     editable: false
+    description: "Username must be at least 4 characters long, contain only letters and numbers"
+    regex: '^[a-zA-Z0-9]{4,}$'
   - envName: NZBGET_PASS
     type: password
     required: true
