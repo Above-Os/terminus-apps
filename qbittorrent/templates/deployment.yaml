@@ -1,58 +1,5 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: qbittorrent-config
-  namespace: {{ .Release.Namespace }}
-data:
-  init.sh: |
-    #!/bin/sh
-    set -e
-
-    homeDir="/olares/userdata/home"
-    externalDir="/olares/userdata/external"
-    appDataDir="/appData"
-    confFile="$appDataDir/qBittorrent.conf"
-    defaultConf="/chart-defaults/qBittorrent.conf"
-
-    mkdir -p "$homeDir/Downloads/qBittorrent"
-    chown -R 1000:1000 "$homeDir" "$appDataDir" "$externalDir"
-
-    # Seed the default config ONCE from the chart default if absent, then leave it
-    # alone. Upgrades and restarts never overwrite user-edited qBittorrent.conf.
-    if [ ! -f "$confFile" ]; then
-      echo "First-time setup: copying default qBittorrent.conf into appData."
-      mkdir -p "$(dirname "$confFile")"
-      cp "$defaultConf" "$confFile"
-    else
-      echo "Existing qBittorrent.conf found in appData, leaving user edits intact."
-    fi
-  # linuxserver/docker-qbittorrent@libtorrentv1-release-5.1.4_v1.2.20-ls112
-  # root/defaults/qBittorrent.conf + Olares path/WebUI overrides
-  qBittorrent.conf: |
-    [AutoRun]
-    enabled=false
-    program=
-
-    [LegalNotice]
-    Accepted=true
-
-    [Preferences]
-    Connection\UPnP=false
-    Connection\PortRangeMin=6881
-    Downloads\SavePath=/olares/userdata/home/Downloads/qBittorrent
-    Downloads\ScanDirsV2=@Variant(\0\0\0\x1c\0\0\0\0)
-    Downloads\TempPath=/olares/userdata/home/Downloads/qBittorrent/incomplete/
-    WebUI\Address=*
-    WebUI\ServerDomains=*
-    WebUI\Port=8080
-    WebUI\CSRFProtection=false
-    WebUI\HostHeaderValidation=false
-    WebUI\Authentication=false
-    WebUI\LocalHostAuth=false
-
----
-kind: Deployment
 apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
@@ -80,22 +27,28 @@ spec:
         - name: appdata
           hostPath:
             type: DirectoryOrCreate
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: {{ .Values.userspace.appData }}
-              {{- else }}
-            path: {{ .Values.userspace.appData }}/qbittorrent
-              {{- end }}
-            {{- else }}
-            path: {{ .Values.userspace.appData }}/qbittorrent
-            {{- end }}
         - name: qbittorrent-config
           configMap:
             name: qbittorrent-config
             defaultMode: 438
             items:
+              - key: qBittorrent.conf
+                path: qBittorrent.conf
+        - name: qbittorrent-init
+          configMap:
+            name: qbittorrent-init
+            defaultMode: 438
+            items:
               - key: init.sh
                 path: init.sh
+              - key: init-migrate-webui-auth.sh
+                path: init-migrate-webui-auth.sh
+        - name: qbittorrent-defaults
+          configMap:
+            name: qbittorrent-defaults
+            defaultMode: 438
+            items:
               - key: qBittorrent.conf
                 path: qBittorrent.conf
       initContainers:
@@ -105,7 +58,7 @@ spec:
             - sh
             - '-c'
             - |
-              chmod +x /chart-defaults/init.sh && sh /chart-defaults/init.sh
+              sh /chart-init/init.sh
           resources: {}
           imagePullPolicy: IfNotPresent
           volumeMounts:
@@ -113,20 +66,37 @@ spec:
               mountPath: /olares/userdata/home
             - name: home-downloads
               mountPath: /downloads/home
-            - name: external-downloads
-              mountPath: /olares/userdata/external
-            - name: external-downloads
-              mountPath: /downloads/external
             - name: appdata
               mountPath: /appData
-            - name: qbittorrent-config
+            - name: qbittorrent-init
+              mountPath: /chart-init
+              readOnly: true
+            - name: qbittorrent-defaults
               mountPath: /chart-defaults
+              readOnly: true
+          securityContext:
+            runAsUser: 0
+        # TODO: drop after all users upgraded from chart <= 1.0.20 (nginx loopback proxy).
+        - name: init-migrate-webui-auth
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - '-c'
+            - |
+              sh /chart-init/init-migrate-webui-auth.sh
+          resources: {}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: appdata
+              mountPath: /appData
+            - name: qbittorrent-init
+              mountPath: /chart-init
               readOnly: true
           securityContext:
             runAsUser: 0
       containers:
         - name: qbittorrent
-          image: "docker.io/beclab/linuxserver-qbittorrent:5.2.2"
+          image: "linuxserver/qbittorrent:5.2.2"
           resources:
             requests:
               cpu: 100m

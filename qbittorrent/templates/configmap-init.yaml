@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qbittorrent-init
+  namespace: {{ .Release.Namespace }}
+data:
+  init.sh: |
+    #!/bin/sh
+    set -e
+
+    homeDir="/olares/userdata/home"
+    appDataDir="/appData"
+    confFile="$appDataDir/qBittorrent.conf"
+    defaultConf="/chart-defaults/qBittorrent.conf"
+
+    mkdir -p "$homeDir/Downloads/qBittorrent"
+    chown -R 1000:1000 "$homeDir" "$appDataDir"
+
+    if [ ! -f "$confFile" ]; then
+      echo "First-time setup: copying default qBittorrent.conf into appData."
+      cp "$defaultConf" "$confFile"
+    else
+      echo "Existing qBittorrent.conf found in appData."
+    fi
+  # Temporary migration helper — remove once all users upgraded past chart <= 1.0.20.
+  init-migrate-webui-auth.sh: |
+    #!/bin/sh
+    set -e
+
+    # Up to chart 1.0.20 an nginx stream sidecar forwarded 8001 -> 127.0.0.1:8080, so
+    # qBittorrent saw loopback and LocalHostAuth=false was enough to skip the login page.
+    # From 1.0.21 the Olares entrance reaches the pod directly; qBittorrent 5.x only
+    # bypasses auth for loopback or AuthSubnetWhitelist IPs (WebUI\Authentication is
+    # ignored). Patch legacy appData configs that predate the default qBittorrent.conf.
+    confFile="/appData/qBittorrent.conf"
+    [ -f "$confFile" ] || exit 0
+
+    ensure_pref() {
+      key="$1"
+      value="$2"
+      if grep -q "^${key}=" "$confFile"; then
+        return 0
+      fi
+      grep -q "^\[Preferences\]" "$confFile" || echo "[Preferences]" >> "$confFile"
+      echo "${key}=${value}" >> "$confFile"
+    }
+
+    ensure_pref "WebUI\\AuthSubnetWhitelistEnabled" "true"
+    ensure_pref "WebUI\\AuthSubnetWhitelist" "0.0.0.0/0"
+    ensure_pref "WebUI\\LocalHostAuth" "false"
+    ensure_pref "WebUI\\CSRFProtection" "false"
+    ensure_pref "WebUI\\HostHeaderValidation" "false"
+    echo "WebUI auth bypass settings ensured for legacy config."
