@@ -1,10 +1,10 @@
 {{- /* ENGINE_ARGS is the v1.1.0 daemon-tuning surface: a KEY=VALUE list of
        OLLAMA_* env that the ollama.sh wrapper exports before `ollama serve`.
-       Clone-configurable via olaresEnv.ENGINE_ARGS (e.g.
-       OLLAMA_KEEP_ALIVE=-1 pins the model in VRAM).
+       Clone-configurable via olaresEnv.ENGINE_ARGS; chart defaults
+       OLLAMA_KEEP_ALIVE=-1 when omitted (user ENGINE_ARGS overrides).
        Must stay in sync with the same block in templates/llm-init.yaml. */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $engineArgs := include "ollamallmbasev3.engineArgs" ($oe.ENGINE_ARGS | default "") -}}
 {{- /* CPU/RAM via olaresEnv (manifest defaults); accelerator -1 sums rendered
        workloads. Defaults: 200m/2Gi req, 6/35Gi lim (+ llm-init 200m/256Mi). */ -}}
 {{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "200m") -}}

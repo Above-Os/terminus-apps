@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.2.8'
+  version: '1.2.9'
   categories:
     - AI
 sharedEntrances:
@@ -74,12 +74,10 @@ spec:
     - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
       Embedding); each expands to the `supports_*` CSV seed. The field is required;
       pick Embedding when the model advertises no extra capabilities.
-    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192` or
-      `OLLAMA_KEEP_ALIVE=-1` to pin the model in VRAM (empty for defaults).
+    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192`. Chart defaults
+      `OLLAMA_KEEP_ALIVE=-1` (pin model in VRAM); set `OLLAMA_KEEP_ALIVE=5m` (or
+      any other value) here to override.
     - `LOG_LEVEL` — `debug | info | warn | error` (default `debug`).
-    - `OLLAMA_CPU_REQUEST` / `OLLAMA_MEMORY_REQUEST` / `OLLAMA_CPU_LIMIT` /
-      `OLLAMA_MEMORY_LIMIT` — ollama pod CPU/RAM (fixed per clone template;
-      not editable after install).
     - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
       fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
@@ -91,11 +89,12 @@ spec:
       and VRAM per model via the `OLLAMA_*` env vars above.
 
   upgradeDescription: |
-    Generic Ollama + llm-init base (llm-init v1.2.3, ollama/ollama:0.30.6).
+    Generic Ollama + llm-init base (llm-init v1.2.6, ollama/ollama:0.30.10).
     Supports ollama:// Library pulls. Model identity and tuning are env.
+    v1.2.9: bump llm-init to v1.2.6; default OLLAMA_KEEP_ALIVE=-1; trim fullDescription CPU/RAM param list.
     v1.2.7: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access.
     v1.2.3: fix Helm render — the v1.2.2 gpumem comment used a Go-template comment
-    whose trim markers ({{- ... -}}) collapsed resources:/requests: onto one line;
+    whose trim markers (Go-template trim syntax) collapsed resources:/requests: onto one line;
     switched to a plain YAML (#) comment. No resource-value change.
     v1.2.2: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
     extended resource; the gpu-inject webhook / auto-gpumem template apps read it
@@ -103,7 +102,7 @@ spec:
     v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
     Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
     v1.2.0: version bump (no functional change).
-    v1.1.18: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
+    v1.1.18: engine Deployment name uses Helm Release.Name for allowMultipleInstall.
     v1.1.17: raise shared engine MEMORY_LIMIT default to 35Gi.
     v1.1.16: unify engine CPU/RAM defaults to 200m/2Gi/6/35Gi across llm bases.
     v1.1.15: OLLAMA_REQUIRED_GPU_MEMORY no manifest default (install dialog).
@@ -217,9 +216,9 @@ envs:
       - title: Embedding        # required-field fallback; expands to no supports_* keys
         value: embedding
   # --- Tuning ---
-  - envName: ENGINE_ARGS         # example: OLLAMA_NUM_CTX=8192 OLLAMA_NUM_PARALLEL=2  ("" for daemon defaults)
+  - envName: ENGINE_ARGS         # example: OLLAMA_NUM_CTX=8192; chart adds OLLAMA_KEEP_ALIVE=-1 when omitted
     required: true              # required:true so it shows in the install dialog;
-    default: ""                 # default:"" lets the user leave it empty (= daemon defaults)
+    default: ""                 # default:"" lets the user leave it empty (chart injects OLLAMA_KEEP_ALIVE=-1)
     type: string
     editable: true
     applyOnChange: true
