@@ -1,14 +1,18 @@
 {{- /*
-  knowledgev3 — shared knowledge backend for Wise.
+  knowledge — shared knowledge backend for Wise (v3 shared app, admin-only).
 
   Three containers in one Pod:
     - knowledge      (knowledge-base-api, port 3010)
     - vectorcrawl    (vector indexing worker, port 8080)
     - flaresolverr   (Cloudflare/CAPTCHA bypass, used in-pod via localhost)
 
+  Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
+  image (TermiPass docker/wise/wise.conf) works unchanged — it hardcodes
+  `rss-svc.knowledge-shared:{3010,3100}` as nginx upstreams.
+
   Cross-app calls to ytdlpv3 / rssubscribev3 / twitterv3 go via their
   v3 shared entrance Services over Kubernetes DNS. Namespace pattern
-  follows ytdlpv3-shared (per platform v3 install convention); adjust if
+  follows `<appid>-shared` (per platform v3 install convention); adjust if
   the actual install namespace differs.
 */ -}}
 ---
@@ -21,7 +25,7 @@ metadata:
     app: knowledge
     applications.app.bytetrade.io/author: bytetrade.io
 spec:
-  replicas: {{ .Values.workloads.knowledgev3.replicaCount }}
+  replicas: {{ .Values.workloads.knowledge.replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -167,7 +171,7 @@ spec:
             runAsUser: 1000
           env:
             - name: LISTEN_ADDR
-              value: 127.0.0.1:8080
+              value: 0.0.0.0:8080
             - name: REDIS_PASSWORD
               value: {{ .Values.redis.password }}
             - name: REDIS_ADDR
@@ -251,14 +255,14 @@ spec:
 
 ---
 # Backs the (invisible, admin-only) Olares entrance for direct API access.
-# Distinct from sharedentrances-knowledge so users hitting the gateway and
-# other v3 apps making cluster-internal calls go through separate Services
-# (mirrors the ollamav3 split: `ollama` for entrance, `sharedentrances-ollama`
-# for sharedentrance).
+# Name kept as `rss-svc` for compatibility with the Wise frontend image
+# (TermiPass `docker/wise/wise.conf` hardcodes
+# `rss-svc.knowledge-shared:{3010,3100}` as nginx upstreams).
+# Ports mirror the v2 wise/knowledge rss-svc layout.
 apiVersion: v1
 kind: Service
 metadata:
-  name: knowledge
+  name: rss-svc
   namespace: {{ .Release.Namespace }}
   labels:
     app: knowledge
@@ -267,20 +271,20 @@ spec:
   selector:
     app: knowledge
   ports:
-    - name: "api"
+    - name: "knowledge-base-api"
       protocol: TCP
       port: 3010
       targetPort: 3010
-    - name: "backend-server"
-      protocol: TCP
-      port: 8080
-      targetPort: 8080
-    - name: "ws"
+    - name: "knowledge-ws-api"
       protocol: TCP
       port: 3100
       targetPort: 3100
 
 ---
+# v3 sharedentrance: cluster-internal canonical hop other v3 apps SHOULD
+# use to reach knowledge (port 80 -> knowledge-base-api 3010).
+# Kept separate from `rss-svc` so the legacy hostname keeps working
+# unchanged while v3 callers use the standardised endpoint.
 apiVersion: v1
 kind: Service
 metadata:
@@ -293,19 +297,7 @@ spec:
   selector:
     app: knowledge
   ports:
-    # Primary HTTP entrance: knowledge-base-api on 3010, exposed as 80 to
-    # match the v3 sharedentrance convention (port 80 -> targetPort).
     - name: "http"
       protocol: TCP
       port: 80
       targetPort: 3010
-    # Auxiliary ports for callers that need the backend-server or websocket
-    # endpoints directly.
-    - name: "backend-server"
-      protocol: TCP
-      port: 8080
-      targetPort: 8080
-    - name: "knowledge-ws-api"
-      protocol: TCP
-      port: 3100
-      targetPort: 3100

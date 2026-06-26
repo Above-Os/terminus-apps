@@ -2,22 +2,22 @@ olaresManifest.version: '0.12.0'
 olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
-  name: knowledgev3
-  appid: knowledgev3
+  name: knowledge
+  appid: knowledge
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Shared knowledge backend for Wise
-  title: Knowledge Backend V3 for test
+  title: Knowledge Backend
   version: '1.1.5'
   categories:
     - Productivity_v112
 
 # Exposed to other v3 apps (primarily wisev3 frontend) over Service DNS:
-#   http://sharedentrances-knowledge.<knowledgev3-ns>.svc.cluster.local:80
+#   http://sharedentrances-knowledge.knowledge-shared.svc.cluster.local:80
 #     -> knowledge-base-api (3010)
 # Additional in-pod ports (8080 backend-server, 3100 ws) are also exposed on
 # the same Service for callers that need them.
 sharedEntrances:
-  - name: knowledgev3
+  - name: knowledge
     host: sharedentrances-knowledge
     port: 0
     title: Knowledge API
@@ -27,12 +27,15 @@ sharedEntrances:
 
 # Admin-only entrance, registered with the Olares gateway for direct API
 # access (debugging, admin tooling). Not shown in the user app launcher.
-# Wise frontends (per-user) reach this backend through the shared entrance
-# above over in-cluster DNS, NOT through this entrance.
+# Backed by the `rss-svc` Service (name kept for compatibility with the
+# Wise frontend image, which hardcodes `rss-svc.<knowledge-ns>` as nginx
+# upstreams).
+# Wise frontends (per-user) reach this backend over in-cluster DNS
+# directly, NOT through this entrance.
 entrances:
   - name: knowledge
     port: 3010
-    host: knowledge
+    host: rss-svc
     title: Knowledge API
     icon: https://app.cdn.olares.com/appstore/wise/icon.png
     authLevel: private
@@ -40,10 +43,10 @@ entrances:
 
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   knowledgev3 — knowledge backend Deployment
-#                 (== appid / Release.Name; 3 containers in one Pod)
+#   knowledge — knowledge backend Deployment
+#               (== appid / Release.Name; 3 containers in one Pod)
 workloadReplicas:
-  knowledgev3: 1
+  knowledge: 1
 
 permission:
   appData: true
@@ -89,7 +92,7 @@ spec:
     - **Architecture**: extracted from `wise/knowledge` sub-chart, now a
       first-class v3 shared app installable only by Admin.
     - **Schema**: apiVersion v3, `options.shared: true`, declared
-      `workloadReplicas: { knowledgev3: 1 }`; Deployment uses
+      `workloadReplicas: { knowledge: 1 }`; Deployment uses
       `{{ .Release.Name }}` so allowMultipleInstall stays safe.
     - **Routing**: provider-proxy ClusterRoleBindings removed; cross-app
       calls to ytdlp/rssubscribe/twitter go through their v3
@@ -125,9 +128,9 @@ options:
   shared: true
   apiTimeout: 0
   conflicts:
+    # v2 Wise bundled the knowledge sub-chart; installing both would
+    # collide on the rss-svc / knowledge resources.
     - name: wise
-      type: application
-    - name: knowledge
       type: application
   dependencies:
     - name: olares
