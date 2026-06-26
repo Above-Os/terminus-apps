@@ -1,0 +1,280 @@
+{{- /*
+  knowledgev3 — shared knowledge backend for Wise.
+
+  Three containers in one Pod:
+    - knowledge      (knowledge-base-api, port 3010)
+    - vectorcrawl    (vector indexing worker, port 8080)
+    - flaresolverr   (Cloudflare/CAPTCHA bypass, used in-pod via localhost)
+
+  Cross-app calls to ytdlpv3 / rssubscribev3 / twitterv3 go via their
+  v3 shared entrance Services over Kubernetes DNS. Namespace pattern
+  follows ytdlpv3-shared (per platform v3 install convention); adjust if
+  the actual install namespace differs.
+*/ -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: knowledge
+    applications.app.bytetrade.io/author: bytetrade.io
+spec:
+  replicas: {{ .Values.workloads.knowledgev3.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: knowledge
+  template:
+    metadata:
+      labels:
+        app: knowledge
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsNonRoot: false
+      initContainers:
+        - name: init-container
+          image: "beclab/postgres:16.0-alpine3.18"
+          command:
+            - sh
+            - '-c'
+            - >-
+              echo -e "Checking for the availability of PostgreSQL Server deployment";
+              until psql -h $PGHOST -p $PGPORT -U $PGUSER -d $PGDB -c "SELECT 1"; do
+                sleep 1; printf "-";
+              done; sleep 5;
+              echo -e " >> PostgreSQL DB Server has started";
+          env:
+            - name: PGHOST
+              value: {{ .Values.postgres.host }}
+            - name: PGPORT
+              value: "{{ .Values.postgres.port }}"
+            - name: PGUSER
+              value: "{{ .Values.postgres.username }}"
+            - name: PGPASSWORD
+              value: {{ .Values.postgres.password }}
+            - name: PGDB
+              value: {{ .Values.postgres.databases.knowledge }}
+      containers:
+        - name: knowledge
+          image: "beclab/knowledge-base-api:v1.0.1"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          ports:
+            - containerPort: 3010
+              name: api
+            - containerPort: 3100
+              name: ws
+          env:
+            - name: BACKEND_URL
+              value: http://127.0.0.1:8080
+            # System services live in platform namespaces; no app-level RBAC
+            # is required to reach them via DNS.
+            - name: COOKIE_URL
+              value: http://integration-provider-svc.os-protected:28080
+            # v3 shared-app cross-call. Namespace pattern: <chart>-shared.
+            - name: SUBSCRIBE_URL
+              value: http://3bfa8113.shared.olares.com
+            - name: UPLOAD_SAVE_PATH
+              value: '/data/'
+            - name: SEARCH_URL
+              value: 'http://search3-provider-svc.os-framework:28080'
+            - name: REDIS_PASSWORD
+              value: {{ .Values.redis.password }}
+            - name: REDIS_ADDR
+              value: "{{ .Values.redis.host }}:{{ .Values.redis.port }}"
+            - name: PG_USERNAME
+              value: "{{ .Values.postgres.username }}"
+            - name: PG_PASSWORD
+              value: {{ .Values.postgres.password }}
+            - name: PG_HOST
+              value: {{ .Values.postgres.host }}
+            - name: PG_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: PG_DATABASE
+              value: {{ .Values.postgres.databases.knowledge }}
+            - name: DOWNLOAD_URL
+              value: http://download-provider-svc.os-framework:28080
+            - name: YTDLP_DOWNLOAD_URL
+              value: http://7b1e87ff.shared.olares.com
+            - name: NATS_HOST
+              value: nats.os-platform
+            - name: NATS_PORT
+              value: "4222"
+            - name: NATS_USERNAME
+              value: {{ .Release.Namespace }}-knowledge
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: nats_password
+                  name: knowledge-secrets
+            - name: NATS_DOWNLOAD_SUBJECT
+              value: os.download_status
+            - name: NATS_RSSUBSCRIBE_SUBJECT
+              value: os.rssubscribe_status
+            - name: SOCKET_URL
+              value: 'http://localhost:40010'
+            - name: BACKUP_PATH
+              value: /backup/
+          volumeMounts:
+            - name: pgbackup
+              mountPath: /backup
+            - name: domain-config
+              mountPath: /domain-config
+            - name: ytdlp-supportedsites
+              mountPath: /ytdlp-supportedsites
+          startupProbe:
+            tcpSocket:
+              port: 3010
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 3010
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: 3010
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 20m
+              memory: 50Mi
+            limits:
+              cpu: "3.5"
+              memory: 6Gi
+
+        - name: vectorcrawl
+          image: "beclab/vectorcrawl:v1.0.1"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+          env:
+            - name: LISTEN_ADDR
+              value: 127.0.0.1:8080
+            - name: REDIS_PASSWORD
+              value: {{ .Values.redis.password }}
+            - name: REDIS_ADDR
+              value: "{{ .Values.redis.host }}:{{ .Values.redis.port }}"
+            - name: PG_USERNAME
+              value: {{ .Values.postgres.username }}
+            - name: PG_PASSWORD
+              value: {{ .Values.postgres.password }}
+            - name: PG_HOST
+              value: {{ .Values.postgres.host }}
+            - name: PG_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: PG_DATABASE
+              value: {{ .Values.postgres.databases.knowledge }}
+            - name: YT_DLP_API_URL
+              value: http://7b1e87ff.shared.olares.com/api
+            - name: TWITTER_API_URL
+              value: http://f1bce645.shared.olares.com/api
+          ports:
+            - containerPort: 8080
+              name: backend
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 20m
+              memory: 50Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+
+        - name: flaresolverr
+          image: "beclab/flaresolverr:v0.0.2"
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 20m
+              memory: 60Mi
+            limits:
+              cpu: "2"
+              memory: 500Mi
+
+      volumes:
+        - name: pgbackup
+          hostPath:
+            path: '{{ .Values.userspace.appCache }}/pg_backup'
+            type: DirectoryOrCreate
+        - name: domain-config
+          configMap:
+            name: domain-config
+            items:
+              - key: domain.conf
+                path: domain.conf
+        - name: ytdlp-supportedsites
+          configMap:
+            name: ytdlp-supportedsites
+            items:
+              - key: ytdlpsupported.conf
+                path: ytdlpsupported.conf
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-knowledge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: knowledge
+spec:
+  type: ClusterIP
+  selector:
+    app: knowledge
+  ports:
+    # Primary HTTP entrance: knowledge-base-api on 3010, exposed as 80 to
+    # match the v3 sharedentrance convention (port 80 -> targetPort).
+    - name: "http"
+      protocol: TCP
+      port: 80
+      targetPort: 3010
+    # Auxiliary ports for callers that need the backend-server or websocket
+    # endpoints directly.
+    - name: "backend-server"
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+    - name: "knowledge-ws-api"
+      protocol: TCP
+      port: 3100
+      targetPort: 3100
