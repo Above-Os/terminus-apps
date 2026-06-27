@@ -1,10 +1,16 @@
 {{- /* ENGINE_ARGS is the v1.1.0 daemon-tuning surface: a KEY=VALUE list of
        OLLAMA_* env that the ollama.sh wrapper exports before `ollama serve`.
        Clone-configurable via olaresEnv.ENGINE_ARGS; chart defaults
-       OLLAMA_KEEP_ALIVE=-1 when omitted (user ENGINE_ARGS overrides).
+       OLLAMA_KEEP_ALIVE=-1 when omitted; CPU mode adds OLLAMA_NUM_GPU=0.
        Must stay in sync with the same block in templates/llm-init.yaml. */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
-{{- $engineArgs := include "ollamallmbasev3.engineArgs" ($oe.ENGINE_ARGS | default "") -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $isCpuMode := eq $gpuType "cpu" -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $engineArgs := include "ollamallmbasev3.engineArgs" (dict "Args" ($oe.ENGINE_ARGS | default "") "IsCpu" $isCpuMode) -}}
 {{- /* CPU/RAM via olaresEnv (manifest defaults); accelerator -1 sums rendered
        workloads. Defaults: 200m/2Gi req, 6/35Gi lim (+ llm-init 200m/256Mi). */ -}}
 {{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "200m") -}}
@@ -12,16 +18,9 @@
 {{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.OLLAMA_MEMORY_LIMIT | default "35Gi") -}}
 {{- /* Per-instance model memory quota. nvidia.com/gpumem needs a BARE MiB int;
-       Spark unified memory reuses the same value as pod memory ("<MiB>Mi"). */ -}}
+       Spark unified memory reuses the same value as pod memory ("<MiB>Mi").
+       CPU mode (accelerator mode: cpu) skips GPU inject and gpumem. */ -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.OLLAMA_REQUIRED_GPU_MEMORY | default "4096") -}}
-{{- /* Olares injects .Values.gpu / .Values.GPU.Type at install (SelectedGpuType).
-       Discrete NVIDIA: OLLAMA_REQUIRED_GPU_MEMORY -> nvidia.com/gpumem (Mi).
-       Spark (nvidia-gb10) unified memory: same env -> pod memory r/l. */ -}}
-{{- $gpuType := .Values.gpu | default "" -}}
-{{- if not $gpuType -}}
-{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
-{{- end -}}
-{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
@@ -44,8 +43,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: ollama
+  {{- if not $isCpuMode }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.ollamallmbasev3.replicaCount }}
   selector:
@@ -71,19 +72,21 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.appCommon }}/ollama"
             type: DirectoryOrCreate
+{{- if not $isCpuMode }}
         # CUDA JIT compile cache lives alongside the models under appCommon/ollama
         # (appCache is not available for this hostPath mount).
         - name: cuda-compute-cache
           hostPath:
             path: "{{ .Values.userspace.appCommon }}/ollama/.nv"
             type: DirectoryOrCreate
+{{- end }}
         - name: wrappers
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
       containers:
         - name: ollama
-          image: docker.io/ollama/ollama:0.30.10
+          image: docker.io/ollama/ollama:0.30.11
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/ollama.sh"]
           env:
@@ -103,8 +106,17 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
+{{- if $isCpuMode }}
+            # Olares cpu accelerator may still expose /dev/nvidia* on GPU nodes;
+            # hide devices from CUDA so Ollama cannot offload despite OLLAMA_NUM_GPU=0.
+            - name: OLLAMA_NUM_GPU
+              value: "0"
+            - name: CUDA_VISIBLE_DEVICES
+              value: ""
+{{- else }}
             - name: GGML_CUDA_DISABLE_GRAPHS
               value: "1"
+{{- end }}
           ports:
             - name: ollama
               containerPort: 11434
@@ -125,9 +137,11 @@ spec:
           volumeMounts:
             - name: ollama-data
               mountPath: /root/.ollama
+{{- if not $isCpuMode }}
             - name: cuda-compute-cache
               mountPath: /root/.nv/ComputeCache
               subPath: ComputeCache
+{{- end }}
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
@@ -140,13 +154,13 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if not $unifiedMem }}
+{{- if and (not $isCpuMode) (not $unifiedMem) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if not $unifiedMem }}
+{{- if and (not $isCpuMode) (not $unifiedMem) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
