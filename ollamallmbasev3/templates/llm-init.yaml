@@ -37,9 +37,14 @@
 {{- end -}}
 {{- $modelSupports = join "," $expandedSupports -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $isCpuMode := eq $gpuType "cpu" -}}
 {{- /* ENGINE_ARGS is mirrored onto llm-init so /api/config + diagnostics
        reflect the same OLLAMA_* tuning the ollama.sh wrapper exports. */ -}}
-{{- $engineArgs := include "ollamallmbasev3.engineArgs" ($oe.ENGINE_ARGS | default "") -}}
+{{- $engineArgs := include "ollamallmbasev3.engineArgs" (dict "Args" ($oe.ENGINE_ARGS | default "") "IsCpu" $isCpuMode) -}}
 ---
 # llm-init Pod (no GPU). Talks to the ollama daemon via the "ollama"
 # Service on :11434 (defined in templates/ollama.yaml). llm-init derives

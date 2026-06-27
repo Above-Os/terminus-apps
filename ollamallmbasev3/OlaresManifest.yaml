@@ -7,7 +7,7 @@ metadata:
   description: "Generic Ollama + llm-init base. Pick any model at install via env."
   appid: ollamallmbasev3
   title: Ollama LLM Base (llm-init)
-  version: '1.2.9'
+  version: '1.3.0'
   categories:
     - AI
 sharedEntrances:
@@ -42,7 +42,7 @@ workloadReplicas:
   llminit: 1
 spec:
   onlyAdmin: true
-  versionName: '0.30.10'
+  versionName: '0.30.11'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -59,6 +59,13 @@ spec:
     - **llm-init** (`beclab/llm-init`, port 8090): OpenAI `/v1/*`, progress UI.
     - Inter-pod traffic via ClusterIP Service `ollama:11434` (the name is
       required because llm-init v1.1.0 derives the engine URL from ENGINE_KIND).
+
+    **Accelerator modes**
+    | Olares mode | Ollama device | Notes |
+    |-------------|---------------|-------|
+    | `nvidia` | GPU (CUDA) | `OLLAMA_REQUIRED_GPU_MEMORY` -> `nvidia.com/gpumem` |
+    | `nvidia-gb10` | GPU (Spark unified memory) | same env -> pod memory |
+    | `cpu` | CPU only | chart injects `OLLAMA_NUM_GPU=0` + `CUDA_VISIBLE_DEVICES=""`; no GPU inject / gpumem |
 
     **Model storage (App Common)**
     Pulled models go to the **shared, cross-app** App Common store
@@ -78,8 +85,8 @@ spec:
       `OLLAMA_KEEP_ALIVE=-1` (pin model in VRAM); set `OLLAMA_KEEP_ALIVE=5m` (or
       any other value) here to override.
     - `LOG_LEVEL` — `debug | info | warn | error` (default `debug`).
-    - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+    - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required for GPU modes;
+      ignored on `cpu`). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
@@ -89,8 +96,9 @@ spec:
       and VRAM per model via the `OLLAMA_*` env vars above.
 
   upgradeDescription: |
-    Generic Ollama + llm-init base (llm-init v1.2.6, ollama/ollama:0.30.10).
+    Generic Ollama + llm-init base (llm-init v1.2.6, ollama/ollama:0.30.11).
     Supports ollama:// Library pulls. Model identity and tuning are env.
+    v1.3.0: bump ollama to 0.30.11; add accelerator mode cpu (OLLAMA_NUM_GPU=0, CUDA_VISIBLE_DEVICES="", no GPU inject).
     v1.2.9: bump llm-init to v1.2.6; default OLLAMA_KEEP_ALIVE=-1; trim fullDescription CPU/RAM param list.
     v1.2.7: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access.
     v1.2.3: fix Helm render — the v1.2.2 gpumem comment used a Go-template comment
@@ -129,10 +137,18 @@ spec:
 
   accelerator:
     # Modes (must match node gpu.bytetrade.io/type / install-time GPU selection):
+    #   cpu          — CPU-only inference (embedding models); OLLAMA_NUM_GPU=0
     #   nvidia       — discrete GPU; OLLAMA_REQUIRED_GPU_MEMORY -> gpumem
     #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
     # -1 = auto (CPU/RAM/GPU only): Olares sums rendered workload resources.
     # Disk is NOT auto-summed — keep requiredDisk/limitedDisk explicit.
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
     - mode: nvidia
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -262,7 +278,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
     required: true
     type: string
     editable: false
