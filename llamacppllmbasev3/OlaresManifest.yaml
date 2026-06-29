@@ -3,10 +3,10 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: llamacppllmbasev3
-  icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
-  description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
+  icon: https://app.cdn.olares.com/appstore/llamacpp/icon2.png
+  description: "Generic llama.cpp engine base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
-  title: llama.cpp LLM Base (llm-init)
+  title: llama.cpp Engine Base
   version: '1.2.17'
   categories:
     - AI
@@ -14,16 +14,16 @@ sharedEntrances:
   - name: llamacppllmbasev3
     host: sharedentrances-api
     port: 0
-    title: llama.cpp LLM API
+    title: llama.cpp API
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+    icon: https://app.cdn.olares.com/appstore/llamacpp/icon2.png
 entrances:
   - name: llamacppclient
     port: 8090
     host: download-svc
-    title: llama.cpp LLM
-    icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+    title: llama.cpp API
+    icon: https://app.cdn.olares.com/appstore/llamacpp/icon2.png
     openMethod: window
     authLevel: internal
 #   llamacppllmbasev3 — engine Deployment (== appid / Release.Name)
@@ -35,98 +35,38 @@ spec:
   onlyAdmin: true
   versionName: 'b9837'
   fullDescription: |
-    **IMPORTANT NOTE**
-    This is a shared app and a generic *base*: it is NOT tied to any specific
-    model. The model to serve is chosen entirely at install time through
-    environment variables, so the same Helm chart can serve any GGUF model that
-    llama.cpp supports.
+    **IMPORTANT NOTE**  
+    This app is a template and cannot be used on its own. To use it, set the environment variables below to connect your specific model.
 
-    **HOW IT WORKS**
-    The llm-init sidecar downloads the configured GGUF model, writes a readiness
-    sentinel + model path, and exposes an OpenAI-compatible `/v1/*` surface plus
-    a unified `/api/progress` + `/healthz` dashboard. The llama.cpp container
-    waits for the sentinel, then serves the model. llm-init and llama.cpp run in
-    separate Deployments and share the HF cache + run-state via hostPath.
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo> --include <file>.gguf`. The source to download your model. For models with split files, only include the first part; for vision-language models, add the projector with a comma, like `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`.
+    - `MODEL_NAME`: `owner/repo:quant`. The name of your model in `owner/repo:quant` format, for example `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`. This is also used as the OpenAI alias.
+    - `MODEL_MODE`: `chat` or `embedding`. If you pick embedding, the chart adds `--embedding` automatically.
+    - `MODEL_SUPPORTS`: Model capability options (Vision / Tools / Thinking / None). Pick what your model supports. This is required.
+    - `ENGINE_ARGS`: `-c 8192 -ngl all -fa on`. Extra llama.cpp options, like `-c 8192 -ngl all -fa on`. To fully use GPU, add `-ngl all`; for CPU, it adds `-ngl 0` automatically. You can also use values like `LLAMA_ARG_*=val`.
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`. Log level: choose from `debug`, `info`, `warn`, or `error`.
+    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed (for GPU only; ignored on CPU). Accepts values like `8Gi`, `8192`, or `8192Mi`. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory.
+    
+    **How It Works**
+    First, `llm-init` downloads your model and gets it ready, then `llama.cpp` starts serving the model when it’s ready. These two parts run separately but share files and progress info.
 
     **Stack**
-    - **llama.cpp** (`ggml-org/llama.cpp`, port 8081): GGUF inference, OpenAI server.
-    - **llm-init** (`beclab/llm-init`, port 8090): GGUF download, OpenAI `/v1/*`,
-      progress UI; proxies the engine at `http://llamacpp:8081`.
+    - **llama.cpp**: Runs the model and serves API requests (port 8081)
+    - **llm-init**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
 
     **Accelerator modes**
-    | Olares mode | llama.cpp device | Notes |
-    |-------------|------------------|-------|
-    | `nvidia` | GPU (CUDA) | `LLAMACPP_REQUIRED_GPU_MEMORY` -> `nvidia.com/gpumem`; use `-ngl all` in `ENGINE_ARGS` |
-    | `nvidia-gb10` | GPU (Spark unified memory) | same env -> pod memory |
-    | `cpu` | CPU only | chart injects `-ngl 0` + `CUDA_VISIBLE_DEVICES=""`; no GPU inject / gpumem |
+    | Mode           | Device            | Details                                                            |
+    |----------------|-------------------|---------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Set `LLAMACPP_REQUIRED_GPU_MEMORY`; use `-ngl all` for full GPU use |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod                        |
+    | `cpu`          | CPU only          | Adds `-ngl 0`; disables GPU                                         |
 
-    **Model storage (App Common)**
-    GGUF files go to the shared App Common store `appCommon/huggingface`, mounted
-    at `/cache/hf/hub`. All HF-based apps share it; llm-init writes, llama.cpp reads.
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
 
-    **Install-time parameters (set per model)**
-    - `MODEL_SOURCE` — `hf://<repo> --include <file>.gguf` (the --include pins the
-      exact quant file; split GGUFs auto-load from the 00001-of-... part). For a
-      VLM, append the projector as a comma-separated second segment, e.g.
-      `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`;
-      llm-init downloads both and wires `--mmproj` automatically.
-    - `MODEL_NAME` — `owner/repo:quant` for `llama-server -hf` (e.g.
-      `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`); also used as OpenAI `--alias`.
-    - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
-      chart auto-adds `--embedding`, no need to set it in `ENGINE_ARGS`.
-    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
-      None); each expands to the `supports_*` CSV seed. The field is required;
-      pick None when the model advertises no extra capabilities.
-    - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
-      offloads all layers to GPU; CPU mode auto-adds `-ngl 0`). Also accepts `LLAMA_ARG_*=val`.
-    - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `LLAMACPP_REQUIRED_GPU_MEMORY` — model memory quota (required for GPU modes;
-      ignored on `cpu`). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
-      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
-
-    **NOTE ON RESOURCES**
-    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto) from rendered chart.
-      `requiredDisk` / `limitedDisk` stay fixed.
-    - GPU offload via `-ngl all` in `ENGINE_ARGS`; without `-ngl`, runs on CPU.
-
-  upgradeDescription: |
-    Generic llama.cpp + llm-init base (llm-init v1.2.7, beclab/ggml-org-llama.cpp:server-cuda12-b9837).
-    Loads any GGUF model; model identity, source and tuning are install-time env.
-    v1.2.17: move sentinel/model_path to appCommon/huggingface/llm-init-run/<release>.
-    v1.2.16: bump llm-init to v1.2.7.
-    v1.2.15: rename MODEL_SUPPORTS option Embedding -> None (value none); legacy embedding alias kept in chart.
-    v1.2.14: bump llama.cpp engine to server-cuda12-b9837; add accelerator mode cpu (-ngl 0, CUDA_VISIBLE_DEVICES="", no GPU inject).
-    v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list; remove README.
-    v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
-    shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
-    v1.2.9: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access; bump llama.cpp engine to server-cuda12-b9776 from server-cuda12-b9692.
-    v1.2.6: bump llama.cpp engine to server-cuda12-b9603 (build b9603, kept on
-    CUDA 12 for driver compatibility) from server-cuda12-b9426. Adds Multi-Token
-    Prediction (MTP) speculative decoding for MTP-capable GGUFs (e.g. Qwen3.6 *-MTP);
-    enable at install via ENGINE_ARGS: --spec-type draft-mtp --spec-draft-n-max 2.
-    No resource-value change.
-    v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
-    (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
-    OOM on large sharded models (huggingface_hub#3300). No resource-value change.
-    v1.2.4: fix Helm render — the v1.2.3 gpumem comment used a Go-template comment
-    whose trim markers collapsed resources/requests onto one line; switched to a
-    plain YAML (#) comment. No resource-value change.
-    v1.2.3: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
-    extended resource; the gpu-inject webhook / auto-gpumem template apps read it
-    from limits). gb10 unaffected (unified memory uses pod memory).
-    v1.2.2: raise llm-init download memory limit to 4Gi (hf_xet chunk buffering OOM, huggingface_hub#3300).
-    v1.2.0: version bump (no functional change).
-    Models live in the shared App Common store appCommon/huggingface.
-    Sentinel/model_path are per-instance under appCommon/huggingface/llm-init-run/<release>.
-    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
-    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
-    MODEL_MODE=embedding now auto-adds --embedding (no ENGINE_ARGS needed).
-    LOG_LEVEL is optional and defaults to debug.
-    v1.0.5: engine Deployment name uses Helm Release.Name for allowMultipleInstall.
-    v1.0.4: raise shared engine MEMORY_LIMIT default to 35Gi.
-    v1.0.3: unify engine CPU/RAM defaults to 200m/2Gi/6/35Gi across llm bases.
-    v1.0.2: align resource envs with ollamallmbasev3 — gpumem Mi, accelerator -1,
-    LLAMACPP_REQUIRED_GPU_MEMORY install prompt, CPU/RAM envs non-editable.
+    **Resource Tips**
+    - CPU, RAM, and GPU auto-configure based on the chart; disk settings are fixed.
+    - To use the GPU, set `-ngl all` in `ENGINE_ARGS`. Without it, the model will run on CPU.
 
   developer: beclab
   website: https://github.com/beclab/llm-init
@@ -190,12 +130,15 @@ envs:
     required: true
     type: string
     editable: true
-    applyOnChange: true
+    applyOnChange: true    
+    description:  "Example: hf://unsloth/Qwen3-0.6B-GGUF --include Qwen3-0.6B-Q4_K_M.gguf. The source to download your model. For models with split files, only include the first part; for vision-language models, add the projector with a comma, like `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`."
+    regex: "^hf://"
   - envName: MODEL_NAME          # example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M (-hf repo:quant)
     required: true
     type: string
     editable: true
     applyOnChange: true
+    description:  "Example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M. The name of your model in `owner/repo:quant` format"
   - envName: MODEL_MODE
     required: true
     type: string
@@ -223,12 +166,14 @@ envs:
       value: thinking
     - title: None
       value: none
+    description:  "The model capabilities. Pick what your model supports, if no extra capabilities, pick None."
   - envName: ENGINE_ARGS         # example: -c 8192 -ngl all -fa on
     required: true
     default: ""
     type: string
     editable: true
     applyOnChange: true
+    description:  "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options, to fully use GPU, add `-ngl all`, for CPU, it adds `-ngl 0` automatically. You can also use values like `LLAMA_ARG_*=val`."
   - envName: LOG_LEVEL           # single-select: debug | info | warn | error
     required: false
     type: string
@@ -283,3 +228,5 @@ envs:
     type: string
     editable: false
     applyOnChange: false
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. Use `0` on CPU. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"
