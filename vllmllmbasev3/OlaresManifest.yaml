@@ -7,7 +7,7 @@ metadata:
   description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
   appid: vllmllmbasev3
   title: vLLM LLM Base (llm-init)
-  version: '1.2.13'
+  version: '1.2.16'
   categories:
     - AI
 sharedEntrances:
@@ -62,6 +62,13 @@ spec:
     - **llm-init** (`beclab/llm-init`, port 8090): HF download, OpenAI `/v1/*`,
       progress UI; proxies the in-pod vLLM server.
 
+    **Accelerator modes**
+    | Olares mode | vLLM device | Notes |
+    |-------------|-------------|-------|
+    | `nvidia` | GPU (CUDA) | `VLLM_REQUIRED_GPU_MEMORY` -> `nvidia.com/gpumem` |
+    | `nvidia-gb10` | GPU (Spark unified memory) | same env -> pod memory |
+    | `cpu` | CPU only | chart injects `--device cpu` + `CUDA_VISIBLE_DEVICES=""`; no GPU inject / gpumem |
+
     **Model storage (App Common)**
     HF models go to the **shared, cross-app** App Common store
     `appCommon/huggingface`, mounted at the fixed container path `/cache/hf/hub`
@@ -77,14 +84,14 @@ spec:
     - `MODEL_MODE` — `chat` or `embedding`. For embedding, set `--task embed` in
       `ENGINE_ARGS` yourself.
     - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
-      Embedding); each expands to the `supports_*` CSV seed. Pick Embedding (or just
+      None); each expands to the `supports_*` CSV seed. Pick None (or just
       the chat caps) when the model advertises no extras — the field is required.
     - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1` (empty for vLLM defaults).
     - `LOG_LEVEL` — `debug | info | warn | error`.
     - `HF_ENDPOINT` — HF mirror, e.g. `https://hf-mirror.com` (empty = huggingface.co).
     - `HF_TOKEN` — HF access token for private/gated repos (empty if public).
-    - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+    - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required for GPU modes;
+      ignored on `cpu`). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
@@ -93,8 +100,11 @@ spec:
     - vLLM also honors `--gpu-memory-utilization` via `ENGINE_ARGS`.
 
   upgradeDescription: |
-    Generic vLLM + llm-init base (llm-init v1.2.6, vllm/vllm-openai:v0.23.0).
+    Generic vLLM + llm-init base (llm-init v1.2.7, vllm/vllm-openai:v0.23.0).
     Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.16: bump llm-init to v1.2.7.
+    v1.2.15: rename MODEL_SUPPORTS option Embedding -> None (value none); legacy embedding alias kept in chart.
+    v1.2.14: add accelerator mode cpu (--device cpu, CUDA_VISIBLE_DEVICES="", no GPU inject).
     v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list.
     v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
     shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
@@ -132,9 +142,17 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
+    #   cpu          — CPU-only inference; chart injects --device cpu, no GPU inject / gpumem
     #   nvidia       — discrete GPU; VLLM_REQUIRED_GPU_MEMORY -> gpumem (Mi)
     #   nvidia-gb10  — Spark unified memory; same env -> pod memory
     # -1 = auto from rendered workloads; disk stays explicit.
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
     - mode: nvidia
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -216,8 +234,8 @@ envs:
       value: tools
     - title: Thinking
       value: thinking
-    - title: Embedding          # required-field fallback; expands to no supports_* keys
-      value: embedding
+    - title: None          # required-field fallback; expands to no supports_* keys
+      value: none
   # --- Tuning ---
   - envName: ENGINE_ARGS         # vLLM CLI flags, e.g. --max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1
     required: true              # required:true so it shows in the install dialog;
@@ -282,7 +300,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: VLLM_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
+  - envName: VLLM_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
     required: true
     type: string
     editable: false
