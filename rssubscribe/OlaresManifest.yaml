@@ -1,27 +1,61 @@
 olaresManifest.version: '0.12.0'
 olaresManifest.type: app
-apiVersion: 'v2'
+apiVersion: 'v3'
 metadata:
   name: rssubscribe
   description: Provide RSS Subscribe service for Wise
   icon: https://app.cdn.olares.com/appstore/rssubscribe/icon.png
   appid: rssubscribe
-  version: '1.1.19'
-  title: RSS Subscribe
+  version: '1.1.5'
+  title: RSS Subscribe V3 for test
   categories:
-  - Utilities_v112
+    - Utilities_v112
 
-permission:
-  appData: true
-  appCache: true
+sharedEntrances:
+  - name: rssubscribe
+    host: sharedentrances-rssubscribe
+    port: 0
+    title: RSS Subscribe API
+    icon: https://app.cdn.olares.com/appstore/rssubscribe/icon.png
+    invisible: true
+    authLevel: internal
+entrances:
+  - name: rssubscribe-svc
+    port: 8082
+    host: rssubscribe-svc
+    title: rssubscribe API
+    icon: https://app.cdn.olares.com/appstore/rssubscribe/icon.png
+    authLevel: private
+    invisible: true
+
+# Declares every workload's replica count (v3 schema). Keys MUST match the
+# rendered Deployment metadata.name and values.yaml workloads.<name>:
+#   rssubscribe — rss-server + rssubscribe Deployment (must match metadata.name / appid)
+workloadReplicas:
+  rssubscribe: 1
+
 spec:
-  versionName: '0.1.8'
+  versionName: '1.0.1'
   fullDescription: |
-    Provide RSS Subscribe service for Wise and other apps on Olares
+    **IMPORTANT NOTE**
+    This is a shared app. Once installed by the Olares Admin, all users in the cluster can use it through reference apps (e.g. wise).
+
+    Provide RSS Subscribe service for Wise and other apps on Olares.
+
+  upgradeDescription: |
+    Migrate RSS Subscribe to the v3 shared-app schema.
+
+    **What's Changed**
+
+    - **Schema**: OlaresManifest upgraded to `apiVersion: v3`.
+    - **Layout**: merged the previous `rsserver` + `rssubscribe` subCharts into a single chart.
+    - **Sharing**: replaced `appScope.clusterScoped` + `appRef` with `options.shared: true`; consumers now reach the API via `sharedentrances-rssubscribe`.
+    - **Scaling**: `workloadReplicas` declares replica counts for the `rssubscribe` workload.
+
   submitter: Olares
   locale:
-  - en-US
-  - zh-CN
+    - en-US
+    - zh-CN
   requiredMemory: 200Mi
   limitedMemory: 1200Mi
   requiredDisk: 128Mi
@@ -29,39 +63,22 @@ spec:
   requiredCpu: 10m
   limitedCpu: 1200m
   supportArch:
-  - amd64
-  - arm64
-  subCharts:
-  - name: rsserver
-    shared: true
-  - name: rssubscribe
+    - amd64
+    - arm64
+  onlyAdmin: true
+
+permission:
+  appData: true
+  appCache: true
 options:
+  shared: true
+  apiTimeout: 0
   dependencies:
-  - name: olares
-    type: system
-    version: '>=1.12.3-0,<1.12.6'
-  appScope:
-    clusterScoped: true
-    appRef:
-    - wise.*
-sharedEntrances:
-- name: rssubscribe
-  host: sharedentrances-rssubscribe
-  port: 0
-  title: RSS Subscribe API
-  icon: https://app.cdn.olares.com/appstore/rssubscribe/icon.png
-  invisible: true
-  authLevel: internal
-entrances:
-- name: rssubscribe-svc
-  port: 8080
-  host: rssubscribe-svc
-  title: rssubscribe API
-  icon: https://app.cdn.olares.com/appstore/rssubscribe/icon.png
-  authLevel: private
-  invisible: true
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
 middleware:
   postgres:
     username: rssubscribe
     databases:
-    - name: rssubscribe
+      - name: rssubscribe
