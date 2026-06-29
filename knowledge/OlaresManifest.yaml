@@ -130,11 +130,16 @@ spec:
 options:
   shared: true
   apiTimeout: 0
-  conflicts:
-    # v2 Wise bundled the knowledge sub-chart; installing both would
-    # collide on the rss-svc / knowledge resources.
-    - name: wise
-      type: application
+  # No `conflicts:` against `wise` anymore.
+  #
+  # The old v2 wise (<= 1.1.51) used to bundle the knowledge sub-chart and
+  # claim the same postgres user `knowledge` / db `knowledge` / redis
+  # namespace `knowledge` that this shared backend now claims. Conflict
+  # entries only support `name` + `type` (no version range), so a blanket
+  # `conflicts: wise` would also block the new v3 wise (1.1.52+), which
+  # is exactly the per-user frontend that REQUIRES this backend. We rely
+  # on Olares' middleware-claim collision check to refuse install when an
+  # older v2 wise is still around.
   dependencies:
     - name: olares
       type: system
