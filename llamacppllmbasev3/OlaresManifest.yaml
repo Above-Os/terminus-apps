@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp + llm-init base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp LLM Base (llm-init)
-  version: '1.2.13'
+  version: '1.2.16'
   categories:
     - AI
 sharedEntrances:
@@ -33,7 +33,7 @@ workloadReplicas:
   llminit: 1
 spec:
   onlyAdmin: true
-  versionName: 'b9776'
+  versionName: 'b9837'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app and a generic *base*: it is NOT tied to any specific
@@ -53,6 +53,13 @@ spec:
     - **llm-init** (`beclab/llm-init`, port 8090): GGUF download, OpenAI `/v1/*`,
       progress UI; proxies the engine at `http://llamacpp:8081`.
 
+    **Accelerator modes**
+    | Olares mode | llama.cpp device | Notes |
+    |-------------|------------------|-------|
+    | `nvidia` | GPU (CUDA) | `LLAMACPP_REQUIRED_GPU_MEMORY` -> `nvidia.com/gpumem`; use `-ngl all` in `ENGINE_ARGS` |
+    | `nvidia-gb10` | GPU (Spark unified memory) | same env -> pod memory |
+    | `cpu` | CPU only | chart injects `-ngl 0` + `CUDA_VISIBLE_DEVICES=""`; no GPU inject / gpumem |
+
     **Model storage (App Common)**
     GGUF files go to the shared App Common store `appCommon/huggingface`, mounted
     at `/cache/hf/hub`. All HF-based apps share it; llm-init writes, llama.cpp reads.
@@ -68,13 +75,13 @@ spec:
     - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
       chart auto-adds `--embedding`, no need to set it in `ENGINE_ARGS`.
     - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
-      Embedding); each expands to the `supports_*` CSV seed. The field is required;
-      pick Embedding when the model advertises no extra capabilities.
+      None); each expands to the `supports_*` CSV seed. The field is required;
+      pick None when the model advertises no extra capabilities.
     - `ENGINE_ARGS` — llama.cpp flags, e.g. `-c 8192 -ngl all -fa on` (`-ngl all`
-      offloads all layers to GPU; omit for CPU). Also accepts `LLAMA_ARG_*=val`.
+      offloads all layers to GPU; CPU mode auto-adds `-ngl 0`). Also accepts `LLAMA_ARG_*=val`.
     - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `LLAMACPP_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+    - `LLAMACPP_REQUIRED_GPU_MEMORY` — model memory quota (required for GPU modes;
+      ignored on `cpu`). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
@@ -83,8 +90,11 @@ spec:
     - GPU offload via `-ngl all` in `ENGINE_ARGS`; without `-ngl`, runs on CPU.
 
   upgradeDescription: |
-    Generic llama.cpp + llm-init base (llm-init v1.2.6, beclab/ggml-org-llama.cpp:server-cuda12-b9776).
+    Generic llama.cpp + llm-init base (llm-init v1.2.7, beclab/ggml-org-llama.cpp:server-cuda12-b9837).
     Loads any GGUF model; model identity, source and tuning are install-time env.
+    v1.2.16: bump llm-init to v1.2.7.
+    v1.2.15: rename MODEL_SUPPORTS option Embedding -> None (value none); legacy embedding alias kept in chart.
+    v1.2.14: bump llama.cpp engine to server-cuda12-b9837; add accelerator mode cpu (-ngl 0, CUDA_VISIBLE_DEVICES="", no GPU inject).
     v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list; remove README.
     v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
     shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
@@ -129,6 +139,16 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
+    #   cpu          — CPU-only inference; chart injects -ngl 0, no GPU inject / gpumem
+    #   nvidia       — discrete GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
     - mode: nvidia
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -200,8 +220,8 @@ envs:
       value: tools
     - title: Thinking
       value: thinking
-    - title: Embedding
-      value: embedding
+    - title: None
+      value: none
   - envName: ENGINE_ARGS         # example: -c 8192 -ngl all -fa on
     required: true
     default: ""
@@ -257,7 +277,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
     required: true
     type: string
     editable: false
