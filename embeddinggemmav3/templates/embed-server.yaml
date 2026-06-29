@@ -1,18 +1,18 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
-{{- $cpuRequest := trim ($oe.EMBED_CPU_REQUEST | default "200m") -}}
-{{- $memRequest := trim ($oe.EMBED_MEMORY_REQUEST | default "2Gi") -}}
-{{- $cpuLimit := trim ($oe.EMBED_CPU_LIMIT | default "4") -}}
-{{- $memLimit := trim ($oe.EMBED_MEMORY_LIMIT | default "3Gi") -}}
-{{- $gpuMem := trim ($oe.EMBED_REQUIRED_GPU_MEMORY | default "2048Mi") -}}
+{{- $cpuRequest := "200m" -}}
+{{- $memRequest := "2Gi" -}}
+{{- $cpuLimit := "4" -}}
+{{- $memLimit := "3Gi" -}}
+{{- $gpuMem := "2048Mi" -}}
 {{- $gpuMemMi := include "embeddinggemmav3.gpuMiB" $gpuMem -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
 {{- if not $gpuType -}}
 {{- $gpuType = $gpuObj.Type | default "cpu" -}}
 {{- end -}}
-{{- /* SoC unified memory: GB10 / Strix Halo have no discrete GDDR; bind Pod memory to EMBED_REQUIRED_GPU_MEMORY. */ -}}
+{{- /* SoC unified memory: GB10 / Strix Halo have no discrete GDDR; bind Pod memory to gpuMem (2048Mi). */ -}}
 {{- $unifiedMem := or (eq $gpuType "nvidia-gb10") (eq $gpuType "strix-halo") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMemMi -}}
