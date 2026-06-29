@@ -15,6 +15,21 @@
   follows `<appid>-shared` (per platform v3 install convention); adjust if
   the actual install namespace differs.
 */ -}}
+{{- /*
+  Strip the first label off `.Values.user.zone` to recover the platform
+  domain (e.g. "alice.olares.com" -> "olares.com", "bob.olares.cn" ->
+  "olares.cn"). Olares only injects `user.zone` at install time; there is
+  no separate platformDomain field, so this template-time derivation is
+  the standard pattern for assembling v3 shared-app URLs that have to
+  switch cleanly between olares.com and olares.cn deployments.
+  Lint renders `user.zone` as "user-zone" (no dot), in which case the
+  regex doesn't match and we fall back to "olares.com" so the resulting
+  env value is still a syntactically-valid URL.
+*/ -}}
+{{- $platformDomain := regexReplaceAll "^[^.]+\\." (toString .Values.user.zone) "" -}}
+{{- if not (contains "." $platformDomain) -}}
+{{-   $platformDomain = "olares.com" -}}
+{{- end -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -88,7 +103,7 @@ spec:
               value: http://integration-provider-svc.os-protected:28080
             # v3 shared-app cross-call. Namespace pattern: <chart>-shared.
             - name: SUBSCRIBE_URL
-              value: http://93dbb580.shared.olares.cn
+              value: http://93dbb580.shared.{{ $platformDomain }}
             - name: UPLOAD_SAVE_PATH
               value: '/data/'
             - name: SEARCH_URL
@@ -110,7 +125,7 @@ spec:
             - name: DOWNLOAD_URL
               value: http://download-provider-svc.os-framework:28080
             - name: YTDLP_DOWNLOAD_URL
-              value: http://95744974.shared.olares.cn
+              value: http://95744974.shared.{{ $platformDomain }}
             - name: NATS_HOST
               value: nats.os-platform
             - name: NATS_PORT
@@ -192,9 +207,9 @@ spec:
             - name: PG_DATABASE
               value: {{ .Values.postgres.databases.knowledge }}
             - name: YT_DLP_API_URL
-              value: http://95744974.shared.olares.cn
+              value: http://95744974.shared.{{ $platformDomain }}
             - name: TWITTER_API_URL
-              value: http://9aa23a690.shared.olares.cn/api
+              value: http://9aa23a690.shared.{{ $platformDomain }}/api
           ports:
             - containerPort: 8080
               name: backend
