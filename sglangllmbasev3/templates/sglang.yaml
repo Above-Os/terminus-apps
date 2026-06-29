@@ -11,21 +11,23 @@
 {{- $memRequest := trim ($oe.SGLANG_MEMORY_REQUEST | default "2Gi") -}}
 {{- $cpuLimit := trim ($oe.SGLANG_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.SGLANG_MEMORY_LIMIT | default "35Gi") -}}
-{{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
-       same value as pod memory ("<MiB>Mi"). Accepts 8Gi / 8192 / 8192Mi. */ -}}
-{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.SGLANG_REQUIRED_GPU_MEMORY | default "4096") -}}
 {{- $gpuType := .Values.gpu | default "" -}}
 {{- if not $gpuType -}}
 {{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
 {{- end -}}
+{{- $isCpuMode := eq $gpuType "cpu" -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $engineArgs = include "sglangllmbasev3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) -}}
+{{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
+       same value as pod memory ("<MiB>Mi"). CPU mode skips GPU inject and gpumem. */ -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.SGLANG_REQUIRED_GPU_MEMORY | default "4096") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
 ---
-# SGLang engine Deployment (GPU). wrappers/sglang.sh blocks on the sentinel
+# SGLang engine Deployment. wrappers/sglang.sh blocks on the sentinel
 # llm-init writes, reads model_path, then execs launch_server on :30000.
 # llm-init reverse-proxies at http://sglang:30000 — Service name MUST be "sglang".
 # Shared hostPath volumes (read-only here, llm-init owns writes): hf-cache
@@ -40,8 +42,10 @@ metadata:
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: sglang
+  {{- if not $isCpuMode }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "sglang"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.sglangllmbasev3.replicaCount }}
   selector:
@@ -95,6 +99,10 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
+{{- if $isCpuMode }}
+            - name: CUDA_VISIBLE_DEVICES
+              value: ""
+{{- end }}
           ports:
             - name: sglang
               containerPort: 30000
@@ -105,9 +113,11 @@ spec:
             - name: hf-cache
               mountPath: /cache/sglang
               subPath: sglang-cache
+{{- if not $isCpuMode }}
             - name: hf-cache
               mountPath: /root/.nv/ComputeCache
               subPath: .nv/ComputeCache
+{{- end }}
             - name: run-state
               mountPath: /run/llm-init
               readOnly: true
@@ -119,17 +129,17 @@ spec:
             # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
             # It's a non-overcommittable extended resource, so it must be in BOTH
             # requests and limits with the same value. Dropped on gb10 (unified
-            # memory uses pod memory instead).
+            # memory uses pod memory instead) and cpu (no GPU inject).
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if not $unifiedMem }}
+{{- if and (not $isCpuMode) (not $unifiedMem) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if not $unifiedMem }}
+{{- if and (not $isCpuMode) (not $unifiedMem) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---

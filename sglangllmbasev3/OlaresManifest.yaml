@@ -7,7 +7,7 @@ metadata:
   description: "Generic SGLang + llm-init base. Pick any HF model at install via env."
   appid: sglangllmbasev3
   title: SGLang LLM Base (llm-init)
-  version: '1.2.13'
+  version: '1.2.16'
   categories:
     - AI
 sharedEntrances:
@@ -54,6 +54,13 @@ spec:
     - **llm-init** (`beclab/llm-init`, port 8090): HF download, OpenAI `/v1/*`,
       progress UI; proxies the engine at `http://sglang:30000`.
 
+    **Accelerator modes**
+    | Olares mode | SGLang device | Notes |
+    |-------------|---------------|-------|
+    | `nvidia` | GPU (CUDA) | `SGLANG_REQUIRED_GPU_MEMORY` -> `nvidia.com/gpumem` |
+    | `nvidia-gb10` | GPU (Spark unified memory) | same env -> pod memory |
+    | `cpu` | CPU only | chart injects `--device cpu` + `CUDA_VISIBLE_DEVICES=""`; no GPU inject / gpumem |
+
     **Model storage (App Common)**
     HF models go to the shared App Common store `appCommon/huggingface`, mounted
     at `/cache/hf/hub`. All HF-based apps share it; llm-init writes, SGLang reads.
@@ -65,12 +72,12 @@ spec:
     - `MODEL_MODE` — `chat` or `embedding`. Embedding works out of the box: the
       chart auto-adds `--is-embedding`, no need to set it in `ENGINE_ARGS`.
     - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
-      Embedding); each expands to the `supports_*` CSV seed. The field is required;
-      pick Embedding when the model advertises no extra capabilities.
+      None); each expands to the `supports_*` CSV seed. The field is required;
+      pick None when the model advertises no extra capabilities.
     - `ENGINE_ARGS` — SGLang CLI flags, e.g. `--context-length 8192 --mem-fraction-static 0.8 --tp 1`.
     - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `SGLANG_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
+    - `SGLANG_REQUIRED_GPU_MEMORY` — model memory quota (required for GPU modes;
+      ignored on `cpu`). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
       as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
 
     **NOTE ON RESOURCES**
@@ -79,8 +86,11 @@ spec:
     - SGLang also honors `--mem-fraction-static` via `ENGINE_ARGS`.
 
   upgradeDescription: |
-    Generic SGLang + llm-init base (llm-init v1.2.6, lmsysorg/sglang:v0.5.12.post1-cu130).
+    Generic SGLang + llm-init base (llm-init v1.2.7, lmsysorg/sglang:v0.5.13.post1-cu130).
     Loads any HF model; model identity, source and tuning are install-time env.
+    v1.2.16: bump llm-init to v1.2.7.
+    v1.2.15: rename MODEL_SUPPORTS option Embedding -> None (value none); legacy embedding alias kept in chart.
+    v1.2.14: add accelerator mode cpu (--device cpu, CUDA_VISIBLE_DEVICES="", no GPU inject).
     v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list.
     v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
     shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
@@ -119,6 +129,16 @@ spec:
       url: https://github.com/beclab/llm-init
 
   accelerator:
+    #   cpu          — CPU-only inference; chart injects --device cpu, no GPU inject / gpumem
+    #   nvidia       — discrete GPU; SGLANG_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
     - mode: nvidia
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -188,8 +208,8 @@ envs:
       value: tools
     - title: Thinking
       value: thinking
-    - title: Embedding
-      value: embedding
+    - title: None
+      value: none
   - envName: ENGINE_ARGS         # example: --context-length 8192 --mem-fraction-static 0.8 --max-running-requests 32
     required: true
     default: ""
@@ -245,7 +265,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: SGLANG_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
+  - envName: SGLANG_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
     required: true
     type: string
     editable: false
