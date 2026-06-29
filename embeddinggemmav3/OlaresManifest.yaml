@@ -3,11 +3,11 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: embeddinggemmav3
-  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
   description: "EmbeddingGemma-300M text embeddings via IREmbeddingServer (OpenVINO / ONNX)"
   appid: embeddinggemmav3
-  title: EmbeddingGemma 300M
-  version: '1.0.5'
+  title: EmbeddingGemma
+  version: '1.0.6'
   categories:
     - AI
 sharedEntrances:
@@ -17,20 +17,20 @@ sharedEntrances:
     title: EmbeddingGemma API
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
 entrances:
   - name: embedclient
     port: 8090
     host: download-svc
     title: EmbeddingGemma
-    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
     openMethod: window
     authLevel: internal
   - name: embedapi
     port: 8080
     host: embedserver
     title: EmbeddingGemma API
-    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
     invisible: true
     openMethod: window
     authLevel: internal
@@ -38,7 +38,7 @@ entrances:
     port: 80
     host: console-svc
     title: Embedding Console
-    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
     openMethod: window
     authLevel: internal
 #   embeddinggemmav3 — embed-server engine Deployment (== appid / Release.Name)
@@ -50,11 +50,9 @@ workloadReplicas:
   embedconsole: 1
 spec:
   onlyAdmin: true
-  versionName: 'v0.1.0'
+  versionName: '0.1.0'
   fullDescription: |
-    **EmbeddingGemma-300M** text embedding service powered by
-    [IREmbeddingServer](https://github.com/beclab/IREmbeddingServer). Serves
-    OpenAI-compatible `/v1/embeddings` and `/v1/models` on port 8080.
+    **EmbeddingGemma-300M** text embedding service powered by [IREmbeddingServer](https://github.com/beclab/IREmbeddingServer). Serves OpenAI-compatible `/v1/embeddings` and `/v1/models` on port 8080.
 
     **Accelerator modes**
     | Olares mode | Image | Backend | `EMBED_DEVICE` |
@@ -66,24 +64,15 @@ spec:
 
     CPU mode intentionally uses the **ov-intel** image (not onnx-cpu).
 
-    **Model download (llm-init)**
-    On first start, llm-init downloads both Hugging Face repos into the shared
-    App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
+    **Model download**
+    On first start, llm-init downloads both Hugging Face repos into the shared App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
     - [wangzhong/embeddinggemma-300m-ov](https://huggingface.co/wangzhong/embeddinggemma-300m-ov) — OpenVINO IR
     - [wangzhong/embeddinggemma-300m-onnx-export](https://huggingface.co/wangzhong/embeddinggemma-300m-onnx-export) — ONNX
-
-    The embed-server wrapper waits for `model_download_finish`, resolves HF
-    snapshot paths, then starts `embed_server` with the backend matching the
-    selected accelerator.
 
     **Device mounts**
     - `cpu` (ov-intel): `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
     - `strix-halo` (ROCm): `/dev/dri`, `/sys/class/drm`, `/dev/kfd`
     - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
-
-    **Diagnostics**
-    `GET /v1/capabilities` reports `configured_device_kind` (actual runtime device:
-    `cpu`, `igpu`, `cuda`, `rocm`, …).
 
     **Stack**
     - **embed-server** (`beclab/embed-server`, port 8080): Rust embedding inference.
@@ -93,11 +82,6 @@ spec:
       same-origin `/api`, proxied by nginx to `embedserver:8080` (no direct backend URL
       in the UI). Open the **Embedding Console** entrance after the engine is healthy;
       use **embedclient** to monitor model download if the engine is still waiting.
-
-  upgradeDescription: |
-    Adds **Embedding Console** (`console` entrance): Playground, compare, diagnostics,
-    and optional API key — nginx `/api` proxy to embed-server. Third workload
-    `embedconsole` alongside llm-init and embed-server.
 
   developer: beclab
   website: https://huggingface.co/google/embeddinggemma-300m
