@@ -4,37 +4,28 @@ apiVersion: 'v3'
 metadata:
   name: ollamallmbasev3
   icon: https://app.cdn.olares.com/appstore/ollama/icon.png
-  description: "Generic Ollama + llm-init base. Pick any model at install via env."
+  description: "Generic Ollama engine base. Pick any Ollama library model at install via env."
   appid: ollamallmbasev3
-  title: Ollama LLM Base (llm-init)
-  version: '1.3.2'
+  title: Ollama Engine Base
+  version: '1.3.3'
   categories:
     - AI
 sharedEntrances:
   - name: ollamallmbasev3
     host: sharedentrances-api
     port: 0
-    title: Ollama LLM API
+    title: Ollama
     invisible: true
     authLevel: internal
     icon: https://app.cdn.olares.com/appstore/ollama/icon.png
 entrances:
-  # Routes straight to the llm-init download/UI Service (download-svc:8090).
-  # The entrance NAME stays "ollamaclient" so .Values.domain.ollamaclient
-  # (used for APP_URL in llm-init.yaml) keeps resolving after the nginx
-  # clientproxy was removed. llm-init serves its own same-origin dashboard
-  # (polls /api/progress; no websocket/SSE) so no proxy/CORS layer is needed.
   - name: ollamaclient
     port: 8090
     host: download-svc
-    title: Ollama LLM
+    title: Ollama
     icon: https://app.cdn.olares.com/appstore/ollama/icon.png
     openMethod: window
     authLevel: internal
-# Declares every workload's replica count (v3 documented schema):
-#   workloadReplicas.deployments.<name>  — Deployment metadata.name
-#   workloadReplicas.statefulSets.<name> — StatefulSet metadata.name (omit if none)
-# Keys MUST match rendered workload names and values.yaml workloads.<name>:
 #   ollamallmbasev3 — engine Deployment (== appid / Release.Name)
 #   llminit          — llm-init / entrance Deployment
 workloadReplicas:
@@ -44,106 +35,54 @@ spec:
   onlyAdmin: true
   versionName: '0.30.11'
   fullDescription: |
-    **IMPORTANT NOTE**
-    This is a shared app and a generic *base*: it is NOT tied to any specific
-    model. The model to serve is chosen entirely at install time through
-    environment variables, so the same Helm chart can serve any Ollama model.
+    **IMPORTANT NOTE**  
+    This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
 
-    **HOW IT WORKS**
-    An Ollama daemon owns the model bytes; the llm-init sidecar drives
-    `/api/pull` on first boot and exposes an OpenAI-compatible `/v1/*`
-    surface plus a unified `/api/progress` + `/healthz` dashboard.
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `ollama://<model>:<tag>`. The Ollama library source to pull your model, for example `ollama://qwen3.5:2b` or `ollama://gemma3:27b`. Browse models at https://ollama.com/library.
+    - `MODEL_NAME`: `<model>:<tag>`. The name of your model — use the string after `ollama://` in `MODEL_SOURCE`, for example `qwen3.5:2b`. This is also used as the OpenAI alias.
+    - `MODEL_MODE`: `chat` or `embedding`. Use `chat` for conversational models; use `embedding` for embedding models.
+    - `MODEL_SUPPORTS`: Model capability options (Vision / Tools / Thinking / None). Pick what your model supports. Check the model page on ollama.com/library for capabilities.
+    - `ENGINE_ARGS`: `OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1`. Extra Ollama daemon options. Separate multiple `key=value` pairs with spaces. If `OLLAMA_KEEP_ALIVE` is omitted, the chart defaults to `-1` (keep model in VRAM). See https://github.com/ollama/ollama/blob/main/docs/faq.mdx.
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`. Log level for the llm-init container.
+    - `OLLAMA_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed, enter `0` for CPU mode. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory.
+
+    **How It Works**
+    First, `llm-init` pulls your model from the Ollama library and gets it ready, then the Ollama daemon starts serving the model when it's ready. These two parts run separately but share files and progress info.
 
     **Stack**
-    - **Ollama daemon** (`ollama/ollama`, port 11434): pulls + serves the model.
-    - **llm-init** (`beclab/llm-init`, port 8090): OpenAI `/v1/*`, progress UI.
-    - Inter-pod traffic via ClusterIP Service `ollama:11434` (the name is
-      required because llm-init v1.1.0 derives the engine URL from ENGINE_KIND).
+    - **Ollama daemon** (port 11434): pulls and serves the model
+    - **llm-init** (port 8090): drives model pull, shows progress, and provides the OpenAI API, proxying to Ollama
 
     **Accelerator modes**
-    | Olares mode | Ollama device | Notes |
-    |-------------|---------------|-------|
-    | `nvidia` | GPU (CUDA) | `OLLAMA_REQUIRED_GPU_MEMORY` -> `nvidia.com/gpumem` |
-    | `nvidia-gb10` | GPU (Spark unified memory) | same env -> pod memory |
-    | `cpu` | CPU only | chart injects `OLLAMA_NUM_GPU=0` + `CUDA_VISIBLE_DEVICES=""`; no GPU inject / gpumem |
+    | Mode           | Device            | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Set `OLLAMA_REQUIRED_GPU_MEMORY`; Ollama uses GPU by default         |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod                         |
+    | `cpu`          | CPU only          | Chart injects `OLLAMA_NUM_GPU=0`; disables GPU                       |
 
-    **Model storage (App Common)**
-    Pulled models go to the **shared, cross-app** App Common store
-    `appCommon/ollama` (SSD on single-node, JuiceFS on multi-node). All
-    ollama-based apps share this one dir, so blobs dedup by digest and you get a
-    single unified view of downloaded models. The CUDA JIT compile cache lives
-    alongside them under `appCommon/ollama/.nv`.
+    **Model Storage**
+    All pulled models are stored in a shared folder at `appCommon/ollama`. All Ollama-based apps share this location, so blobs deduplicate by digest across installs.
 
-    **Install-time parameters (set per model)**
-    - `MODEL_SOURCE` — `ollama://<library-tag>`, e.g. `ollama://qwen3.5:0.8b`.
-    - `MODEL_NAME` — OpenAI client alias, e.g. `qwen3.5-0.8b`.
-    - `MODEL_MODE` — `chat` or `embedding`.
-    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
-      None); each expands to the `supports_*` CSV seed. The field is required;
-      pick None when the model advertises no extra capabilities.
-    - `ENGINE_ARGS` — daemon tuning, e.g. `OLLAMA_NUM_CTX=8192`. Chart defaults
-      `OLLAMA_KEEP_ALIVE=-1` (pin model in VRAM); set `OLLAMA_KEEP_ALIVE=5m` (or
-      any other value) here to override.
-    - `LOG_LEVEL` — `debug | info | warn | error` (default `debug`).
-    - `OLLAMA_REQUIRED_GPU_MEMORY` — model memory quota (required for GPU modes;
-      ignored on `cpu`). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
-      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
+    **Resource Tips**
+    - CPU, RAM, and GPU auto-configure based on the chart; disk settings are fixed.
+    - For large models (e.g. gemma3:27b), set `OLLAMA_CONTEXT_LENGTH` and `OLLAMA_KV_CACHE_TYPE` in `ENGINE_ARGS` to balance context length and VRAM usage.
 
-    **NOTE ON RESOURCES**
-    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto): Olares derives them
-      from the rendered chart. `requiredDisk` / `limitedDisk` stay fixed in the
-      manifest (disk is not auto-summed from workloads). Tune ollama CPU/RAM
-      and VRAM per model via the `OLLAMA_*` env vars above.
-
-  upgradeDescription: |
-    Generic Ollama + llm-init base (llm-init v1.2.7, ollama/ollama:0.30.11).
-    Supports ollama:// Library pulls. Model identity and tuning are env.
-    v1.3.2: bump llm-init to v1.2.7.
-    v1.3.1: rename MODEL_SUPPORTS option Embedding -> None (value none); legacy embedding alias kept in chart.
-    v1.3.0: bump ollama to 0.30.11; add accelerator mode cpu (OLLAMA_NUM_GPU=0, CUDA_VISIBLE_DEVICES="", no GPU inject).
-    v1.2.9: bump llm-init to v1.2.6; default OLLAMA_KEEP_ALIVE=-1; trim fullDescription CPU/RAM param list.
-    v1.2.7: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access.
-    v1.2.3: fix Helm render — the v1.2.2 gpumem comment used a Go-template comment
-    whose trim markers (Go-template trim syntax) collapsed resources:/requests: onto one line;
-    switched to a plain YAML (#) comment. No resource-value change.
-    v1.2.2: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
-    extended resource; the gpu-inject webhook / auto-gpumem template apps read it
-    from limits). gb10 unaffected (unified memory uses pod memory).
-    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
-    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
-    v1.2.0: version bump (no functional change).
-    v1.1.18: engine Deployment name uses Helm Release.Name for allowMultipleInstall.
-    v1.1.17: raise shared engine MEMORY_LIMIT default to 35Gi.
-    v1.1.16: unify engine CPU/RAM defaults to 200m/2Gi/6/35Gi across llm bases.
-    v1.1.15: OLLAMA_REQUIRED_GPU_MEMORY no manifest default (install dialog).
-    v1.1.14: gpumem as Mi (Gi×1024); resource OLLAMA_* envs non-editable.
-    v1.1.13: drop strix-halo accelerator; Spark (nvidia-gb10) unified memory only.
-    v1.1.11: repackage chart; accelerator auto-resource strings quoted as "-1".
-    v1.0.5: accelerator resources auto (-1); ollama CPU/RAM/VRAM via OLLAMA_*
-    env with defaults; LOG_LEVEL defaults to debug.
-    v1.0.4: bump llm-init to v1.2.3, Ollama 0.30.6, raise llm-init memory limit to 1Gi.
-    v1.0.0: models now live in the shared cross-app App Common store
-    appCommon/ollama instead of Home/Ollama — re-pull on upgrade; old
-    Home/Ollama copies can be deleted manually.
-
-  developer: beclab
-  website: https://github.com/beclab/llm-init
-  sourceCode: https://github.com/beclab/llm-init
+  developer: Ollama
+  website: https://ollama.com/
+  sourceCode: https://github.com/ollama/ollama
   submitter: Olares
   locale:
     - en-US
     - zh-CN
   license:
     - text: MIT
-      url: https://github.com/beclab/llm-init
+      url: https://github.com/ollama/ollama#MIT-1-ov-file
 
   accelerator:
-    # Modes (must match node gpu.bytetrade.io/type / install-time GPU selection):
-    #   cpu          — CPU-only inference (embedding models); OLLAMA_NUM_GPU=0
+    #   cpu          — CPU-only inference; chart injects OLLAMA_NUM_GPU=0, no GPU inject / gpumem
     #   nvidia       — discrete GPU; OLLAMA_REQUIRED_GPU_MEMORY -> gpumem
     #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
-    # -1 = auto (CPU/RAM/GPU only): Olares sums rendered workload resources.
-    # Disk is NOT auto-summed — keep requiredDisk/limitedDisk explicit.
     - mode: cpu
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -172,90 +111,81 @@ spec:
     - arm64
 permission:
   appData: true
-  # Models AND the CUDA JIT compile cache live in the shared cross-app App
-  # Common store (appCommon/ollama). No Home/* userData mount is needed.
-  appCommon: true   # access the shared Common directory
+  appCommon: true
 options:
   apiTimeout: 0
   LLMGatewaySupported: true
   allowMultipleInstall: true
   shared: true
-  # This is a generic base with no bundled model: there is no installable body,
-  # you create an instance (clone) and install that. Matches the base concept.
   templateOnly: true
   dependencies:
     - name: olares
       version: '>=1.12.6-0'
       type: system
 envs:
-  # Clone-configurable surface. Every entry is required with NO default, so
-  # each install must explicitly set every value (the base ships no model).
-  # The `example` comments are an illustrative qwen3.5:0.8b config.
-  #
-  # This base currently supports the ollama:// source shape only
-  # (MODEL_SOURCE=ollama://<library-tag>). hf:// GGUF support is not wired.
-  #
-  # --- Model identity ---
-  - envName: MODEL_SOURCE        # example: ollama://qwen3.5:0.8b
+  - envName: MODEL_SOURCE        # example: ollama://qwen3.5:2b
     required: true
     type: string
     editable: true
     applyOnChange: true
-  - envName: MODEL_NAME          # example: qwen3.5-0.8b
+    description: "Example: ollama://qwen3.5:2b. The Ollama library source to pull your model. Use `ollama://<model>:<tag>` format. Browse models at https://ollama.com/library."
+    regex: "^ollama://"
+  - envName: MODEL_NAME          # example: qwen3.5:2b
     required: true
     type: string
     editable: true
     applyOnChange: true
-  - envName: MODEL_MODE          # single-select: chat | embedding
+    description: "Example: qwen3.5:2b. The name of your model — use the string after `ollama://` in MODEL_SOURCE. This is also used as the OpenAI alias."
+  - envName: MODEL_MODE
     required: true
     type: string
     editable: true
     applyOnChange: true
     options:
-      - title: Chat
-        value: chat
-      - title: Embedding
-        value: embedding
-  - envName: MODEL_SUPPORTS      # multi-select capability groups; expanded to supports_* CSV in chart
-    required: true              # required:true so it shows in the install dialog;
-    default: ""                 # default:"" lets the user leave it empty (= no caps)
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
     type: string
     editable: true
     applyOnChange: true
-    multiSelect: true           # user ticks capability groups; values joined by splitter
-    splitter: ","               # llm-init.yaml expands each group token into supports_* keys
-    options:                    # coarse capability groups -> expanded one-to-many in chart
-      - title: Vision
-        value: vision
-      - title: Tools
-        value: tools
-      - title: Thinking
-        value: thinking
-      - title: None        # required-field fallback; expands to no supports_* keys
-        value: none
-  # --- Tuning ---
-  - envName: ENGINE_ARGS         # example: OLLAMA_NUM_CTX=8192; chart adds OLLAMA_KEEP_ALIVE=-1 when omitted
-    required: true              # required:true so it shows in the install dialog;
-    default: ""                 # default:"" lets the user leave it empty (chart injects OLLAMA_KEEP_ALIVE=-1)
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "The model capabilities. Pick what your model supports; check ollama.com/library for details. If no extra capabilities, pick None."
+  - envName: ENGINE_ARGS         # example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1
+    required: true
+    default: ""
     type: string
     editable: true
     applyOnChange: true
-  - envName: LOG_LEVEL           # single-select: debug | info | warn | error
+    description: "Example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1. Extra Ollama daemon options. Separate multiple key=value pairs with spaces. Chart defaults OLLAMA_KEEP_ALIVE=-1 when omitted."
+  - envName: LOG_LEVEL
     required: false
     type: string
     editable: true
     applyOnChange: true
     default: "debug"
     options:
-      - title: Debug
-        value: debug
-      - title: Info
-        value: info
-      - title: Warn
-        value: warn
-      - title: Error
-        value: error
-  # --- Ollama pod resources (fixed per clone template; rendered into ollama.yaml) ---
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
   - envName: OLLAMA_CPU_REQUEST    # default: 200m
     required: true
     default: "200m"
@@ -285,3 +215,5 @@ envs:
     type: string
     editable: false
     applyOnChange: false
+    description: "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. Use `0` on CPU. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"
