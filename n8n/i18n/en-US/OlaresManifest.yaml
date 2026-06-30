@@ -40,24 +40,24 @@ spec:
     - Custom error workflows
 
   upgradeDescription: |
-    Upgrade app version to 2.26.9
+    Upgrade n8n to 2.27.5 and enforce non-root deployment on Olares.
 
-    **Version Upgrade**
-    This upgrade brings n8n from 2.20.9 to 2.26.9.
+    **Version Upgrade (chart 1.0.19 → 1.1.0, app 2.26.9 → 2.27.5)**
 
     **Deployment Changes**
-    - Switched from the custom `beclab/n8nio-n8n` image to the official `n8nio/n8n:2.26.9` image
-    - Removed the forced root `securityContext`; the container now runs as the image default user (`node`, UID 1000)
-    - Data volume mount path changed from `/root/.n8n` to the official `/home/node/.n8n`
-    - Added an init container to `chown` appData to UID 1000 before startup
-    - n8n now listens on port 5678 internally; the Service still exposes port 80 and forwards to 5678 (non-root cannot bind privileged port 80)
-    - Added reverse-proxy environment variables (`N8N_PROTOCOL`, `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_PROXY_HOPS`, `N8N_SECURE_COOKIE`) for correct HTTPS URLs behind the Olares gateway
-    - Enabled `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS` for stricter config file permission checks
-    - Removed the `ollamaclient` provider permission request, `legacy_ollama` sysData access, and the ollama application dependency
-    - Raised resource limits for n8n 2.26 built-in task runners (memory request 1Gi -> 2Gi, limit 4Gi -> 6Gi; CPU limit 2 -> 3 cores)
+    - Image updated to official `n8nio/n8n:2.27.5`
+    - Enforce pod-level `runAsUser` / `runAsGroup` 1000 so the main container no longer runs as root on Olares
+    - Main container sets `runAsNonRoot: true`; init container still chowns appData as root before startup
+    - Data volume remains at `/home/node/.n8n`; Service still exposes port 80 and forwards to 5678
+    - HTTPS reverse-proxy env vars retained (`N8N_PROTOCOL`, `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_PROXY_HOPS`, `N8N_SECURE_COOKIE`)
+
+    **Key Changes Since 2.26.9**
+    - Instance AI builder, MCP OAuth2, Anthropic streaming, and execution-list performance improvements (2.27)
+    - 2.27.0 adds a database index on `execution_entity` (may take several minutes on large instances)
+    - 2.27.5 fixes startup failure from partially-installed community packages
 
     **Important Notes**
-    - Database migrations will run automatically on startup
+    - Database migrations run automatically on startup
     - Review workflow compatibility using the migration tool (Settings > Migration Report)
 
-    Check full release notes at: https://github.com/n8n-io/n8n/releases/tag/n8n%402.26.9
+    Check full release notes at: https://github.com/n8n-io/n8n/releases/tag/n8n%402.27.5

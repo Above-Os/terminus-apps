@@ -40,24 +40,24 @@ spec:
     - 定制错误处理流程
 
   upgradeDescription: |
-    升级应用版本至 2.26.9
+    升级 n8n 至 2.27.5，并在 Olares 上强制非 root 部署。
 
-    **版本升级**
-    本次升级将 n8n 从 2.20.9 更新至 2.26.9。
+    **版本升级（chart 1.0.19 → 1.1.0，应用 2.26.9 → 2.27.5）**
 
     **部署变更**
-    - 镜像由自定义 `beclab/n8nio-n8n` 切换为官方 `n8nio/n8n:2.26.9`
-    - 移除强制 root 的 `securityContext`，容器现以镜像默认用户（`node`，UID 1000）运行
-    - 数据卷挂载路径由 `/root/.n8n` 改为官方路径 `/home/node/.n8n`
-    - 新增 init 容器，启动前将 appData 目录 `chown` 为 UID 1000
-    - n8n 内部监听 5678 端口；Service 仍对外暴露 80 并转发至 5678（非 root 无法绑定特权端口 80）
-    - 新增反向代理相关环境变量（`N8N_PROTOCOL`、`WEBHOOK_URL`、`N8N_EDITOR_BASE_URL`、`N8N_PROXY_HOPS`、`N8N_SECURE_COOKIE`），确保经 Olares 网关以 HTTPS 访问时 URL 正确
-    - 启用 `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS`，加强配置文件权限校验
-    - 移除对 `ollamaclient` provider 的权限申请、`legacy_ollama` sysData 访问以及 ollama 应用依赖
-    - 为适配 n8n 2.26 内置 task runner，提升资源上限（内存 request 1Gi -> 2Gi，limit 4Gi -> 6Gi；CPU limit 2 -> 3 核）
+    - 镜像更新为官方 `n8nio/n8n:2.27.5`
+    - Pod 级强制 `runAsUser` / `runAsGroup` 1000，避免主容器在 Olares 上以 root 运行
+    - 主容器设置 `runAsNonRoot: true`；init 容器仍在启动前以 root chown appData
+    - 数据卷保持 `/home/node/.n8n`；Service 仍对外 80 转发至 5678
+    - 保留 HTTPS 反代环境变量（`N8N_PROTOCOL`、`WEBHOOK_URL`、`N8N_EDITOR_BASE_URL`、`N8N_PROXY_HOPS`、`N8N_SECURE_COOKIE`）
+
+    **自 2.26.9 起的主要变更**
+    - Instance AI Builder、MCP OAuth2、Anthropic 流式输出及执行列表性能改进（2.27）
+    - 2.27.0 为 `execution_entity` 添加数据库索引（大规模实例可能需要数分钟）
+    - 2.27.5 修复部分安装的社区包导致启动失败的问题
 
     **重要提示**
-    - 启动时将自动执行数据库迁移
+    - 启动时自动执行数据库迁移
     - 使用迁移工具检查工作流兼容性（设置 > 迁移报告）
 
-    完整发布说明请见：https://github.com/n8n-io/n8n/releases/tag/n8n%402.26.9
+    完整发布说明请见：https://github.com/n8n-io/n8n/releases/tag/n8n%402.27.5
