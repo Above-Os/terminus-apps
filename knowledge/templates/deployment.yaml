@@ -145,6 +145,24 @@ spec:
               value: 'http://localhost:40010'
             - name: BACKUP_PATH
               value: /backup/
+            # Absolute path the **platform** backup orchestrator uses to read
+            # the staged files reported in /knowledge/backup/status's
+            # entry_files / pg_files. Must match the in-pod path of the
+            # host backup dir from the **platform pod's** perspective —
+            # both pods mount the same hostPath, just under different
+            # in-container mountpoints. We point this at the same host
+            # path we use for our own pgbackup hostPath so platform pods
+            # that mount the host rootfs at the conventional location see
+            # the files at the path we report.
+            #
+            # Historical note: older knowledgebase builds had this hardcoded
+            # to `/olares/rootfs/middleware-backup/pg_backup/`, which broke
+            # the moment the platform changed its in-pod rootfs mountpoint
+            # from `/olares/rootfs` to `/rootfs`. Driving it from the same
+            # `userspace.appCache` value Olares injects everywhere keeps
+            # the two sides aligned automatically.
+            - name: BACKUP_EXTERNAL_PATH
+              value: '{{ .Values.userspace.appCache }}/pg_backup/'
           volumeMounts:
             - name: pgbackup
               mountPath: /backup
