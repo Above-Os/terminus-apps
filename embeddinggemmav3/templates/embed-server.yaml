@@ -33,7 +33,7 @@
 {{- $useOpenVino := $isIntelMode -}}
 {{- $useRocm := $isStrixHalo -}}
 {{- $cudaMajor := $gpuObj.Cuda | default 12 -}}
-{{- $embedTag := "v0.0.8" -}}
+{{- $embedTag := "v0.0.9" -}}
 {{- $embedImage := printf "docker.io/beclab/embed-server:%s-onnx-cuda12" $embedTag -}}
 {{- if $useOpenVino -}}
 {{- $embedImage = printf "docker.io/beclab/embed-server:%s-ov-intel" $embedTag -}}
@@ -147,6 +147,12 @@ spec:
             - name: HF_TOKEN
               value: "{{ $hfToken }}"
 {{- end }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: EMBED_SHARED_ENTRANCE_HOST
+              value: "sharedentrances-api"
           ports:
             - name: http
               containerPort: 8080
