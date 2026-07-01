@@ -32,3 +32,27 @@
 {{- end -}}
 {{- $args -}}
 {{- end -}}
+{{- /* Spark/GB10: detect from GPU.Type or node hardware (install-time .Values.nodes). */ -}}
+{{- define "llmbase.isGb10" -}}
+{{- $isGb10 := "false" -}}
+{{- if .Values.nodes -}}
+  {{- range $nodeIndex, $node := .Values.nodes -}}
+    {{- if eq $nodeIndex 0 -}}
+      {{- with $node -}}
+        {{- if .GPUS -}}
+          {{- range $gpuIndex, $gpu := .GPUS -}}
+            {{- if eq $gpuIndex 0 -}}
+              {{- with $gpu -}}
+                {{- if eq (upper .Model) "GB10" -}}
+                  {{- $isGb10 = "true" -}}
+                {{- end -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $isGb10 -}}
+{{- end -}}

@@ -43,8 +43,9 @@
 {{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
-{{- /* HF_ENDPOINT / HF_TOKEN come from the user's system HF account via
-       OlaresManifest valueFrom; empty -> huggingface.co with no auth. */ -}}
+{{- /* HF_ENDPOINT / HF_TOKEN: OlaresManifest valueFrom injects HF_ENDPOINT from
+       OLARES_SYSTEM_HUGGINGFACE_SERVICE and HF_TOKEN from the user HF account;
+       empty -> huggingface.co with no auth. */ -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- /* Per-release hostPath under App Common so concurrent clones and multi-node
@@ -112,7 +113,7 @@ spec:
           # v1.2.4 defaults to the stable LFS download path (hf_xet disabled
           # unless HF_ENABLE_XET=true); LFS streams each file to disk with a
           # bounded RAM footprint, avoiding the hf_xet OOM (huggingface_hub#3300).
-          image: docker.io/beclab/llm-init:v1.2.7
+          image: docker.io/beclab/llm-init:v1.2.8
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
