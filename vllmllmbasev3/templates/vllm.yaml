@@ -11,13 +11,15 @@
 {{- $memLimit := trim ($oe.VLLM_MEMORY_LIMIT | default "35Gi") -}}
 {{- $gpuType := .Values.gpu | default "" -}}
 {{- if not $gpuType -}}
-{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- $gpuType = (.Values.GPU | default dict).Type | default "nvidia" -}}
 {{- end -}}
 {{- $isCpuMode := eq $gpuType "cpu" -}}
-{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $gb10FromNodes := eq (include "llmbase.isGb10" .) "true" -}}
+{{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) -}}
-{{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
-       same value as pod memory ("<MiB>Mi"). CPU mode skips GPU inject and gpumem. */ -}}
+{{- /* nvidia.com/gpumem: nvidia -> explicit in chart; gb10 -> pod memory quota only,
+       gpu-inject sets matching requests/limits (chart gpumem on gb10 breaks K8s
+       validation: requests has gpumem but limits stripped by platform). */ -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.VLLM_REQUIRED_GPU_MEMORY | default "4096") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
@@ -74,7 +76,7 @@ spec:
             defaultMode: 0555
       containers:
         - name: vllm
-          image: docker.io/vllm/vllm-openai:v0.23.0-cu129
+          image: docker.io/vllm/vllm-openai:v0.24.0-cu129
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/vllm.sh"]
           env:
@@ -98,6 +100,12 @@ spec:
               value: "1000"
             - name: TZ
               value: Etc/UTC
+{{- if $unifiedMem }}
+            - name: VLLM_PATCH_SPARK_MEM_UTILS
+              value: "true"
+            - name: VLLM_SPARK_AUTO_GPU_UTIL
+              value: "false"
+{{- end }}
 {{- if $isCpuMode }}
             - name: CUDA_VISIBLE_DEVICES
               value: ""
@@ -128,11 +136,7 @@ spec:
               mountPath: /llm-init/wrappers
               readOnly: true
           resources:
-            # nvidia.com/gpumem is the per-instance GPU memory quota read by the
-            # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
-            # It's a non-overcommittable extended resource, so it must be in BOTH
-            # requests and limits with the same value. Dropped on gb10 (unified
-            # memory uses pod memory instead) and cpu (no GPU inject).
+            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory + gpu-inject.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
