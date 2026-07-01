@@ -75,7 +75,7 @@ spec:
             defaultMode: 0555
       containers:
         - name: sglang
-          image: docker.io/lmsysorg/sglang:v0.5.13.post1-cu130
+          image: docker.io/lmsysorg/sglang:v0.5.14
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/sglang.sh"]
           env:
@@ -91,6 +91,16 @@ spec:
               value: "{{ $engineArgs }}"
             - name: SGLANG_JIT_CACHE_ROOT
               value: /cache/sglang
+            # Without these, huggingface_hub defaults to ~/.cache/huggingface
+            # (root's home) instead of the shared hf-cache mount below, so
+            # SGLang can't see the model llm-init already downloaded and
+            # re-downloads it into the ephemeral container filesystem.
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: TRANSFORMERS_CACHE
+              value: /cache/hf/hub
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: PGID
