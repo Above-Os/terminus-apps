@@ -1,32 +1,52 @@
-olaresManifest.version: '0.11.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
-apiVersion: 'v2'
+apiVersion: 'v3'
 metadata:
   name: wise
+  appid: wise
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Your Digital Secret Garden
-  appid: wise
   title: Wise
-  version: '1.1.51'
+  version: '1.1.52'
   categories:
-  - Productivity_v112  
-  - Fun
+    - Productivity_v112
+    - Fun
+
+# Per-user app — every user installs their own frontend that talks to the
+# admin-installed shared backend (knowledge) over in-cluster DNS.
+# The Wise frontend image (TermiPass docker/wise/wise.conf) hardcodes the
+# FQDN `rss-svc.knowledge-shared:{3010,3100}`, so it resolves to the
+# knowledge namespace directly without a local Service in this chart.
+# No sharedEntrances: this app is not consumed by other v3 apps.
 entrances:
-- authLevel: internal
-  host: wise-svc
-  icon: https://app.cdn.olares.com/appstore/wise/icon.png
-  name: wiseclient
-  openMethod: window
-  port: 80
-  title: Wise
+  - name: wiseclient
+    port: 80
+    host: wise-svc
+    title: Wise
+    icon: https://app.cdn.olares.com/appstore/wise/icon.png
+    authLevel: internal
+    openMethod: window
+
+# Declares every workload's replica count (v3 schema). Keys MUST match the
+# rendered Deployment metadata.name and values.yaml workloads.<name>:
+#   wise — Wise frontend nginx Deployment (== appid / Release.Name)
+workloadReplicas:
+  wise: 1
+
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home
+
 spec:
   versionName: '1.9.4'
   featuredImage: https://app.cdn.olares.com/appstore/wise/1.webp
   promoteImage:
-  - https://app.cdn.olares.com/appstore/wise/1.webp
-  - https://app.cdn.olares.com/appstore/wise/2.webp
-  - https://app.cdn.olares.com/appstore/wise/3.webp
-  - https://app.cdn.olares.com/appstore/wise/4.webp
+    - https://app.cdn.olares.com/appstore/wise/1.webp
+    - https://app.cdn.olares.com/appstore/wise/2.webp
+    - https://app.cdn.olares.com/appstore/wise/3.webp
+    - https://app.cdn.olares.com/appstore/wise/4.webp
   fullDescription: |
     Wise is a modern knowledge management tool built for control and insight. Wise empowers you to collect diverse content from across the web and your devices. Crucially, it leverages locally-run AI to unearth valuable insights, freeing you from the filter bubbles and privacy compromises of big-platform algorithms.
 
@@ -39,7 +59,7 @@ spec:
     *All-in-One Content Capture:*
     - Click Once, Save Anything: Instantly capture web pages to read later.
     - Own Your Media: Automatically save YouTube videos, podcasts, and other multimedia directly to your device.
-    - Bring It All In: Directly upload local files (PDFs, EPUBs, videos, audio) to your Olares system.    
+    - Bring It All In: Directly upload local files (PDFs, EPUBs, videos, audio) to your Olares system.
 
     *Distraction-Free Reading*
     - Clean View: Extract pure content for a clean, focused reading experience.
@@ -55,91 +75,43 @@ spec:
     - Organize Effortlessly: Easily tag documents and add notes for simple yet powerful organization.
     - Filtered View: Customize your reading list
   upgradeDescription: |
-    upgrade to version 1.9.4
+    Migrated Wise to apiVersion v3. The shared backend has been split out
+    into the standalone v3 shared app `knowledge` (admin-installed once).
 
-    Important: please install the latest chrome extension(1.9.4) to use the latest version.
-
-    What's Changed
-    - Add more error handling for yt-dlp downloader.
-    - Improve the layout in detail page
-    - Fix many bugs
+    **What's Changed**
+    - **Architecture**: the wise client (frontend nginx) is now a per-user
+      v3 application; backend (knowledge + vectorcrawl + flaresolverr) is
+      installed once by the Olares Admin as the shared v3 app `knowledge`
+      and reached over in-cluster DNS.
+    - **Schema**: apiVersion v3, declared `workloadReplicas: { wise: 1 }`;
+      Deployment uses `{{ .Release.Name }}`.
+    - **Probes**: startup / liveness / readiness probes added on port 80.
 
   developer: Olares
   website: https://www.olares.com/
   submitter: Olares
   locale:
-  - en-US
-  - zh-CN
+    - en-US
+    - zh-CN
   doc: https://docs.olares.com/manual/olares/wise/
-  limitedCpu: 10
-  requiredCpu: 600m
+  requiredCpu: 50m
+  limitedCpu: 1
+  requiredMemory: 50Mi
+  limitedMemory: 300Mi
   requiredDisk: 50Mi
   limitedDisk: 500Gi
-  limitedMemory: 12Gi
-  requiredMemory: 800Mi
   supportArch:
-  - amd64
-  - arm64
-  subCharts:
-  - name: knowledge
-    shared: true
-  - name: wise  
-{{- if .Values.sysVersion }}
-  {{- if semverCompare "<1.12.3-0" (toString .Values.sysVersion) }}
-  runAsInternal: true
-  {{- else }}
-  {{- end }}
-{{- else }}
-{{- end }}
-permission:
-  appData: true
-  appCache: true
-  userData:
-  - Home
-middleware:
-  redis:
-    namespace: knowledge
-  postgres:
-    username: knowledge
-    databases:
-    - name: knowledge
-      extensions:
-      - pg_trgm
-      - btree_gin  
+    - amd64
+    - arm64
+
 options:
   apiTimeout: 0
   dependencies:
-  - name: olares
-    version: '>=1.12.3-0,<1.12.6'
-    type: system
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-  - name: ytdlp
-    type: application
-    version: '>=1.0.0'
-  - name: rssubscribe
-    type: application
-    version: '>=1.0.0'
-  - name: twitter
-    type: application
-    version: '>=1.0.0'       
-{{- else }}
-  - name: wise
-    type: application
-    version: '>=1.0.11'
-    mandatory: true
-{{- end }}    
-  appScope:
-{{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}    
-    clusterScoped: true
-  {{- if .Values.sysVersion }}
-    {{- if semverCompare "<1.12.3-0" (toString .Values.sysVersion) }}
-    systemService: true
-    {{- else }}
-    {{- end }}
-  {{- else }}
-  {{- end }}    
-    appRef:
-    - workflow.*
-{{- else }}
-    clusterScoped: false
-{{- end }}
+    - name: olares
+      type: system
+      version: '>=1.12.6-0'
+    # wise frontend is useless without the shared knowledge backend.
+    # Forces Olares to refuse install until the Admin has installed knowledge.
+    - name: knowledge
+      type: application
+      version: '>=1.1.5'
