@@ -1,0 +1,140 @@
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   creationTimestamp: null
+#   labels:
+#     io.kompose.service: firefox-claim0
+#   name: firefox-claim0
+#   namespace: {{ .Release.Namespace }}
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   resources:
+#     requests:
+#       storage: 100Mi
+# status: {}
+# ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert
+    kompose.version: 1.28.0 (c4137012e)
+  creationTimestamp: null
+  labels:
+    io.kompose.service: testappempty2
+  name: testappempty2
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: testappempty2
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert
+        kompose.version: 1.28.0 (c4137012e)
+      creationTimestamp: null
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: testappempty2
+    spec:
+      {{- $isOlaresOne := and .Values.deviceName (eq .Values.deviceName "Olares One") }}
+      {{- $homepage := "https://www.google.com" }}
+      {{- if and .Values.olaresEnv .Values.olaresEnv.FIREFOX_HOMEPAGE }}
+      {{- $homepage = .Values.olaresEnv.FIREFOX_HOMEPAGE }}
+      {{- end }}
+      containers:
+        - name: testappempty2
+          image: "docker.io/beclab/linuxserver-firefox:1151.0.1"
+          {{- if $isOlaresOne }}
+          securityContext:
+            privileged: true
+          {{- end }}
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+            - name: FIREFOX_CLI
+              value: {{ $homepage | quote }}
+            {{- if $isOlaresOne }}
+            - name: DRINODE
+              value: /dev/dri/renderD128
+            - name: DRI_NODE
+              value: /dev/dri/renderD128
+            {{- end }}
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "3"
+              memory: 6Gi
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+            - containerPort: 3001
+            - containerPort: 8082
+          volumeMounts:
+            - mountPath: /config
+              name: config
+            - mountPath: /home
+              name: userdata
+            - name: dshm
+              mountPath: /dev/shm
+            {{- if $isOlaresOne }}
+            - mountPath: /dev/dri
+              name: dev-dri
+            {{- end }}
+      restartPolicy: Always
+      volumes:
+        - name: config
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.appCache }}/testappempty2
+        - hostPath:
+            path: '{{ .Values.userspace.userData }}'
+            type: DirectoryOrCreate
+          name: userdata
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+        {{- if $isOlaresOne }}
+        - name: dev-dri
+          hostPath:
+            path: /dev/dri
+        {{- end }}
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kompose.cmd: kompose convert
+    kompose.version: 1.28.0 (c4137012e)
+  creationTimestamp: null
+  labels:
+    io.kompose.service: testappempty2
+  name: testappempty2
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: NodePort
+  ports:
+    - name: "3000"
+      port: 3000
+      targetPort: 3000
+    - name: "3001"
+      port: 3001
+      targetPort: 3001
+  selector:
+    io.kompose.service: testappempty2
+status:
+  loadBalancer: {}
