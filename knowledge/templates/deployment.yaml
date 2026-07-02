@@ -26,6 +26,7 @@
   regex doesn't match and we fall back to "olares.com" so the resulting
   env value is still a syntactically-valid URL.
 */ -}}
+{{ $dbbackup_rootpath := printf "%s%s" .Values.rootPath "/rootfs/middleware-backup" }}
 {{- $platformDomain := regexReplaceAll "^[^.]+\\." (toString .Values.user.zone) "" -}}
 {{- if not (contains "." $platformDomain) -}}
 {{-   $platformDomain = "olares.com" -}}
@@ -84,7 +85,7 @@ spec:
               value: {{ .Values.postgres.databases.knowledge }}
       containers:
         - name: knowledge
-          image: "beclab/knowledge-base-api:v1.0.1"
+          image: "beclab/knowledge-base-api:v1.0.2"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -145,24 +146,6 @@ spec:
               value: 'http://localhost:40010'
             - name: BACKUP_PATH
               value: /backup/
-            # Absolute path the **platform** backup orchestrator uses to read
-            # the staged files reported in /knowledge/backup/status's
-            # entry_files / pg_files. Must match the in-pod path of the
-            # host backup dir from the **platform pod's** perspective —
-            # both pods mount the same hostPath, just under different
-            # in-container mountpoints. We point this at the same host
-            # path we use for our own pgbackup hostPath so platform pods
-            # that mount the host rootfs at the conventional location see
-            # the files at the path we report.
-            #
-            # Historical note: older knowledgebase builds had this hardcoded
-            # to `/olares/rootfs/middleware-backup/pg_backup/`, which broke
-            # the moment the platform changed its in-pod rootfs mountpoint
-            # from `/olares/rootfs` to `/rootfs`. Driving it from the same
-            # `userspace.appCache` value Olares injects everywhere keeps
-            # the two sides aligned automatically.
-            - name: BACKUP_EXTERNAL_PATH
-              value: '{{ .Values.userspace.appCache }}/pg_backup/'
           volumeMounts:
             - name: pgbackup
               mountPath: /backup
@@ -202,7 +185,7 @@ spec:
               memory: 6Gi
 
         - name: vectorcrawl
-          image: "beclab/vectorcrawl:v1.0.1"
+          image: "beclab/vectorcrawl:v1.0.2"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -276,7 +259,7 @@ spec:
       volumes:
         - name: pgbackup
           hostPath:
-            path: '{{ .Values.userspace.appCache }}/pg_backup'
+            path: '{{ $dbbackup_rootpath }}/pg_backup'
             type: DirectoryOrCreate
         - name: domain-config
           configMap:
