@@ -40,6 +40,12 @@ data:
         OLLAMA_MODEL_CANDIDATES="${OLLAMA_MODEL_CANDIDATES:+${OLLAMA_MODEL_CANDIDATES} }${cand}"
     }
 
+    normalize_keep_alive() {
+        case "${OLLAMA_KEEP_ALIVE:-}" in
+            -1|'-1s$1') export OLLAMA_KEEP_ALIVE=-1s ;;
+        esac
+    }
+
     build_model_candidates() {
         OLLAMA_MODEL_CANDIDATES=""
         case "${MODEL_SOURCE:-}" in
@@ -85,7 +91,7 @@ data:
                 fi
                 ;;
         esac
-        # Load weights into VRAM; keep_alive inherits OLLAMA_KEEP_ALIVE=-1.
+        # Load weights into VRAM; keep_alive inherits OLLAMA_KEEP_ALIVE (default -1s).
         ollama run "$model" "Hello" >/dev/null 2>&1
     }
 
@@ -135,7 +141,8 @@ data:
 
     export OLLAMA_HOST="${OLLAMA_HOST:-0.0.0.0:11434}"
     engine_args_export_env
-    export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"
+    normalize_keep_alive
+    export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1s}"
     build_model_candidates
 
     log "starting ollama serve on $OLLAMA_HOST"
