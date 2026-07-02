@@ -18,15 +18,25 @@
 {{- end -}}
 {{- end -}}
 {{- /* ollamallmbasev3.engineArgs: merge clone ENGINE_ARGS with chart defaults.
-       OLLAMA_KEEP_ALIVE=-1 (pin model in VRAM) unless the user already set it.
-       Usage: {{ include "ollamallmbasev3.engineArgs" ($oe.ENGINE_ARGS | default "") }} */ -}}
+       OLLAMA_KEEP_ALIVE=-1 unless set; CPU mode adds OLLAMA_NUM_GPU=0 unless set.
+       Usage: {{ include "ollamallmbasev3.engineArgs" (dict "Args" ($oe.ENGINE_ARGS | default "") "IsCpu" $isCpuMode) }} */ -}}
 {{- define "ollamallmbasev3.engineArgs" -}}
-{{- $args := trim (. | default "") -}}
-{{- if contains "OLLAMA_KEEP_ALIVE" $args -}}
-{{- $args -}}
-{{- else if $args -}}
-{{- printf "%s OLLAMA_KEEP_ALIVE=-1" $args -}}
+{{- $in := . -}}
+{{- $args := trim ($in.Args | default "") -}}
+{{- $isCpu := $in.IsCpu | default false -}}
+{{- if not (contains "OLLAMA_KEEP_ALIVE" $args) -}}
+{{- if $args -}}
+{{- $args = printf "%s OLLAMA_KEEP_ALIVE=-1" $args -}}
 {{- else -}}
-OLLAMA_KEEP_ALIVE=-1
+{{- $args = "OLLAMA_KEEP_ALIVE=-1" -}}
 {{- end -}}
+{{- end -}}
+{{- if and $isCpu (not (contains "OLLAMA_NUM_GPU" $args)) -}}
+{{- if $args -}}
+{{- $args = printf "%s OLLAMA_NUM_GPU=0" $args -}}
+{{- else -}}
+{{- $args = "OLLAMA_NUM_GPU=0" -}}
+{{- end -}}
+{{- end -}}
+{{- $args -}}
 {{- end -}}

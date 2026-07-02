@@ -4,36 +4,28 @@ apiVersion: 'v3'
 metadata:
   name: vllmllmbasev3
   icon: https://app.cdn.olares.com/appstore/vllm/icon.png
-  description: "Generic vLLM + llm-init base. Pick any HF model at install via env."
+  description: "Generic vLLM engine base. Pick any HuggingFace Safetensors model at install via env."
   appid: vllmllmbasev3
-  title: vLLM LLM Base (llm-init)
-  version: '1.2.13'
+  title: vLLM Engine Base
+  version: '1.2.19'
   categories:
     - AI
 sharedEntrances:
   - name: vllmllmbasev3
     host: sharedentrances-api
     port: 0
-    title: vLLM LLM API
+    title: vLLM API
     invisible: true
     authLevel: internal
     icon: https://app.cdn.olares.com/appstore/vllm/icon.png
 entrances:
-  # Routes straight to the llm-init download/UI Service (download-svc:8090).
-  # The entrance NAME stays "vllmclient" so .Values.domain.vllmclient (used
-  # for APP_URL in vllm.yaml) keeps resolving after the nginx clientproxy was
-  # removed. llm-init serves its own same-origin dashboard (polls
-  # /api/progress; no websocket/SSE) so no proxy/CORS layer is needed.
   - name: vllmclient
     port: 8090
     host: download-svc
-    title: vLLM LLM
+    title: vLLM
     icon: https://app.cdn.olares.com/appstore/vllm/icon.png
     openMethod: window
     authLevel: internal
-# Declares every workload's replica count (flat map; keys = Deployment
-# metadata.name). Keys MUST match rendered workload names and values.yaml
-# workloads.<name>:
 #   vllmllmbasev3 — engine Deployment (== appid / Release.Name)
 #   llminit        — llm-init / entrance Deployment
 workloadReplicas:
@@ -41,100 +33,68 @@ workloadReplicas:
   llminit: 1
 spec:
   onlyAdmin: true
-  versionName: '0.23.0'
+  versionName: '0.24.0'
+  upgradeDescription: |
+    Bump vLLM engine to 0.24.0 and llm-init to v1.2.8.
+    Spark (nvidia-gb10): mem_utils patch; chart gpumem only on nvidia (gb10 uses pod memory + gpu-inject).
+    HF_ENDPOINT from OLARES_SYSTEM_HUGGINGFACE_SERVICE.
   fullDescription: |
-    **IMPORTANT NOTE**
-    This is a shared app and a generic *base*: it is NOT tied to any specific
-    model. The model to serve is chosen entirely at install time through
-    environment variables, so the same Helm chart can serve any Hugging Face
-    model that vLLM supports.
+    **IMPORTANT NOTE**  
+    This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
 
-    **HOW IT WORKS**
-    The llm-init sidecar downloads the configured HF model, writes a readiness
-    sentinel, and exposes an OpenAI-compatible `/v1/*` surface plus a unified
-    `/api/progress` + `/healthz` dashboard. The vLLM container waits for the
-    sentinel, then loads `--model` from `MODEL_NAME` (HF `owner/repo`, same repo
-    as `MODEL_SOURCE`). Both containers live in the SAME
-    Pod and share the model dir + sentinel.
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo>`. The HuggingFace source to download your model, for example `hf://Qwen/Qwen3.5-2B`. Use a repo that contains `.safetensors` weight files. Optionally append `--include <file>` or `--revision <sha>`.
+    - `MODEL_NAME`: `owner/repo`. The name of your model — use the string after `hf://` in `MODEL_SOURCE`, for example `Qwen/Qwen3.5-2B`. This is also used as the OpenAI alias and vLLM `--model`.
+    - `MODEL_MODE`: `chat` or `embedding`. Use `chat` for conversational models; for embedding, the chart auto-adds `--task embed`.
+    - `MODEL_SUPPORTS`: Model capability options (Vision / Tools / Thinking / None). Pick what your model supports.
+    - `ENGINE_ARGS`: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`. Extra vLLM CLI flags. Separate multiple `--key value` pairs with spaces. See https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`. Log level for the llm-init container.
+    - `VLLM_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed, enter `0` for CPU mode. On GPU modes (`nvidia`, `nvidia-gb10`), gpu-inject caps visible CUDA memory to this quota; tune `--gpu-memory-utilization` in ENGINE_ARGS against that budget.
+
+    **How It Works**
+    First, `llm-init` downloads your model and gets it ready, then vLLM starts serving the model when it's ready. Both containers run in the same Pod and share the model directory and readiness sentinel.
 
     **Stack**
-    - **vLLM** (`vllm/vllm-openai`, port 8000): GPU inference, OpenAI server.
-    - **llm-init** (`beclab/llm-init`, port 8090): HF download, OpenAI `/v1/*`,
-      progress UI; proxies the in-pod vLLM server.
+    - **vLLM** (port 8000): runs the model and serves API requests
+    - **llm-init** (port 8090): downloads the model, shows progress, and provides the OpenAI API, proxying to vLLM
 
-    **Model storage (App Common)**
-    HF models go to the **shared, cross-app** App Common store
-    `appCommon/huggingface`, mounted at the fixed container path `/cache/hf/hub`
-    (SSD on single-node, JuiceFS on multi-node). All HF-based apps share it for a
-    single unified view of downloaded models; the standard
-    `models--owner--repo/snapshots/<sha>/` layout dedups by digest. llm-init
-    writes the cache; the vLLM engine mounts it read-only.
+    **Accelerator modes**
+    | Mode           | Device            | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Set `VLLM_REQUIRED_GPU_MEMORY`; tune `--gpu-memory-utilization` in ENGINE_ARGS |
+    | `nvidia-gb10`  | GPU (Spark)       | Same as `nvidia`: set `VLLM_REQUIRED_GPU_MEMORY`; tune `--gpu-memory-utilization` in ENGINE_ARGS (no auto remapping) |
+    | `cpu`          | CPU only          | Chart injects `--device cpu`; disables GPU                           |
 
-    **Install-time parameters (set per model)**
-    - `MODEL_SOURCE` — `hf://<repo>` (optionally `--include <file>` / `--revision <sha>`).
-    - `MODEL_NAME` — HF `owner/repo` for vLLM `--model` and `--served-model-name`
-      (must match the repo in `MODEL_SOURCE`, e.g. `Qwen/Qwen3-0.6B`).
-    - `MODEL_MODE` — `chat` or `embedding`. For embedding, set `--task embed` in
-      `ENGINE_ARGS` yourself.
-    - `MODEL_SUPPORTS` — multi-select capability groups (Vision / Tools / Thinking /
-      Embedding); each expands to the `supports_*` CSV seed. Pick Embedding (or just
-      the chat caps) when the model advertises no extras — the field is required.
-    - `ENGINE_ARGS` — vLLM CLI flags, e.g. `--max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1` (empty for vLLM defaults).
-    - `LOG_LEVEL` — `debug | info | warn | error`.
-    - `HF_ENDPOINT` — HF mirror, e.g. `https://hf-mirror.com` (empty = huggingface.co).
-    - `HF_TOKEN` — HF access token for private/gated repos (empty if public).
-    - `VLLM_REQUIRED_GPU_MEMORY` — model memory quota (required at install;
-      fixed after install). Accepts `8Gi` / `8192` / `8192Mi`. NVIDIA: rendered
-      as a bare-MiB `nvidia.com/gpumem` integer; Spark: pod `memory`.
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
 
-    **NOTE ON RESOURCES**
-    - Manifest `accelerator` CPU/RAM/GPU use `-1` (auto): Olares derives them
-      from the rendered chart. `requiredDisk` / `limitedDisk` stay fixed.
-    - vLLM also honors `--gpu-memory-utilization` via `ENGINE_ARGS`.
+    **Resource Tips**
+    - CPU, RAM, and GPU auto-configure based on the chart; disk settings are fixed.
+    - vLLM model loading can take several minutes for large models. Keep the app Running until ready.
+    - For high-concurrency workloads, vLLM's PagedAttention delivers strong throughput; tune `--max-num-batched-tokens` and `--gpu-memory-utilization` in `ENGINE_ARGS`.
 
-  upgradeDescription: |
-    Generic vLLM + llm-init base (llm-init v1.2.6, vllm/vllm-openai:v0.23.0).
-    Loads any HF model; model identity, source and tuning are install-time env.
-    v1.2.13: bump llm-init to v1.2.6; trim fullDescription CPU/RAM param list.
-    v1.2.11: move sentinel/model_path to appCommon/llm-init-run/<release> (cross-node
-    shared); strengthen init-chown for HF .locks; use aboveos-busybox:1.37.0.
-    v1.2.9: restore sharedEntrances (sharedentrances-api) for cluster-internal OpenAI API access.
-    v1.2.5: bump llm-init to v1.2.4 — default to the stable LFS download path
-    (hf_xet disabled unless HF_ENABLE_XET=true) to avoid the hf_xet chunk-buffer
-    OOM on large sharded models (huggingface_hub#3300). No resource-value change.
-    v1.2.4: fix Helm render — the v1.2.3 gpumem comment used a Go-template comment
-    whose trim markers ({{- ... -}}) collapsed resources:/requests: onto one line;
-    switched to a plain YAML (#) comment. No resource-value change.
-    v1.2.3: set nvidia.com/gpumem on BOTH requests and limits (non-overcommittable
-    extended resource; the gpu-inject webhook / auto-gpumem template apps read it
-    from limits). gb10 unaffected (unified memory uses pod memory).
-    v1.2.2: raise llm-init download memory limit to 4Gi (hf_xet chunk buffering OOM, huggingface_hub#3300).
-    v1.2.1: fix nvidia.com/gpumem to a bare MiB integer (HAMi base unit MiB; a
-    Mi/Gi suffix was misread, e.g. 6144Mi -> 6442450944); accept 8Gi/8192/8192Mi.
-    MODEL_MODE=embedding now auto-adds --task embed (no ENGINE_ARGS needed).
-    LOG_LEVEL is optional and defaults to debug.
-    v1.2.0: version bump (no functional change).
-    Models live in the shared cross-app App Common store appCommon/huggingface.
-    v1.0.7: engine Deployment name {{ .Release.Name }} for allowMultipleInstall.
-    v1.0.6: raise shared engine MEMORY_LIMIT default to 35Gi.
-    v1.0.5: align resource envs with ollamallmbasev3 — gpumem Mi, accelerator -1,
-    VLLM_REQUIRED_GPU_MEMORY install prompt, CPU/RAM envs non-editable.
-
-  developer: beclab
-  website: https://github.com/beclab/llm-init
-  sourceCode: https://github.com/beclab/llm-init
+  developer: vLLM
+  website: https://vllm.ai/
+  sourceCode: https://github.com/vllm-project/vllm
   submitter: Olares
   locale:
     - en-US
     - zh-CN
   license:
-    - text: MIT
-      url: https://github.com/beclab/llm-init
+    - text: Apache-2.0
+      url: https://github.com/vllm-project/vllm/blob/main/LICENSE
 
   accelerator:
-    #   nvidia       — discrete GPU; VLLM_REQUIRED_GPU_MEMORY -> gpumem (Mi)
-    #   nvidia-gb10  — Spark unified memory; same env -> pod memory
-    # -1 = auto from rendered workloads; disk stays explicit.
+    #   cpu          — CPU-only inference; chart injects --device cpu, no GPU inject / gpumem
+    #   nvidia       — discrete GPU; VLLM_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; VLLM_REQUIRED_GPU_MEMORY -> gpumem
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
     - mode: nvidia
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -151,47 +111,37 @@ spec:
       limitedDisk: 500Gi
       limitedMemory: "-1"
       requiredMemory: "-1"
-
   supportArch:
     - amd64
     - arm64
 permission:
   appData: true
-  # HF models + sentinel/model_path live in the shared cross-app App Common store
-  # (appCommon/huggingface + appCommon/llm-init-run/<release>).
-  # No Home/* userData mount is needed.
-  appCommon: true   # access the shared Common directory
+  appCommon: true
 options:
   apiTimeout: 0
   LLMGatewaySupported: true
   allowMultipleInstall: true
   shared: true
-  # This is a generic base with no bundled model: there is no installable body,
-  # you create an instance (clone) and install that. Matches the base concept.
   templateOnly: true
   dependencies:
     - name: olares
       version: '>=1.12.6-0'
       type: system
 envs:
-  # Clone-configurable surface. Required entries with default:"" still show in
-  # the install dialog (Olares only renders required:true envs) but can be left
-  # empty. The `example` comments are an illustrative qwen3 HF config.
-  #
-  # vLLM loads Hugging Face models only: MODEL_SOURCE must be an hf:// source.
-  #
-  # --- Model identity ---
-  - envName: MODEL_SOURCE        # example: hf://Qwen/Qwen3-0.6B   (--include / --revision optional)
+  - envName: MODEL_SOURCE        # example: hf://Qwen/Qwen3.5-2B
     required: true
     type: string
     editable: true
     applyOnChange: true
-  - envName: MODEL_NAME          # example: Qwen/Qwen3-0.6B  (--model owner/repo)
+    description: "Example: hf://Qwen/Qwen3.5-2B. The HuggingFace source to download your model. Use a repo with `.safetensors` weights. Optionally append `--include <file>` or `--revision <sha>`."
+    regex: "^hf://"
+  - envName: MODEL_NAME          # example: Qwen/Qwen3.5-2B
     required: true
     type: string
     editable: true
     applyOnChange: true
-  - envName: MODEL_MODE          # single-select: chat | embedding
+    description: "Example: Qwen/Qwen3.5-2B. The name of your model — use the string after `hf://` in MODEL_SOURCE. This is also used as the OpenAI alias and vLLM `--model`."
+  - envName: MODEL_MODE
     required: true
     type: string
     editable: true
@@ -201,31 +151,32 @@ envs:
       value: chat
     - title: Embedding
       value: embedding
-  - envName: MODEL_SUPPORTS      # multi-select capability keys; joined CSV -> supports_* seed
-    required: true              # required:true so it shows in the install dialog;
-    default: ""                 # default:"" lets the user leave it empty (= no caps)
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
     type: string
     editable: true
     applyOnChange: true
-    multiSelect: true           # user ticks capability groups; values joined by splitter
-    splitter: ","               # llm-init.yaml expands each group token into supports_* keys
-    options:                    # coarse capability groups -> expanded one-to-many in chart
+    multiSelect: true
+    splitter: ","
+    options:
     - title: Vision
       value: vision
     - title: Tools
       value: tools
     - title: Thinking
       value: thinking
-    - title: Embedding          # required-field fallback; expands to no supports_* keys
-      value: embedding
-  # --- Tuning ---
-  - envName: ENGINE_ARGS         # vLLM CLI flags, e.g. --max-model-len 8192 --gpu-memory-utilization 0.9 --tensor-parallel-size 1
-    required: true              # required:true so it shows in the install dialog;
-    default: ""                 # default:"" lets the user leave it empty (= vLLM defaults)
+    - title: None
+      value: none
+    description: "The model capabilities. Pick what your model supports. If no extra capabilities, pick None."
+  - envName: ENGINE_ARGS         # stability-first example for quantized Ornith 9B on 24GB: --max-model-len 131072 --gpu-memory-utilization 0.92 --tensor-parallel-size 1 --max-num-batched-tokens 4096 --kv-cache-dtype fp8 --quantization compressed-tensors --language-model-only --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --trust-remote-code --enforce-eager
+    required: true
+    default: ""
     type: string
     editable: true
     applyOnChange: true
-  - envName: LOG_LEVEL           # single-select: debug | info | warn | error
+    description: "Flags only — do not prefix with ENGINE_ARGS=. Example: --max-model-len 131072 --gpu-memory-utilization 0.92 .... On Spark (nvidia-gb10), use the same style; the chart does not rewrite --gpu-memory-utilization (visible CUDA memory is capped by VLLM_REQUIRED_GPU_MEMORY via gpu-inject)."
+  - envName: LOG_LEVEL
     required: false
     type: string
     editable: true
@@ -240,24 +191,16 @@ envs:
       value: warn
     - title: Error
       value: error
-  # --- Hugging Face mirror / token: system-sourced, NOT install-dialog fields ---
-  # v3 forbids referencing OLARES_USER_* names inside chart template files. The
-  # sanctioned pattern: declare our OWN env names here and pull the system value
-  # in via valueFrom; the OLARES_USER_* name appears ONLY in valueFrom below, and
-  # templates reference .Values.olaresEnv.HF_ENDPOINT / .HF_TOKEN. No editable /
-  # default, so these are auto-populated from the user's system HF account and do
-  # NOT show in the install dialog. Empty (no HF account) -> huggingface.co, no auth.
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
     valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_SERVICE
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
   - envName: HF_TOKEN
     required: false
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
-  # --- vLLM container resources (fixed per clone; rendered into vllm.yaml) ---
   - envName: VLLM_CPU_REQUEST    # default: 200m
     required: true
     default: "200m"
@@ -282,8 +225,10 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: VLLM_REQUIRED_GPU_MEMORY  # 8Gi/8192/8192Mi -> bare-MiB gpumem; gb10: pod memory
+  - envName: VLLM_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
     required: true
     type: string
     editable: false
     applyOnChange: false
+    description: "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. Use `0` on CPU. On GPU modes, gpu-inject caps visible CUDA memory to this value."
+    regex: "^[0-9]+(Gi|Mi)?$"
