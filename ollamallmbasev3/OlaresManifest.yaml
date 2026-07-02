@@ -35,7 +35,7 @@ spec:
   onlyAdmin: true
   versionName: '0.31.1'
   upgradeDescription: |
-    Fix /v1/chat keep_alive 400 on Ollama 0.31+: OLLAMA_KEEP_ALIVE=-1s on daemon only (stripped from llm-init ENGINE_ARGS).
+    Fix /v1/chat keep_alive 400: OLLAMA_KEEP_ALIVE=-1 on ollama daemon only (stripped from llm-init).
   fullDescription: |
     **IMPORTANT NOTE**  
     This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
@@ -45,7 +45,7 @@ spec:
     - `MODEL_NAME`: `<model>:<tag>`. The name of your model — use the string after `ollama://` in `MODEL_SOURCE`, for example `qwen3.5:2b`. This is also used as the OpenAI alias.
     - `MODEL_MODE`: `chat` or `embedding`. Use `chat` for conversational models; use `embedding` for embedding models.
     - `MODEL_SUPPORTS`: Model capability options (Vision / Tools / Thinking / None). Pick what your model supports. Check the model page on ollama.com/library for capabilities.
-    - `ENGINE_ARGS`: `OLLAMA_KEEP_ALIVE=-1s OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1`. Extra Ollama **daemon** options (applied on the ollama pod). Separate multiple `key=value` pairs with spaces. If `OLLAMA_KEEP_ALIVE` is omitted, the chart defaults to `-1s` (keep model in VRAM). Use `-1s` not bare `-1`. This value is not forwarded to `/api/chat` by llm-init (avoids Ollama 0.31+ `missing unit in duration "-1"`). See https://github.com/ollama/ollama/blob/main/docs/faq.mdx.
+    - `ENGINE_ARGS`: `OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1`. Extra Ollama **daemon** options (ollama pod only). Separate multiple `key=value` pairs with spaces. If `OLLAMA_KEEP_ALIVE` is omitted, the chart defaults to `-1` (keep model in VRAM forever). This is **not** forwarded to `/api/chat` by llm-init (avoids OpenAI path 400). See https://github.com/ollama/ollama/blob/main/docs/faq.mdx.
     - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`. Log level for the llm-init container.
     - `OLLAMA_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed, enter `0` for CPU mode. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory.
 
@@ -166,13 +166,13 @@ envs:
     - title: None
       value: none
     description: "The model capabilities. Pick what your model supports; check ollama.com/library for details. If no extra capabilities, pick None."
-  - envName: ENGINE_ARGS         # example: OLLAMA_KEEP_ALIVE=-1s OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1
+  - envName: ENGINE_ARGS         # example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1
     required: true
     default: ""
     type: string
     editable: true
     applyOnChange: true
-    description: "Example: OLLAMA_KEEP_ALIVE=-1s OLLAMA_CONTEXT_LENGTH=65536 .... OLLAMA_KEEP_ALIVE is daemon-only (chart default -1s). Do not use bare -1."
+    description: "Example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 .... KEEP_ALIVE is ollama-daemon-only (chart default -1, forever in VRAM)."
   - envName: LOG_LEVEL
     required: false
     type: string
