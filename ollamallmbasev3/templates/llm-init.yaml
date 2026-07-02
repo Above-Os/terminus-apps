@@ -43,9 +43,8 @@
 {{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
 {{- end -}}
 {{- $isCpuMode := eq $gpuType "cpu" -}}
-{{- /* ENGINE_ARGS on llm-init omits OLLAMA_KEEP_ALIVE: llm-init forwards it as
-       keep_alive on /api/chat (bare "-1" breaks Ollama 0.31+). Daemon env is set
-       on the ollama pod via ollama.sh instead. */ -}}
+{{- /* User ENGINE_ARGS for llm-init: never OLLAMA_KEEP_ALIVE (see engineArgsForLlminit).
+       Empty when user leaves ENGINE_ARGS blank — keep_alive is ollama-daemon-only. */ -}}
 {{- $engineArgs := include "ollamallmbasev3.engineArgsForLlminit" (dict "Args" ($oe.ENGINE_ARGS | default "") "IsCpu" $isCpuMode) -}}
 ---
 # llm-init Pod (no GPU). Talks to the ollama daemon via the "ollama"

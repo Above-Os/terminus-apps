@@ -42,13 +42,23 @@
 {{- end -}}
 {{- $args -}}
 {{- end -}}
-{{- /* ollamallmbasev3.engineArgsForLlminit: daemon ENGINE_ARGS without
-       OLLAMA_KEEP_ALIVE. llm-init forwards it as keep_alive on /api/chat;
-       string "-1" breaks parsing and overrides daemon env. Omit on llm-init.
+{{- /* ollamallmbasev3.engineArgsForLlminit: user ENGINE_ARGS for llm-init only.
+       Never inject OLLAMA_KEEP_ALIVE (llm-init forwards it on /api/chat as "-1").
+       Strip if user set it; CPU mode adds OLLAMA_NUM_GPU=0 unless set.
        Usage: {{ include "ollamallmbasev3.engineArgsForLlminit" (dict "Args" ($oe.ENGINE_ARGS | default "") "IsCpu" $isCpuMode) }} */ -}}
 {{- define "ollamallmbasev3.engineArgsForLlminit" -}}
-{{- $args := include "ollamallmbasev3.engineArgs" . -}}
+{{- $in := . -}}
+{{- $args := trim ($in.Args | default "") -}}
+{{- $isCpu := $in.IsCpu | default false -}}
 {{- $args = regexReplaceAll ` ?OLLAMA_KEEP_ALIVE=[^ ]+` "" $args -}}
 {{- $args = regexReplaceAll ` +` " " $args -}}
-{{- trim $args -}}
+{{- $args = trim $args -}}
+{{- if and $isCpu (not (contains "OLLAMA_NUM_GPU" $args)) -}}
+{{- if $args -}}
+{{- $args = printf "%s OLLAMA_NUM_GPU=0" $args -}}
+{{- else -}}
+{{- $args = "OLLAMA_NUM_GPU=0" -}}
+{{- end -}}
+{{- end -}}
+{{- $args -}}
 {{- end -}}
