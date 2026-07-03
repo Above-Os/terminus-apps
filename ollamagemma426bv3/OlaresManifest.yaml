@@ -1,0 +1,191 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: ollamagemma426bv3
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  description: "Gemma 4 26B served with Ollama."
+  appid: ollamagemma426bv3
+  title: Gemma 4 26B (Ollama)
+  version: '1.0.0'
+  categories:
+    - AI
+sharedEntrances:
+  - name: ollamagemma426bv3
+    host: sharedentrances-api
+    port: 0
+    title: Gemma 4 26B
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+entrances:
+  - name: ollamaclient
+    port: 8090
+    host: download-svc
+    title: Gemma 4 26B
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+    authLevel: internal
+#   ollamagemma426bv3 — engine Deployment (== appid / Release.Name)
+#   llminit          — llm-init / entrance Deployment
+workloadReplicas:
+  ollamagemma426bv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: '0.31.1'
+  fullDescription: |
+    **Model Overview**
+    Gemma 4 26B served with Ollama, pulled from the Ollama library as `gemma4:26b`. The model ships ready to run and supports thinking, tools, and vision.
+
+    **Preset Configuration**
+    - Model: `gemma4:26b`
+    - Capabilities: thinking, tools, vision
+    - Engine args: `OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=131072 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1` (128K context, keep model in VRAM, flash attention, q8_0 KV cache)
+    - Required GPU memory: `23Gi`
+
+    **How It Works**
+    First, `llm-init` pulls the model from the Ollama library and gets it ready, then the Ollama daemon starts serving the model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **Ollama daemon** (port 11434): pulls and serves the model
+    - **llm-init** (port 8090): drives model pull, shows progress, and provides the OpenAI API, proxying to Ollama
+
+    **Accelerator modes**
+    | Mode           | Device            | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; Ollama uses GPU by default                   |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod                         |
+    | `cpu`          | CPU only          | Chart injects `OLLAMA_NUM_GPU=0`; disables GPU                       |
+
+    **Model Storage**
+    All pulled models are stored in a shared folder at `appCommon/ollama`. All Ollama-based apps share this location, so blobs deduplicate by digest across installs.
+
+    **Resource Tips**
+    - CPU, RAM, and GPU auto-configure based on the chart; disk settings are fixed.
+    - This model needs a GPU with at least 23Gi of memory.
+
+  developer: Ollama
+  website: https://ollama.com/
+  sourceCode: https://github.com/ollama/ollama
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/ollama/ollama#MIT-1-ov-file
+
+  accelerator:
+    #   cpu          — CPU-only inference; chart injects OLLAMA_NUM_GPU=0, no GPU inject / gpumem
+    #   nvidia       — discrete GPU; OLLAMA_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "ollama://gemma4:26b"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "gemma4:26b"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+  - envName: ENGINE_ARGS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=131072 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "info"
+  - envName: OLLAMA_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_REQUEST # default: 2Gi
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_LIMIT   # default: 35Gi
+    required: true
+    default: "35Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "23Gi"
+    description: "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. Use `0` on CPU. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"
