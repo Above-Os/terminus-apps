@@ -4,7 +4,6 @@
   Layout:
     - Deployment + wise-svc Service (the per-user entrance backend)
     - Per-user cross-NS resources kept from the v2 `wise/wise` sub-chart:
-        * workflow-archivelog-s3 Service in user-system-<username>
         * <username>:files-frontend-domain-wise ClusterRole + Binding
         * files-proxy ExternalName -> system-server.user-system-<username>
       These are valid in v3 per-user mode because `.Values.bfl.username`
@@ -39,7 +38,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: "beclab/wise:v1.9.4"
+          image: "beclab/wise:v1.11.1"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -89,34 +88,6 @@ spec:
       protocol: TCP
       port: 80
       targetPort: 80
-
----
-# Per-user resources preserved from the v2 wise/wise sub-chart -----------
-#
-# These three resources create a per-user side-band so the frontend can:
-#   - write workflow archive logs to the user's own s3 endpoint
-#     (workflow-archivelog-s3),
-#   - call cluster-wide files-service under this user's identity
-#     (ClusterRole + ClusterRoleBinding),
-#   - proxy file operations to the user's system-server (files-proxy
-#     ExternalName).
-# All three depend on `.Values.bfl.username` resolving to the installing
-# user, which is true for v3 per-user apps.
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: workflow-archivelog-s3
-  namespace: user-system-{{ .Values.bfl.username }}
-spec:
-  type: ClusterIP
-  selector:
-    app: systemserver
-  ports:
-    - protocol: TCP
-      name: fakes3
-      port: 4568
-      targetPort: 4568
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
