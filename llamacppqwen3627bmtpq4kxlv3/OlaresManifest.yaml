@@ -36,14 +36,14 @@ spec:
   versionName: 'b9870'
   fullDescription: |
     **Model Overview**
-    Qwen3.6-27B MTP with Unsloth Dynamic `UD-Q4_K_XL` quantization, served via llama.cpp with Multi-Token Prediction (MTP) draft decoding. Preset tuned for Telegram/OpenClaw agent workloads: thinking, tools, and vision.
+    Qwen3.6-27B MTP with Unsloth Dynamic `UD-Q4_K_XL` quantization, served via llama.cpp with Multi-Token Prediction (MTP) draft decoding. Preset tuned for Telegram/OpenClaw agent workloads: thinking and tools (text-only; no vision/mmproj — KoL A0–A11 suite did not exercise multimodal).
 
     **Why this preset**
     KoL benchmark (A0–A11 agent suite): **12/12 pass**, total **699s** — best all-around result so far among tested local stacks. Recommended default for Telegram/OpenClaw when pairing NemoClaw or similar agents with a shared llama.cpp backend.
 
     **Preset Configuration**
-    - Model: `unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL` (with `mmproj-F16.gguf` for vision)
-    - Capabilities: thinking, tools, vision
+    - Model: `unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL` (MTP repo; no mmproj — saves VRAM/disk on 24GB for 98K + MTP)
+    - Capabilities: thinking, tools
     - Engine args: `-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (98K context, MTP draft-2, full GPU offload, q8_0 KV cache)
     - Required GPU memory: `23Gi`
 
@@ -117,7 +117,6 @@ permission:
 options:
   apiTimeout: 0
   LLMGatewaySupported: true
-  allowMultipleInstall: true
   shared: true
   templateOnly: false
   dependencies:
@@ -131,7 +130,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "hf://unsloth/Qwen3.6-27B-MTP-GGUF --include Qwen3.6-27B-UD-Q4_K_XL.gguf,hf://unsloth/Qwen3.6-27B-MTP-GGUF --include mmproj-F16.gguf"
+    default: "hf://unsloth/Qwen3.6-27B-MTP-GGUF --include Qwen3.6-27B-UD-Q4_K_XL.gguf"
   - envName: MODEL_NAME
     required: true
     type: string
@@ -149,7 +148,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "thinking,tools,vision"
+    default: "thinking,tools"
   - envName: ENGINE_ARGS
     required: true
     type: string
