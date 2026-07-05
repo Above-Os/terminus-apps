@@ -1,0 +1,39 @@
+metadata:
+  description: "使用 llama.cpp 运行 Qwen3.6-27B MTP UD-Q4_K_XL（Telegram/OpenClaw 推荐默认）。"
+  title: Qwen3.6 27B MTP UD-XL (llama.cpp)
+
+spec:
+  fullDescription: |
+    **模型简介**
+    Qwen3.6-27B MTP，采用 Unsloth Dynamic `UD-Q4_K_XL` 量化，通过 llama.cpp 的 Multi-Token Prediction (MTP) 草稿解码提供服务。预设面向 Telegram/OpenClaw 代理场景：思考、工具调用与视觉能力。
+
+    **为何选用此预设**
+    KoL 基准测试（A0–A11 代理套件）：**12/12 通过**，总耗时 **699s** — 目前在本地栈中综合表现最佳。搭配 NemoClaw 等代理使用共享 llama.cpp 后端时，推荐作为 Telegram/OpenClaw 默认模型。
+
+    **预设配置**
+    - 模型：`unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL`（含 `mmproj-F16.gguf` 视觉投影）
+    - 能力：思考、工具、视觉
+    - 引擎参数：`-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2`（98K 上下文、MTP draft-2、全量 GPU 卸载、q8_0 KV 缓存）
+    - 所需显存：`23Gi`
+
+    **工作流程说明**
+    首先，`llm-init` 下载并准备模型，然后 `llama.cpp` 在模型就绪后启动服务。MTP（`--spec-type draft-mtp`）利用模型内置草稿头每步预测多个 token，提升解码吞吐。
+
+    **技术栈说明**
+    - **llama.cpp**：运行模型并通过 8081 端口提供 API 服务
+    - **llm-init**：下载模型，展示进度，并通过 8090 端口提供 OpenAI API，代理到 `llamacpp`
+
+    **加速器模式**
+    | 模式           | 设备             | 说明                                        |
+    |----------------|------------------|---------------------------------------------|
+    | `nvidia`       | GPU (CUDA)       | 使用 `23Gi` 显存，`-ngl all` 完全利用 GPU   |
+    | `nvidia-gb10`  | GPU (Spark)      | 类似上方，但显存由 pod 管理                  |
+    | `cpu`          | CPU              | 自动加入 `-ngl 0`，禁用 GPU 与 MTP 加速      |
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。
+
+    **资源建议**
+    - CPU、内存和 GPU 数量随图表自动配置，磁盘配额为固定
+    - 该模型需要至少 23Gi 显存的 GPU 才能完全加速
+    - MTP 会略增显存占用；若 98K 上下文 OOM，可降低 `-c`（如 `-c 65536`）

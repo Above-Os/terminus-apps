@@ -1,0 +1,206 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacppqwen3627bmtpq4kxlv3
+  icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
+  description: "Qwen3.6-27B MTP UD-Q4_K_XL served with llama.cpp (OpenClaw/Telegram default)."
+  appid: llamacppqwen3627bmtpq4kxlv3
+  title: Qwen3.6 27B MTP UD-XL (llama.cpp)
+  version: '1.0.0'
+  categories:
+    - AI
+sharedEntrances:
+  - name: llamacppqwen3627bmtpq4kxlv3
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3.6 27B MTP UD-XL API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: Qwen3.6 27B MTP UD-XL API
+    icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
+    openMethod: window
+    authLevel: internal
+#   llamacppqwen3627bmtpq4kxlv3 — engine Deployment (== appid / Release.Name)
+#   llminit                      — llm-init / entrance Deployment
+workloadReplicas:
+  llamacppqwen3627bmtpq4kxlv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'b9870'
+  fullDescription: |
+    **Model Overview**
+    Qwen3.6-27B MTP with Unsloth Dynamic `UD-Q4_K_XL` quantization, served via llama.cpp with Multi-Token Prediction (MTP) draft decoding. Preset tuned for Telegram/OpenClaw agent workloads: thinking, tools, and vision.
+
+    **Why this preset**
+    KoL benchmark (A0–A11 agent suite): **12/12 pass**, total **699s** — best all-around result so far among tested local stacks. Recommended default for Telegram/OpenClaw when pairing NemoClaw or similar agents with a shared llama.cpp backend.
+
+    **Preset Configuration**
+    - Model: `unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL` (with `mmproj-F16.gguf` for vision)
+    - Capabilities: thinking, tools, vision
+    - Engine args: `-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (98K context, MTP draft-2, full GPU offload, q8_0 KV cache)
+    - Required GPU memory: `23Gi`
+
+    **How It Works**
+    First, `llm-init` downloads the model and gets it ready, then `llama.cpp` starts serving when ready. MTP (`--spec-type draft-mtp`) uses the model's built-in draft head to predict multiple tokens per step for higher decode throughput.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda12-b9870`): Runs the model and serves API requests (port 8081)
+    - **llm-init** (`v1.2.8`): Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`
+
+    **Accelerator modes**
+    | Mode           | Device            | Details                                          |
+    |----------------|-------------------|--------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; `-ngl all` for full GPU  |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
+    | `cpu`          | CPU only          | Adds `-ngl 0`; disables GPU and MTP speedup      |
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
+
+    **Resource Tips**
+    - CPU, RAM, and GPU auto-configure based on the chart; disk settings are fixed.
+    - This model needs a GPU with at least 23Gi of memory for full acceleration.
+    - MTP adds modest VRAM overhead; if OOM at full 98K context, reduce `-c` (e.g. `-c 65536`).
+
+  developer: ggml-org
+  website: https://llama.app/
+  sourceCode: https://github.com/ggml-org/llama.cpp
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF
+
+  accelerator:
+    #   cpu          — CPU-only inference; chart injects -ngl 0, no GPU inject / gpumem
+    #   nvidia       — discrete GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    - mode: cpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://unsloth/Qwen3.6-27B-MTP-GGUF --include Qwen3.6-27B-UD-Q4_K_XL.gguf,hf://unsloth/Qwen3.6-27B-MTP-GGUF --include mmproj-F16.gguf"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+  - envName: ENGINE_ARGS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "info"
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST # default: 2Gi
+    required: true
+    default: "2Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT   # default: 35Gi
+    required: true
+    default: "35Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "23Gi"
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. Use `0` on CPU. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"
