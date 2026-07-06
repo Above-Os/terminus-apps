@@ -15,7 +15,7 @@
 # Build & push:
 #   docker buildx build \
 #     --platform linux/amd64,linux/arm64 \
-#     -t beclab/harveyff-codex-base:0.5.6 \
+#     -t beclab/harveyff-codex-base:0.5.7 \
 #     --push .
 # syntax=docker/dockerfile:1.7
 
