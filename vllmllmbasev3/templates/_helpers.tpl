@@ -17,21 +17,6 @@
 {{- int $g -}}
 {{- end -}}
 {{- end -}}
-{{- /* vllmllmbasev3.engineArgs: CPU mode auto-adds --device cpu unless already set.
-       Usage: {{ include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) }} */ -}}
-{{- define "vllmllmbasev3.engineArgs" -}}
-{{- $in := . -}}
-{{- $args := trim ($in.Args | default "") -}}
-{{- $isCpu := $in.IsCpu | default false -}}
-{{- if and $isCpu (not (contains "--device" $args)) -}}
-{{- if $args -}}
-{{- $args = printf "%s --device cpu" $args -}}
-{{- else -}}
-{{- $args = "--device cpu" -}}
-{{- end -}}
-{{- end -}}
-{{- $args -}}
-{{- end -}}
 {{- /* Spark/GB10: detect from GPU.Type or node hardware (install-time .Values.nodes). */ -}}
 {{- define "llmbase.isGb10" -}}
 {{- $isGb10 := "false" -}}
