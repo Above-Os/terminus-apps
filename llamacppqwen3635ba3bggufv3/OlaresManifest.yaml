@@ -36,7 +36,9 @@ spec:
   versionName: 'unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS'
   fullDescription: |
     **Model Overview**
-    Qwen3.6-35B-A3B served with llama.cpp, using the `UD-IQ4_XS` GGUF quantization from `unsloth/Qwen3.6-35B-A3B-GGUF`. This is a Mixture-of-Experts model (35B total parameters, ~3B active) that ships ready to run and supports thinking, tools, and vision.
+    Qwen3.6-35B-A3B is a Mixture-of-Experts vision-language model from the Qwen series (Alibaba), with 35B total parameters and about 3B active per token. It features a built-in vision encoder, very long context support, and ships with thinking, tool-calling, and vision capabilities. This app serves the `UD-IQ4_XS` GGUF build from `unsloth/Qwen3.6-35B-A3B-GGUF` via llama.cpp.
+
+    Well suited for multimodal workloads that need long context and vision understanding. The Qwen3.6 35B series natively supports extended context windows and includes a vision encoder for image-and-text tasks.
 
     **Preset Configuration**
     - Model: `unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS` (with `mmproj-F16.gguf` projector for vision)
@@ -44,19 +46,19 @@ spec:
     - Engine args: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0` (128K context, full GPU offload, KV cache quantized to q8_0)
     - Required GPU memory: `23Gi`
 
-    **How It Works**
-    First, `llm-init` downloads the model and gets it ready, then `llama.cpp` starts serving the model when it’s ready. These two parts run separately but share files and progress info.
-
-    **Stack**
-    - **llama.cpp**: Runs the model and serves API requests (port 8081)
-    - **llm-init**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
-
     **Accelerator modes**
     | Mode           | Device            | Details                                          |
     |----------------|-------------------|--------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; `-ngl all` for full GPU  |
     | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
     | `cpu`          | CPU only          | Adds `-ngl 0`; disables GPU                       |
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it’s ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp**: Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
 
     **Model Storage**
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.

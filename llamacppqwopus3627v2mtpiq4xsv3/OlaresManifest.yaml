@@ -36,7 +36,9 @@ spec:
   versionName: 'Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:IQ4_XS'
   fullDescription: |
     **Model Overview**
-    Qwopus3.6-27B-v2 with built-in Multi-Token Prediction (MTP) heads, `IQ4_XS` quantization from `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF`, served via llama.cpp draft decoding. Fine-tuned Qwen3.6-27B variant for coding, math, and agent workloads. Text-only preset (no vision/mmproj).
+    Qwopus3.6-27B-v2 is a community fine-tuned variant of Qwen3.6-27B with built-in Multi-Token Prediction (MTP) heads, published by Jackrong on Hugging Face. It supports thinking and tool calling and is optimized for structured logic output. This app serves the `IQ4_XS` GGUF build from `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF` via llama.cpp (text-only preset, no vision/mmproj).
+
+    Recommended when you need high token generation speed, or when your workload requires strict structured output and DevOps-style tasks. This community build is tuned for compact, well-formed outputs in those scenarios.
 
     **Preset Configuration**
     - Model: `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:IQ4_XS`
@@ -44,19 +46,19 @@ spec:
     - Engine args: `-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (98K context, MTP draft-2, full GPU offload, q8_0 KV cache)
     - Required GPU memory: `23Gi`
 
-    **How It Works**
-    First, `llm-init` downloads the model and gets it ready, then `llama.cpp` starts serving when ready. MTP (`--spec-type draft-mtp`) uses the model's built-in draft head (layer 64) to predict multiple tokens per step for higher decode throughput.
-
-    **Stack**
-    - **llama.cpp** (`server-cuda12-b9870`): Runs the model and serves API requests (port 8081)
-    - **llm-init** (`v1.2.8`): Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`
-
     **Accelerator modes**
     | Mode           | Device            | Details                                          |
     |----------------|-------------------|--------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; `-ngl all` for full GPU  |
     | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
     | `cpu`          | CPU only          | Adds `-ngl 0`; disables GPU and MTP speedup      |
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving when ready. MTP (`--spec-type draft-mtp`) uses the model's built-in draft head (layer 64) to predict multiple tokens per step for higher decode throughput.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda12-b9870`): Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`
 
     **Model Storage**
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
