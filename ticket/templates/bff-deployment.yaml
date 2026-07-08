@@ -34,8 +34,14 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "4200"
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: OLARESD_BASE_URL
-              value: "{{ .Values.olaresEnv.OLARESD_BASE_URL }}"
+              value: "http://$(HOST_IP):18088"
+{{/*            - name: OLARESD_BASE_URL*/}}
+{{/*              value: "{{ .Values.olaresEnv.OLARESD_BASE_URL }}"*/}}
             - name: TICKET_API_BASE_URL
               value: "{{ .Values.olaresEnv.SERVER_API_URL }}"
             - name: BFF_REQUIRE_AUTH
@@ -46,6 +52,8 @@ spec:
               value: "{{ .Values.bff.requestTimeoutMs }}"
             - name: BFF_UPLOAD_TIMEOUT_MS
               value: "{{ .Values.bff.uploadTimeoutMs }}"
+            - name: OLARES_ID
+              value: '{{ .Values.bfl.username }}@{{ trimPrefix (printf "%s." .Values.bfl.username) .Values.user.zone }}'
           ports:
             - containerPort: 4200
               protocol: TCP
