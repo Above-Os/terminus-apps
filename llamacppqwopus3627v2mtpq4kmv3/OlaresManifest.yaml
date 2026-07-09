@@ -7,7 +7,7 @@ metadata:
   description: "Qwopus3.6-27B-v2 MTP Q4_K_M served with llama.cpp."
   appid: llamacppqwopus3627v2mtpq4kmv3
   title: Qwopus3.6 MTP Q4_K_M
-  version: '1.0.1'
+  version: '1.0.3'
   categories:
     - AI
 sharedEntrances:
@@ -35,6 +35,8 @@ spec:
   onlyAdmin: true
   versionName: 'b9879'
   upgradeDescription: |
+    v1.0.3: allow editing ENGINE_ARGS.
+    v1.0.2: set context to 128K (`-c 131072`); lower nvidia requiredMemory to 12Gi.
     v1.0.1: update app icon to qwop.png.
     v1.0.0: Initial release with `Qwopus3.6-27B-v2-MTP-Q4_K_M.gguf` (replaces delisted IQ4_XS preset). llama.cpp b9879 + llm-init v1.2.9.
   fullDescription: |
@@ -44,7 +46,7 @@ spec:
     **Preset Configuration**
     - Model: `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M`
     - Capabilities: thinking, tools
-    - Engine args: `-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (98K context, MTP draft-2, full GPU offload, q8_0 KV cache)
+    - Engine args: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (128K context, MTP draft-2, full GPU offload, q8_0 KV cache)
     - Required GPU memory: `23Gi`
 
     **How It Works**
@@ -65,8 +67,8 @@ spec:
 
     **Resource Tips**
     - CPU, RAM, and GPU quotas are fixed for this preset; disk settings are fixed.
-    - `Q4_K_M` weights are ~16.8 GiB; this preset targets GPUs with at least 23Gi for 98K context + MTP.
-    - MTP adds modest VRAM overhead; if OOM at full 98K context, reduce `-c` (e.g. `-c 65536`).
+    - `Q4_K_M` weights are ~16.8 GiB; this preset targets GPUs with at least 23Gi for 128K context + MTP.
+    - MTP adds modest VRAM overhead; if OOM at full 128K context, reduce `-c` (e.g. `-c 65536`).
 
   developer: Jackrong
   website: https://huggingface.co/Jackrong/Qwopus3.6-27B-v2-MTP-GGUF
@@ -87,9 +89,9 @@ spec:
       requiredCpu: 500m
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # Host RAM covers GGUF load peak (~17Gi) + headroom; sum with llm-init (256Mi/4Gi)
+      # Engine 11Gi + llm-init 256Mi <= 12Gi admission floor
       limitedMemory: 39Gi
-      requiredMemory: 25Gi
+      requiredMemory: 12Gi
       requiredGPUMemory: 23Gi
       limitedGPUMemory: 24Gi
     - mode: nvidia-gb10
@@ -145,9 +147,10 @@ envs:
   - envName: ENGINE_ARGS
     required: true
     type: string
-    editable: false
-    applyOnChange: false
-    default: "-c 100352 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2"
+    editable: true
+    applyOnChange: true
+    default: "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2"
+    description: "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options; use `-ngl all` for full GPU offload. You can also use values like `LLAMA_ARG_*=val`."
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -170,9 +173,9 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: LLAMACPP_MEMORY_REQUEST # cover GGUF load peak; sum with llm-init <= requiredMemory
+  - envName: LLAMACPP_MEMORY_REQUEST # sum with llm-init 256Mi <= requiredMemory 12Gi
     required: true
-    default: "24Gi"
+    default: "11Gi"
     type: string
     editable: false
     applyOnChange: false
