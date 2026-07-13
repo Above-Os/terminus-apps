@@ -288,6 +288,13 @@ spec:
             - name: knowledge-nginx-config
               mountPath: /opt/bitnami/openresty/nginx/conf/nginx.conf
               subPath: nginx.conf
+            # Dedicated SA token for the /download provider-proxy call. The
+            # Pod's auto-mounted token is 0600 root-only, unreadable by the
+            # non-root nginx worker; this projected copy is world-readable
+            # (0644) and lets us pin the audience the provider-proxy expects.
+            - name: knowledge-sa-token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
 
       volumes:
         - name: knowledge-nginx-config
@@ -297,6 +304,15 @@ spec:
             items:
               - key: nginx.conf
                 path: nginx.conf
+        - name: knowledge-sa-token
+          projected:
+            # 0644 so the nginx worker (runs as non-root) can read it.
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  path: knowledge-token
+                  expirationSeconds: 3600
+                  audience: https://kubernetes.default.svc.cluster.local
         - name: pgbackup
           hostPath:
             path: '{{ $dbbackup_rootpath }}/pg_backup'

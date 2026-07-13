@@ -65,10 +65,18 @@ data:
             listen 3009;
 
             proxy_http_version 1.1;
+
+            # Base forwarding headers, inherited by `location /` (knowledge).
+            # NOTE: nginx stops inheriting the whole proxy_set_header set the
+            # moment a location declares its own — `location /download/` below
+            # therefore RE-declares the ones it needs.
             proxy_set_header Host              $host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            # Tenant identity for the knowledge backend; forwarded as-is from
+            # the incoming request (injected upstream by the BFL gateway).
+            proxy_set_header X-Bfl-User        $http_x_bfl_user;
 
             # Local health endpoint for the sidecar's k8s probes.
             location = /healthz {
@@ -84,7 +92,10 @@ data:
             # /download/api/user/preferences -> /api/user/preferences.
             location /download/ {
                 access_by_lua_block {
-                    local f = io.open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
+                    -- Read from the dedicated projected token (mode 0644, so the
+                    -- non-root nginx worker can read it) instead of the Pod's
+                    -- auto-mounted 0600 token which only root containers can read.
+                    local f = io.open("/var/run/secrets/tokens/knowledge-token", "r")
                     if f then
                         local tok = f:read("*a")
                         f:close()
@@ -93,7 +104,34 @@ data:
                             ngx.req.set_header("Authorization", "Bearer " .. tok)
                         end
                     end
+                    -- Pin the provider ref to a SINGLE clean value. The provider-
+                    -- proxy resolves which provider to authorize from
+                    -- X-Provider-Proxy / X-Forwarded-Host, and matches that ref
+                    -- against the backend:download-provider ClusterRole annotation.
+                    -- proxy_set_header does NOT reliably drop the gateway's inbound
+                    -- X-Forwarded-Host here (its external domain survives and our
+                    -- value gets comma-appended, which the proxy's url.Parse then
+                    -- rejects on the space -> 400). ngx.req.set_header replaces ALL
+                    -- existing instances, guaranteeing one clean value.
+                    ngx.req.set_header("X-Forwarded-Host", "download-provider-svc.os-framework:28080")
+                    ngx.req.set_header("X-Provider-Proxy", "download-provider-svc.os-framework:28080")
+                    -- The app is authenticated by the SA bearer token above; the
+                    -- browser's auth_token cookie must not leak downstream.
+                    ngx.req.clear_header("Cookie")
                 }
+
+                # Host MUST equal the provider's `provider-service-ref`
+                # (download-provider-svc.os-framework:28080) — the provider-proxy
+                # authorizer only evaluates the ClusterRole rules when the request
+                # Host matches that annotation; forwarding the browser Host yields
+                # a 403. Declaring proxy_set_header here also stops inheritance of
+                # the server-level set, so re-declare the ones we still need.
+                proxy_set_header Host              download-provider-svc.os-framework:28080;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header X-Bfl-User        $http_x_bfl_user;
+
                 proxy_pass http://download-provider-svc.os-framework:28080/;
                 proxy_read_timeout 300s;
                 proxy_send_timeout 300s;
