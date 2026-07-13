@@ -1,0 +1,132 @@
+{{- /*
+  wisev3 — per-user Wise frontend nginx.
+
+  Layout:
+    - Deployment + wise-svc Service (the per-user entrance backend)
+    - Per-user cross-NS resources kept from the v2 `wise/wise` sub-chart:
+        * <username>:files-frontend-domain-wise ClusterRole + Binding
+        * files-proxy ExternalName -> system-server.user-system-<username>
+      These are valid in v3 per-user mode because `.Values.bfl.username`
+      resolves to the actual installing user.
+
+  Backend connectivity: the Wise frontend image (TermiPass
+  docker/wise/wise.conf) hardcodes the FQDN
+  `rss-svc.knowledge-shared:{3010,3100}`, so the per-user pod resolves
+  cross-namespace to the admin-installed `knowledge` shared app directly.
+  No local Service alias is needed here.
+*/ -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: wise
+    applications.app.bytetrade.io/author: bytetrade.io
+spec:
+  replicas: {{ .Values.workloads.wisev3.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wise
+  template:
+    metadata:
+      labels:
+        app: wise
+    spec:
+      containers:
+        - name: frontend
+          image: "beclab/wise:v1.11.6"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          startupProbe:
+            tcpSocket:
+              port: 80
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 20Mi
+            limits:
+              cpu: "500m"
+              memory: 200Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wise-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: wise
+  ports:
+    - name: "frontend"
+      protocol: TCP
+      port: 80
+      targetPort: 80
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.bfl.username }}:files-frontend-domain-wise
+  annotations:
+    provider-registry-ref: {{ .Values.bfl.username }}/dbf4c379
+    provider-service-ref: files-service.os-framework:80
+rules:
+  - nonResourceURLs:
+      - "/api/*"
+      - "/upload/*"
+      - "/videos/*"
+    verbs: ["*"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: user:{{ .Values.bfl.username }}:files-frontend-domain-wise
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.bfl.username }}:files-frontend-domain-wise
+subjects:
+  - kind: User
+    name: '{{ .Values.bfl.username }}'
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: files-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ExternalName
+  externalName: system-server.user-system-{{ .Values.bfl.username }}.svc.cluster.local
+  ports:
+    - protocol: TCP
+      port: 28080
+      targetPort: 28080
