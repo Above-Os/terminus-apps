@@ -1,27 +1,29 @@
 {{- /*
-  Reverse-proxy config for the `nginx` sidecar in the knowledge Pod.
+  Full nginx.conf for the `nginx` sidecar in the knowledge Pod.
 
-  The sidecar is the new front door for the knowledge HTTP API (rss-svc:3010
-  now targets it instead of the knowledge container directly). It splits
-  traffic by path:
+  This REPLACES the bitnami-openresty image's default main config
+  (/opt/bitnami/openresty/nginx/conf/nginx.conf, which run.sh loads via
+  `openresty -c`). We ship a complete config instead of a server_blocks
+  snippet on purpose: the stock config also defines a `server { listen
+  8080; }`, and this sidecar shares the Pod's network namespace with the
+  vectorcrawl container which already binds 8080 — so keeping the default
+  would fail with "bind() to 0.0.0.0:8080 (address already in use)". Our
+  config only listens on 3009.
 
-    /download/*  -> download-server (manager) behind the os-framework
+  The sidecar is the front door for the knowledge HTTP API (rss-svc:3010
+  targets it) and splits traffic by path:
+    /download/*  -> download-server (manager) via the os-framework
                     download provider-proxy.
     everything   -> knowledge-base-api on 127.0.0.1:3010 (same Pod).
 
   Why the SA token is injected for /download:
-  `download-provider-svc.os-framework:28080` is a provider-proxy that gates
-  every request with a Kubernetes TokenReview + SubjectAccessReview. The
-  knowledge backend used to call it with a `knowledge-cluster-view`
-  ServiceAccount token (see the removed relay endpoints). Now that the
-  frontend calls /download directly, the sidecar attaches the same
-  identity: the Pod's auto-mounted SA token, which is the
-  `knowledge-cluster-view` SA bound to the `backend:download-provider`
-  ClusterRole in rbac.yaml. The tenant header `X-Bfl-User` is already
-  injected upstream by the BFL gateway and passes straight through.
-
-  The mounted server block is included by the bitnami-openresty image's
-  default nginx.conf (http{} { include server_blocks/*.conf; }).
+  `download-provider-svc.os-framework:28080` gates every request with a
+  Kubernetes TokenReview + SubjectAccessReview. The sidecar attaches the
+  Pod's auto-mounted `knowledge-cluster-view` SA token (bound to the
+  `backend:download-provider` ClusterRole in rbac.yaml) — the same
+  identity the knowledge backend used when it still proxied these routes.
+  The tenant header `X-Bfl-User` is injected upstream by the BFL gateway
+  and passes straight through.
 */ -}}
 apiVersion: v1
 kind: ConfigMap
@@ -32,57 +34,76 @@ metadata:
     app: knowledge
 data:
   nginx.conf: |
-    server {
-        listen 3009;
-        access_log /opt/bitnami/openresty/nginx/logs/access.log;
-        error_log  /opt/bitnami/openresty/nginx/logs/error.log;
+    worker_processes  auto;
+    error_log  "/opt/bitnami/openresty/nginx/logs/error.log";
+    pid        "/opt/bitnami/openresty/nginx/tmp/nginx.pid";
+
+    events {
+        worker_connections  1024;
+    }
+
+    http {
+        include       mime.types;
+        default_type  application/octet-stream;
+
+        client_body_temp_path  "/opt/bitnami/openresty/nginx/tmp/client_body" 1 2;
+        proxy_temp_path        "/opt/bitnami/openresty/nginx/tmp/proxy" 1 2;
+        fastcgi_temp_path      "/opt/bitnami/openresty/nginx/tmp/fastcgi" 1 2;
+        scgi_temp_path         "/opt/bitnami/openresty/nginx/tmp/scgi" 1 2;
+        uwsgi_temp_path        "/opt/bitnami/openresty/nginx/tmp/uwsgi" 1 2;
+
+        sendfile           on;
+        keepalive_timeout  65;
+        server_tokens      off;
 
         # wise uploads (opml / cookie batch / multipart attachments) can be a
         # few MB; mirror the backend's 100 MB cap so the proxy never truncates
         # a request the backend would otherwise accept.
         client_max_body_size 100m;
 
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        server {
+            listen 3009;
 
-        # Local health endpoint for the sidecar's k8s probes.
-        location = /healthz {
-            access_log off;
-            add_header Content-Type text/plain;
-            return 200 'ok\n';
-        }
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Anything under /download/ is served by the download-server (manager)
-        # behind the os-framework download provider-proxy — NOT by knowledge.
-        # The provider-proxy authenticates every call with a Kubernetes
-        # TokenReview, so attach the Pod's knowledge-cluster-view SA token
-        # (the same identity knowledge used when it still proxied these
-        # routes). The trailing slash on proxy_pass strips the /download
-        # prefix: /download/api/user/preferences -> /api/user/preferences.
-        location /download/ {
-            access_by_lua_block {
-                local f = io.open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
-                if f then
-                    local tok = f:read("*a")
-                    f:close()
-                    if tok then
-                        tok = tok:gsub("%s+$", "")
-                        ngx.req.set_header("Authorization", "Bearer " .. tok)
-                    end
-                end
+            # Local health endpoint for the sidecar's k8s probes.
+            location = /healthz {
+                access_log off;
+                add_header Content-Type text/plain;
+                return 200 'ok\n';
             }
-            proxy_pass http://download-provider-svc.os-framework:28080/;
-            proxy_read_timeout 300s;
-            proxy_send_timeout 300s;
-        }
 
-        # Everything else is the knowledge-base-api in the same Pod.
-        location / {
-            proxy_pass http://127.0.0.1:3010;
-            proxy_read_timeout 120s;
-            proxy_send_timeout 120s;
+            # /download/* -> download-server (manager) behind the os-framework
+            # download provider-proxy — NOT knowledge. Inject the Pod's
+            # knowledge-cluster-view SA token so the provider-proxy TokenReview
+            # passes. The trailing slash strips the /download prefix, e.g.
+            # /download/api/user/preferences -> /api/user/preferences.
+            location /download/ {
+                access_by_lua_block {
+                    local f = io.open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
+                    if f then
+                        local tok = f:read("*a")
+                        f:close()
+                        if tok then
+                            tok = tok:gsub("%s+$", "")
+                            ngx.req.set_header("Authorization", "Bearer " .. tok)
+                        end
+                    end
+                }
+                proxy_pass http://download-provider-svc.os-framework:28080/;
+                proxy_read_timeout 300s;
+                proxy_send_timeout 300s;
+            }
+
+            # Everything else is the knowledge-base-api in the same Pod.
+            location / {
+                proxy_pass http://127.0.0.1:3010;
+                proxy_read_timeout 120s;
+                proxy_send_timeout 120s;
+            }
         }
     }

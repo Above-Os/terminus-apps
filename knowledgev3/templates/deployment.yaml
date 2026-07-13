@@ -253,9 +253,6 @@ spec:
         - name: nginx
           image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
           imagePullPolicy: IfNotPresent
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
           ports:
             - containerPort: 3009
               name: proxy
@@ -285,11 +282,11 @@ spec:
               cpu: 500m
               memory: 256Mi
           volumeMounts:
+            # Replace the image's default main config (which also listens on
+            # 8080, colliding with vectorcrawl in this Pod). run.sh loads this
+            # exact path via `openresty -c`.
             - name: knowledge-nginx-config
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-            - name: knowledge-nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
+              mountPath: /opt/bitnami/openresty/nginx/conf/nginx.conf
               subPath: nginx.conf
 
       volumes:
