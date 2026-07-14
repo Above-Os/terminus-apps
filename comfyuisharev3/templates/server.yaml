@@ -202,6 +202,44 @@ spec:
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
+      # Seed user-editable extra_model_paths.yaml once. Never overwrite on upgrade.
+      - name: seed-extra-model-paths
+        image: {{ $image }}
+        command:
+          - sh
+          - '-c'
+          - |
+            set -e
+            USER_CFG=/root/ComfyUI/user/extra_model_paths.yaml
+            DEFAULT_CFG=/runner-config/extra_model_paths.yaml
+            if [ ! -d /root/ComfyUI ]; then
+              echo "seed-extra-model-paths: /root/ComfyUI missing, skip"
+              exit 0
+            fi
+            if [ -f "$USER_CFG" ]; then
+              echo "seed-extra-model-paths: already exists, skip ($USER_CFG)"
+              exit 0
+            fi
+            if [ ! -f "$DEFAULT_CFG" ]; then
+              echo "seed-extra-model-paths: default missing, skip ($DEFAULT_CFG)"
+              exit 0
+            fi
+            mkdir -p /root/ComfyUI/user
+            cp "$DEFAULT_CFG" "$USER_CFG"
+            echo "seed-extra-model-paths: seeded $USER_CFG from image default"
+        resources: {}
+        volumeMounts:
+          - name: appdata
+            mountPath: /root
+          - name: output
+            mountPath: /root/ComfyUI/output
+          - name: input
+            mountPath: /root/ComfyUI/input
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
       - name: migrate-models-appcommon
         image: {{ $image }}
         command:
@@ -409,8 +447,9 @@ spec:
               value: 'https://pypi.joinolares.cn/root/olares3/+simple/'
             - name: MODELS_DIR
               value: '/root/ComfyUI/models'
+            # User-editable copy under appData (seeded once by seed-extra-model-paths init)
             - name: EXTRA_MODEL_PATHS_CONFIG
-              value: /runner-config/extra_model_paths.yaml
+              value: /root/ComfyUI/user/extra_model_paths.yaml
             - name: SHARED_MODEL_HUB_PATH
               value: /mnt/olares-shared-model
             - name: PLUGIN_PATH
