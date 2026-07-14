@@ -56,6 +56,15 @@ data:
         keepalive_timeout  65;
         server_tokens      off;
 
+        # WebSocket upgrade plumbing for /download/api/download/ws (the
+        # per-user push channel). Regular requests have an empty Upgrade
+        # header and get Connection: close; a real WS handshake carries
+        # Upgrade: websocket and gets Connection: upgrade.
+        map $http_upgrade $connection_upgrade {
+            default upgrade;
+            ''      close;
+        }
+
         # wise uploads (opml / cookie batch / multipart attachments) can be a
         # few MB; mirror the backend's 100 MB cap so the proxy never truncates
         # a request the backend would otherwise accept.
@@ -131,6 +140,11 @@ data:
                 proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
                 proxy_set_header X-Bfl-User        $http_x_bfl_user;
+                # WebSocket support for /download/api/download/ws. Browsers can't
+                # set X-Bfl-User on a WS handshake, but the BFL gateway injects it
+                # on the upgrade request, so the header path above still applies.
+                proxy_set_header Upgrade           $http_upgrade;
+                proxy_set_header Connection        $connection_upgrade;
 
                 proxy_pass http://download-provider-svc.os-framework:28080/;
                 proxy_read_timeout 300s;
