@@ -7,7 +7,7 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Shared knowledge backend for Wise
   title: Knowledge Backend
-  version: '1.1.9'
+  version: '1.2.0'
   categories:
     - Productivity_v112
 
@@ -44,7 +44,8 @@ entrances:
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
 #   knowledgev3 — knowledge backend Deployment
-#               (== appid / Release.Name; 3 containers in one Pod)
+#               (== appid / Release.Name; 4 containers in one Pod:
+#                knowledge + vectorcrawl + flaresolverr + nginx sidecar)
 workloadReplicas:
   knowledgev3: 1
 
@@ -79,14 +80,29 @@ spec:
     - knowledge-base-api (port 3010): main HTTP API for the knowledge base.
     - vectorcrawl (port 8080): vector indexing and crawl worker.
     - flaresolverr: CAPTCHA / Cloudflare bypass companion (in-pod, localhost).
+    - nginx (port 3009): reverse-proxy front door. rss-svc targets it; it
+      serves /download/* from the download provider-proxy and everything
+      else from knowledge-base-api on 127.0.0.1:3010.
 
     **STORAGE & MIDDLEWARE**
     - Postgres database `knowledge` (extensions: pg_trgm, btree_gin).
     - Redis (shared via platform middleware, namespace: knowledge).
     - NATS subjects: rssubscribe_status, download_status, knowledge.*.
   upgradeDescription: |
-    Initial split-out of the legacy `wise/knowledge` sub-chart into a
-    standalone v3 shared application.
+    Adds an nginx (openresty) reverse-proxy sidecar (port 3009) in front of
+    the knowledge API. rss-svc now targets the sidecar, which routes
+    /download/* to the os-framework download provider-proxy (injecting the
+    knowledge-cluster-view SA token) and everything else to
+    knowledge-base-api on 127.0.0.1:3010. The sidecar ships a complete
+    nginx.conf (only listens on 3009) to avoid the image's default
+    `listen 8080` server colliding with vectorcrawl in the same Pod.
+    The /download hop also pins Host to the provider-service-ref and clears
+    the gateway's X-Forwarded-Host/X-Provider-Proxy so the provider-proxy
+    resolves the right provider (fixes the 403/400 on /download/*).
+
+    **Previously (v3 split-out)**
+    Split the legacy `wise/knowledge` sub-chart into a standalone v3 shared
+    application.
 
     **What's Changed**
     - **Architecture**: extracted from `wise/knowledge` sub-chart, now a
@@ -110,12 +126,13 @@ spec:
     - zh-CN
   doc: https://docs.olares.com/manual/olares/wise/
 
-  # Σ across the 3 application containers (initContainers excluded):
+  # Σ across the 4 application containers (initContainers excluded):
   #   knowledge      req 20m / 50Mi   lim 3500m / 6Gi
   #   vectorcrawl    req 20m / 50Mi   lim 1000m / 2Gi
   #   flaresolverr   req 20m / 60Mi   lim 2000m / 500Mi
+  #   nginx          req 10m / 32Mi   lim 500m  / 256Mi
   #   ------------------------------------------------
-  #   Σ              req 60m / 160Mi  lim 6500m / 8.5Gi
+  #   Σ              req 70m / 192Mi  lim 7000m / 8.75Gi
   requiredCpu: 100m
   limitedCpu: 7
   requiredMemory: 256Mi
