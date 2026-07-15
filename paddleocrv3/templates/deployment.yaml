@@ -1,4 +1,5 @@
 {{- $gpuType := include "paddleocrv3.gpuType" . -}}
+{{- $isBlackwell := include "paddleocrv3.isBlackwell" . -}}
 {{- $engineImage := include "paddleocrv3.engineImage" . -}}
 {{- $isNvidia := eq $gpuType "nvidia" -}}
 {{- $gpuMemMi := include "paddleocrv3.gpuMiB" (.Values.engine.gpuMemory | default "8Gi") -}}
@@ -10,10 +11,25 @@ metadata:
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: paddleocrv3
-  {{- if $isNvidia }}
   annotations:
+    {{- if $isNvidia }}
     applications.app.bytetrade.io/gpu-inject: "paddleocr"
-  {{- end }}
+    {{- end }}
+    debug.paddleocrv3/gpu-type: {{ $gpuType | quote }}
+    debug.paddleocrv3/is-blackwell: {{ $isBlackwell | quote }}
+    debug.paddleocrv3/engine-image: {{ $engineImage | quote }}
+    debug.paddleocrv3/nodes-len: {{ len (.Values.nodes | default (list)) | quote }}
+    {{- with (first (.Values.nodes | default (list))) }}
+    {{- $n := (toJson .) | fromJson }}
+    debug.paddleocrv3/node0-kind: {{ kindOf . | quote }}
+    debug.paddleocrv3/node0-json: {{ toJson . | quote }}
+    debug.paddleocrv3/node0-gpus-len: {{ len ((index $n "gpus") | default (list)) | quote }}
+    {{- with (first ((index $n "gpus") | default (list))) }}
+    debug.paddleocrv3/gpu0-arch: {{ (index . "arch") | quote }}
+    debug.paddleocrv3/gpu0-vendor: {{ (index . "vendor") | quote }}
+    debug.paddleocrv3/gpu0-modelname: {{ (index . "modelName") | quote }}
+    {{- end }}
+    {{- end }}
 spec:
   replicas: {{ .Values.workloads.paddleocrv3.replicaCount }}
   strategy:
