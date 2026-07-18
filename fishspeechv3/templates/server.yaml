@@ -304,17 +304,16 @@ spec:
             runAsUser: 0
       containers:
         - name: llm-init
-          # v1.2.4: nullengine download-only, default LFS (hf_xet off unless
+          # v1.3.1: nullengine download-only, default LFS (hf_xet off unless
           # HF_ENABLE_XET=true) for stable download memory.
-          image: docker.io/beclab/llm-init:v1.2.4
+          image: docker.io/beclab/llm-init:v1.3.1
           imagePullPolicy: IfNotPresent
           env:
             # Empty ENGINE_KIND selects download-only mode (nullengine).
             - name: ENGINE_KIND
               value: ""
-            # TEMPORARY (llm-init v1.2.4 image): download-only still requires
-            # MODEL_NAME + MODEL_MODE placeholders; the repo to fetch comes
-            # entirely from MODEL_SOURCE. Drop both once the make-optional patch ships.
+            # Download-only still requires MODEL_NAME + MODEL_MODE placeholders;
+            # the repo to fetch comes entirely from MODEL_SOURCE.
             - name: MODEL_NAME
               value: "fishaudio/s2-pro"
             - name: MODEL_MODE
@@ -329,7 +328,7 @@ spec:
             - name: HF_TOKEN
               value: "{{ $hfToken }}"
 {{- end }}
-            # Keep concurrency low; LFS is the image default in v1.2.4.
+            # Keep concurrency low; LFS is the image default.
             - name: MAX_CONCURRENT_DOWNLOADS
               value: "1"
             - name: RUN_DIR
