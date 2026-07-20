@@ -1,0 +1,441 @@
+{{- /* Generic audio engine. The image is clone-selected via ENGINE_IMAGE, so the
+       same chart serves any audio mode (STT/VAD/Diarize/TTS/...). An init
+       container blocks on llm-init /readyz (model downloaded into the shared HF
+       cache), then the engine starts with its native entrypoint and reads the
+       cached model via HF_HUB_CACHE. The engine provides the OpenAI-compatible
+       audio surface (e.g. /v1/audio/transcriptions) — llm-init does not. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- /* `mode` is the SINGLE model classifier shared across chart / gateway / market
+       (no separate "capability" axis). Engine + gateway routing both key off it. */ -}}
+{{- $modelMode := $oe.MODEL_MODE | default "stt" -}}
+{{- /* container-name-safe mode (no underscores) for naming + gpu-inject. */ -}}
+{{- $modeName := $modelMode | replace "_" "-" -}}
+{{- /* Engine container name = audio-<mode>-<model>, so the Olares Containers panel and
+       `kubectl get pod -o ...` show mode+model at a glance (the pod name is the
+       random Release.Name and can't carry this). Model is sanitized to a DNS label and
+       the whole name is capped at the 63-char k8s container-name limit. */ -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s-%s" $modeName $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- /* mode -> engine (image/port/health) is a BLACK BOX picked by us, not by
+       the user. The clone form only asks model + mode; the engine is derived
+       here. ENGINE_IMAGE / ENGINE_PORT / ENGINE_HEALTH_PATH stay as OPTIONAL post-
+       install overrides (empty = use the mapped value). All images are converted
+       (beclab/, no latest). */ -}}
+{{- /* Only stt/stt_stream/vad/diar/translate/embed/enhance/align/diar_stream are WIRED. Other modes
+       are reserved in the MODEL_MODE enum; selecting one points at an obviously-unbuilt placeholder
+       image (voice-engine-<mode>:notbuilt) so it's clear the engine isn't ready yet.
+       diar_stream (streaming/online speaker diarization) is the ONLY capability on a NEW, heavy
+       engine image (beclab/nvidia-nemo:26.02, ~23GB): NVIDIA Streaming Sortformer is a .nemo
+       checkpoint needing the NeMo runtime — it CANNOT ride the pyannote or vLLM images. It runs
+       /wrappers/diar_stream.py (a WebSocket at /v1/audio/diarize/stream emitting speaker-turn
+       segments WITH the model's NATIVE frame timestamps). This is the one image the
+       "reuse existing engines" rule doesn't cover.
+       CRITICAL PYTHON GOTCHA (cost one clone iteration, 2026-07-03): the NeMo 26.02 image
+       installs nemo_toolkit into a uv venv at /opt/venv (python 3.13), while the base image's
+       torch sits in the SYSTEM python 3.12 (/usr/local/.../dist-packages). The shared
+       $pydepsPrelude builds /pydeps/venv off `python3` = the 3.12 system python, whose
+       --system-site-packages exposes torch but NOT nemo (different interpreter) → the wrapper
+       died with `No module named 'nemo'` for 13h at 0/1. FIX: diar_stream's cmd bypasses the
+       pydeps venv and runs /opt/venv/bin/python directly (the ONLY interpreter with nemo), and
+       persists fastapi/uvicorn/websockets into /pydeps/diarstream-site via `pip/uv --target`
+       (added to PYTHONPATH, which we RESET to $SITE to drop the prelude's 3.12 venv path). Deps
+       install only if missing (import-probe) and only once (sentinel /pydeps/.diar_stream.ok) →
+       restart re-installs nothing.
+       stt_stream (streaming ASR) rides the SAME vLLM cu129 image as offline stt/align but runs
+       /wrappers/stream.py: Qwen3-ASR streaming lives in the qwen-asr[vllm] package's IN-PROCESS
+       API (Qwen3ASRModel.LLM + init/streaming/finish_streaming_transcribe) — `vllm serve` has NO
+       realtime/WS endpoint for it — so the wrapper loads that engine and bridges it to a
+       WebSocket (/v1/audio/stream). Plain qwen-asr is pip-installed on first load (NO [vllm]
+       extra — vLLM is already in this image; the extra re-resolves the whole vLLM stack and
+       hangs the container). NO new image.
+       An entry may carry "cmd": that mode REUSES an image but overrides the container
+       command to run an injected wrapper script (templates/wrappers.yaml), so we don't
+       build a new image. EVERY non-stt capability rides the ONE pyannote/torch image and
+       pip-installs any missing dep on first load (same on-demand pattern throughout).
+       PERSISTENCE: those first-load installs go into a hostPath venv at /pydeps (see the
+       $pydepsPrelude below), so ONLY the first install (or an uninstall+reinstall) downloads
+       — a POD RESTART reuses the venv and re-installs NOTHING (no network). This keeps the
+       on-demand model workable even on the `latest`-only base image and flaky networks.
+       vad runs /wrappers/vad.py: soundfile decode + the `silero-vad` pip pkg on the
+       image's torch (it bundles its own model). CPU-ok.
+       translate (text->text MT) runs /wrappers/translate.py, which is SELF-ADAPTIVE across
+       translation models: it picks an adapter FROM MODEL_NAME (m2m100 -> transformers/
+       sentencepiece, ISO codes, the MIT commercial default; nllb -> `tokenizers`, FLORES
+       codes, kept for opt-in CC-BY-NC use). All ride CPU ctranslate2 on THIS one image (GPU
+       ct2 is broken on Blackwell), so a new translation model needs NO engine/image change —
+       just its adapter in translate.py. External API is fixed to FLORES-200 for every model.
+       NOTE: whisper's stt mode also natively serves /v1/audio/translations
+       (speech->English); this `translate` mode is the dedicated text-MT class.
+       diar: the mapped image is the AMD64-only CUDA pyannote_fastapi (mirrored to
+       beclab); we override its API with /wrappers/diar.py and run on GPU. BACKLOG:
+       ARM64 (DGX Spark/GB10) + GPU needs a multi-arch image — the CPU-only multi-arch
+       ../voice-engine-pyannote (Dockerfile+build.sh) is the starting point; on arm64
+       set ENGINE_IMAGE override to that until a multi-arch GPU build exists.
+       embed (speaker/audio x-vector) ALSO reuses the SAME pyannote image with NO new
+       image: pyannote.audio's Model+Inference(window="whole") turns a clip into one
+       fixed-length vector. /wrappers/embed.py runs it; light enough for CPU (GPU=0).
+       enhance (denoise/speech enhancement) ALSO reuses the SAME pyannote image with NO
+       new image: it ships torch, and SpeechBrain is pip-installed on first load (same
+       on-demand pattern as embed's omegaconf). /wrappers/enhance.py runs a SpeechBrain
+       SpectralMaskEnhancement model (e.g. mtl-mimic-voicebank) at 16k mono; CPU-ok. */ -}}
+{{- /* TWO engine images only (the faster-whisper/ctranslate2 image was dropped: its
+       ct2 gets NO GPU on Blackwell sm_120, and it was the only thing pulling a 3rd
+       image): (1) vLLM cu129 serves stt natively; (2) the pyannote/torch image hosts
+       every non-LLM capability via a wrapper (diar/embed/enhance + vad via silero-vad,
+       + translate via CPU ctranslate2). All wrappers pip-install any missing deps on
+       first load (same pattern as embed's omegaconf / enhance's speechbrain).
+       align (forced alignment, Qwen3-ForcedAligner-0.6B) is the ONE non-stt capability
+       that ALSO rides the vLLM cu129 image (NOT pyannote): the Qwen3-ForcedAligner is a
+       brand-new model arch needing recent transformers + Blackwell-built (cu129) torch,
+       both of which the vLLM image already has. It runs /wrappers/align.py (the official
+       qwen-asr toolkit's end-to-end aligner — timestamps come from the model itself, no
+       external CTC/Viterbi), pip-installing qwen-asr on first load. Still NO new image. */ -}}
+{{- $engines := dict
+      "stt"  (dict "image" "docker.io/beclab/vllm-vllm-openai:v0.23.0-cu129" "port" "8000" "health" "/health" "cmd" "export HF_HUB_OFFLINE=1; [ -f /pydeps/.stt.ok ] || { python3 -m pip install -q librosa soundfile av && touch /pydeps/.stt.ok; }; exec vllm serve $MODEL_NAME --host 0.0.0.0 --port $WRAPPER_PORT --gpu-memory-utilization ${VLLM_GPU_UTIL:-0.45} --mm-processor-cache-gb ${VLLM_MM_CACHE_GB:-1}")
+      "stt_stream" (dict "image" "docker.io/beclab/vllm-vllm-openai:v0.23.0-cu129" "port" "8000" "health" "/healthz" "cmd" "export HF_HUB_OFFLINE=1; export PYTHONUNBUFFERED=1; [ -f /pydeps/.stt_stream.ok ] || { echo '[stream] first-run: installing qwen-asr + audio/ws deps into /pydeps (reusing image vLLM, NO [vllm] extra)'; python3 -m pip install -q --root-user-action=ignore --ignore-installed blinker || true; python3 -m pip install --root-user-action=ignore qwen-asr soundfile librosa av websockets && touch /pydeps/.stt_stream.ok; }; echo '[stream] launching stream.py'; exec $(command -v python3 || command -v python) /wrappers/stream.py")
+      "vad"  (dict "image" "docker.io/beclab/maximsachs-pyannote_fastapi:4.0.4" "port" "8000" "health" "/healthz" "cmd" "exec $(command -v python3 || command -v python) /wrappers/vad.py")
+      "diar" (dict "image" "docker.io/beclab/maximsachs-pyannote_fastapi:4.0.4" "port" "8000" "health" "/healthz" "cmd" "exec $(command -v python3 || command -v python) /wrappers/diar.py")
+      "translate" (dict "image" "docker.io/beclab/maximsachs-pyannote_fastapi:4.0.4" "port" "8000" "health" "/healthz" "cmd" "exec $(command -v python3 || command -v python) /wrappers/translate.py")
+      "embed" (dict "image" "docker.io/beclab/maximsachs-pyannote_fastapi:4.0.4" "port" "8000" "health" "/healthz" "cmd" "exec $(command -v python3 || command -v python) /wrappers/embed.py")
+      "enhance" (dict "image" "docker.io/beclab/maximsachs-pyannote_fastapi:4.0.4" "port" "8000" "health" "/healthz" "cmd" "exec $(command -v python3 || command -v python) /wrappers/enhance.py")
+      "align" (dict "image" "docker.io/beclab/vllm-vllm-openai:v0.23.0-cu129" "port" "8000" "health" "/healthz" "cmd" "export HF_HUB_OFFLINE=1; [ -f /pydeps/.align.ok ] || { python3 -m pip install -q --ignore-installed blinker || true; python3 -m pip install -q qwen-asr librosa soundfile av && touch /pydeps/.align.ok; }; exec $(command -v python3 || command -v python) /wrappers/align.py")
+      "diar_stream" (dict "image" "docker.io/beclab/nvidia-nemo:26.02" "port" "8000" "health" "/healthz" "cmd" "export HF_HUB_OFFLINE=1; export PYTHONUNBUFFERED=1; PY=/opt/venv/bin/python; [ -x $PY ] || PY=$(command -v python3 || command -v python); SITE=/pydeps/diarstream-site; mkdir -p $SITE; export PYTHONPATH=$SITE; [ -f /pydeps/.diar_stream.ok ] || { if $PY -c 'import fastapi,uvicorn,websockets' 2>/dev/null; then echo '[diar_stream] fastapi/uvicorn/websockets already present in image venv'; else echo '[diar_stream] first-run: installing fastapi/uvicorn/websockets into /pydeps/diarstream-site (python=/opt/venv, the interpreter that has nemo)'; { command -v uv >/dev/null 2>&1 && uv pip install --python $PY --target $SITE fastapi uvicorn websockets; } || $PY -m pip install --root-user-action=ignore --target $SITE fastapi uvicorn websockets || { $PY -m ensurepip --upgrade && $PY -m pip install --root-user-action=ignore --target $SITE fastapi uvicorn websockets; } || echo '[diar_stream] WARN dep install failed'; fi; touch /pydeps/.diar_stream.ok; }; echo '[diar_stream] launching diar_stream.py'; exec $PY /wrappers/diar_stream.py") -}}
+{{- $sel := index $engines $modelMode -}}
+{{- if not $sel -}}
+{{- $sel = dict "image" (printf "docker.io/beclab/voice-engine-%s:notbuilt" $modelMode) "port" "8000" "health" "/healthz" -}}
+{{- end -}}
+{{- /* MODEL_ENGINE = "same model-type, different OFFICIAL engine". Empty => the mode's
+       default engine above (byte-identical back-compat for stt/vad/diar/...). A named
+       value selects from $engineAlts, each a DIFFERENT official engine for the SAME mode.
+       This is the one-chart / one-mode / multiple-engines axis the boss flagged.
+       stt: default = Whisper on vLLM (vllm serve openai/whisper-large-v3, native
+            /v1/audio/transcriptions + verbose_json);
+            MODEL_ENGINE=qwen3-asr = Qwen3-ASR (0.6B/1.7B) on the OFFICIAL vLLM engine
+            image (vllm/vllm-openai v0.23.0-cu129, mirrored to beclab; native Qwen3-ASR
+            batch + realtime support). cu129 (CUDA 12.9) is the variant the cluster's
+            RTX 5090 (Blackwell) driver runs; the plain v0.23.0 is cu130 and risks a
+            too-new-CUDA mismatch. `vllm serve <model>` NATIVELY exposes the SAME
+            /v1/audio/transcriptions contract, so the gateway stt route + clients don't
+            change and NO wrapper is needed. The model is read from the shared HF cache
+            (HF_HUB_OFFLINE=1); librosa/soundfile (audio extras absent from the base image)
+            are pip-installed at startup, same on-demand pattern as the other engines. We
+            use vllm-openai instead of qwenllm/qwen3-asr because the latter ships as a
+            single-arch manifest the beclab image mirror rejects; vllm-openai is a
+            multi-arch index and mirrors cleanly (and is reusable for other vLLM models).
+            Each alt is keyed by engine id; it is the cloner's job to pick an engine
+            compatible with the chosen mode. */ -}}
+{{- $engineSel := $oe.MODEL_ENGINE | default "" -}}
+{{- /* AUTO-SELECT the stt engine FROM THE MODEL NAME (MODEL_ENGINE is NOT a clone-form field —
+       users only type MODEL_NAME). This is correctness, not convenience: the engine must match
+       the model FORMAT. A CTranslate2 repo (Systran/faster-whisper-*) can ONLY load on
+       faster-whisper; a transformers Whisper repo (openai/whisper-*) loads on vLLM; Qwen3-ASR
+       has its own vLLM path. So: name says qwen -> qwen3-asr; name is a CT2/Systran whisper ->
+       faster-whisper; otherwise -> "" = default Whisper-on-vLLM. An explicit MODEL_ENGINE
+       (advanced CLI override) still wins. Only stt has alternates; other modes ignore this. */ -}}
+{{- if and (not $engineSel) (eq $modelMode "stt") -}}
+{{- $mn := lower $modelName -}}
+{{- if contains "qwen" $mn -}}
+{{- $engineSel = "qwen3-asr" -}}
+{{- else if or (contains "faster-whisper" $mn) (contains "ctranslate2" $mn) (hasPrefix "systran/" $mn) -}}
+{{- $engineSel = "faster-whisper" -}}
+{{- end -}}
+{{- end -}}
+{{- /* qwen3-asr: --gpu-memory-utilization is read from $VLLM_GPU_UTIL (computed
+       below from the HAMI gpumem quota vs the physical card; falls back to 0.45).
+       vLLM sees the FULL physical GPU even though HAMI enforces the smaller quota,
+       so a fixed 0.8 sizes the KV cache to the whole card and OOM-kills on the first
+       inference — the value MUST be scaled to the quota. */ -}}
+{{- /* The DEFAULT stt engine is already Whisper-on-vLLM (openai/whisper-large-v3 served
+       by `vllm serve`, native /v1/audio/transcriptions + verbose_json) — chosen because
+       faster-whisper/ctranslate2 gets NO GPU on Blackwell sm_120 (cuBLAS has no sm_120
+       kernels → float16 silently runs CPU-speed). qwen3-asr is the only ALT: same vLLM
+       cu129 image, but with --max-model-len (Qwen3-ASR is a decoder LLM); Whisper omits
+       it (small-window encoder-decoder, max_model_len 448, vLLM sets it automatically). */ -}}
+{{- /* faster-whisper alt: vLLM's Whisper is autoregressive (one CUDA sync per token), which
+       the olares time-sliced vGPU lock throttles ~10x. faster-whisper (ctranslate2) issues
+       FEW CUDA calls/sec, so it stays fast UNDER time-slicing (proven by the harveyff
+       Whisper-WebUI on the same Blackwell card). We take ONLY that image's Blackwell-built
+       ctranslate2/faster_whisper and run our own /wrappers/stt_fw.py (NOT the WebUI app); it
+       serves the SAME OpenAI STT contract (/v1/audio/transcriptions + /translations +
+       /v1/models + /health) so the gateway and Demo are unchanged. MODEL_NAME at clone time
+       must be a CT2 whisper repo, e.g. Systran/faster-whisper-large-v3. fastapi/uvicorn are
+       pip-installed if missing WITHOUT --deps so the image's ctranslate2 is never replaced. */ -}}
+{{- $engineAlts := dict
+      "qwen3-asr" (dict "image" "docker.io/beclab/vllm-vllm-openai:v0.23.0-cu129" "port" "8000" "health" "/health" "cmd" "export HF_HUB_OFFLINE=1; [ -f /pydeps/.stt.ok ] || { python3 -m pip install -q librosa soundfile av && touch /pydeps/.stt.ok; }; exec vllm serve $MODEL_NAME --host 0.0.0.0 --port $WRAPPER_PORT --gpu-memory-utilization ${VLLM_GPU_UTIL:-0.45} --max-model-len ${VLLM_MAX_LEN:-32768} --mm-processor-cache-gb ${VLLM_MM_CACHE_GB:-1}")
+      "faster-whisper" (dict "image" "docker.io/beclab/harveyff-whisper-webui:v1.0.7" "port" "8000" "health" "/health" "cmd" "export HF_HUB_OFFLINE=1; [ -f /pydeps/.fw.ok ] || { python3 -m pip install -q fastapi uvicorn && touch /pydeps/.fw.ok; }; exec $(command -v python3 || command -v python) /wrappers/stt_fw.py") -}}
+{{- if $engineSel -}}
+{{- $alt := index $engineAlts $engineSel -}}
+{{- if $alt -}}{{- $sel = $alt -}}{{- end -}}
+{{- end -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (index $sel "image") -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default (index $sel "port")) -}}
+{{- $healthPath := $oe.ENGINE_HEALTH_PATH | default (index $sel "health") -}}
+{{- $engineCmd := index $sel "cmd" | default "" -}}
+{{- /* PERSISTENT-DEPS PRELUDE (prepended to every engine cmd). Any pip-installed extra
+       (qwen-asr, librosa, silero-vad, speechbrain, ctranslate2, fastapi, ...) is installed
+       into a hostPath venv at /pydeps (appData/pydeps) instead of the ephemeral container FS,
+       so a POD RESTART reuses it and NEVER re-installs (no network hit — critical for the
+       `latest`-only base image + flaky-network users). --system-site-packages keeps the
+       image's own torch/vLLM/CUDA build (no heavy re-pull); only the missing extras land in
+       the venv. Prepending the venv bin to PATH makes the UNCHANGED cmds transparently use it:
+       `python3`/`pip` resolve to the venv (installs persist + wrapper `try import` succeeds on
+       restart), while `vllm` (a system console script, absent from the venv bin) still runs the
+       image's build with the venv's audio extras visible via PYTHONPATH. If venv creation fails
+       we fall back to ephemeral system installs (no worse than before). Per-mode `.ok` sentinels
+       (below) let cmd-level pip skip entirely on restart. */ -}}
+{{- /* SELF-HEALING venv: some base images (e.g. harveyff-whisper-webui) create a
+       `python -m venv` WITHOUT a usable pip (no bundled ensurepip / Debian dist-packages
+       pip not on the venv path). If we blindly prepend that pip-less venv to PATH, the
+       cmd's `pip install ...` dies with `No module named pip` and the wrapper crashes
+       (this broke the offline faster-whisper STT engine). So: only ADOPT the venv once we
+       confirm `pip` works in it — bootstrapping via `ensurepip` if missing; if pip STILL
+       can't be had, DON'T switch to the venv, fall back to the image's system python
+       (which has a working pip; deps install ephemerally per restart — fine for the tiny
+       fastapi/uvicorn set). Healthy images (cu129/pyannote/nemo) keep the venv exactly as
+       before. This also REPAIRS an already-broken /pydeps/venv on restart (ensurepip). */ -}}
+{{- $pydepsPrelude := "mkdir -p /pydeps; VENV=/pydeps/venv; if [ ! -x $VENV/bin/python ]; then echo '[pydeps] creating persistent venv (first run)'; python3 -m venv --system-site-packages $VENV || echo '[pydeps] WARN: venv unavailable, using ephemeral system installs'; fi; if [ -x $VENV/bin/python ]; then $VENV/bin/python -m pip --version >/dev/null 2>&1 || { echo '[pydeps] venv has no pip; bootstrapping via ensurepip'; $VENV/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true; }; if $VENV/bin/python -m pip --version >/dev/null 2>&1; then export PATH=$VENV/bin:$PATH; export PYTHONPATH=$(ls -d $VENV/lib/python*/site-packages 2>/dev/null | head -n1):${PYTHONPATH:-}; else echo '[pydeps] venv pip unavailable (ensurepip missing in image); using system python'; fi; fi;" -}}
+{{- /* WAIT-FOR-MODEL, moved from a blocking initContainer INTO the engine container
+       (mirrors llamacppllmbasev3's llamacpp.sh). Why: an initContainer keeps the
+       engine pod in Init:0/1 for the WHOLE download, so the pod never turns Ready →
+       the app never reaches "running" → the entrance (llm-init's progress dashboard)
+       is unreachable and the market install times out to "暂停". By waiting inside the
+       main container instead — and dropping the readinessProbe (llamacpp has none) —
+       the pod is Ready the instant it starts, so the app is "running" in seconds and
+       users can watch the download progress on the llm-init dashboard, exactly like
+       llamacpp. The engine process only execs after the sentinel appears; llm-init
+       still gates /v1/* with its own NotReadyGuard (503) until the engine is alive.
+       No double quotes (kept inline-JSON-safe like $pydepsPrelude; path has no spaces). */ -}}
+{{- $waitSentinel := "SENTINEL=/run/llm-init/model_download_finish; echo '[wait] waiting for llm-init model-download sentinel' $SENTINEL; until [ -f $SENTINEL ]; do echo '[wait] model not downloaded yet...'; sleep 10; done; echo '[wait] model downloaded; starting engine.';" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $cpuRequest := trim ($oe.AUDIO_CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.AUDIO_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.AUDIO_CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.AUDIO_MEMORY_LIMIT | default "24Gi") -}}
+{{- /* GPU is OPTIONAL: requested only when AUDIO_REQUIRED_GPU_MEMORY is a real
+       value (not "" / "0"). CPU-only capabilities (e.g. VAD) set it to "0" and get
+       no gpumem + no gpu-inject. nvidia.com/gpumem needs a BARE MiB int; gb10 unified
+       memory reuses it as pod memory ("<MiB>Mi"). Accepts 8Gi / 8192 / 8192Mi. */ -}}
+{{- $gpuRaw := trim ($oe.AUDIO_REQUIRED_GPU_MEMORY | default "") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- /* vLLM --gpu-memory-utilization is a fraction of the PHYSICAL GPU, but HAMI
+       only grants the nvidia.com/gpumem quota. Scale the fraction to the quota so
+       vLLM's KV cache fits inside it (else OOM on first inference):
+         util = (quota / physicalTotal) * 0.85 (safety headroom), clamp [0.1, 0.9].
+       AUDIO_GPU_TOTAL_MIB defaults to the cluster's ~24GB card (override per host);
+       MODEL_GPU_MEM_UTIL overrides the whole computation. Consumed by the qwen3-asr
+       engine cmd via $VLLM_GPU_UTIL; harmless for engines that ignore it. */ -}}
+{{- $vllmUtil := $oe.MODEL_GPU_MEM_UTIL | default "" -}}
+{{- if and (not $vllmUtil) $wantGpu -}}
+{{- $totalMiB := float64 (int ($oe.AUDIO_GPU_TOTAL_MIB | default "24454")) -}}
+{{- $u := divf (mulf (float64 (int $gpuMiB)) 0.85) $totalMiB -}}
+{{- if gt $u 0.9 -}}{{- $u = 0.9 -}}{{- end -}}
+{{- if lt $u 0.1 -}}{{- $u = 0.1 -}}{{- end -}}
+{{- $vllmUtil = printf "%.2f" $u -}}
+{{- end -}}
+{{- if not $vllmUtil -}}{{- $vllmUtil = "0.45" -}}{{- end -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Primary workload: named after the release (== appid audiolabx2v3) for v3
+  # allowMultipleInstall. Label/selector stays io.kompose.service: audio-engine.
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+    # Directly distinguish instances by mode/model in `kubectl get -L ...`.
+    audio.mode: "{{ $modelMode }}"
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/engine: "{{ $engineSel | default "default" }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audiolabx2v3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+        audio.mode: "{{ $modelMode }}"
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        # Shared run-state with llm-init: llm-init writes the download-complete
+        # sentinel (model_download_finish) here after pulling the model; the
+        # engine's init container blocks on that file instead of polling
+        # llm-init /readyz (which now depends on THIS engine being alive —
+        # polling it would deadlock). Same host path as llm-init RUN_DIR.
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        # Persistent pip target (a --system-site-packages venv) so a POD RESTART never
+        # re-installs deps (no network); only first install / uninstall+reinstall repopulates it.
+        - name: pydeps
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/pydeps"
+            type: DirectoryOrCreate
+        # Wrapper scripts for capabilities that reuse an image via command override.
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+      # NOTE: no wait-models initContainer. The download-sentinel wait now runs INSIDE
+      # the engine container ($waitSentinel, prepended to the command) so the pod turns
+      # Ready immediately and the app reaches "running" while the model downloads —
+      # letting users watch progress on the llm-init dashboard (mirrors llamacpp).
+      containers:
+        # Name embeds capability+model so the Containers panel shows both at a glance
+        # (e.g. audio-stt-openai-whisper-large-v3). exec uses: -c {{ $cname }}.
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+{{- if $engineCmd }}
+          # Capability reuses this image but runs an injected wrapper instead of the
+          # image's native entrypoint (see templates/wrappers.yaml). $waitSentinel first
+          # blocks (inside this container) until llm-init finishes the model download.
+          command: ["/bin/sh", "-c", "{{ $waitSentinel }} {{ $pydepsPrelude }} {{ $engineCmd }}"]
+{{- end }}
+{{- if $engineArgs }}
+          args:
+{{- range (splitList " " (trim $engineArgs)) }}
+            - "{{ . }}"
+{{- end }}
+{{- end }}
+          env:
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_MODE
+              value: "{{ $modelMode }}"
+            - name: WRAPPER_PORT
+              value: "{{ $enginePort }}"
+            # vLLM KV-cache sizing scaled to the HAMI gpumem quota (see $vllmUtil above).
+            - name: VLLM_GPU_UTIL
+              value: "{{ $vllmUtil }}"
+            # Qwen3-ASR's default max_model_len (65536) needs ~7GiB KV for ONE request,
+            # which exceeds the KV budget left after weights under the 12GiB quota. ASR
+            # audio is chunked, so a smaller window is plenty. Override via MODEL_MAX_LEN.
+            - name: VLLM_MAX_LEN
+              value: "{{ $oe.MODEL_MAX_LEN | default "32768" }}"
+            # vLLM rejects audio uploads >25MB by default; a 1h+ MP3 easily exceeds it.
+            # Raise the ceiling so long-audio STT works (override via MODEL_MAX_AUDIO_MB).
+            # Harmless to non-vLLM engines (they ignore it).
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "{{ $oe.MODEL_MAX_AUDIO_MB | default "1024" }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+            # Read the model from the shared HF cache populated by llm-init.
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- /* Drop HAMi's per-kernel compute rate_limiter while KEEPING memory isolation, so every
+       GPU engine runs full-speed under the time-sliced vGPU. This is the proven fix for vLLM's
+       ~10x autoregressive throttle (Qwen 1h5m: 4269s clip 42s cold / 28s warm); pyannote /
+       speechbrain benefit too. FORCED ON for any GPU engine (no clone-form knob — users can't
+       and shouldn't have to set it); advanced override still possible via olaresEnv. Tradeoff:
+       this pod can grab more SM time on a shared card, so it may crowd time-sliced neighbours. */ -}}
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # NO readinessProbe (mirrors llamacpp): the pod must count as Ready as soon
+          # as the container starts so the app reaches "running" while the model
+          # downloads. Engine-not-ready is handled upstream by llm-init's NotReadyGuard
+          # (503 on /v1/* until the engine is alive), so a probe here would only re-
+          # introduce the "app stuck 安装中 → 暂停 during download" bug.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: pydeps
+              mountPath: /pydeps
+            # Read-only: $waitSentinel polls the llm-init download-complete sentinel here.
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP
