@@ -99,18 +99,20 @@ spec:
           runAsUser: 0
       containers:
       - name: twenty
-        image: "docker.io/beclab/twentycrm-twenty:v1.15.0"
+        image: "docker.io/twentycrm/twenty:v2.22.0"
         env:
         - name: NODE_PORT
           value: "3000"
         - name: PG_DATABASE_URL
-          value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.twenty }}"
+          valueFrom:
+            secretKeyRef:
+              name: twenty-secrets
+              key: PG_DATABASE_URL
         - name: REDIS_URL
-          {{- if .Values.redis.password }}
-          value: "redis://:{{ .Values.redis.password }}@{{ .Values.redis.host }}:{{ .Values.redis.port }}"
-          {{- else }}
-          value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}"
-          {{- end }}
+          valueFrom:
+            secretKeyRef:
+              name: twenty-secrets
+              key: REDIS_URL
         - name: SERVER_URL
           {{- if $appDomain }}
           value: "https://{{ $appDomain }}"
@@ -124,7 +126,10 @@ spec:
           value: "http://localhost:3000"
           {{- end }}
         - name: APP_SECRET
-          value: "{{ .Values.appSecret }}"
+          valueFrom:
+            secretKeyRef:
+              name: twenty-secrets
+              key: APP_SECRET
         - name: DISABLE_DB_MIGRATIONS
           value: "{{ .Values.disableDbMigrations | default false }}"
         - name: DISABLE_CRON_JOBS_REGISTRATION
@@ -147,7 +152,10 @@ spec:
         {{- end }}
         {{- if .Values.olaresEnv.SMTP_PASSWORD }}
         - name: EMAIL_SMTP_PASSWORD
-          value: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
+          valueFrom:
+            secretKeyRef:
+              name: twenty-secrets
+              key: EMAIL_SMTP_PASSWORD
         {{- end }}
         {{- if .Values.olaresEnv.MAIL_DEFAULT_SEND_FROM }}
         - name: EMAIL_FROM_ADDRESS
