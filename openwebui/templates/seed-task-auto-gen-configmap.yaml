@@ -8,9 +8,9 @@ data:
     #!/usr/bin/env python3
     """Best-effort Open WebUI defaults seed.
 
-    Sidecar loop fills missing Settings→Interface keys with false; never
-    overwrites saved values. Uses adaptive backoff so SQLite is not poked
-    every few seconds forever (that can make /auth flicker under load).
+    Sidecar loop so users created after pod start are still covered.
+    One-shot force Interface auto-gen defaults off per user, then only
+    fills missing keys. Title uses nested ui.title.auto.
     """
 
     from __future__ import annotations
@@ -24,13 +24,7 @@ data:
     import traceback
 
     DB_PATH = os.environ.get("WEBUI_DB_PATH", "/data/webui.db")
-    # Short while waiting for first signup / missing keys; long when idle.
-    # waiting: db empty / no users yet (signup page open — keep DB quiet)
-    WAITING_INTERVAL_SEC = max(15, int(os.environ.get("SEED_WAITING_INTERVAL_SEC", "60")))
-    # active: users exist but some still missing ui keys
-    ACTIVE_INTERVAL_SEC = max(5, int(os.environ.get("SEED_ACTIVE_INTERVAL_SEC", "20")))
-    # idle: everyone already seeded
-    IDLE_INTERVAL_SEC = max(30, int(os.environ.get("SEED_IDLE_INTERVAL_SEC", "180")))
+    INTERVAL_SEC = max(5, int(os.environ.get("SEED_INTERVAL_SEC", "10")))
     OLD_FORCE_MARKER = "/data/.olares_task_auto_gen_default_off_v1"
     UNGATE_MARKER = "/data/.olares_task_auto_gen_admin_ungate_v1"
     ADMIN_KEYS = (
@@ -115,6 +109,13 @@ data:
             if "no such table" in str(e).lower():
                 return 0, 0
             raise
+        # v2: one-shot force false for the three Interface toggles, then only
+        # fill missing keys. Needed because the frontend defaults missing
+        # title.auto to true and can persist that before/after our first seed
+        # (so "never overwrite" alone leaves title stuck on).
+        SEED_MARK = "olaresTaskUiDefaults"
+        SEED_VER = 2
+
         updated = 0
         for uid, settings_raw in users:
             settings = ensure_dict(settings_raw)
@@ -123,10 +124,36 @@ data:
                 ui = {}
                 settings["ui"] = ui
             changed = False
-            for key in ("title.auto", "autoFollowUps", "autoTags"):
-                if key not in ui:
-                    ui[key] = False
+
+            # Drop mistaken flat key from older seed script.
+            if "title.auto" in ui:
+                ui.pop("title.auto", None)
+                changed = True
+
+            title = ui.get("title")
+            if not isinstance(title, dict):
+                title = {}
+                ui["title"] = title
+
+            marked = ui.get(SEED_MARK) == SEED_VER
+            if not marked:
+                # One-shot: force defaults off even if frontend already wrote true.
+                title["auto"] = False
+                ui["autoFollowUps"] = False
+                ui["autoTags"] = False
+                ui[SEED_MARK] = SEED_VER
+                changed = True
+                log(f"one-shot force Interface auto-gen defaults off for {uid}")
+            else:
+                # After the one-shot, only fill missing keys; never overwrite.
+                if "auto" not in title:
+                    title["auto"] = False
                     changed = True
+                for key in ("autoFollowUps", "autoTags"):
+                    if key not in ui:
+                        ui[key] = False
+                        changed = True
+
             if not changed:
                 continue
             conn.execute(
@@ -140,33 +167,20 @@ data:
         return updated, len(users)
 
 
-    def tick() -> str:
-        """Return next-mode hint: waiting | active | idle."""
+    def tick() -> None:
         if not os.path.exists(DB_PATH):
             log(f"{DB_PATH} not found yet; retrying later")
-            return "waiting"
+            return
 
         conn = sqlite3.connect(DB_PATH, timeout=5)
         try:
             conn.execute("PRAGMA busy_timeout = 5000")
             ungate_admin_if_previously_forced(conn)
-            updated, user_count = seed_user_ui_defaults(conn)
+            updated, _user_count = seed_user_ui_defaults(conn)
             if updated:
                 log(f"user ui seed applied; updated={updated}")
-                return "active"
-            if user_count == 0:
-                return "waiting"
-            return "idle"
         finally:
             conn.close()
-
-
-    def interval_for(mode: str) -> int:
-        if mode == "waiting":
-            return WAITING_INTERVAL_SEC
-        if mode == "active":
-            return ACTIVE_INTERVAL_SEC
-        return IDLE_INTERVAL_SEC
 
 
     def main() -> int:
@@ -186,26 +200,14 @@ data:
                 log("best-effort one-shot failed; exiting 0")
             return 0
 
-        log(
-            "sidecar loop starting; "
-            f"waiting={WAITING_INTERVAL_SEC}s "
-            f"active={ACTIVE_INTERVAL_SEC}s "
-            f"idle={IDLE_INTERVAL_SEC}s"
-        )
-        mode = "waiting"
+        log(f"sidecar loop starting; interval={INTERVAL_SEC}s")
         while True:
             try:
-                mode = tick()
+                tick()
             except Exception:
                 traceback.print_exc()
                 log("best-effort tick failed; will retry")
-                mode = "active"
-            delay = interval_for(mode)
-            if mode == "idle":
-                log(f"all users seeded; backing off {delay}s")
-            elif mode == "waiting":
-                log(f"no users yet; next check in {delay}s")
-            time.sleep(delay)
+            time.sleep(INTERVAL_SEC)
 
 
     if __name__ == "__main__":
