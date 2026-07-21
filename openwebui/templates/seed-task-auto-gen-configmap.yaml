@@ -1,0 +1,219 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openwebui-seed-scripts
+  namespace: "{{ .Release.Namespace }}"
+data:
+  seed_task_auto_gen.py: |
+    #!/usr/bin/env python3
+    """Best-effort Open WebUI defaults seed.
+
+    Sidecar loop fills missing Settings→Interface keys with false; never
+    overwrites saved values. Uses adaptive backoff so SQLite is not poked
+    every few seconds forever (that can make /auth flicker under load).
+    """
+
+    from __future__ import annotations
+
+    import argparse
+    import json
+    import os
+    import sqlite3
+    import sys
+    import time
+    import traceback
+
+    DB_PATH = os.environ.get("WEBUI_DB_PATH", "/data/webui.db")
+    # Short while waiting for first signup / missing keys; long when idle.
+    # waiting: db empty / no users yet (signup page open — keep DB quiet)
+    WAITING_INTERVAL_SEC = max(15, int(os.environ.get("SEED_WAITING_INTERVAL_SEC", "60")))
+    # active: users exist but some still missing ui keys
+    ACTIVE_INTERVAL_SEC = max(5, int(os.environ.get("SEED_ACTIVE_INTERVAL_SEC", "20")))
+    # idle: everyone already seeded
+    IDLE_INTERVAL_SEC = max(30, int(os.environ.get("SEED_IDLE_INTERVAL_SEC", "180")))
+    OLD_FORCE_MARKER = "/data/.olares_task_auto_gen_default_off_v1"
+    UNGATE_MARKER = "/data/.olares_task_auto_gen_admin_ungate_v1"
+    ADMIN_KEYS = (
+        "task.title.enable",
+        "task.follow_up.enable",
+        "task.tags.enable",
+    )
+
+
+    def log(msg: str) -> None:
+        print(f"seed-task-auto-gen: {msg}", flush=True)
+
+
+    def load_json(value, default):
+        if value is None:
+            return default
+        if isinstance(value, (bytes, bytearray)):
+            value = value.decode("utf-8", errors="replace")
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                return default
+        return value if isinstance(value, type(default)) else default
+
+
+    def dump_json(value) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+    def ensure_dict(value):
+        value = load_json(value, {})
+        return value if isinstance(value, dict) else {}
+
+
+    def ungate_admin_if_previously_forced(conn: sqlite3.Connection) -> None:
+        if os.path.exists(UNGATE_MARKER):
+            return
+        if not os.path.exists(OLD_FORCE_MARKER):
+            open(UNGATE_MARKER, "a").close()
+            return
+        rows = conn.execute(
+            "SELECT id, data FROM config ORDER BY id DESC LIMIT 1"
+        ).fetchall()
+        if not rows:
+            return
+        cfg_id, raw = rows[0]
+        data = ensure_dict(raw)
+        task = data.setdefault("task", {})
+        if not isinstance(task, dict):
+            return
+        changed = False
+        for key in ADMIN_KEYS:
+            parts = key.split(".")
+            cur = data
+            ok = True
+            for p in parts[:-1]:
+                if not isinstance(cur.get(p), dict):
+                    ok = False
+                    break
+                cur = cur[p]
+            if not ok:
+                continue
+            if cur.get(parts[-1]) is False:
+                cur[parts[-1]] = True
+                changed = True
+        if changed:
+            conn.execute(
+                "UPDATE config SET data = ? WHERE id = ?",
+                (dump_json(data), cfg_id),
+            )
+            conn.commit()
+            log("ungated admin task.*.enable (were forced false by older chart)")
+        open(UNGATE_MARKER, "a").close()
+
+
+    def seed_user_ui_defaults(conn: sqlite3.Connection) -> tuple[int, int]:
+        """Returns (updated_count, user_count)."""
+        try:
+            users = conn.execute("SELECT id, settings FROM user").fetchall()
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e).lower():
+                return 0, 0
+            raise
+        updated = 0
+        for uid, settings_raw in users:
+            settings = ensure_dict(settings_raw)
+            ui = settings.get("ui")
+            if not isinstance(ui, dict):
+                ui = {}
+                settings["ui"] = ui
+            changed = False
+            for key in ("title.auto", "autoFollowUps", "autoTags"):
+                if key not in ui:
+                    ui[key] = False
+                    changed = True
+            if not changed:
+                continue
+            conn.execute(
+                "UPDATE user SET settings = ? WHERE id = ?",
+                (json.dumps(settings), uid),
+            )
+            updated += 1
+            log(f"seeded user.settings.ui defaults for {uid}")
+        if updated:
+            conn.commit()
+        return updated, len(users)
+
+
+    def tick() -> str:
+        """Return next-mode hint: waiting | active | idle."""
+        if not os.path.exists(DB_PATH):
+            log(f"{DB_PATH} not found yet; retrying later")
+            return "waiting"
+
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        try:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            ungate_admin_if_previously_forced(conn)
+            updated, user_count = seed_user_ui_defaults(conn)
+            if updated:
+                log(f"user ui seed applied; updated={updated}")
+                return "active"
+            if user_count == 0:
+                return "waiting"
+            return "idle"
+        finally:
+            conn.close()
+
+
+    def interval_for(mode: str) -> int:
+        if mode == "waiting":
+            return WAITING_INTERVAL_SEC
+        if mode == "active":
+            return ACTIVE_INTERVAL_SEC
+        return IDLE_INTERVAL_SEC
+
+
+    def main() -> int:
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--loop",
+            action="store_true",
+            help="run forever as a sidecar (default for chart)",
+        )
+        args = parser.parse_args()
+
+        if not args.loop:
+            try:
+                tick()
+            except Exception:
+                traceback.print_exc()
+                log("best-effort one-shot failed; exiting 0")
+            return 0
+
+        log(
+            "sidecar loop starting; "
+            f"waiting={WAITING_INTERVAL_SEC}s "
+            f"active={ACTIVE_INTERVAL_SEC}s "
+            f"idle={IDLE_INTERVAL_SEC}s"
+        )
+        mode = "waiting"
+        while True:
+            try:
+                mode = tick()
+            except Exception:
+                traceback.print_exc()
+                log("best-effort tick failed; will retry")
+                mode = "active"
+            delay = interval_for(mode)
+            if mode == "idle":
+                log(f"all users seeded; backing off {delay}s")
+            elif mode == "waiting":
+                log(f"no users yet; next check in {delay}s")
+            time.sleep(delay)
+
+
+    if __name__ == "__main__":
+        try:
+            raise SystemExit(main())
+        except SystemExit:
+            raise
+        except Exception:
+            traceback.print_exc()
+            log("fatal unexpected error; exiting 0 so the pod is not blocked")
+            raise SystemExit(0)
