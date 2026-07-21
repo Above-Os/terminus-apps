@@ -108,6 +108,35 @@ spec:
               mountPath: /data
 {{- end }}
       containers:
+        # Sidecar: fill missing user Settings→Interface keys with false after signup.
+        # Looping (not init) so registration after pod start is still covered.
+        # Failures are logged only — never blocks Open WebUI.
+        - name: seed-task-auto-gen
+          image: 'docker.io/library/python:3.14.6-alpine3.23'
+          command: ['python', '/scripts/seed_task_auto_gen.py', '--loop']
+          env:
+            - name: WEBUI_DB_PATH
+              value: /data/webui.db
+            # waiting=no users yet (keep /auth quiet); active=need seed; idle=done
+            - name: SEED_WAITING_INTERVAL_SEC
+              value: "60"
+            - name: SEED_ACTIVE_INTERVAL_SEC
+              value: "20"
+            - name: SEED_IDLE_INTERVAL_SEC
+              value: "180"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: appdata
+              mountPath: /data
+            - name: seed-scripts
+              mountPath: /scripts
+              readOnly: true
         - name: openwebui
           image: 'docker.io/openwebui/open-webui:0.10.2'
           ports:
@@ -179,6 +208,10 @@ spec:
               mountPath: /app/backend/data/cache
 
       volumes:
+        - name: seed-scripts
+          configMap:
+            name: openwebui-seed-scripts
+            defaultMode: 0555
         - name: hf-cache
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}"
