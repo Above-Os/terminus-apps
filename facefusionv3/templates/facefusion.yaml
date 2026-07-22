@@ -141,7 +141,10 @@ spec:
 {{- end }}
 {{- if $hfToken }}
             - name: HF_TOKEN
-              value: "{{ $hfToken }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
 {{- end }}
           envFrom:
             - configMapRef:
@@ -262,7 +265,10 @@ spec:
               value: "{{ $hfEndpoint }}"
 {{- if $hfToken }}
             - name: HF_TOKEN
-              value: "{{ $hfToken }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
 {{- end }}
             # Seven full repos: keep concurrency low so the huggingface_hub
             # subprocess inside llm-init stays inside its 4Gi memory limit.
