@@ -6,7 +6,7 @@ data:
         autoLaunch: false,
         autoRegister: true,
         clientId: "{{ .Values.oidc.client.id }}",
-        clientSecret: "{{ .Values.oidc.client.secret }}",
+        clientSecret: "",
         enabled: true,
         issuerUrl: "{{ .Values.oidc.issuer }}",
         scope: "openid email profile"
@@ -86,7 +86,10 @@ spec:
             - name: OAUTH_CLIENT_ID
               value: "{{ .Values.oidc.client.id }}"
             - name: OAUTH_CLIENT_SECRET
-              value: "{{ .Values.oidc.client.secret }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: OAUTH_CLIENT_SECRET
             - name: OAUTH_ISSUER_URL
               value: "{{ .Values.oidc.issuer }}"
             - name: OAUTH_SCOPE
