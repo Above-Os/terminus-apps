@@ -112,7 +112,10 @@ spec:
             - name: REDIS_URL
               value: "redis://{{ .Values.redis.host }}:6379"
             - name: DATABASE_URL
-              value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:5432/{{ .Values.postgres.databases.medusa }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DATABASE_URL
             - name: DB_NAME
               value: "{{ .Values.postgres.databases.medusa }}"
             - name: JWT_SECRET
@@ -181,7 +184,10 @@ spec:
             - name: PG_USER
               value: "{{ .Values.postgres.username }}"
             - name: PGPASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: PGPASSWORD
             - name: PG_DB
               value: "{{ .Values.postgres.databases.medusa }}"
           ports:
