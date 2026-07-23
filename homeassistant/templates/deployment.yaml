@@ -1,4 +1,3 @@
-{{- $isNewVersion := and .Values.sysVersion (semverCompare ">=1.12.3-0" (toString .Values.sysVersion)) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,6 +18,13 @@ spec:
         app: homeassistant
         applications.app.bytetrade.io/macvlan-init: "true"
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
       initContainers:
         - name: init-chmod-data
           image: "docker.io/beclab/aboveos-busybox:1.37.0"
@@ -142,11 +148,11 @@ spec:
         - name: homeassistant-config
           hostPath:
             type: DirectoryOrCreate
-            path: '{{ if $isNewVersion }}{{ .Values.userspace.appData }}{{ else }}{{ .Values.userspace.appData }}/homeassistant{{ end }}'
+            path: '{{ .Values.userspace.appData }}'
         - name: homeassistant-localtime
           hostPath:
             type: DirectoryOrCreate
-            path: '{{ if $isNewVersion }}{{ .Values.userspace.appData }}/localtime{{ else }}{{ .Values.userspace.appData }}/homeassistant/localtime{{ end }}'
+            path: '{{ .Values.userspace.appData }}/localtime'
         - name: config
           configMap:
             name: {{ .Release.Name }}-config
