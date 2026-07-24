@@ -1,0 +1,19 @@
+# audiolabx2v3 — nginx-free audio base (llm-init audio-proxy variant): llm-init downloads MODEL_SOURCE into the shared HF cache AND reverse-proxies the engine's OpenAI /v1/* directly (ENGINE_KIND=audio, upstream audio-engine:8000). This compose is just the kompose scaffold; the runtime shape lives in the Helm templates (engine.yaml: vLLM cu129 for stt, pyannote/torch for the rest).
+services:
+  llm-init:
+    image: docker.io/lovehunter9/llm-init:v1.3.2-test3
+    ports:
+      - "8090:8090"
+    environment:
+      ENGINE_KIND: "audio"
+      PORT: "8090"
+    labels:
+      io.kompose.service: llm-init
+      olares.service.type: Entrance
+
+  audio-engine:
+    image: docker.io/beclab/vllm-vllm-openai:v0.23.0-cu129
+    ports:
+      - "8000:8000"
+    labels:
+      io.kompose.service: audio-engine

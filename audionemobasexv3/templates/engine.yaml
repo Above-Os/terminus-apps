@@ -1,0 +1,176 @@
+{{- /* NeMo audio engine base (audionemobasexv3): ONE image only (nvidia-nemo), ONE capability diar_stream (/wrappers/diar_stream.py, WS /v1/audio/diarize/stream with native frame timestamps). NVIDIA Streaming Sortformer is a .nemo checkpoint needing the NeMo runtime (cannot ride pyannote/vLLM); its nemo_toolkit lives in the image's OWN uv venv at /opt/venv (--system-site-packages does NOT expose it), so diar_stream runs /opt/venv/bin/python directly and persists fastapi/uvicorn/websockets into /pydeps/diarstream-site via --target (PYTHONPATH RESET to $SITE), gated by /pydeps/.diar_stream.ok. Gateway-facing coarse mode fixed to `audio` (see llm-init.yaml). */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- /* MODEL_SUPPORTS: on the NeMo base the only valid value is diar_stream. */ -}}
+{{- $supportsRaw := $oe.MODEL_SUPPORTS | default "diar_stream" -}}
+{{- $primaryCap := "diar_stream" -}}
+{{- $healthPath := "/healthz" -}}
+{{- $baseImage := "docker.io/beclab/nvidia-nemo:26.02" -}}
+{{- $engineCmd := "export HF_HUB_OFFLINE=1; export PYTHONUNBUFFERED=1; PY=/opt/venv/bin/python; [ -x $PY ] || PY=$(command -v python3 || command -v python); SITE=/pydeps/diarstream-site; mkdir -p $SITE; export PYTHONPATH=$SITE; [ -f /pydeps/.diar_stream.ok ] || { if $PY -c 'import fastapi,uvicorn,websockets' 2>/dev/null; then echo '[diar_stream] fastapi/uvicorn/websockets already present in image venv'; else echo '[diar_stream] first-run: installing fastapi/uvicorn/websockets into /pydeps/diarstream-site (python=/opt/venv, the interpreter that has nemo)'; { command -v uv >/dev/null 2>&1 && uv pip install --python $PY --target $SITE fastapi uvicorn websockets; } || $PY -m pip install --root-user-action=ignore --target $SITE fastapi uvicorn websockets || { $PY -m ensurepip --upgrade && $PY -m pip install --root-user-action=ignore --target $SITE fastapi uvicorn websockets; } || echo '[diar_stream] WARN dep install failed'; fi; touch /pydeps/.diar_stream.ok; }; echo '[diar_stream] launching diar_stream.py'; exec $PY /wrappers/diar_stream.py" -}}
+{{- /* Container name = audio-diar-stream-<model> (DNS-safe, <=63 chars). */ -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s-%s" ($primaryCap | replace "_" "-") $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default $baseImage -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $healthPath = $oe.ENGINE_HEALTH_PATH | default $healthPath -}}
+{{- $cpuRequest := trim ($oe.AUDIO_CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.AUDIO_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.AUDIO_CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.AUDIO_MEMORY_LIMIT | default "24Gi") -}}
+{{- $gpuRaw := trim ($oe.AUDIO_REQUIRED_GPU_MEMORY | default "6Gi") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- $pydepsPrelude := "mkdir -p /pydeps; VENV=/pydeps/venv; if [ ! -x $VENV/bin/python ]; then echo '[pydeps] creating persistent venv (first run)'; python3 -m venv --system-site-packages $VENV || echo '[pydeps] WARN: venv unavailable, using ephemeral system installs'; fi; if [ -x $VENV/bin/python ]; then $VENV/bin/python -m pip --version >/dev/null 2>&1 || { echo '[pydeps] venv has no pip; bootstrapping via ensurepip'; $VENV/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true; }; if $VENV/bin/python -m pip --version >/dev/null 2>&1; then export PATH=$VENV/bin:$PATH; export PYTHONPATH=$(ls -d $VENV/lib/python*/site-packages 2>/dev/null | head -n1):${PYTHONPATH:-}; else echo '[pydeps] venv pip unavailable; using system python'; fi; fi;" -}}
+{{- $waitSentinel := "SENTINEL=/run/llm-init/model_download_finish; echo '[wait] waiting for llm-init model-download sentinel' $SENTINEL; until [ -f $SENTINEL ]; do echo '[wait] model not downloaded yet...'; sleep 10; done; echo '[wait] model downloaded; starting engine.';" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+    audio.primary-capability: "{{ $primaryCap }}"
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audionemobasexv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+        audio.primary-capability: "{{ $primaryCap }}"
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: pydeps
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/pydeps"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "{{ $waitSentinel }} {{ $pydepsPrelude }} {{ $engineCmd }}"]
+          env:
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_MODE
+              value: "{{ $primaryCap }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: WRAPPER_PORT
+              value: "{{ $enginePort }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: pydeps
+              mountPath: /pydeps
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP

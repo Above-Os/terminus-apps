@@ -1,0 +1,236 @@
+{{- /* vLLM audio engine base: ONE image (vLLM cu129) serving stt / stt_stream / align chosen via MODEL_SUPPORTS CSV (coarse mode fixed to `audio` on llm-init); single-capability runtimes reuse tested commands, the stt+stt_stream unified wrapper is pending GPU validation. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- /* MODEL_SUPPORTS: multi-select CSV of this instance's capabilities (valid on the vLLM base: stt / stt_stream / align). */ -}}
+{{- $supportsRaw := $oe.MODEL_SUPPORTS | default "stt" -}}
+{{- $supports := list -}}
+{{- range $tok := splitList "," $supportsRaw -}}
+{{- $t := trim $tok -}}
+{{- if $t -}}{{- $supports = append $supports $t -}}{{- end -}}
+{{- end -}}
+{{- $hasStt := has "stt" $supports -}}
+{{- $hasSttStream := has "stt_stream" $supports -}}
+{{- $hasAlign := has "align" $supports -}}
+{{- $isQwen := contains "qwen" (lower $modelName) -}}
+{{- /* Pick the primary runtime (precedence stt_stream > stt > align); primaryCap also becomes the engine container's MODEL_MODE for tested-wrapper compat. */ -}}
+{{- $primaryCap := "stt" -}}
+{{- $healthPath := "/health" -}}
+{{- $engineCmd := "" -}}
+{{- $vllmImage := "docker.io/beclab/vllm-vllm-openai:v0.23.0-cu129" -}}
+{{- if $hasSttStream -}}
+{{- $primaryCap = "stt_stream" -}}
+{{- $healthPath = "/healthz" -}}
+{{- $engineCmd = "export HF_HUB_OFFLINE=1; export PYTHONUNBUFFERED=1; [ -f /pydeps/.stt_stream_dual.ok ] || { echo '[stream] first-run: installing qwen-asr + audio/ws deps into /pydeps (reusing image vLLM, NO [vllm] extra)'; python3 -m pip install -q --root-user-action=ignore --ignore-installed blinker || true; python3 -m pip install --root-user-action=ignore qwen-asr soundfile librosa av websockets python-multipart && touch /pydeps/.stt_stream_dual.ok; }; echo '[stream] launching stream.py'; exec $(command -v python3 || command -v python) /wrappers/stream.py" -}}
+{{- else if $hasStt -}}
+{{- $primaryCap = "stt" -}}
+{{- $healthPath = "/health" -}}
+{{- if $isQwen -}}
+{{- $engineCmd = "export HF_HUB_OFFLINE=1; [ -f /pydeps/.stt.ok ] || { python3 -m pip install -q librosa soundfile av && touch /pydeps/.stt.ok; }; exec vllm serve $MODEL_NAME --host 0.0.0.0 --port $WRAPPER_PORT --gpu-memory-utilization ${VLLM_GPU_UTIL:-0.45} --max-model-len ${VLLM_MAX_LEN:-32768} --mm-processor-cache-gb ${VLLM_MM_CACHE_GB:-1}" -}}
+{{- else -}}
+{{- $engineCmd = "export HF_HUB_OFFLINE=1; [ -f /pydeps/.stt.ok ] || { python3 -m pip install -q librosa soundfile av && touch /pydeps/.stt.ok; }; exec vllm serve $MODEL_NAME --host 0.0.0.0 --port $WRAPPER_PORT --gpu-memory-utilization ${VLLM_GPU_UTIL:-0.45} --mm-processor-cache-gb ${VLLM_MM_CACHE_GB:-1}" -}}
+{{- end -}}
+{{- else if $hasAlign -}}
+{{- $primaryCap = "align" -}}
+{{- $healthPath = "/healthz" -}}
+{{- $engineCmd = "export HF_HUB_OFFLINE=1; [ -f /pydeps/.align.ok ] || { python3 -m pip install -q --ignore-installed blinker || true; python3 -m pip install -q qwen-asr librosa soundfile av && touch /pydeps/.align.ok; }; exec $(command -v python3 || command -v python) /wrappers/align.py" -}}
+{{- end -}}
+{{- /* Container name = audio-<primaryCap>-<model> (DNS-safe, <=63 chars) so the Containers panel shows capability+model at a glance. */ -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s-%s" ($primaryCap | replace "_" "-") $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default $vllmImage -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $healthPath = $oe.ENGINE_HEALTH_PATH | default $healthPath -}}
+{{- $cpuRequest := trim ($oe.AUDIO_CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.AUDIO_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.AUDIO_CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.AUDIO_MEMORY_LIMIT | default "24Gi") -}}
+{{- /* GPU is OPTIONAL (AUDIO_REQUIRED_GPU_MEMORY = "" or "0" => CPU-only). */ -}}
+{{- $gpuRaw := trim ($oe.AUDIO_REQUIRED_GPU_MEMORY | default "") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- /* vLLM --gpu-memory-utilization scaled to the HAMi gpumem quota (see original base). */ -}}
+{{- $vllmUtil := $oe.MODEL_GPU_MEM_UTIL | default "" -}}
+{{- if and (not $vllmUtil) $wantGpu -}}
+{{- $totalMiB := float64 (int ($oe.AUDIO_GPU_TOTAL_MIB | default "24454")) -}}
+{{- $u := divf (mulf (float64 (int $gpuMiB)) 0.85) $totalMiB -}}
+{{- if gt $u 0.9 -}}{{- $u = 0.9 -}}{{- end -}}
+{{- if lt $u 0.1 -}}{{- $u = 0.1 -}}{{- end -}}
+{{- $vllmUtil = printf "%.2f" $u -}}
+{{- end -}}
+{{- if not $vllmUtil -}}{{- $vllmUtil = "0.45" -}}{{- end -}}
+{{- /* stt_stream max_model_len is DERIVED from the allocated GPU quota (more gpumem => longer context), stepping down from the qwen-asr default 65536 so small quotas still boot instead of OOMing; override via STREAM_MAX_LEN. */ -}}
+{{- $streamMaxLen := trim ($oe.STREAM_MAX_LEN | default "") -}}
+{{- if and (eq $streamMaxLen "") $wantGpu -}}
+{{- $g := int $gpuMiB -}}
+{{- if ge $g 18000 -}}{{- $streamMaxLen = "65536" -}}
+{{- else if ge $g 15000 -}}{{- $streamMaxLen = "49152" -}}
+{{- else if ge $g 13000 -}}{{- $streamMaxLen = "32768" -}}
+{{- else if ge $g 11000 -}}{{- $streamMaxLen = "16384" -}}
+{{- else -}}{{- $streamMaxLen = "8192" -}}{{- end -}}
+{{- end -}}
+{{- if eq $streamMaxLen "" -}}{{- $streamMaxLen = "16384" -}}{{- end -}}
+{{- $pydepsPrelude := "mkdir -p /pydeps; VENV=/pydeps/venv; if [ ! -x $VENV/bin/python ]; then echo '[pydeps] creating persistent venv (first run)'; python3 -m venv --system-site-packages $VENV || echo '[pydeps] WARN: venv unavailable, using ephemeral system installs'; fi; if [ -x $VENV/bin/python ]; then $VENV/bin/python -m pip --version >/dev/null 2>&1 || { echo '[pydeps] venv has no pip; bootstrapping via ensurepip'; $VENV/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true; }; if $VENV/bin/python -m pip --version >/dev/null 2>&1; then export PATH=$VENV/bin:$PATH; export PYTHONPATH=$(ls -d $VENV/lib/python*/site-packages 2>/dev/null | head -n1):${PYTHONPATH:-}; else echo '[pydeps] venv pip unavailable; using system python'; fi; fi;" -}}
+{{- $waitSentinel := "SENTINEL=/run/llm-init/model_download_finish; echo '[wait] waiting for llm-init model-download sentinel' $SENTINEL; until [ -f $SENTINEL ]; do echo '[wait] model not downloaded yet...'; sleep 10; done; echo '[wait] model downloaded; starting engine.';" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+    audio.primary-capability: "{{ $primaryCap }}"
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audiovllmbasexv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+        audio.primary-capability: "{{ $primaryCap }}"
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: pydeps
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/pydeps"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "{{ $waitSentinel }} {{ $pydepsPrelude }} {{ $engineCmd }}"]
+          env:
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            # Engine-container MODEL_MODE = primary capability (tested-wrapper compat); the coarse `audio` mode + MODEL_SUPPORTS live on the llm-init container.
+            - name: MODEL_MODE
+              value: "{{ $primaryCap }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: WRAPPER_PORT
+              value: "{{ $enginePort }}"
+            - name: VLLM_GPU_UTIL
+              value: "{{ $vllmUtil }}"
+            - name: VLLM_MAX_LEN
+              value: "{{ $oe.MODEL_MAX_LEN | default "32768" }}"
+            # stt_stream (stream.py) max_model_len, DERIVED from the GPU quota above (bigger GPU => longer context); not a clone --env.
+            - name: STREAM_MAX_LEN
+              value: "{{ $streamMaxLen }}"
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "{{ $oe.MODEL_MAX_AUDIO_MB | default "1024" }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # NO readinessProbe (mirrors llamacpp): pod Ready at start so the app reaches "running" while the model downloads; llm-init NotReadyGuard 503-gates /v1/* until the engine is alive.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: pydeps
+              mountPath: /pydeps
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP

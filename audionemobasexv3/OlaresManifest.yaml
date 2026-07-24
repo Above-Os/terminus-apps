@@ -1,0 +1,237 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audionemobasexv3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: Audio model base (vLLM engine, llm-init audio-proxy). One instance = one model; capabilities via MODEL_SUPPORTS (stt / stt_stream / align). llm-init downloads the model AND fronts the engine's OpenAI /v1/* directly (ENGINE_KIND=audio, no nginx).
+  appid: audionemobasexv3
+  title: Audio NeMo Base X V3
+  version: '1.0.0'
+  categories:
+    - AI
+# INTERNAL shared API: a sharedEntrances stub -> the sharedentrances-api Service (:80 -> llm-init:8090), the cluster-internal, no-public-edge, no-SSO base_url the LLM Gateway should use (http://sharedentrances-api.<ns>:80 + /v1), bypassing the public edge's ~17s first-byte timeout. invisible + authLevel internal: no public URL, not shown on the desktop.
+sharedEntrances:
+  - name: audionemobasexv3api
+    host: sharedentrances-api
+    port: 0
+    title: Audio NeMo Base X V3 API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Public entrance -> llm-init (download-svc:8090): in audio-proxy mode llm-init IS the complete base (serves control plane/dashboard//api/model-spec on "/", reverse-proxies "/v1/*" to the sibling audio engine, synthesizes /v1/models at the edge). No openresty/nginx sidecar.
+entrances:
+  - name: audionemobasexv3
+    port: 8090
+    host: download-svc
+    title: Audio NeMo Base X V3
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: public
+workloadReplicas:
+  audionemobasexv3: 1
+  llminit: 1
+spec:
+  versionName: '1.0.0'
+  fullDescription: |
+    **Audio model base — vLLM engine (`audionemobasexv3`, llm-init audio-proxy)**
+    A generic *base* for audio models that run on the vLLM engine. One installed
+    instance = one model. Which capabilities the instance exposes is chosen at
+    install time via `MODEL_SUPPORTS` (multi-select): `stt` / `stt_stream` / `align`.
+
+    **HOW IT WORKS (llm-init audio-proxy mode, `ENGINE_KIND=audio`)**
+    llm-init does BOTH jobs: (1) downloads the configured model into the shared HF
+    cache, and (2) IS the OpenAI-compatible data plane — it reverse-proxies `/v1/*`
+    (incl. WebSocket streaming) to the sibling audio engine at
+    `http://audio-engine:8000`, synthesizes `/v1/models` at the edge, and serves its
+    control plane / dashboard on `/`. The single entrance is `download-svc:8090`. The
+    engine container waits for llm-init's download sentinel rather than polling
+    `/readyz`, avoiding the proxy<->engine readiness deadlock.
+
+    **Model storage (App Common)**
+    Model files go to `appCommon/huggingface`, mounted at `/cache/hf/hub`. llm-init
+    writes, the engine reads.
+
+    **Clone form**
+    - `MODEL_SOURCE` — `hf://<repo>` (llm-init download spec).
+    - `MODEL_NAME` — model id advertised to clients.
+    - `MODEL_SUPPORTS` — multi-select of the capabilities this model exposes:
+      `stt` (offline transcription), `stt_stream` (streaming ASR, WebSocket),
+      `align` (forced alignment). Pick what the chosen model actually supports.
+    - `AUDIO_REQUIRED_GPU_MEMORY` — e.g. Whisper stt `8Gi`; Qwen3-ASR (1.7B)
+      stt / stt_stream `12Gi`; Qwen3-ForcedAligner (0.6B) align `4Gi`.
+
+    **Engine** — vLLM cu129 only. `stt` runs native `vllm serve` (OpenAI
+    `/v1/audio/transcriptions`); `stt_stream` runs `/wrappers/stream.py` (WebSocket);
+    `align` runs `/wrappers/align.py`. GPU engines force
+    `GPU_CORE_UTILIZATION_POLICY=disable` so they run full-speed under time-sliced vGPU.
+
+    **Example clone sets**
+    - STT (Whisper): MODEL_SOURCE=hf://openai/whisper-large-v3
+      MODEL_NAME=openai/whisper-large-v3  MODEL_SUPPORTS=stt  AUDIO_REQUIRED_GPU_MEMORY=8Gi
+    - STT (Qwen3-ASR): MODEL_SOURCE=hf://Qwen/Qwen3-ASR-1.7B
+      MODEL_NAME=Qwen/Qwen3-ASR-1.7B  MODEL_SUPPORTS=stt  AUDIO_REQUIRED_GPU_MEMORY=12Gi
+    - STT Stream (Qwen3-ASR): MODEL_SOURCE=hf://Qwen/Qwen3-ASR-1.7B
+      MODEL_NAME=Qwen/Qwen3-ASR-1.7B  MODEL_SUPPORTS=stt_stream  AUDIO_REQUIRED_GPU_MEMORY=12Gi
+    - Align (Qwen3-ForcedAligner): MODEL_SOURCE=hf://Qwen/Qwen3-ForcedAligner-0.6B
+      MODEL_NAME=Qwen/Qwen3-ForcedAligner-0.6B  MODEL_SUPPORTS=align  AUDIO_REQUIRED_GPU_MEMORY=4Gi
+
+    NOTE (WIP): a single Qwen instance serving BOTH `stt` and `stt_stream` from one
+    model load (`MODEL_SUPPORTS=stt,stt_stream`) is the pending unified wrapper and
+    needs GPU validation. Requires llm-init >= v1.3.2-audiobase3.
+
+  upgradeDescription: |
+    v1.0.0: initial vLLM audio base. llm-init runs ENGINE_KIND=audio
+    (image lovehunter9/llm-init:v1.3.2-audiobase6): it downloads the model AND
+    reverse-proxies the engine's OpenAI /v1/* directly (no nginx). Capabilities
+    chosen at clone via MODEL_SUPPORTS (stt / stt_stream / align); GPU required.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/llm-init
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  # MODEL_SUPPORTS: multi-select of the capabilities THIS instance exposes; on the NeMo base the only valid value is diar_stream (maps to WS /v1/audio/diarize/stream in llm-init). Pick what the chosen model actually supports.
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Diarization Stream (streaming speaker diarization, WebSocket)
+      value: diar_stream
+  - envName: MODEL_MAX_AUDIO_MB
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_PORT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+  - envName: ENGINE_HEALTH_PATH
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "debug"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: AUDIO_CPU_REQUEST
+    required: true
+    default: "500m"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_MEMORY_REQUEST
+    required: true
+    default: "2Gi"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_CPU_LIMIT
+    required: true
+    default: "6"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_MEMORY_LIMIT
+    required: true
+    default: "24Gi"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true

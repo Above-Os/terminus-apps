@@ -1,0 +1,244 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiopyannotebasexv3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: Audio model base (pyannote / torch + speechbrain engine, llm-init audio-proxy). One instance = one model; capabilities via MODEL_SUPPORTS (vad / diar / speaker_embed / enhance). llm-init downloads the model AND fronts the engine's OpenAI-style /v1/audio/* directly (ENGINE_KIND=audio, no nginx).
+  appid: audiopyannotebasexv3
+  title: Audio Pyannote Base X V3
+  version: '1.0.0'
+  categories:
+    - AI
+# INTERNAL shared API: sharedEntrances stub -> sharedentrances-api Service (:80 -> llm-init:8090), the no-edge/no-SSO base_url the LLM Gateway should use (http://sharedentrances-api.<ns>:80 + /v1) to bypass the public edge's ~17s first-byte timeout; invisible + authLevel internal.
+sharedEntrances:
+  - name: audiopyannotebasexv3api
+    host: sharedentrances-api
+    port: 0
+    title: Audio Pyannote Base X V3 API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Public entrance -> llm-init (download-svc:8090): in audio-proxy mode llm-init IS the complete base (control plane/dashboard/model-spec on "/", reverse-proxies "/v1/*" to the audio engine, synthesizes /v1/models), no openresty/nginx sidecar.
+entrances:
+  - name: audiopyannotebasexv3
+    port: 8090
+    host: download-svc
+    title: Audio Pyannote Base X V3
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: public
+workloadReplicas:
+  audiopyannotebasexv3: 1
+  llminit: 1
+spec:
+  versionName: '1.0.0'
+  fullDescription: |
+    **Audio model base — pyannote / torch + speechbrain (`audiopyannotebasexv3`, llm-init audio-proxy)**
+    A generic *base* for non-vLLM audio models (pyannote.audio, silero-vad, speechbrain).
+    One installed instance = one model. Which capabilities the instance exposes is chosen
+    at install time via `MODEL_SUPPORTS` (multi-select): `vad` / `diar` / `speaker_embed` / `enhance`.
+
+    **HOW IT WORKS (llm-init audio-proxy mode, `ENGINE_KIND=audio`)**
+    llm-init does BOTH jobs: (1) downloads the configured model into the shared HF
+    cache, and (2) IS the OpenAI-compatible data plane — it reverse-proxies `/v1/*`
+    (incl. WebSocket streaming) to the sibling audio engine at
+    `http://audio-engine:8000`, synthesizes `/v1/models` at the edge, and serves its
+    control plane / dashboard on `/`. The single entrance is `download-svc:8090`. The
+    engine container waits for llm-init's download sentinel rather than polling
+    `/readyz`, avoiding the proxy<->engine readiness deadlock.
+
+    **Model storage (App Common)**
+    Model files go to `appCommon/huggingface`, mounted at `/cache/hf/hub`. llm-init
+    writes, the engine reads.
+
+    **Clone form**
+    - `MODEL_SOURCE` — `hf://<repo>` (llm-init download spec).
+    - `MODEL_NAME` — model id advertised to clients.
+    - `MODEL_SUPPORTS` — multi-select of the capabilities this model exposes:
+      `vad` (voice activity detection), `diar` (speaker diarization),
+      `speaker_embed` (speaker voiceprint / x-vector), `enhance` (denoise / speech
+      enhancement). Pick what the chosen model actually supports.
+    - `AUDIO_REQUIRED_GPU_MEMORY` — e.g. VAD (silero) `0` (CPU); Diar (pyannote) `4Gi`;
+      Speaker embed (pyannote) `0`; Enhance (speechbrain) `2Gi`.
+
+    **Engine** — pyannote/torch + speechbrain image (no vLLM). `vad` runs
+    `/wrappers/vad.py` (silero-vad), `diar` runs `/wrappers/diar.py` (pyannote.audio
+    Pipeline), `speaker_embed` runs `/wrappers/embed.py` (pyannote Inference,
+    window=whole), `enhance` runs `/wrappers/enhance.py` (speechbrain, server-side
+    chunked). GPU engines force `GPU_CORE_UTILIZATION_POLICY=disable` for time-sliced vGPU.
+
+    **Example clone sets**
+    - VAD (silero): MODEL_SOURCE=hf://onnx-community/silero-vad
+      MODEL_NAME=silero-v5  MODEL_SUPPORTS=vad  AUDIO_REQUIRED_GPU_MEMORY=0
+    - Diar (pyannote): MODEL_SOURCE=hf://pyannote/speaker-diarization-community-1
+      MODEL_NAME=pyannote-community-1  MODEL_SUPPORTS=diar  AUDIO_REQUIRED_GPU_MEMORY=4Gi
+    - Speaker embed (pyannote): MODEL_SOURCE=hf://pyannote/embedding
+      MODEL_NAME=pyannote-embedding  MODEL_SUPPORTS=speaker_embed  AUDIO_REQUIRED_GPU_MEMORY=0
+    - Enhance (speechbrain): MODEL_SOURCE=hf://speechbrain/mtl-mimic-voicebank
+      MODEL_NAME=mtl-mimic-voicebank  MODEL_SUPPORTS=enhance  AUDIO_REQUIRED_GPU_MEMORY=2Gi
+
+    Gated repos (pyannote diar / embedding) require accepting the model license on
+    HuggingFace + the Olares HuggingFace integration token (auto-injected as HF_TOKEN).
+
+  upgradeDescription: |
+    v1.0.0: initial pyannote/speechbrain audio base. llm-init runs ENGINE_KIND=audio
+    (image lovehunter9/llm-init:v1.3.2-audiobase6): it downloads the model AND
+    reverse-proxies the engine's /v1/audio/* directly (no nginx). Capabilities
+    chosen at clone via MODEL_SUPPORTS (vad / diar / speaker_embed / enhance).
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/llm-init
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  # MODEL_SUPPORTS: multi-select of the capabilities THIS instance exposes (pyannote base valid values vad / diar / speaker_embed / enhance, each mapping to /v1/audio/* in llm-init); pick what the model supports.
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: VAD (voice activity detection)
+      value: vad
+    - title: Diarization (speaker segmentation)
+      value: diar
+    - title: Speaker Embedding (x-vector)
+      value: speaker_embed
+    - title: Enhance (denoise / speech enhancement)
+      value: enhance
+  - envName: MODEL_MAX_AUDIO_MB
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_PORT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+  - envName: ENGINE_HEALTH_PATH
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "debug"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: AUDIO_CPU_REQUEST
+    required: true
+    default: "500m"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_MEMORY_REQUEST
+    required: true
+    default: "2Gi"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_CPU_LIMIT
+    required: true
+    default: "6"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_MEMORY_LIMIT
+    required: true
+    default: "24Gi"
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: AUDIO_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true

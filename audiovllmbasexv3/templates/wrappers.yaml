@@ -1,0 +1,2055 @@
+{{- /* Engine wrapper scripts injected into a REUSED image (no new build): a mode's "cmd" runs one via a command override (see engine.yaml); every non-stt capability rides the ONE pyannote/torch image and pip-installs missing deps on first load (vad: silero-vad; translate: ctranslate2+tokenizers; embed: omegaconf; enhance: speechbrain). */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+data:
+  # Shared GPU-introspection helper: exposes audio_gpu_* Prometheus gauges (via torch mem_get_info under HAMi) that llm-init reads for /api/diag/gpu; no new pip dep.
+  _gpumetrics.py: |
+    # Uniform GPU /metrics for audio engine wrappers. import + mount_metrics(app).
+    def gpu_metrics_text():
+        present, used, total, util = 0, 0, 0, 0.0
+        try:
+            import torch
+            if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                present = 1
+                free, tot = torch.cuda.mem_get_info()  # bytes, current device (HAMi slice)
+                total = int(tot)
+                used = int(tot - free)
+                try:
+                    util = float(torch.cuda.utilization()) / 100.0  # needs pynvml; 0 if absent
+                except Exception:
+                    util = 0.0
+        except Exception:
+            present = 0
+        lines = []
+        def g(name, help_, val):
+            lines.append("# HELP %s %s" % (name, help_))
+            lines.append("# TYPE %s gauge" % name)
+            lines.append("%s %s" % (name, val))
+        g("audio_gpu_present", "1 if a CUDA device is visible to this engine, else 0", present)
+        g("audio_gpu_mem_used_bytes", "GPU memory in use on this engine's device slice (bytes)", used)
+        g("audio_gpu_mem_total_bytes", "GPU memory visible to this engine (HAMi quota, bytes)", total)
+        g("audio_gpu_util_ratio", "GPU compute utilization 0..1 (0 when unavailable)", "%.4f" % util)
+        return "\n".join(lines) + "\n"
+
+    def mount_metrics(app):
+        # Register GET /metrics on a FastAPI/Starlette app (Prometheus text exposition).
+        from fastapi.responses import PlainTextResponse
+        @app.get("/metrics")
+        def _metrics():
+            return PlainTextResponse(gpu_metrics_text(),
+                                     media_type="text/plain; version=0.0.4")
+        return app
+  vad.py: |
+    # Silero VAD on the shared pyannote/torch image (soundfile decode, silero-vad pkg pip-installed on first load); exposes /healthz /readyz /v1/models POST /v1/audio/vad.
+    import io, os, sys, subprocess, threading, logging
+    from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-vad")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "silero-v5")
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    SR = 16000
+
+    # Defaults tuned for music/singing (silero's stock defaults over-split), each overridable per-request: threshold 0.3, min_silence 500ms, speech_pad 200ms, min_speech 250ms, max_speech 30s.
+    def _envf(name, default):
+        try:
+            return float(os.environ.get(name, "") or default)
+        except Exception:
+            return default
+    VAD_THRESHOLD = _envf("VAD_THRESHOLD", 0.3)
+    VAD_MIN_SILENCE_MS = _envf("VAD_MIN_SILENCE_MS", 500)
+    VAD_SPEECH_PAD_MS = _envf("VAD_SPEECH_PAD_MS", 200)
+    VAD_MIN_SPEECH_MS = _envf("VAD_MIN_SPEECH_MS", 250)
+    VAD_MAX_SPEECH_S = _envf("VAD_MAX_SPEECH_S", 30)
+
+    app = FastAPI(title="audio-vad (silero)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "model": None, "get_ts": None}
+
+    def _decode(data):
+        # Bytes -> mono float32 @16k via soundfile (torchaudio only as fallback/resample), avoiding the image's broken torchcodec AudioDecoder.
+        import torch
+        try:
+            import soundfile as sf
+            arr, sr = sf.read(io.BytesIO(data), dtype="float32", always_2d=True)  # (time, ch)
+            wav = torch.from_numpy(arr.mean(axis=1).copy())  # mono (time,)
+        except Exception:
+            import torchaudio
+            w, sr = torchaudio.load(io.BytesIO(data))  # (ch, time)
+            wav = w.float().mean(dim=0)
+        if int(sr) != SR:
+            import torchaudio
+            wav = torchaudio.functional.resample(wav, int(sr), SR)
+        return wav.contiguous()
+
+    def _load():
+        try:
+            try:
+                from silero_vad import load_silero_vad, get_speech_timestamps
+            except Exception:
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "silero-vad"], check=False)
+                from silero_vad import load_silero_vad, get_speech_timestamps
+            _state["model"] = load_silero_vad()
+            _state["get_ts"] = get_speech_timestamps
+            _state["ready"] = True
+            log.info("silero-vad loaded; ready")
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("vad load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/healthz")
+    def healthz():
+        return {"status": "ok"}
+
+    @app.get("/readyz")
+    def readyz():
+        if _state["ready"]:
+            return {"status": "ready"}
+        raise HTTPException(status_code=503, detail=_state["error"] or "model not loaded yet")
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "mode": "vad"}]}
+
+    @app.post("/v1/audio/vad")
+    async def vad(
+        file: UploadFile = File(...),
+        threshold: str = Form(default=None),
+        min_silence_ms: str = Form(default=None),
+        speech_pad_ms: str = Form(default=None),
+        min_speech_ms: str = Form(default=None),
+        max_speech_s: str = Form(default=None),
+    ):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        data = await file.read()
+        try:
+            wav = _decode(data)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="audio decode failed: %s" % e)
+
+        def _pick(form_val, default):
+            if form_val is None or form_val == "":
+                return default
+            try:
+                return float(form_val)
+            except Exception:
+                return default
+
+        thr = _pick(threshold, VAD_THRESHOLD)
+        max_s = _pick(max_speech_s, VAD_MAX_SPEECH_S)
+        kw = {
+            "sampling_rate": SR,
+            "threshold": thr,
+            "min_silence_duration_ms": int(_pick(min_silence_ms, VAD_MIN_SILENCE_MS)),
+            "speech_pad_ms": int(_pick(speech_pad_ms, VAD_SPEECH_PAD_MS)),
+            "min_speech_duration_ms": int(_pick(min_speech_ms, VAD_MIN_SPEECH_MS)),
+        }
+        # silero treats max_speech_duration_s=inf as "no cap"; only pass a finite cap.
+        if max_s and max_s > 0:
+            kw["max_speech_duration_s"] = max_s
+        log.info("vad params: %s", {k: v for k, v in kw.items() if k != "sampling_rate"})
+        try:
+            # silero get_speech_timestamps returns [{'start','end'}] in SAMPLES.
+            ts = _state["get_ts"](wav, _state["model"], **kw)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="vad failed: %s" % e)
+        segs = [{"start": round(t["start"] / SR, 3), "end": round(t["end"] / SR, 3)} for t in ts]
+        speech = round(sum(s["end"] - s["start"] for s in segs), 3)
+        return {
+            "model": MODEL_NAME,
+            "mode": "vad",
+            "sampling_rate": SR,
+            "duration": round(int(wav.shape[-1]) / SR, 3),
+            "speech_seconds": speech,
+            "num_segments": len(segs),
+            "params": {k: v for k, v in kw.items() if k != "sampling_rate"},
+            "segments": segs,
+        }
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  diar.py: |
+    # Speaker diarization via pyannote (image's torch/pyannote.audio, model from shared HF cache); exposes /healthz /readyz /v1/models POST /v1/audio/diarization.
+    import os, tempfile, threading, logging
+    from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-diar")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "pyannote-community-1")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    HF_TOKEN = os.environ.get("HF_TOKEN") or None
+
+    app = FastAPI(title="audio-diarization (pyannote)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "pipeline": None, "device": "cpu"}
+
+    def _decode(path):
+        # Decode to (channels,time) float32 tensor + sample_rate so we feed pyannote an in-memory waveform, bypassing its broken torchcodec AudioDecoder.
+        import torch
+        try:
+            import soundfile as sf
+            data, sr = sf.read(path, dtype="float32", always_2d=True)  # (time, channels)
+            return torch.from_numpy(data.T.copy()), int(sr)
+        except Exception:
+            pass
+        try:
+            import torchaudio
+            wav, sr = torchaudio.load(path)  # (channels, time)
+            return wav.float(), int(sr)
+        except Exception:
+            pass
+        import wave, numpy as np
+        with wave.open(path, "rb") as wf:
+            sr, ch, sw = wf.getframerate(), wf.getnchannels(), wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+        dt = {1: np.uint8, 2: np.int16, 4: np.int32}[sw]
+        a = np.frombuffer(raw, dtype=dt).astype(np.float32)
+        if sw == 2:
+            a /= 32768.0
+        elif sw == 4:
+            a /= 2147483648.0
+        else:
+            a = (a - 128.0) / 128.0
+        a = a.reshape(-1, ch).T
+        return torch.from_numpy(a.copy()), int(sr)
+
+    def _load():
+        try:
+            import torch
+            from pyannote.audio import Pipeline
+            # pyannote.audio 4 uses token=; older used use_auth_token=.
+            try:
+                pipe = Pipeline.from_pretrained(MODEL_REPO, token=HF_TOKEN)
+            except TypeError:
+                pipe = Pipeline.from_pretrained(MODEL_REPO, use_auth_token=HF_TOKEN)
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+            pipe.to(torch.device(dev))
+            _state["pipeline"], _state["device"], _state["ready"] = pipe, dev, True
+            log.info("pyannote pipeline %s loaded on %s", MODEL_REPO, dev)
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("pipeline load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/healthz")
+    def healthz():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"]}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading pipeline")
+
+    @app.get("/readyz")
+    def readyz():
+        return healthz()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "mode": "diar"}]}
+
+    @app.post("/v1/audio/diarization")
+    async def diarize(file: UploadFile = File(...), num_speakers: str = Form(default=None),
+                      min_speakers: str = Form(default=None), max_speakers: str = Form(default=None)):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "pipeline not ready")
+        data = await file.read()
+        suffix = os.path.splitext(file.filename or "a.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(data)
+            path = f.name
+        try:
+            kw = {}
+            if num_speakers:
+                kw["num_speakers"] = int(num_speakers)
+            if min_speakers:
+                kw["min_speakers"] = int(min_speakers)
+            if max_speakers:
+                kw["max_speakers"] = int(max_speakers)
+            waveform, sr = _decode(path)
+            out = _state["pipeline"]({"waveform": waveform, "sample_rate": sr}, **kw)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="diarization failed: %s" % e)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        # pyannote 4 wraps the Annotation in .speaker_diarization (v3 returned it directly); unwrap to a common itertracks() form.
+        ann = getattr(out, "speaker_diarization", out)
+        segs = [{"start": round(float(t.start), 3), "end": round(float(t.end), 3), "speaker": str(spk)}
+                for t, _, spk in ann.itertracks(yield_label=True)]
+        speakers = sorted({s["speaker"] for s in segs})
+        return {"model": MODEL_NAME, "mode": "diar", "device": _state["device"],
+                "num_speakers": len(speakers), "speakers": speakers,
+                "num_segments": len(segs), "segments": segs}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  translate.py: |
+    # Text->text translation on the shared pyannote/torch image, SELF-ADAPTIVE by MODEL_NAME (CPU ctranslate2, deps pip-installed on first load); external API fixed to FLORES-200 with per-adapter mapping. Adapters: m2m100 (transformers+sentencepiece, ISO codes, MIT default) and nllb (tokenizers, codes already FLORES, CC-BY-NC opt-in). Exposes /healthz /readyz /v1/models POST /v1/translate.
+    import os, re, sys, subprocess, threading, logging
+    from typing import Optional
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-translate")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "nllb-200-distilled-600M")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    DEVICE = os.environ.get("CT2_DEVICE", "cpu")
+    DEFAULT_SRC = os.environ.get("DEFAULT_SOURCE_LANG", "eng_Latn")
+    # Advanced override only (not a clone field): force an adapter when name-detection guesses wrong; empty => auto-detect from MODEL_NAME/MODEL_REPO.
+    FORCE_ADAPTER = (os.environ.get("TRANSLATE_ADAPTER", "") or "").strip().lower()
+
+    def _pip(*pkgs):
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pkgs], check=False)
+
+    def _locate():
+        # Resolve the CT2 model dir from the shared HF cache populated by llm-init.
+        from huggingface_hub import snapshot_download
+        return snapshot_download(MODEL_REPO, local_files_only=True,
+                                 cache_dir=os.environ.get("HF_HUB_CACHE"))
+
+    # adapters: one per model family; external codes always FLORES-200, each owns its tokenization + ctranslate2 call + FLORES<->native mapping.
+
+    class _Adapter:
+        name = "base"
+        @staticmethod
+        def matches(repo, mdir):
+            return False
+        def load(self, mdir):
+            raise NotImplementedError
+        def translate(self, sents, src_flores, tgt_flores, beam_size):
+            raise NotImplementedError
+
+    class NLLBAdapter(_Adapter):
+        # NLLB CT2 repo ships tokenizer.json (tokenizers, no sentencepiece); its codes ARE FLORES-200 so no mapping - byte-identical to the pre-multi-model wrapper.
+        name = "nllb"
+        @staticmethod
+        def matches(repo, mdir):
+            if "nllb" in repo:
+                return True
+            return (os.path.exists(os.path.join(mdir, "tokenizer.json"))
+                    and not os.path.exists(os.path.join(mdir, "sentencepiece.bpe.model")))
+        def load(self, mdir):
+            try:
+                import ctranslate2
+                from tokenizers import Tokenizer
+            except Exception:
+                _pip("ctranslate2", "tokenizers")
+                import ctranslate2
+                from tokenizers import Tokenizer
+            self.tok = Tokenizer.from_file(os.path.join(mdir, "tokenizer.json"))
+            self.tr = ctranslate2.Translator(mdir, device=DEVICE)
+        def _decode_hyp(self, hyp, tgt):
+            out = [t for t in hyp if t not in (tgt, "</s>", "<pad>", "<s>")]
+            ids = [self.tok.token_to_id(t) for t in out]
+            ids = [i for i in ids if i is not None]
+            return self.tok.decode(ids).strip()
+        def translate(self, sents, src, tgt, beam_size):
+            # NLLB encoder input per sentence = [src_lang] + subwords + </s>; decoder prefix = [tgt].
+            sources = [[src] + self.tok.encode(s, add_special_tokens=False).tokens + ["</s>"] for s in sents]
+            res = self.tr.translate_batch(sources, target_prefix=[[tgt]] * len(sources),
+                                          beam_size=beam_size, max_input_length=1024,
+                                          max_decoding_length=1024)
+            return [self._decode_hyp(r.hypotheses[0], tgt) for r in res]
+
+    class M2M100Adapter(_Adapter):
+        # m2m100 CT2 repo bundles M2M100Tokenizer (sentencepiece), ISO 639-1 codes; map FLORES->ISO by the 3-letter prefix and follow the CTranslate2 m2m100 recipe (target_prefix tag, hypotheses[0][1:] drops the forced tag).
+        name = "m2m100"
+        FLORES2M2M = {
+            "eng": "en", "zho": "zh", "jpn": "ja", "kor": "ko", "fra": "fr", "deu": "de",
+            "spa": "es", "rus": "ru", "ita": "it", "por": "pt", "arb": "ar", "hin": "hi",
+            "vie": "vi", "tha": "th", "ind": "id", "nld": "nl", "pol": "pl", "tur": "tr",
+            "ukr": "uk", "ces": "cs", "ell": "el", "heb": "he", "swe": "sv", "ron": "ro",
+            "hun": "hu", "fin": "fi", "dan": "da", "nob": "no", "nno": "no", "afr": "af",
+            "amh": "am", "ast": "ast", "azj": "az", "azb": "az", "bak": "ba", "bel": "be",
+            "bul": "bg", "ben": "bn", "bos": "bs", "cat": "ca", "ceb": "ceb", "cym": "cy",
+            "pes": "fa", "prs": "fa", "gle": "ga", "gla": "gd", "glg": "gl", "guj": "gu",
+            "hau": "ha", "hrv": "hr", "hat": "ht", "hye": "hy", "ibo": "ig", "ilo": "ilo",
+            "isl": "is", "jav": "jv", "kat": "ka", "kaz": "kk", "khm": "km", "kan": "kn",
+            "ltz": "lb", "lug": "lg", "lin": "ln", "lao": "lo", "lit": "lt", "lvs": "lv",
+            "plt": "mg", "mkd": "mk", "mal": "ml", "khk": "mn", "mar": "mr", "zsm": "ms",
+            "mya": "my", "npi": "ne", "nso": "ns", "oci": "oc", "ory": "or", "pan": "pa",
+            "pbt": "ps", "snd": "sd", "sin": "si", "slk": "sk", "slv": "sl", "som": "so",
+            "als": "sq", "srp": "sr", "ssw": "ss", "sun": "su", "swh": "sw", "tam": "ta",
+            "tgl": "tl", "tsn": "tn", "urd": "ur", "uzn": "uz", "wol": "wo", "xho": "xh",
+            "ydd": "yi", "yor": "yo", "zul": "zu", "est": "et", "fuv": "ff", "bre": "br",
+            "fry": "fy",
+        }
+        @staticmethod
+        def matches(repo, mdir):
+            return any(k in repo for k in ("m2m100", "m2m_100", "m2m-100"))
+        def load(self, mdir):
+            try:
+                import ctranslate2, transformers
+                import sentencepiece  # noqa: F401
+            except Exception:
+                _pip("ctranslate2", "transformers", "sentencepiece")
+                import ctranslate2, transformers
+            self.tok = transformers.AutoTokenizer.from_pretrained(mdir, clean_up_tokenization_spaces=True)
+            self.tr = ctranslate2.Translator(mdir, device=DEVICE)
+        def _iso(self, flores):
+            code = self.FLORES2M2M.get(flores) or self.FLORES2M2M.get(flores.split("_")[0])
+            if not code and flores in self.tok.lang_code_to_token:
+                code = flores  # allow a raw ISO code passed straight through
+            if not code or code not in self.tok.lang_code_to_token:
+                raise HTTPException(status_code=400,
+                                    detail="m2m100 does not support language '%s'" % flores)
+            return code
+        def translate(self, sents, src, tgt, beam_size):
+            src_iso, tgt_iso = self._iso(src), self._iso(tgt)
+            self.tok.src_lang = src_iso
+            sources = [self.tok.convert_ids_to_tokens(self.tok.encode(s)) for s in sents]
+            prefix = [self.tok.lang_code_to_token[tgt_iso]]
+            res = self.tr.translate_batch(sources, target_prefix=[prefix] * len(sources),
+                                          beam_size=beam_size, max_input_length=1024,
+                                          max_decoding_length=1024)
+            out = []
+            for r in res:
+                ids = self.tok.convert_tokens_to_ids(r.hypotheses[0][1:])
+                out.append(self.tok.decode(ids, skip_special_tokens=True).strip())
+            return out
+
+    ADAPTERS = [M2M100Adapter, NLLBAdapter]
+
+    def _pick_adapter(mdir):
+        repo = MODEL_REPO.lower()
+        if FORCE_ADAPTER:
+            for A in ADAPTERS:
+                if A.name == FORCE_ADAPTER:
+                    return A()
+        for A in ADAPTERS:
+            if A.matches(repo, mdir):
+                return A()
+        return NLLBAdapter()  # safe default preserves legacy behaviour
+
+    app = FastAPI(title="audio-translate (multi-model via ctranslate2)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "adapter": None, "device": DEVICE}
+
+    def _load():
+        try:
+            d = _locate()
+            ad = _pick_adapter(d)
+            ad.load(d)
+            _state.update(adapter=ad, ready=True)
+            log.info("translate ready: adapter=%s model=%s on %s", ad.name, MODEL_REPO, DEVICE)
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/healthz")
+    def healthz():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"],
+                    "adapter": _state["adapter"].name if _state["adapter"] else None}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/readyz")
+    def readyz():
+        return healthz()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "mode": "translate"}]}
+
+    class Req(BaseModel):
+        text: str
+        target: str                 # FLORES-200 code, e.g. zho_Hans
+        source: Optional[str] = None  # FLORES-200 code; default DEFAULT_SOURCE_LANG
+
+    # Models are SENTENCE-level, so split input with a punctuation-only (non-AI) splitter, translate as one ctranslate2 batch, then join (empty joiner for space-less languages); adapter-agnostic, keyed on the FLORES target.
+    _SENT_RE = re.compile(r"[^。！？!?；;…\n]*[。！？!?；;…\n]+|[^。！？!?；;…\n]+")
+    _NOSPACE_TGT = ("zho", "jpn", "yue", "tha", "lao", "mya", "khm", "wuu", "bod")
+
+    def _split_sentences(text, max_chars=220):
+        sents = []
+        for m in _SENT_RE.findall(text):
+            s = m.strip()
+            if not s:
+                continue
+            if len(s) <= max_chars:
+                sents.append(s)
+            else:  # hard-wrap a delimiter-less run so a single huge "sentence" can't truncate
+                sents.extend(s[i:i + max_chars] for i in range(0, len(s), max_chars))
+        return sents or [text.strip()]
+
+    @app.post("/v1/translate")
+    def translate(req: Req):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        if not req.text.strip():
+            return {"model": MODEL_NAME, "mode": "translate", "translation": ""}
+        src = req.source or DEFAULT_SRC
+        tgt = req.target
+        sents = _split_sentences(req.text)
+        try:
+            hyps = _state["adapter"].translate(sents, src, tgt, 4)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="translation failed: %s" % e)
+        joiner = "" if tgt[:3] in _NOSPACE_TGT else " "
+        translation = joiner.join(h for h in hyps if h)
+        return {"model": MODEL_NAME, "mode": "translate", "adapter": _state["adapter"].name,
+                "source": src, "target": tgt, "sentences": len(sents), "translation": translation}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  embed.py: |
+    # Speaker/audio embedding via pyannote (image's torch, model from shared HF cache, gated repos use auto-injected HF_TOKEN); exposes /healthz /readyz /v1/models POST /v1/audio/embeddings (file -> one vector).
+    import os, tempfile, threading, logging
+    from fastapi import FastAPI, UploadFile, File, HTTPException
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-embed")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "pyannote-embedding")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    HF_TOKEN = os.environ.get("HF_TOKEN") or None
+
+    app = FastAPI(title="audio-embedding (pyannote)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "inference": None, "device": "cpu", "dim": None}
+
+    def _decode(path):
+        # Decode to (channels,time) float32 tensor + sample_rate, feeding pyannote an in-memory waveform to bypass its broken torchcodec AudioDecoder.
+        import torch
+        try:
+            import soundfile as sf
+            data, sr = sf.read(path, dtype="float32", always_2d=True)  # (time, channels)
+            return torch.from_numpy(data.T.copy()), int(sr)
+        except Exception:
+            pass
+        try:
+            import torchaudio
+            wav, sr = torchaudio.load(path)  # (channels, time)
+            return wav.float(), int(sr)
+        except Exception:
+            pass
+        import wave, numpy as np
+        with wave.open(path, "rb") as wf:
+            sr, ch, sw = wf.getframerate(), wf.getnchannels(), wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+        dt = {1: np.uint8, 2: np.int16, 4: np.int32}[sw]
+        a = np.frombuffer(raw, dtype=dt).astype(np.float32)
+        if sw == 2:
+            a /= 32768.0
+        elif sw == 4:
+            a /= 2147483648.0
+        else:
+            a = (a - 128.0) / 128.0
+        a = a.reshape(-1, ch).T
+        return torch.from_numpy(a.copy()), int(sr)
+
+    def _load():
+        try:
+            # pyannote/embedding's checkpoint pickles an omegaconf config, so torch.load needs omegaconf (absent in this image); best-effort pip-install at first load, node-cached after.
+            try:
+                import omegaconf  # noqa: F401
+            except ImportError:
+                import subprocess, sys
+                log.info("omegaconf missing; pip-installing for pyannote checkpoint...")
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "omegaconf"], check=False)
+            import torch
+            from pyannote.audio import Model, Inference
+            # pyannote.audio 4 uses token=; older used use_auth_token=.
+            try:
+                model = Model.from_pretrained(MODEL_REPO, token=HF_TOKEN)
+            except TypeError:
+                model = Model.from_pretrained(MODEL_REPO, use_auth_token=HF_TOKEN)
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+            # window="whole" -> a single fixed-length vector for the entire clip.
+            try:
+                inf = Inference(model, window="whole", device=torch.device(dev))
+            except TypeError:
+                model.to(torch.device(dev))
+                inf = Inference(model, window="whole")
+            _state.update(inference=inf, device=dev, ready=True)
+            log.info("pyannote embedding %s loaded on %s", MODEL_REPO, dev)
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("embedding load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/healthz")
+    def healthz():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"]}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/readyz")
+    def readyz():
+        return healthz()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "mode": "embed"}]}
+
+    @app.post("/v1/audio/embeddings")
+    async def embeddings(file: UploadFile = File(...)):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        data = await file.read()
+        suffix = os.path.splitext(file.filename or "a.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(data)
+            path = f.name
+        try:
+            import numpy as np
+            waveform, sr = _decode(path)
+            emb = _state["inference"]({"waveform": waveform, "sample_rate": sr})
+            vec = np.asarray(emb, dtype="float32").reshape(-1)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="embedding failed: %s" % e)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        _state["dim"] = int(vec.shape[0])
+        return {"model": MODEL_NAME, "mode": "embed", "device": _state["device"],
+                "dim": int(vec.shape[0]), "embedding": vec.tolist()}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  enhance.py: |
+    # Speech enhancement/denoise reusing the image's torch; SpeechBrain model from shared HF cache, best-effort pip-installed on first load; audio in -> 16k mono WAV out. Exposes /healthz /readyz /v1/models POST /v1/audio/enhance.
+    import io, os, tempfile, threading, logging
+    from fastapi import FastAPI, UploadFile, File, HTTPException
+    from fastapi.responses import Response
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-enhance")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "mtl-mimic-voicebank")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    HF_TOKEN = os.environ.get("HF_TOKEN") or None
+    SR = 16000  # SpeechBrain enhancement models operate at 16 kHz mono.
+
+    app = FastAPI(title="audio-enhance (speechbrain)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "model": None, "kind": None, "device": "cpu"}
+
+    def _decode(path):
+        # Decode to a mono float32 16k tensor with our own resample, avoiding the image's broken torchcodec AudioDecoder (see diar/embed).
+        import torch
+        try:
+            import soundfile as sf
+            data, sr = sf.read(path, dtype="float32", always_2d=True)  # (time, channels)
+            wav = torch.from_numpy(data.T.copy())  # (channels, time)
+        except Exception:
+            import torchaudio
+            wav, sr = torchaudio.load(path)  # (channels, time)
+            wav = wav.float()
+        if wav.shape[0] > 1:
+            wav = wav.mean(dim=0, keepdim=True)  # downmix to mono
+        if int(sr) != SR:
+            import torchaudio
+            wav = torchaudio.functional.resample(wav, int(sr), SR)
+        return wav  # (1, time) @ 16k
+
+    def _load():
+        try:
+            # SpeechBrain is not bundled in the pyannote image; pip-install on first load.
+            try:
+                import speechbrain  # noqa: F401
+            except ImportError:
+                import subprocess, sys
+                log.info("speechbrain missing; pip-installing (no new image)...")
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "speechbrain"], check=False)
+            import torch
+            from huggingface_hub import snapshot_download
+            src = snapshot_download(MODEL_REPO, local_files_only=True,
+                                    cache_dir=os.environ.get("HF_HUB_CACHE"), token=HF_TOKEN)
+            # speechbrain needs a "<type>:<index>" device string ("cuda" alone errors).
+            dev = "cuda:0" if torch.cuda.is_available() else "cpu"
+            # Enhancement repos need different inference classes (per hyperparams.yaml): WaveformEnhancement / SpectralMaskEnhancement / SepformerSeparation - auto-detect by trying from_hparams in order; module path moved between speechbrain 1.x and 0.5.x.
+            try:
+                from speechbrain.inference.enhancement import WaveformEnhancement, SpectralMaskEnhancement
+                from speechbrain.inference.separation import SepformerSeparation
+            except ImportError:
+                from speechbrain.pretrained import (
+                    WaveformEnhancement, SpectralMaskEnhancement, SepformerSeparation)
+            candidates = [("waveform", WaveformEnhancement),
+                          ("spectralmask", SpectralMaskEnhancement),
+                          ("sepformer", SepformerSeparation)]
+            last = None
+            for kind, cls in candidates:
+                try:
+                    savedir = os.path.join(tempfile.gettempdir(), "sb-enhance-%s" % kind)
+                    model = cls.from_hparams(source=src, savedir=savedir, run_opts={"device": dev})
+                    _state.update(model=model, kind=kind, device=dev, ready=True)
+                    log.info("speechbrain %s loaded as '%s' on %s", MODEL_REPO, kind, dev)
+                    return
+                except Exception as e:
+                    last = e
+                    log.info("model is not a %s class (%s)", kind, e)
+            raise last or RuntimeError("no compatible speechbrain enhancement class")
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("enhance load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/healthz")
+    def healthz():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"]}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/readyz")
+    def readyz():
+        return healthz()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "mode": "enhance"}]}
+
+    # Long audio handled server-side: past ENHANCE_CHUNK_S, slide a fixed window, enhance each, and overlap-add with a linear crossfade so peak VRAM is bounded by one window and clients can always send the whole clip.
+    CHUNK_S = float(os.environ.get("ENHANCE_CHUNK_S", "120") or 120)   # window length (s)
+    OVERLAP_S = float(os.environ.get("ENHANCE_OVERLAP_S", "1") or 1)   # crossfade overlap (s)
+
+    def _run(noisy):
+        # Enhance one (1, time) tensor -> 1-D float32 numpy of the same length.
+        import torch
+        model = _state["model"]
+        if _state["kind"] == "sepformer":
+            est = model.separate_batch(noisy)        # (batch, time, n_src)
+            enhanced = est[..., 0]
+        else:
+            lengths = torch.ones(noisy.shape[0])
+            enhanced = model.enhance_batch(noisy, lengths=lengths)
+        arr = enhanced.detach().cpu().numpy().reshape(-1)
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return arr
+
+    @app.post("/v1/audio/enhance")
+    async def enhance(file: UploadFile = File(...)):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        data = await file.read()
+        suffix = os.path.splitext(file.filename or "a.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(data)
+            path = f.name
+        try:
+            import numpy as np, soundfile as sf
+            wav = _decode(path)  # (1, time) @ 16k
+            total = int(wav.shape[-1])
+            chunk = int(CHUNK_S * SR)
+            ov = int(OVERLAP_S * SR)
+            if chunk <= 0 or total <= chunk:
+                # Short clip: single pass (identical to the pre-chunking behaviour).
+                out = _run(wav)
+            else:
+                # Long clip: sliding window + overlap-add crossfade, one window on the GPU at a time so peak VRAM is bounded regardless of duration.
+                hop = max(1, chunk - ov)
+                out = np.zeros(total, dtype="float32")
+                wsum = np.zeros(total, dtype="float32")
+                pos = 0
+                while pos < total:
+                    end = min(total, pos + chunk)
+                    n = end - pos
+                    enh = _run(wav[:, pos:end])
+                    if enh.shape[0] >= n:
+                        enh = enh[:n]
+                    else:
+                        enh = np.pad(enh, (0, n - enh.shape[0]))
+                    w = np.ones(n, dtype="float32")
+                    if pos > 0 and ov > 0:
+                        r = min(ov, n)
+                        w[:r] = np.linspace(0.0, 1.0, r, dtype="float32")  # fade in
+                    if end < total and ov > 0:
+                        r = min(ov, n)
+                        w[-r:] = np.minimum(w[-r:], np.linspace(1.0, 0.0, r, dtype="float32"))  # fade out
+                    out[pos:end] += enh * w
+                    wsum[pos:end] += w
+                    if end >= total:
+                        break
+                    pos += hop
+                nz = wsum > 1e-6
+                out[nz] = out[nz] / wsum[nz]
+            peak = float(np.max(np.abs(out))) if out.size else 0.0
+            if peak > 1.0:
+                out = out / peak  # guard against clipping
+            buf = io.BytesIO()
+            sf.write(buf, out, SR, format="WAV", subtype="PCM_16")
+            body = buf.getvalue()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="enhance failed: %s" % e)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        return Response(content=body, media_type="audio/wav",
+                        headers={"X-Audio-Model": MODEL_NAME, "X-Audio-Mode": "enhance"})
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  align.py: |
+    # Forced alignment (audio+text -> word/char timestamps) via Qwen3-ForcedAligner, reusing the vLLM cu129 image (capability end-to-end in the model, read from shared HF cache offline); exposes /health /healthz /readyz /v1/models POST /v1/audio/align.
+    import os, tempfile, threading, logging, asyncio
+    from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-align")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-ForcedAligner-0.6B")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    HF_TOKEN = os.environ.get("HF_TOKEN") or None
+
+    app = FastAPI(title="audio-align (Qwen3-ForcedAligner)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "model": None, "device": "cpu"}
+    # Serialise .align() across connections AND run it off the event loop (asyncio.to_thread): its blocking vLLM inference (30~110s under vGPU) otherwise froze uvicorn and got concurrent requests RST at ~47s; the lock keeps GPU use one-at-a-time.
+    _align_lock = asyncio.Lock()
+
+    def _load():
+        try:
+            # qwen-asr ships the Qwen3-ForcedAligner modeling code + .align(); engine cmd installs it on first load, fall back to a pip here just in case.
+            try:
+                from qwen_asr import Qwen3ForcedAligner  # noqa: F401
+            except Exception:
+                import subprocess, sys
+                log.info("qwen-asr missing; pip-installing for forced aligner...")
+                # qwen-asr pulls flask->blinker but the image has a distutils blinker 1.4 pip won't uninstall; reinstall blinker as pip-managed first so the install doesn't abort.
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                                "--ignore-installed", "blinker"], check=False)
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "qwen-asr"], check=False)
+                from qwen_asr import Qwen3ForcedAligner  # noqa: F401
+            import torch
+            from qwen_asr import Qwen3ForcedAligner
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.bfloat16 if dev == "cuda" else torch.float32
+            kw = dict(dtype=dtype, device_map=(dev if dev == "cpu" else "cuda:0"))
+            if HF_TOKEN:
+                kw["token"] = HF_TOKEN
+            try:
+                model = Qwen3ForcedAligner.from_pretrained(MODEL_REPO, **kw)
+            except TypeError:
+                kw.pop("token", None)
+                model = Qwen3ForcedAligner.from_pretrained(MODEL_REPO, **kw)
+            _state.update(model=model, device=dev, ready=True)
+            log.info("Qwen3-ForcedAligner %s loaded on %s", MODEL_REPO, dev)
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("forced-aligner load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/health")
+    def health():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"]}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/healthz")
+    def healthz():
+        return health()
+
+    @app.get("/readyz")
+    def readyz():
+        return health()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "mode": "align"}]}
+
+    def _field(u, *names):
+        for n in names:
+            try:
+                if isinstance(u, dict):
+                    if n in u:
+                        return u[n]
+                elif hasattr(u, n):
+                    return getattr(u, n)
+            except Exception:
+                pass
+        return None
+
+    # Gateway routes multipart audio-in capabilities under /v1/audio/<op>, so /v1/audio/align is the path the LLM Gateway hits.
+    @app.post("/v1/audio/align")
+    async def align(file: UploadFile = File(...), text: str = Form(default=None),
+                    language: str = Form(default=None), segments: str = Form(default=None)):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        data = await file.read()
+        # BATCH mode (opt-in): `segments` JSON [{start,end,text,[language]}] - decode the whole clip once, align each slice against its own text (slice-relative times), per-item try/except; no `segments` => original single-clip path byte-for-byte.
+        if segments:
+            import json as _json, io as _io, soundfile as _sf
+            try:
+                _segs = _json.loads(segments)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail="invalid `segments` json: %s" % e)
+            if not isinstance(_segs, list):
+                raise HTTPException(status_code=400, detail="`segments` must be a JSON array")
+            try:
+                _arr, _sr = _sf.read(_io.BytesIO(data), dtype="float32", always_2d=True)
+                _arr = _arr.mean(axis=1)  # -> mono
+            except Exception as e:
+                raise HTTPException(status_code=400, detail="could not decode audio: %s" % e)
+            _out = []
+            for _seg in _segs:
+                try:
+                    _st = (str(_seg.get("text") or "")).strip()
+                    if not _st:
+                        _out.append({"units": [], "language": None}); continue
+                    _a = float(_seg.get("start") or 0); _b = float(_seg.get("end") or 0)
+                    _lo = max(0, int(_a * _sr)); _hi = min(len(_arr), int(_b * _sr))
+                    if _hi <= _lo:
+                        _out.append({"error": "empty segment"}); continue
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _f:
+                        _sf.write(_f.name, _arr[_lo:_hi], _sr, format="WAV", subtype="PCM_16")
+                        _sp = _f.name
+                    _lg = (str(_seg.get("language") or language or "")).strip() or None
+                    _kw = {"language": _lg} if _lg else {}
+                    def _do_seg(_p=_sp, _t=_st, _k=_kw):
+                        try:
+                            return _state["model"].align(audio=_p, text=_t, **_k)
+                        except TypeError:
+                            return _state["model"].align(_p, _t)
+                    async with _align_lock:
+                        _res = await asyncio.to_thread(_do_seg)
+                    try:
+                        os.unlink(_sp)
+                    except Exception:
+                        pass
+                    _ur = _res[0] if _res else []
+                    _out.append({"language": _lg, "units": [
+                        {"text": _field(u, "text", "word", "token"),
+                         "start": _field(u, "start_time", "start"),
+                         "end": _field(u, "end_time", "end")} for u in _ur]})
+                except Exception as e:
+                    _out.append({"error": "align failed: %s" % e})
+            return {"model": MODEL_NAME, "mode": "align", "batch": True, "results": _out}
+        # ---- SINGLE mode (unchanged) ----
+        if not (text or "").strip():
+            raise HTTPException(status_code=400, detail="`text` is required for forced alignment")
+        suffix = os.path.splitext(file.filename or "a.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(data)
+            path = f.name
+        try:
+            lang = (language or "").strip() or None
+            kw = {"language": lang} if lang else {}
+            def _do_align():
+                try:
+                    return _state["model"].align(audio=path, text=text, **kw)
+                except TypeError:
+                    return _state["model"].align(path, text)
+            # Off the event loop + serialised: keeps uvicorn responsive to concurrent requests (no 47s RST) while GPU aligns run one at a time.
+            async with _align_lock:
+                results = await asyncio.to_thread(_do_align)
+            # results is a batch list; results[0] is the unit list for our single input.
+            units_raw = results[0] if results else []
+            units = []
+            for u in units_raw:
+                units.append({
+                    "text": _field(u, "text", "word", "token"),
+                    "start": _field(u, "start_time", "start"),
+                    "end": _field(u, "end_time", "end"),
+                })
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="alignment failed: %s" % e)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        return {"model": MODEL_NAME, "mode": "align", "device": _state["device"],
+                "language": (language or None), "units": units}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  stt_fw.py: |
+    # faster-whisper STT using the harveyff image's Blackwell-proven ctranslate2 + faster_whisper on the shared HF-cache CT2 model; same OpenAI STT contract as vLLM (drop-in) at /health /healthz /v1/models POST /v1/audio/transcriptions + /translations. Chosen because it issues few CUDA calls/sec so it stays fast on the time-sliced vGPU.
+    import os, sys, tempfile, threading, subprocess, logging
+    from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+    from fastapi.responses import PlainTextResponse
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-stt-fw")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "Systran/faster-whisper-large-v3")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    COMPUTE_TYPE = os.environ.get("FW_COMPUTE_TYPE", "float16")
+    DEVICE = os.environ.get("FW_DEVICE", "auto")
+    BEAM_SIZE = int(os.environ.get("FW_BEAM_SIZE", "5") or 5)
+    # THE speedup: WhisperX-style BatchedInferencePipeline (VAD-cut + parallel batched decode), what the proven WebUI runs by default (~10x faster and friendlier to the time-sliced vGPU).
+    BATCHED = os.environ.get("FW_BATCHED", "1").lower() in ("1", "true", "yes")
+    BATCH_SIZE = int(os.environ.get("FW_BATCH_SIZE", "16") or 16)
+    HF_TOKEN = os.environ.get("HF_TOKEN") or None
+
+    # Map common language full names -> ISO 639-1 (e.g. English/Chinese) so callers needn't send en/zh; unknown values pass through lower-cased.
+    _LANG = {"english": "en", "chinese": "zh", "mandarin": "zh", "japanese": "ja",
+             "korean": "ko", "french": "fr", "german": "de", "spanish": "es",
+             "russian": "ru", "italian": "it", "portuguese": "pt", "arabic": "ar"}
+
+    app = FastAPI(title="audio-stt (faster-whisper)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "model": None, "pipeline": None,
+              "device": None, "compute": None}
+
+    def _locate():
+        # Resolve the CT2 model dir from the shared HF cache populated by llm-init.
+        from huggingface_hub import snapshot_download
+        return snapshot_download(MODEL_REPO, local_files_only=True,
+                                 cache_dir=os.environ.get("HF_HUB_CACHE"), token=HF_TOKEN)
+
+    def _load():
+        try:
+            try:
+                from faster_whisper import WhisperModel
+            except Exception:
+                # Present in the harveyff image; if ever missing, install WITHOUT deps so we never replace the image's Blackwell-built ctranslate2.
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps",
+                                "faster-whisper"], check=False)
+                from faster_whisper import WhisperModel
+            import torch
+            dev = DEVICE
+            if dev == "auto":
+                dev = "cuda" if torch.cuda.is_available() else "cpu"
+            ctype = COMPUTE_TYPE if dev == "cuda" else "int8"
+            path = _locate()
+            model = WhisperModel(path, device=dev, compute_type=ctype)
+            pipeline = None
+            if BATCHED:
+                try:
+                    from faster_whisper import BatchedInferencePipeline
+                    pipeline = BatchedInferencePipeline(model=model)
+                    log.info("BatchedInferencePipeline enabled (batch_size=%d)", BATCH_SIZE)
+                except Exception as e:
+                    log.warning("BatchedInferencePipeline unavailable (%s); using buffered", e)
+            _state.update(model=model, pipeline=pipeline, device=dev, compute=ctype, ready=True)
+            log.info("faster-whisper loaded from %s on %s (%s)", path, dev, ctype)
+        except Exception as e:
+            _state["error"] = str(e)
+            log.exception("stt load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/health")
+    def health():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"], "compute_type": _state["compute"]}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/healthz")
+    def healthz():
+        return health()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list",
+                "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "local", "mode": "stt"}]}
+
+    def _norm_lang(lang):
+        if not lang:
+            return None
+        l = str(lang).strip().lower()
+        if not l or l in ("auto", "none", "null", "automatic detection"):
+            return None
+        if l in _LANG:
+            return _LANG[l]
+        return l.split("-")[0].split("_")[0]  # en-US/zh_CN -> en/zh
+
+    def _parse_temp(raw):
+        if raw is None or str(raw).strip() == "":
+            return 0.0
+        parts = [p for p in str(raw).replace(" ", "").split(",") if p != ""]
+        try:
+            vals = [float(p) for p in parts]
+        except Exception:
+            return 0.0
+        return vals[0] if len(vals) == 1 else tuple(vals)
+
+    def _run(task, file, language, response_format, temperature, prompt, vad_filter, word_ts):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        data = file.file.read() if hasattr(file, "file") else None
+        suffix = os.path.splitext(getattr(file, "filename", "") or "a.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(data)
+            path = f.name
+        try:
+            kw = {
+                "task": task,
+                "beam_size": BEAM_SIZE,
+                "language": _norm_lang(language),
+                "word_timestamps": bool(word_ts),
+            }
+            if prompt:
+                kw["initial_prompt"] = prompt
+            temp = _parse_temp(temperature)
+            pipe = _state.get("pipeline")
+            if pipe is not None:
+                # Batched path (the fast path): VAD-cut + parallel batched decode owns its VAD and needs a scalar temperature; falls back to buffered if this faster_whisper rejects a kwarg.
+                bkw = dict(kw)
+                bkw["temperature"] = temp[0] if isinstance(temp, tuple) else temp
+                bkw["batch_size"] = BATCH_SIZE
+                bkw["vad_filter"] = True
+                try:
+                    segments, info = pipe.transcribe(path, **bkw)
+                    segs = list(segments)
+                except TypeError as te:
+                    log.warning("batched rejected kwargs (%s); buffered fallback", te)
+                    kw["temperature"] = temp
+                    if vad_filter:
+                        kw["vad_filter"] = True
+                    segments, info = _state["model"].transcribe(path, **kw)
+                    segs = list(segments)
+            else:
+                kw["temperature"] = temp
+                if vad_filter:
+                    kw["vad_filter"] = True
+                segments, info = _state["model"].transcribe(path, **kw)
+                segs = list(segments)  # realize the generator (runs inference)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="transcription failed: %s" % e)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        full = "".join(s.text for s in segs).strip()
+        rf = (response_format or "json").lower()
+        if rf == "text":
+            return PlainTextResponse(full)
+        if rf in ("verbose_json", "verbose"):
+            out_segs = []
+            for s in segs:
+                d = {"id": getattr(s, "id", 0), "seek": getattr(s, "seek", 0),
+                     "start": round(float(s.start), 3), "end": round(float(s.end), 3),
+                     "text": s.text,
+                     "avg_logprob": getattr(s, "avg_logprob", None),
+                     "compression_ratio": getattr(s, "compression_ratio", None),
+                     "no_speech_prob": getattr(s, "no_speech_prob", None)}
+                if word_ts and getattr(s, "words", None):
+                    d["words"] = [{"word": w.word, "start": round(float(w.start), 3),
+                                   "end": round(float(w.end), 3),
+                                   "probability": getattr(w, "probability", None)} for w in s.words]
+                out_segs.append(d)
+            return {"task": task, "language": getattr(info, "language", None),
+                    "duration": round(float(getattr(info, "duration", 0.0) or 0.0), 3),
+                    "text": full, "segments": out_segs}
+        return {"text": full}
+
+    @app.post("/v1/audio/transcriptions")
+    async def transcriptions(file: UploadFile = File(...), model: str = Form(default=None),
+                             language: str = Form(default=None), response_format: str = Form(default="json"),
+                             temperature: str = Form(default=None), prompt: str = Form(default=None),
+                             vad_filter: str = Form(default=None), word_timestamps: str = Form(default=None)):
+        return _run("transcribe", file, language, response_format, temperature, prompt,
+                    str(vad_filter).lower() in ("1", "true", "yes"),
+                    str(word_timestamps).lower() in ("1", "true", "yes"))
+
+    @app.post("/v1/audio/translations")
+    async def translations(file: UploadFile = File(...), model: str = Form(default=None),
+                           response_format: str = Form(default="json"),
+                           temperature: str = Form(default=None), prompt: str = Form(default=None)):
+        # OpenAI semantics: translations = speech -> English (Whisper "translate" task).
+        return _run("translate", file, None, response_format, temperature, prompt, False, False)
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL)
+  stream.py: |
+    # Streaming STT (mode=stt_stream) for Qwen3-ASR reusing the vLLM cu129 image: streaming lives in the qwen-asr[vllm] in-process API (not `vllm serve`), loaded in-process and bridged to a WebSocket (pkg pip-installed on first load, model from shared HF cache). WS contract at GET /v1/audio/stream: client sends optional start JSON then PCM16LE binary + stop; server sends ready/partial/final/error. Also exposes /healthz /readyz /health /v1/models. NOTE: Qwen streaming returns no timestamps (rolling-caption surface).
+    import os, sys, json, asyncio, logging, subprocess
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, Form
+    from fastapi.responses import Response
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-stt-stream")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-ASR-1.7B")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or MODEL_NAME)
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+    GPU_UTIL = float(os.environ.get("VLLM_GPU_UTIL", "0.45") or 0.45)
+    MAX_NEW_TOKENS = int(os.environ.get("STREAM_MAX_NEW_TOKENS", "32") or 32)
+    # max_model_len only holds ONE unit of work: offline chunks to <=540s + <=4096 out, streaming a ~240s rolled window + tiny output - so ~16384 (DERIVED from the GPU quota by engine.yaml; 12Gi->16384) is plenty and 65536 was overkill; the real long-audio ceiling is the encoder cache.
+    MAX_MODEL_LEN = int(os.environ.get("STREAM_MAX_LEN", "16384") or 16384)
+    # Streaming state knobs mirror the official example defaults (2s chunks, keep the last few chunks/tokens unfixed so they can still change as more audio arrives).
+    UNFIXED_CHUNK_NUM = int(os.environ.get("STREAM_UNFIXED_CHUNK_NUM", "2") or 2)
+    UNFIXED_TOKEN_NUM = int(os.environ.get("STREAM_UNFIXED_TOKEN_NUM", "5") or 5)
+    CHUNK_SIZE_SEC = float(os.environ.get("STREAM_CHUNK_SIZE_SEC", "2.0") or 2.0)
+    DEFAULT_STEP_MS = int(os.environ.get("STREAM_STEP_MS", "500") or 500)
+    # One streaming state accumulates the session's audio context; left unbounded it overflows vLLM's ~8192-token audio encoder cache (~10 min), so we roll (finalize + re-init) every STREAM_ROLL_SEC for indefinite bounded-memory sessions.
+    ROLL_SEC = float(os.environ.get("STREAM_ROLL_SEC", "240") or 240)
+
+    app = FastAPI(title="audio-stt-stream (Qwen3-ASR streaming)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "asr": None}
+    # vLLM's offline LLM.generate is blocking and not concurrency-safe; serialize all inference across connections behind one lock (fine for a base/PoC instance).
+    _infer_lock = asyncio.Lock()
+
+    def _p(msg):
+        # Startup breadcrumbs to stdout (flushed) so container logs show load progress before the logging handler / uvicorn are up (the engine block-loads first).
+        print("[stream] " + msg, flush=True)
+
+    def _load_blocking():
+        # Load the qwen-asr vLLM streaming engine in the MAIN process/thread before uvicorn (vLLM installs signal handlers + spawns workers at construction, so a daemon thread fails); health comes up only after. Install PLAIN qwen-asr (NOT [vllm], which re-resolves the whole vLLM stack and hangs) since vLLM is already in this image.
+        _p("importing qwen_asr ...")
+        try:
+            from qwen_asr import Qwen3ASRModel
+        except Exception as e:
+            _p("qwen_asr import failed (%s); pip-installing ..." % e)
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                            "--ignore-installed", "blinker"], check=False)
+            subprocess.run([sys.executable, "-m", "pip", "install",
+                            "qwen-asr", "soundfile"], check=False)
+            from qwen_asr import Qwen3ASRModel
+        # OFFLINE long-audio: qwen-asr silence-splits at MAX_ASR_INPUT_SECONDS (default 1200s) and seamlessly join-merges, but the ~8192-token vLLM encoder cache (~600s) is the real ceiling; so we lower the package window to 540s to fit the cache, letting asr.transcribe(whole) handle any length in one call. Bigger window => bigger cache => more GPU; 540s is safe at the 12Gi/8192 tier.
+        try:
+            import qwen_asr.inference.qwen3_asr as _qasr_mod
+            import qwen_asr.inference.utils as _qasr_utils
+            _win = int(os.environ.get("OFFLINE_MAX_INPUT_SEC", "540") or 540)
+            _qasr_utils.MAX_ASR_INPUT_SECONDS = _win
+            _qasr_mod.MAX_ASR_INPUT_SECONDS = _win
+            _p("patched qwen-asr MAX_ASR_INPUT_SECONDS -> %ds (fit 8192 encoder cache; long audio auto-chunked+merged by package)" % _win)
+        except Exception as e:
+            _p("WARN could not patch MAX_ASR_INPUT_SECONDS (%s); offline long audio may hit the encoder-cache cap" % e)
+        _p("constructing Qwen3ASRModel.LLM(model=%s, gpu_util=%.2f, max_model_len=%d) ..."
+           % (MODEL_REPO, GPU_UTIL, MAX_MODEL_LEN))
+        # gpu_memory_utilization + max_model_len are vLLM LLM kwargs qwen-asr forwards; if a build doesn't forward max_model_len, retry without it (needs a smaller quota).
+        _kw = dict(model=MODEL_REPO, gpu_memory_utilization=GPU_UTIL, max_new_tokens=MAX_NEW_TOKENS)
+        try:
+            asr = Qwen3ASRModel.LLM(max_model_len=MAX_MODEL_LEN, **_kw)
+        except TypeError as e:
+            _p("LLM() rejected max_model_len (%s); retrying without it" % e)
+            asr = Qwen3ASRModel.LLM(**_kw)
+        _state["asr"] = asr
+        _state["ready"] = True
+        _p("engine READY: %s (gpu_util=%.2f)" % (MODEL_REPO, GPU_UTIL))
+        log.info("qwen-asr streaming engine loaded: %s (gpu_util=%.2f)", MODEL_REPO, GPU_UTIL)
+
+    @app.get("/healthz")
+    def healthz():
+        if _state["ready"]:
+            return {"status": "ok"}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/readyz")
+    def readyz():
+        return healthz()
+
+    @app.get("/health")
+    def health():
+        return healthz()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list",
+                "data": [{"id": MODEL_NAME, "object": "model", "mode": "stt_stream"}]}
+
+    # Offline STT (mode=stt) on the SAME loaded model: when MODEL_SUPPORTS has both stt and stt_stream this one instance also serves offline /v1/audio/transcriptions reusing the streaming primitives, model loaded once (no double GPU) - the point of the dual-capability dispatcher.
+    def _decode_to_16k_mono(raw, filename):
+        import numpy as np, tempfile
+        import librosa
+        suffix = os.path.splitext(filename or "")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+            tf.write(raw)
+            path = tf.name
+        try:
+            y, _sr = librosa.load(path, sr=16000, mono=True)
+        finally:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        return y.astype("float32")
+
+    async def _offline_transcribe(audio):
+        # Native offline transcription on the SAME loaded Qwen model: pass the WHOLE clip to asr.transcribe() (qwen-asr internally splits at 540s + seamlessly join-merges) for any length with no seams; offline never runs concurrently with streaming. max_tokens temporarily raised to 4096 for offline chunks then restored (serialised by _infer_lock; covers a 9min chunk within the 16384 max_model_len).
+        asr = _state["asr"]
+        off_max = int(os.environ.get("OFFLINE_MAX_TOKENS", "4096") or 4096)
+
+        def _run():
+            sp = getattr(asr, "sampling_params", None)
+            old = getattr(sp, "max_tokens", None) if sp is not None else None
+            try:
+                if sp is not None:
+                    sp.max_tokens = off_max
+                return asr.transcribe(audio=(audio, 16000), language=None, return_time_stamps=False)
+            finally:
+                if sp is not None and old is not None:
+                    sp.max_tokens = old
+
+        async with _infer_lock:
+            results = await asyncio.to_thread(_run)
+        r = results[0] if results else None
+        t = getattr(r, "text", None) if r is not None else None
+        if t is None and isinstance(r, dict):
+            t = r.get("text")
+        return (t or "").strip()
+
+    @app.post("/v1/audio/transcriptions")
+    async def transcriptions(file: UploadFile = File(...),
+                             model: str = Form(None),
+                             language: str = Form(None),
+                             response_format: str = Form("json"),
+                             segments: str = Form(None)):
+        if not _state["ready"]:
+            raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+        raw = await file.read()
+        # Decode the uploaded clip once (caller sends one batch's worth, kept small by its byte-budget) into a 16k mono array.
+        audio = await asyncio.to_thread(_decode_to_16k_mono, raw, file.filename)
+        # BATCH mode (opt-in): `segments` JSON [{start,end}] - slice the decoded array per segment and transcribe each (per-item try/except); no `segments` => original single-clip path.
+        if segments:
+            import json as _json
+            try:
+                _segs = _json.loads(segments)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail="invalid `segments` json: %s" % e)
+            if not isinstance(_segs, list):
+                raise HTTPException(status_code=400, detail="`segments` must be a JSON array")
+            _out = []
+            for _seg in _segs:
+                try:
+                    _a = float(_seg.get("start") or 0); _b = float(_seg.get("end") or 0)
+                    _lo = max(0, int(_a * 16000)); _hi = min(len(audio), int(_b * 16000))
+                    if _hi <= _lo:
+                        _out.append({"text": ""}); continue
+                    _t = await _offline_transcribe(audio[_lo:_hi])
+                    _out.append({"text": _t})
+                except Exception as e:
+                    _out.append({"error": "stt failed: %s" % e})
+            return {"model": MODEL_NAME, "mode": "stt", "batch": True, "results": _out}
+        # ---- SINGLE mode (unchanged) ----
+        text = await _offline_transcribe(audio)
+        if response_format in ("text", "srt", "vtt"):
+            return Response(content=text, media_type="text/plain")
+        return {"text": text}
+
+    def _pcm16_to_f32(buf):
+        import numpy as np
+        if not buf:
+            return np.zeros((0,), dtype="float32")
+        return np.frombuffer(buf, dtype="<i2").astype("float32") / 32768.0
+
+    def _resample_linear(seg, src_sr):
+        import numpy as np
+        if src_sr == 16000 or seg.shape[0] == 0:
+            return seg.astype("float32", copy=False)
+        dur = seg.shape[0] / float(src_sr)
+        n16 = int(round(dur * 16000))
+        if n16 <= 0:
+            return np.zeros((0,), dtype="float32")
+        xo = np.linspace(0.0, dur, num=seg.shape[0], endpoint=False)
+        xn = np.linspace(0.0, dur, num=n16, endpoint=False)
+        return np.interp(xn, xo, seg).astype("float32")
+
+    @app.websocket("/v1/audio/stream")
+    async def stream(ws: WebSocket):
+        import numpy as np
+        await ws.accept()
+        if not _state["ready"]:
+            await ws.send_text(json.dumps({"type": "error",
+                                           "detail": _state["error"] or "model not ready"}))
+            await ws.close()
+            return
+        asr = _state["asr"]
+        sample_rate = 16000
+        step_ms = DEFAULT_STEP_MS
+        language = None
+
+        def _new_state():
+            return asr.init_streaming_state(
+                unfixed_chunk_num=UNFIXED_CHUNK_NUM,
+                unfixed_token_num=UNFIXED_TOKEN_NUM,
+                chunk_size_sec=CHUNK_SIZE_SEC,
+            )
+
+        # Session state in a dict so nested helpers can rebind `st` on a roll: prefix = text finalized by previous rolls (keeps transcript monotonic); samples = audio fed to the current state (drives the proactive roll).
+        S = {"st": _new_state(), "prefix": "", "samples": 0}
+        roll_samples = max(16000, int(ROLL_SEC * 16000))
+        pending = np.zeros((0,), dtype="float32")
+        await ws.send_text(json.dumps({"type": "ready"}))
+
+        def _join(a, b):
+            if not a:
+                return b
+            if not b:
+                return a
+            # Add a space only between two ASCII words (CJK needs none).
+            if a[-1].isascii() and a[-1].isalnum() and b[0].isascii() and b[0].isalnum():
+                return a + " " + b
+            return a + b
+
+        def _full_text():
+            return _join(S["prefix"], getattr(S["st"], "text", "") or "")
+
+        async def _emit(kind):
+            await ws.send_text(json.dumps({
+                "type": kind,
+                "text": _full_text(),
+                "language": getattr(S["st"], "language", None) or language,
+            }))
+
+        async def _roll():
+            # Finalize the current segment, fold its text into the committed prefix, then start a fresh state so accumulated audio context (and encoder-cache usage) resets to ~zero.
+            async with _infer_lock:
+                await asyncio.to_thread(asr.finish_streaming_transcribe, S["st"])
+            S["prefix"] = _join(S["prefix"], getattr(S["st"], "text", "") or "")
+            S["st"] = _new_state()
+            S["samples"] = 0
+
+        async def _feed(cur):
+            # Backstop: if the encoder cache overflows despite the proactive roll, roll and retry the chunk once.
+            try:
+                async with _infer_lock:
+                    await asyncio.to_thread(asr.streaming_transcribe, cur, S["st"])
+            except Exception as e:
+                msg = str(e).lower()
+                if "encoder cache" in msg or "exceeds" in msg or "pre-allocated" in msg:
+                    log.warning("encoder-cache overflow; rolling session and retrying: %s", e)
+                    await _roll()
+                    async with _infer_lock:
+                        await asyncio.to_thread(asr.streaming_transcribe, cur, S["st"])
+                else:
+                    raise
+            S["samples"] += int(cur.shape[0])
+
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                text = msg.get("text")
+                if text is not None:
+                    try:
+                        obj = json.loads(text)
+                    except Exception:
+                        obj = {}
+                    t = obj.get("type")
+                    if t == "start":
+                        language = obj.get("language") or None
+                        sample_rate = int(obj.get("sample_rate") or 16000)
+                        step_ms = int(obj.get("step_ms") or DEFAULT_STEP_MS)
+                        continue
+                    if t in ("stop", "done", "finish"):
+                        break
+                    continue
+                data = msg.get("bytes")
+                if not data:
+                    continue
+                seg = _resample_linear(_pcm16_to_f32(data), sample_rate)
+                pending = np.concatenate([pending, seg]) if pending.size else seg
+                step = max(1, int(round(step_ms / 1000.0 * 16000)))
+                while pending.shape[0] >= step:
+                    cur, pending = pending[:step], pending[step:]
+                    await _feed(cur)
+                    await _emit("partial")
+                    # Proactive roll at a safe point (between steps) so we never approach the encoder-cache cap.
+                    if S["samples"] >= roll_samples:
+                        await _roll()
+                        await _emit("partial")
+            # flush tail + finalize
+            if pending.size:
+                await _feed(pending)
+            async with _infer_lock:
+                await asyncio.to_thread(asr.finish_streaming_transcribe, S["st"])
+            await _emit("final")
+            await ws.close()
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            log.exception("stream error: %s", e)
+            try:
+                await ws.send_text(json.dumps({"type": "error", "detail": str(e)}))
+                await ws.close()
+            except Exception:
+                pass
+
+    if __name__ == "__main__":
+        # Block-load the vLLM engine on the MAIN thread BEFORE serving (see _load_blocking).
+        _p("stream.py starting; model=%s port=%s" % (MODEL_REPO, PORT))
+        try:
+            _load_blocking()
+        except Exception as e:
+            _state["error"] = str(e)
+            _p("engine load FAILED: %s" % e)
+            log.exception("engine load failed: %s", e)
+        _p("starting uvicorn on :%s (ready=%s)" % (PORT, _state["ready"]))
+        # Disable server-initiated WS keepalive: bursty offloaded inference + client-paced feed can lag on Pong past the 20s ping timeout and drop a healthy captioning session with 1011; rely on WebSocketDisconnect/TCP reset instead.
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL,
+                    ws_ping_interval=None, ws_ping_timeout=None)
+  diar_stream.py: |
+    # Streaming/online speaker diarization (mode=diar_stream) via NVIDIA Streaming Sortformer on the NeMo image (the one capability needing a new heavy image); model from shared HF cache offline. Own capability (not diar+flag) because streaming needs time-consistent labels, which Sortformer's Arrival-Order Speaker Cache gives deterministically. Unbounded length via TWO paths: (1) TRUE STREAMING keeping one streaming_state and feeding only new chunk-aligned audio (O(1)/chunk, AOSC keeps labels stable, bounded memory); (2) BOUNDED WINDOW fallback re-running .diarize() over the last WINDOW_SEC with committed turns + OVERLAP_SEC remap when the streaming self-test fails. Path chosen once per connection before any client audio (self-test on silence). Both use only public NeMo API, no monkey-patching. WS contract at GET /v1/audio/diarize/stream: client sends optional start JSON then PCM16LE binary + stop; server sends ready/partial/final/error with speaker SEGMENTS (native frame timestamps). Fusion with ASR text is the consumer's job. Also exposes /healthz /readyz /health /v1/models.
+    import os, sys, json, glob, asyncio, logging, threading
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+    import uvicorn
+
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    log = logging.getLogger("audio-diar-stream")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "diar-streaming-sortformer")
+    _src = os.environ.get("MODEL_SOURCE", "")
+    MODEL_REPO = _src[5:] if _src.startswith("hf://") else (_src or "nvidia/diar_streaming_sortformer_4spk-v2.1")
+    PORT = int(os.environ.get("WRAPPER_PORT", "8000"))
+
+    # Streaming knobs (frames=80ms) default to the card's HIGH-LATENCY preset (~10s, RTF~0.005): a bigger chunk resolves rapid adjacent turns far better than the 480ms low-latency chunk and is ~18x cheaper (NVIDIA DER table), the demo backfilling these late-but-correct labels. Override per host via DIAR_* (low 1.04s: chunk_len=6 rc=7 fifo=188 update=144 cache=188; high 10s: chunk_len=124 rc=1 fifo=124 update=124 cache=188; very high 30.4s: chunk_len=340 rc=40 fifo=40 update=300 cache=188).
+    CHUNK_LEN = int(os.environ.get("DIAR_CHUNK_LEN", "124") or 124)
+    RIGHT_CONTEXT = int(os.environ.get("DIAR_RIGHT_CONTEXT", "1") or 1)
+    FIFO_LEN = int(os.environ.get("DIAR_FIFO_LEN", "124") or 124)
+    UPDATE_PERIOD = int(os.environ.get("DIAR_UPDATE_PERIOD", "124") or 124)
+    SPKCACHE_LEN = int(os.environ.get("DIAR_SPKCACHE_LEN", "188") or 188)
+    # Emit cadence: send a partial update every this many seconds of NEW audio (both paths).
+    STEP_SEC = float(os.environ.get("DIAR_STREAM_STEP_SEC", "2.0") or 2.0)
+    # (Fallback-only) need a little audio before the first .diarize() pass is meaningful.
+    MIN_SEC = float(os.environ.get("DIAR_STREAM_MIN_SEC", "1.0") or 1.0)
+    # Fallback-only unbounded rolling window: re-diarizing the whole buffer is O(n^2) and grows without limit, so diarize only the last WINDOW_SEC (bounded compute+memory), commit older turns, and carry an OVERLAP_SEC tail to remap the new window's labels onto the previous by time-overlap (stable spk_k across seams); window big enough that seams are rare, small enough to keep up.
+    WINDOW_SEC = float(os.environ.get("DIAR_STREAM_WINDOW_SEC", "60") or 60)
+    OVERLAP_SEC = float(os.environ.get("DIAR_STREAM_OVERLAP_SEC", "12") or 12)
+
+    app = FastAPI(title="audio-diar-stream (Streaming Sortformer)")
+    try:
+        from _gpumetrics import mount_metrics
+        mount_metrics(app)  # GET /metrics -> uniform audio_gpu_* gauges
+    except Exception as _e:
+        log.warning("gpu /metrics unavailable: %s", _e)
+    _state = {"ready": False, "error": None, "model": None, "device": "cpu"}
+    # Sortformer's diarize() is blocking and not concurrency-safe; serialize inference.
+    _infer_lock = asyncio.Lock()
+
+    def _p(msg):
+        print("[diar_stream] " + msg, flush=True)
+
+    def _find_nemo():
+        # Locate the llm-init-downloaded .nemo in the shared HF cache (offline load).
+        cache = (os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
+                 or "/cache/hf/hub")
+        repo = "models--" + MODEL_REPO.replace("/", "--")
+        for pat in (os.path.join(cache, repo, "snapshots", "*", "*.nemo"),
+                    os.path.join(cache, "**", "*.nemo")):
+            hits = sorted(glob.glob(pat, recursive=True))
+            if hits:
+                return hits[0]
+        return None
+
+    def _load():
+        try:
+            import torch
+            from nemo.collections.asr.models import SortformerEncLabelModel
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+            path = _find_nemo()
+            if path:
+                _p("restoring Sortformer from cached .nemo: %s" % path)
+                model = SortformerEncLabelModel.restore_from(
+                    restore_path=path, map_location=dev, strict=False)
+            else:
+                _p("no cached .nemo found; from_pretrained(%s) (needs network/token)" % MODEL_REPO)
+                model = SortformerEncLabelModel.from_pretrained(MODEL_REPO, map_location=dev)
+            model.eval()
+            # Configure the streaming behaviour (see card "Setting up Streaming Configuration").
+            sm = model.sortformer_modules
+            sm.chunk_len = CHUNK_LEN
+            sm.chunk_right_context = RIGHT_CONTEXT
+            sm.fifo_len = FIFO_LEN
+            sm.spkcache_update_period = UPDATE_PERIOD
+            sm.spkcache_len = SPKCACHE_LEN
+            try:
+                sm._check_streaming_parameters()
+            except Exception as e:
+                log.warning("streaming-parameter check skipped: %s", e)
+            # Probe the TRUE incremental-streaming API (init_streaming_state + streaming_feat_loader + forward_streaming_step): if present feed only new audio per step (O(1)/chunk); if any piece is missing fall back to the bounded-window .diarize(). n_spk / subsampling_factor drive preds->timestamps (each frame = subsampling_factor*10ms = 80ms).
+            _state["n_spk"] = int(getattr(sm, "n_spk", 4) or 4)
+            _state["subsampling"] = int(getattr(sm, "subsampling_factor", 8) or 8)
+            _state["streaming_ok"] = bool(
+                hasattr(sm, "init_streaming_state") and hasattr(sm, "streaming_feat_loader")
+                and hasattr(model, "forward_streaming_step") and hasattr(model, "preprocessor"))
+            _state["model"], _state["device"], _state["ready"] = model, dev, True
+            _p("streaming API present=%s n_spk=%d subsampling=%d (methods: %s)"
+               % (_state["streaming_ok"], _state["n_spk"], _state["subsampling"],
+                  ",".join(sorted(m for m in ("init_streaming_state", "streaming_feat_loader")
+                                  if hasattr(sm, m)))))
+            _p("engine READY: %s on %s (chunk=%d rc=%d fifo=%d up=%d cache=%d)"
+               % (MODEL_REPO, dev, CHUNK_LEN, RIGHT_CONTEXT, FIFO_LEN, UPDATE_PERIOD, SPKCACHE_LEN))
+        except Exception as e:
+            _state["error"] = str(e)
+            _p("engine load FAILED: %s" % e)
+            log.exception("engine load failed: %s", e)
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load, daemon=True).start()
+
+    @app.get("/healthz")
+    def healthz():
+        if _state["ready"]:
+            return {"status": "ok", "device": _state["device"]}
+        raise HTTPException(status_code=503, detail=_state["error"] or "loading model")
+
+    @app.get("/readyz")
+    def readyz():
+        return healthz()
+
+    @app.get("/health")
+    def health():
+        return healthz()
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list",
+                "data": [{"id": MODEL_NAME, "object": "model", "mode": "diar_stream"}]}
+
+    def _spk_name(spk):
+        # Normalize speaker labels to spk_<n> ("speaker_2" / 2 / "2" -> "spk_2").
+        s = str(spk).strip()
+        digits = "".join(ch for ch in s if ch.isdigit())
+        return ("spk_" + digits) if digits else (s or "spk_0")
+
+    def _parse_segments(raw):
+        # The card's diarize() yields items like "start end speaker" (str) across versions; tolerate tuples/objects too so a NeMo minor bump can't break the wire format.
+        out = []
+        for seg in (raw or []):
+            s = e = spk = None
+            if isinstance(seg, str):
+                parts = seg.split()
+                if len(parts) >= 3:
+                    s, e, spk = parts[0], parts[1], " ".join(parts[2:])
+            elif isinstance(seg, (list, tuple)) and len(seg) >= 3:
+                s, e, spk = seg[0], seg[1], seg[2]
+            else:
+                s = getattr(seg, "start", None)
+                e = getattr(seg, "end", None)
+                spk = getattr(seg, "speaker", None) or getattr(seg, "label", None)
+            if s is None or e is None:
+                continue
+            try:
+                out.append({"start": round(float(s), 3), "end": round(float(e), 3),
+                            "speaker": _spk_name(spk)})
+            except Exception:
+                continue
+        return out
+
+    def _merge_segments(segs, gap=0.8):
+        # Collapse adjacent same-speaker turns (short gaps bridged) so the committed timeline and the committed<->live seam stay clean.
+        s2 = sorted(segs, key=lambda x: (x["start"], x["end"]))
+        out = []
+        for s in s2:
+            if out and out[-1]["speaker"] == s["speaker"] and s["start"] - out[-1]["end"] <= gap:
+                out[-1]["end"] = max(out[-1]["end"], s["end"])
+            else:
+                out.append({"start": round(float(s["start"]), 3),
+                            "end": round(float(s["end"]), 3), "speaker": s["speaker"]})
+        return out
+
+    def _preds_to_segments(preds, frame_sec, thr=0.5):
+        # preds: numpy [T,n_spk] per-frame speaker-activity probs (each frame frame_sec=80ms); threshold each speaker column and collapse contiguous active frames into ABS turns. AOSC keeps column k == one speaker so labels are globally stable with no remap; returns merged spk_<k> segments.
+        import numpy as np
+        out = []
+        if preds is None or getattr(preds, "size", 0) == 0:
+            return out
+        T = preds.shape[0]
+        S = preds.shape[1] if preds.ndim > 1 else 1
+        act = preds >= thr
+        for s in range(S):
+            col = act[:, s]
+            i = 0
+            while i < T:
+                if col[i]:
+                    j = i
+                    while j + 1 < T and col[j + 1]:
+                        j += 1
+                    out.append({"start": round(i * frame_sec, 3),
+                                "end": round((j + 1) * frame_sec, 3),
+                                "speaker": "spk_%d" % s})
+                    i = j + 1
+                else:
+                    i += 1
+        return _merge_segments(out)
+
+    def _diarize(buf):
+        # FALLBACK path only (streaming API absent): buf float32 mono @16k, returns segments over the buffer (times relative to buf[0], callers keep buf bounded to WINDOW_SEC); the OLD per-step re-diarize kept solely as a safety net.
+        model = _state["model"]
+        res = model.diarize(audio=[buf], batch_size=1, sample_rate=16000)
+        return _parse_segments(res[0] if res else [])
+
+    def _pcm16_to_f32(data):
+        import numpy as np
+        if not data:
+            return np.zeros((0,), dtype="float32")
+        return np.frombuffer(data, dtype="<i2").astype("float32") / 32768.0
+
+    def _resample_linear(seg, src_sr):
+        import numpy as np
+        if src_sr == 16000 or seg.shape[0] == 0:
+            return seg.astype("float32", copy=False)
+        dur = seg.shape[0] / float(src_sr)
+        n16 = int(round(dur * 16000))
+        if n16 <= 0:
+            return np.zeros((0,), dtype="float32")
+        xo = np.linspace(0.0, dur, num=seg.shape[0], endpoint=False)
+        xn = np.linspace(0.0, dur, num=n16, endpoint=False)
+        return np.interp(xn, xo, seg).astype("float32")
+
+    class _FallbackToWindow(Exception):
+        # Raised by the streaming pre-flight self-test when the incremental API is unusable on this NeMo build, so the handler switches to the window path before any real audio is consumed (no data lost).
+        pass
+
+    async def _run_streaming(ws):
+        # TRUE incremental streaming matched to NeMo's reference path: extract log-mel over a CONTIGUOUS rolling window each step (consistent normalization + left/right context) and only feed forward_streaming_step for NEW chunks with full right-context (committed chunks skipped but still give context); total_preds accumulates per-80ms-frame activity for the whole session (AOSC => no window/overlap/relabel). Compute O(1)/chunk, feature extraction O(window)/step, bounded memory.
+        import numpy as np, torch
+        model = _state["model"]; sm = model.sortformer_modules; device = _state["device"]
+        n_spk = _state["n_spk"]; sub = _state["subsampling"]
+        frame_sec = sub * 0.01                      # 80ms output frame (sub * 10ms hop)
+        hop = 160                                   # samples per 10ms preprocessor frame @16k
+        CS = max(1, int(sm.chunk_len) * sub)        # feat frames committed per chunk
+        CRs = int(getattr(sm, "chunk_right_context", 0)) * sub   # feat frames of right context
+        chunk_audio = CS * hop                       # samples committed per chunk
+        rc_frames = CRs
+        step_samples = max(8000, int(STEP_SEC * 16000))          # process/emit cadence
+        # Rolling window kept for extraction: long enough for stable normalization + left context, chunk-aligned; re-extracted each step, trimmed to keep_chunks from the committed frontier.
+        keep_chunks = max(8, int(WINDOW_SEC * 16000) // chunk_audio)
+        sample_rate = 16000
+        buf = np.zeros((0,), dtype="float32")
+        ss = {"state": None, "preds": None}
+        st = {"base_chunks": 0, "committed": 0}      # chunks dropped from buf front / total fed
+
+        def _init_stream():
+            ss["state"] = sm.init_streaming_state(batch_size=1, async_streaming=True, device=device)
+            ss["preds"] = torch.zeros((1, 0, n_spk), device=device)
+            st["base_chunks"] = 0
+            st["committed"] = 0
+
+        def _process(final=False):
+            # Feed every NEW chunk in the current window with full right context (or all remaining when final); feat_seq_offset is always 0 (state carries history).
+            nonlocal buf
+            if buf.size < hop:
+                return
+            sig = torch.as_tensor(buf, dtype=torch.float32, device=device).unsqueeze(0)
+            slen = torch.tensor([sig.shape[1]], device=device)
+            with torch.inference_mode():
+                proc, proc_len = model.preprocessor(input_signal=sig, length=slen)
+                T = int(proc.shape[2])
+                zoff = torch.zeros((proc.shape[0],), dtype=torch.long, device=device)
+                loader = sm.streaming_feat_loader(feat_seq=proc, feat_seq_length=proc_len,
+                                                  feat_seq_offset=zoff)
+                local_fed = st["committed"] - st["base_chunks"]   # leading chunks already fed
+                for _tup in loader:
+                    i, chunk_feat, feat_lengths, lo, ro = _tup[0], _tup[1], _tup[2], _tup[3], _tup[4]
+                    if i < local_fed:
+                        continue                       # already committed in a previous step
+                    if not final and ((i + 1) * CS + rc_frames > T):
+                        break                          # right context not fully arrived yet
+                    ss["state"], ss["preds"] = model.forward_streaming_step(
+                        processed_signal=chunk_feat, processed_signal_length=feat_lengths,
+                        streaming_state=ss["state"], total_preds=ss["preds"],
+                        left_offset=lo, right_offset=ro)
+                    st["committed"] += 1
+            # Trim the window to keep_chunks behind the committed frontier (keeps left context + a normalization window; chunk-aligned so the grid never shifts).
+            max_base = st["committed"] - keep_chunks
+            if max_base > st["base_chunks"]:
+                drop = max_base - st["base_chunks"]
+                buf = buf[drop * chunk_audio:]
+                st["base_chunks"] = max_base
+
+        def _selftest():
+            # Exercise the whole pipeline on ~2 chunks of silence then RESET so the probe doesn't shift the real session; any error here => fall back to window mode.
+            _init_stream()
+            nonlocal buf
+            buf = np.zeros((CS * 3 * hop,), dtype="float32")
+            _process(final=True)
+            buf = np.zeros((0,), dtype="float32")
+            _init_stream()
+
+        def _segments():
+            p = ss["preds"]
+            if p is None or p.shape[1] == 0:
+                return []
+            arr = p[0].detach().float().cpu().numpy()
+            return _preds_to_segments(arr, frame_sec)
+
+        async def _send(kind):
+            segs = await asyncio.to_thread(_segments)
+            speakers = sorted({s["speaker"] for s in segs})
+            await ws.send_text(json.dumps({"type": kind, "segments": segs, "speakers": speakers}))
+
+        # Pre-flight: prove the streaming API works BEFORE consuming client audio.
+        async with _infer_lock:
+            try:
+                await asyncio.to_thread(_selftest)
+            except Exception as e:
+                raise _FallbackToWindow("%s: %s" % (type(e).__name__, e))
+        _p("streaming path active (chunk=%d frames rc=%d keep=%d chunks frame=%.3fs n_spk=%d)"
+           % (CS, rc_frames, keep_chunks, frame_sec, n_spk))
+
+        new_samples = 0
+        total_new = 0
+        last_emit = 0
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text is not None:
+                try:
+                    obj = json.loads(text)
+                except Exception:
+                    obj = {}
+                t = obj.get("type")
+                if t == "start":
+                    sample_rate = int(obj.get("sample_rate") or 16000)
+                    continue
+                if t in ("stop", "done", "finish"):
+                    break
+                continue
+            data = msg.get("bytes")
+            if not data:
+                continue
+            seg = _resample_linear(_pcm16_to_f32(data), sample_rate)
+            buf = np.concatenate([buf, seg]) if buf.size else seg
+            new_samples += int(seg.shape[0]); total_new += int(seg.shape[0])
+            if new_samples >= step_samples:
+                new_samples = 0
+                async with _infer_lock:
+                    await asyncio.to_thread(_process)
+                if total_new - last_emit >= step_samples:
+                    last_emit = total_new
+                    await _send("partial")
+        # Final: feed all remaining chunks (accept rc=0 on the trailing chunk), emit final.
+        async with _infer_lock:
+            await asyncio.to_thread(_process, True)
+        await _send("final")
+        await ws.close()
+
+    async def _run_window(ws):
+        # FALLBACK path: the ORIGINAL bounded-window per-step .diarize() implementation, used only if the streaming self-test fails - slower but correct so diar_stream never regresses to "no output".
+        import numpy as np
+        sample_rate = 16000
+        # Rolling window: `buf` holds only the ACTIVE window ([base_offset, now]).
+        buf = np.zeros((0,), dtype="float32")
+        since = 0                                # samples fed since last diarize
+        step_samples = max(16000, int(STEP_SEC * 16000))
+        min_samples = max(8000, int(MIN_SEC * 16000))
+        window_samples = max(step_samples * 2, int(WINDOW_SEC * 16000))
+        overlap_samples = min(window_samples - step_samples, max(0, int(OVERLAP_SEC * 16000)))
+        base_offset = 0.0        # ABS time (s) of buf[0]
+        committed = []           # frozen ABS canonical segments from rolled-off audio
+        overlap_ref = []         # ABS canonical segs over the retained tail (remap ref)
+        win_map = {}             # local spk -> canonical spk for the CURRENT window
+        canon = {"n": 0}         # next canonical speaker index
+
+        def _relabel(local_abs):
+            # Map this window's LOCAL speaker labels (already ABS time) to stable session-canonical labels: within a window AOSC labels are sticky; after a roll anchor the new window to the previous via max overlap with overlap_ref, unmatched speakers get a fresh id.
+            order, by_spk = [], {}
+            for s in local_abs:
+                if s["speaker"] not in by_spk:
+                    order.append(s["speaker"])
+                by_spk.setdefault(s["speaker"], []).append(s)
+            used = set(win_map.values())
+            for L in order:
+                if L in win_map:
+                    continue
+                C = None
+                if overlap_ref:
+                    best = 0.0
+                    cand_set = {r["speaker"] for r in overlap_ref if r["speaker"] not in used}
+                    for cand in cand_set:
+                        ov = 0.0
+                        for a in by_spk[L]:
+                            for r in overlap_ref:
+                                if r["speaker"] != cand:
+                                    continue
+                                ov += max(0.0, min(a["end"], r["end"]) - max(a["start"], r["start"]))
+                        if ov > best:
+                            best, C = ov, cand
+                if C is None:
+                    C = "spk_%d" % canon["n"]; canon["n"] += 1
+                win_map[L] = C
+                used.add(C)
+            return [{"start": s["start"], "end": s["end"], "speaker": win_map[s["speaker"]]}
+                    for s in local_abs]
+
+        async def _current():
+            # Diarize ONLY the active window; return canonical ABS segments for it.
+            if buf.shape[0] < min_samples:
+                return []
+            async with _infer_lock:
+                local = await asyncio.to_thread(_diarize, buf)   # times relative to buf[0]
+            local_abs = [{"start": s["start"] + base_offset, "end": s["end"] + base_offset,
+                          "speaker": s["speaker"]} for s in local]
+            return _relabel(local_abs)
+
+        def _roll(cur):
+            # Once the window is full, freeze turns before the roll boundary into `committed`, keep only the last OVERLAP_SEC of audio, and stash the tail's canonical segments as the remap reference for the next window.
+            nonlocal buf, base_offset, overlap_ref, win_map, committed
+            if buf.shape[0] < window_samples or overlap_samples <= 0:
+                return
+            roll_point = buf.shape[0] - overlap_samples
+            boundary = base_offset + roll_point / 16000.0
+            for s in cur:
+                if s["start"] < boundary:
+                    committed.append({"start": s["start"], "end": min(s["end"], boundary),
+                                      "speaker": s["speaker"]})
+            committed = _merge_segments(committed)
+            overlap_ref = [{"start": max(s["start"], boundary), "end": s["end"], "speaker": s["speaker"]}
+                           for s in cur if s["end"] > boundary]
+            base_offset = boundary
+            buf = buf[roll_point:]
+            win_map = {}   # rebuilt on the next _current() via overlap_ref
+
+        async def _send(kind, cur):
+            full = _merge_segments(committed + cur)
+            speakers = sorted({s["speaker"] for s in full})
+            await ws.send_text(json.dumps({"type": kind, "segments": full, "speakers": speakers}))
+
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text is not None:
+                try:
+                    obj = json.loads(text)
+                except Exception:
+                    obj = {}
+                t = obj.get("type")
+                if t == "start":
+                    sample_rate = int(obj.get("sample_rate") or 16000)
+                    continue
+                if t in ("stop", "done", "finish"):
+                    break
+                continue
+            data = msg.get("bytes")
+            if not data:
+                continue
+            seg = _resample_linear(_pcm16_to_f32(data), sample_rate)
+            buf = np.concatenate([buf, seg]) if buf.size else seg
+            since += int(seg.shape[0])
+            if since >= step_samples:
+                since = 0
+                cur = await _current()
+                await _send("partial", cur)
+                _roll(cur)   # roll AFTER emitting, reusing the just-computed segments
+        await _send("final", await _current())
+        await ws.close()
+
+    @app.websocket("/v1/audio/diarize/stream")
+    async def diarize_stream(ws: WebSocket):
+        await ws.accept()
+        if not _state["ready"]:
+            await ws.send_text(json.dumps({"type": "error",
+                                           "detail": _state["error"] or "model not ready"}))
+            await ws.close()
+            return
+        await ws.send_text(json.dumps({"type": "ready"}))
+        try:
+            if _state.get("streaming_ok"):
+                try:
+                    await _run_streaming(ws)
+                    return
+                except _FallbackToWindow as fb:
+                    _p("streaming self-test failed (%s); using window .diarize() fallback" % fb)
+            await _run_window(ws)
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            log.exception("diar_stream error: %s", e)
+            try:
+                await ws.send_text(json.dumps({"type": "error", "detail": str(e)}))
+                await ws.close()
+            except Exception:
+                pass
+
+    if __name__ == "__main__":
+        _p("diar_stream.py starting; model=%s port=%s" % (MODEL_REPO, PORT))
+        _p("starting uvicorn on :%s" % PORT)
+        # Same rationale as stream.py: bursty offloaded inference + client-paced feed, so disable server-initiated WS keepalive to avoid dropping a healthy session on 1011.
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level=LOG_LEVEL,
+                    ws_ping_interval=None, ws_ping_timeout=None)

@@ -1,0 +1,160 @@
+{{- /* llm-init in AUDIO-PROXY mode (ENGINE_KIND=audio) — the single entrance: it (1) downloads MODEL_SOURCE into the shared HF cache and (2) IS the OpenAI-compatible data plane, reverse-proxying /v1/* to the sibling audio-engine (http://audio-engine:8000, hardcoded), synthesizing /v1/models at the edge, and serving its control plane + dashboard on :8090. No nginx/openresty: this one Service (download-svc:8090) is the complete base. Requires llm-init >= v1.3.2-test1; the engine blocks on the download sentinel in the shared run-state hostPath instead of polling /readyz, breaking the proxy<->engine readiness deadlock. */ -}}
+{{- $clientDomainENV := split "," .Values.domain.audionemobasexv3 -}}
+{{- $clientDomain := index $clientDomainENV "_0" -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- /* Coarse gateway-facing mode is fixed to `audio`; concrete capabilities are carried by MODEL_SUPPORTS (CSV) and llm-init exposes /v1/audio/* per MODEL_SUPPORTS. */ -}}
+{{- $modelSupports := $oe.MODEL_SUPPORTS | default "stt" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- /* run-state lives under appCommon/huggingface (persistent, co-located with the HF cache, survives appCache eviction, matches the updated llamacppllmbasev3 base); the engine's wait-models initContainer reads the download sentinel from the same path. */ -}}
+{{- $runStateHostPath := printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Static name — the engine Deployment uses {{ .Release.Name }} for allowMultipleInstall.
+  name: llminit
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: llm-init
+spec:
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: llm-init
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: llm-init
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-chown
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            # Ensure the HF locks dir exists and the whole shared cache + run-state are owned by UID 1000 (huggingface_hub locks under .locks; a root-owned subdir from a prior run would fail downloads). Matches the updated llamacpp base.
+            - "mkdir -p /cache/hf/hub/.locks && chown -R 1000:1000 /cache/hf/hub /run/llm-init || true"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: llm-init
+          image: docker.io/lovehunter9/llm-init:v1.3.2-audiobase6
+          imagePullPolicy: IfNotPresent
+          env:
+            # AUDIO proxy mode: llm-init fronts http://audio-engine:8000 (hardcoded) as an OpenAI-compatible /v1/* surface + synthesizes /v1/models.
+            - name: ENGINE_KIND
+              value: "audio"
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            # Coarse mode fixed to `audio`; concrete capabilities via MODEL_SUPPORTS (llm-init audiobase3+ exposes /v1/audio/* + synthesizes /v1/models with the supports list); audiobase4 adds uniform audio GPU introspection (reads the wrapper /metrics audio_gpu_* gauges for /api/diag/gpu, falls back to vLLM metrics for native stt).
+            - name: MODEL_MODE
+              value: "audio"
+            - name: MODEL_SUPPORTS
+              value: "{{ $modelSupports }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: MAX_CONCURRENT_DOWNLOADS
+              value: "1"
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_LEVEL
+              value: "{{ $logLevel }}"
+            - name: LOG_FORMAT
+              value: json
+            - name: APP_URL
+              value: "https://{{ $clientDomain }}"
+          ports:
+            - name: http
+              containerPort: 8090
+          # K8s readiness stays on /livez (process up), NOT /readyz, so download-svc has an endpoint as soon as llm-init is up and the entrance works while the engine boots; /v1/* is gated inside llm-init by its own readiness (NotReadyGuard -> 503 until the engine is alive).
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
+---
+# Internal shared-API Service (backs the sharedEntrances stub): the LLM Gateway or any in-cluster OpenAI client reaches llm-init's /v1/* at http://sharedentrances-api.<ns>:80 (no public edge, no SSO), bypassing the edge's ~17s first-byte timeout. :80 -> llm-init:8090.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+  type: ClusterIP
