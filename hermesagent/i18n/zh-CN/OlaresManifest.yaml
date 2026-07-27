@@ -40,8 +40,23 @@ spec:
     - 已本地化为 7 种语言（中文 / 日本語 / Deutsch / Español / Français / Українська / Türkçe），Dashboard 已支持中文。
 
   upgradeDescription: |
-    v1.3.31: Hermes Agent v0.19.0（镜像 `beclab/harveyff-hermes-agent:v2026.7.20-uid1000`，amd64）。
-    将 `API_SERVER_KEY`（`HERMES_API_SERVER_KEY`）移入 Kubernetes Secret（`secretKeyRef`）。
-    本镜像 tag 仅支持 amd64（`supportArch`）。
+    升级至 Hermes Agent v0.19.0 — Quicksilver 版本（1.3.31）。
+    上游说明：https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20
+
+    变更要点：
+    - 镜像：`beclab/harveyff-hermes-agent:v2026.7.20-uid1000`（UID 1000 叠加层；支持 amd64 + arm64）。
+    - 将 `API_SERVER_KEY`（`HERMES_API_SERVER_KEY`）移入 Kubernetes Secret（`secretKeyRef`）。
+    - 性能：各入口（CLI / gateway / TUI / cron）首 token 延迟约降低 80%；推理过程默认实时流式输出；TUI 增量渲染 Markdown。
+    - 智能审批默认开启（由 LLM 复核高风险命令）；支持用户自定义 deny 规则与带原因的 `/deny`。
+    - 密钥源：可插拔 Bitwarden / 1Password（`SecretSource` / `op://`），不必把密钥明文放在 `.env`。
+    - 子代理：可 `tail -f` 的实时 transcript；后台委派结果在重启后仍可恢复投递。
+    - Gateway：投递义务账本，崩溃后可重投已完成回复；单 bot 多 profile 入站路由。
+    - 供应商 / 模型：Fireworks AI、DeepInfra、Upstage Solar；GPT-5.6（Sol/Terra/Luna + Pro）、grok-4.5、kimi-k3、Claude Sonnet/Fable 5、tencent/hy3；推理力度 `max` / `ultra` 及按模型覆盖。
+    - 会话：`hermes sessions export`（Markdown / HTML / Quarto / HF trace）支持 `--redact`；增强清理 / 归档过滤。
+    - 终端内 `/subscription`、`/topup` 管理 Nous 订阅，无需离开 CLI。
+    - 安全加固：凭证作用域、媒体/视觉读保护、webhook 体积上限、更广的 token 脱敏。
+    - 合并 v0.18.1 / v0.18.2 基础设施补丁。完整说明见上游 Release。
+
+    升级后通过 Olares 入口打开 Dashboard / Hermes CLI。现有 `/opt/data` 会保留。
 
     v1.3.23: Hermes Agent v0.18.0 单容器受监督架构；Dashboard 由 Olares 统一认证。
