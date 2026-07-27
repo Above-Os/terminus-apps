@@ -11,7 +11,7 @@ metadata:
   description: The agent that grows with you
   appid: hermesagent
   title: Hermes Agent
-  version: '1.3.31'
+  version: '1.3.32'
   categories:
   - Productivity_v112
   - Developer Tools
@@ -62,38 +62,37 @@ spec:
 
     First-time Setup
     - Open the `Hermes CLI` entrance and run `hermes setup` to launch the interactive wizard. It writes API keys, model providers, and channel tokens into `/opt/data`.
+    - Optional: map Olares Integration OpenAI / Anthropic keys (Settings) into the app so Hermes sees `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` without pasting into `.env`.
+    - Messaging bots: set `TELEGRAM_ALLOWED_USERS` / `DISCORD_ALLOWED_USERS` or `GATEWAY_ALLOWED_USERS` (or enable `GATEWAY_ALLOW_ALL_USERS` only if you accept the risk).
+    - OpenAI-compatible clients (Open WebUI): enable API server + key; set `API_SERVER_CORS_ORIGINS` / `API_SERVER_MODEL_NAME` as needed.
+    - Useful CLI (v0.19): `/subscription`, `/topup`, `hermes sessions export`, smart approvals + `/deny`.
 
     **Key Features**
-    - Real Terminal UI: a full React/Ink rewrite with multiline editing, slash-command autocomplete, sticky composer, live streaming, status bar with per-turn stopwatch and git branch, light-theme preset, and OSC-52 clipboard support.
-    - Multi-channel Gateway with **20 platforms**: Telegram, Discord, Slack, WhatsApp, Signal, Email, Microsoft Teams, Google Chat, QQBot, Tencent 元宝, Matrix, Mattermost, Feishu, DingTalk, IRC, and more — all through one process. Voice memo transcription included; sessions auto-resume after gateway restart.
-    - Closed learning loop: agent-curated memory, autonomous skill creation, FTS5 session search, Honcho dialectic user modeling. agentskills.io compatible. **Autonomous Curator** runs on a 7-day cycle to grade, consolidate, and prune your skill library.
-    - Multi-agent **Kanban** board: durable, multi-profile collaboration with heartbeats, reclaim, zombie detection, retry budgets and a hallucination gate. Spin up an AI team that actually finishes what it starts.
-    - **`/goal`** persistent cross-turn goals (Ralph loop) — the agent stays on task across turns.
-    - **Checkpoints v2** with real pruning + disk guardrails, and per-session OpenAI-compatible API server with long-term memory via `X-Hermes-Session-Key`.
-    - Scheduled automations via a built-in cron scheduler with a `no_agent` script-only watchdog mode.
-    - Delegates and parallelizes work with isolated subagents and an explicit orchestrator role.
-    - Built-in skills include ComfyUI v5, TouchDesigner-MCP, Spotify, Google Meet, SearXNG search, Shopify, video analysis (Gemini), and more.
-    - Pluggable provider, transport, gateway-platform, and dashboard plugin systems — drop-in extensions without forking core.
-    - Security hardened: secret redaction ON by default, MCP OAuth + auth.json TOCTOU windows closed, browser cloud-metadata SSRF floor, per-platform allowlists, `0600` perms on `.env` / `auth.json` / `state.db`.
+    - Quicksilver (v0.19): ~80% faster first token; live reasoning streams; smart approvals by default; Bitwarden/1Password secret sources; live subagent transcripts; durable delivery ledger after gateway crashes.
+    - Real Terminal UI: React/Ink TUI with multiline editing, slash-command autocomplete, sticky composer, live streaming, incremental markdown, status bar, light-theme preset, OSC-52 clipboard.
+    - Multi-channel Gateway with **20 platforms**: Telegram, Discord, Slack, WhatsApp, Signal, Email, Microsoft Teams, Google Chat, QQBot, Tencent 元宝, Matrix, Mattermost, Feishu, DingTalk, IRC, and more — sessions auto-resume after gateway restart.
+    - Closed learning loop: agent-curated memory, autonomous skill creation, FTS5 session search, Honcho dialectic user modeling. agentskills.io compatible. **Autonomous Curator** on a 7-day cycle.
+    - Multi-agent **Kanban** board: durable multi-profile collaboration with heartbeats, reclaim, zombie detection, retry budgets and a hallucination gate.
+    - **`/goal`** persistent cross-turn goals (Ralph loop); checkpoints v2; OpenAI-compatible API server with long-term memory via `X-Hermes-Session-Key`.
+    - Cron automations (`HERMES_CRON_*` tunable) with `no_agent` script-only watchdog mode; busy-input modes `queue` / `steer` / `interrupt`.
+    - Built-in skills include ComfyUI v5, TouchDesigner-MCP, Spotify, Google Meet, SearXNG, Shopify, video analysis (Gemini), and more.
+    - New providers/models (v0.19): Fireworks, DeepInfra, Upstage Solar; GPT-5.6 family, grok-4.5, kimi-k3, Claude Sonnet/Fable 5, and more; reasoning effort `max` / `ultra`.
+    - Security hardened: secret redaction ON by default, MCP OAuth + auth.json TOCTOU closed, browser SSRF floor, per-platform allowlists, `0600` on `.env` / `auth.json` / `state.db`.
     - Localized into 7 languages (中文 / 日本語 / Deutsch / Español / Français / Українська / Türkçe) plus a Chinese dashboard.
 
   upgradeDescription: |
-    Upgrade to Hermes Agent v0.19.0 — The Quicksilver Release (1.3.31).
+    Upgrade to Hermes Agent v0.19.0 — The Quicksilver Release (1.3.32).
     Upstream: https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.20
 
     Change Details:
     - Image: `beclab/harveyff-hermes-agent:v2026.7.20-uid1000` (UID 1000 overlay; amd64 + arm64).
     - Move `API_SERVER_KEY` (`HERMES_API_SERVER_KEY`) into Kubernetes Secret (`secretKeyRef`).
-    - Performance: ~80% first-token latency cut across CLI / gateway / TUI / cron; reasoning streams live by default; TUI incremental markdown.
-    - Smart approvals are the default (LLM reviews flagged commands); user-defined deny rules + `/deny` with reasons.
-    - Secret sources: pluggable Bitwarden & 1Password (`SecretSource` / `op://`) so keys need not live in plaintext `.env`.
-    - Subagents: live transcripts you can `tail -f`; durable background delegation results across restarts.
-    - Gateway: delivery-obligation ledger redelivers finished replies after a crash; profile-based inbound routing on one multiplexed bot.
-    - Providers / models: Fireworks AI, DeepInfra, Upstage Solar; GPT-5.6 (Sol/Terra/Luna + Pro), grok-4.5, kimi-k3, Claude Sonnet/Fable 5, tencent/hy3; reasoning effort `max` / `ultra` + per-model overrides.
-    - Sessions: `hermes sessions export` (Markdown / HTML / Quarto / HF traces) with `--redact`; prune / archive filters.
-    - Terminal: `/subscription` and `/topup` to manage Nous plan without leaving the CLI.
-    - Security hardening: credential scoping, media/vision guards, webhook body-size caps, broader token redaction.
-    - Rolls up v0.18.1 / v0.18.2 infrastructure patches. Full notes: upstream release link above.
+    - New Olares envs (v0.19): `API_SERVER_CORS_ORIGINS`, `API_SERVER_MODEL_NAME`, `GATEWAY_ALLOW_ALL_USERS`, `GATEWAY_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`, `DISCORD_ALLOWED_USERS`, `HERMES_CRON_TIMEOUT`, `HERMES_CRON_MAX_PARALLEL`, `HERMES_GATEWAY_BUSY_INPUT_MODE`, `HERMES_GATEWAY_BUSY_ACK_ENABLED`.
+    - Map Olares Integration keys: `OLARES_USER_OPENAI_APIKEY` → `OPENAI_API_KEY`, `OLARES_USER_ANTHROPIC_APIKEY` → `ANTHROPIC_API_KEY` (Secret-injected when set).
+    - Performance: ~80% first-token latency cut; reasoning streams live by default; TUI incremental markdown.
+    - Smart approvals default; Bitwarden/1Password secret sources; live subagent transcripts; durable delivery ledger; profile-based gateway routing.
+    - Providers/models: Fireworks, DeepInfra, Upstage; GPT-5.6, grok-4.5, kimi-k3, Claude Sonnet/Fable 5, tencent/hy3; reasoning `max`/`ultra`.
+    - Sessions export, `/subscription` `/topup`, security hardening. Full notes: upstream release link above.
 
     After upgrade, open Dashboard / Hermes CLI via Olares entrances. Existing `/opt/data` is preserved.
 
@@ -162,3 +161,90 @@ envs:
   editable: true
   regex: '^[\w\-!@#$%^&*()+={}\[\]:,.?~]{8,}$'
   description: "Auth token for the OpenAI-compatible API server. Required when API_SERVER_ENABLED is true. Must be at least 8 characters and contain only letters, numbers, and common symbols. Pass the same value as HERMES_API_TOKEN on the client side."
+- envName: API_SERVER_CORS_ORIGINS
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Comma-separated browser origins allowed to call the API server (e.g. https://openwebui.example.com). Empty disables CORS. Used when API_SERVER_ENABLED is true."
+- envName: API_SERVER_MODEL_NAME
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Model name advertised on /v1/models (useful for Open WebUI). Empty uses Hermes default (profile name or hermes-agent)."
+- envName: OPENAI_API_KEY
+  valueFrom:
+    envName: OLARES_USER_OPENAI_APIKEY
+  required: false
+  description: "OpenAI-compatible API key from Olares Settings → Integration (optional)."
+- envName: ANTHROPIC_API_KEY
+  valueFrom:
+    envName: OLARES_USER_ANTHROPIC_APIKEY
+  required: false
+  description: "Anthropic API key from Olares Settings → Integration (optional)."
+- envName: GATEWAY_ALLOW_ALL_USERS
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Allow all messaging senders without per-platform allowlists. Security risk on public bots — prefer GATEWAY_ALLOWED_USERS / TELEGRAM_ALLOWED_USERS / DISCORD_ALLOWED_USERS."
+- envName: GATEWAY_ALLOWED_USERS
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Comma-separated user IDs allowed across all messaging platforms."
+- envName: TELEGRAM_ALLOWED_USERS
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Comma-separated Telegram user IDs allowed to talk to the bot (DMs/groups/forums)."
+- envName: DISCORD_ALLOWED_USERS
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Comma-separated Discord user IDs allowed to talk to the bot."
+- envName: HERMES_CRON_TIMEOUT
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "600"
+  description: "Cron agent inactivity timeout in seconds (default 600). Set 0 for unlimited while tools/stream are active."
+- envName: HERMES_CRON_MAX_PARALLEL
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "4"
+  description: "Max cron jobs run in parallel per tick (default 4)."
+- envName: HERMES_GATEWAY_BUSY_INPUT_MODE
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "queue"
+  options:
+  - title: Queue
+    value: queue
+  - title: Steer
+    value: steer
+  - title: Interrupt
+    value: interrupt
+  description: "What to do when the user sends input while the agent is busy (queue / steer / interrupt). Overridable per chat with /busy."
+- envName: HERMES_GATEWAY_BUSY_ACK_ENABLED
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "true"
+  description: "Send a short acknowledgment when input arrives while the agent is busy (default true)."

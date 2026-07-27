@@ -309,7 +309,63 @@ spec:
                 secretKeyRef:
                   name: hermesagent-secrets
                   key: API_SERVER_KEY
+            {{- $cors := index $oe "API_SERVER_CORS_ORIGINS" | default "" }}
+            {{- if $cors }}
+            - name: API_SERVER_CORS_ORIGINS
+              value: {{ $cors | quote }}
             {{- end }}
+            {{- $modelName := index $oe "API_SERVER_MODEL_NAME" | default "" }}
+            {{- if $modelName }}
+            - name: API_SERVER_MODEL_NAME
+              value: {{ $modelName | quote }}
+            {{- end }}
+            {{- end }}
+            # Optional provider keys from Olares user settings (Settings → Integration).
+            {{- $openai := index $oe "OPENAI_API_KEY" | default "" }}
+            {{- if $openai }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: OPENAI_API_KEY
+            {{- end }}
+            {{- $anthropic := index $oe "ANTHROPIC_API_KEY" | default "" }}
+            {{- if $anthropic }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
+            # Messaging allowlists (v0.19 still warns without these on gateways).
+            {{- if eq (toString (index $oe "GATEWAY_ALLOW_ALL_USERS" | default "false")) "true" }}
+            - name: GATEWAY_ALLOW_ALL_USERS
+              value: "true"
+            {{- end }}
+            {{- $gwUsers := index $oe "GATEWAY_ALLOWED_USERS" | default "" }}
+            {{- if $gwUsers }}
+            - name: GATEWAY_ALLOWED_USERS
+              value: {{ $gwUsers | quote }}
+            {{- end }}
+            {{- $tgUsers := index $oe "TELEGRAM_ALLOWED_USERS" | default "" }}
+            {{- if $tgUsers }}
+            - name: TELEGRAM_ALLOWED_USERS
+              value: {{ $tgUsers | quote }}
+            {{- end }}
+            {{- $dcUsers := index $oe "DISCORD_ALLOWED_USERS" | default "" }}
+            {{- if $dcUsers }}
+            - name: DISCORD_ALLOWED_USERS
+              value: {{ $dcUsers | quote }}
+            {{- end }}
+            # Cron + busy-input (Quicksilver / v0.19).
+            - name: HERMES_CRON_TIMEOUT
+              value: {{ index $oe "HERMES_CRON_TIMEOUT" | default "600" | quote }}
+            - name: HERMES_CRON_MAX_PARALLEL
+              value: {{ index $oe "HERMES_CRON_MAX_PARALLEL" | default "4" | quote }}
+            - name: HERMES_GATEWAY_BUSY_INPUT_MODE
+              value: {{ index $oe "HERMES_GATEWAY_BUSY_INPUT_MODE" | default "queue" | quote }}
+            - name: HERMES_GATEWAY_BUSY_ACK_ENABLED
+              value: {{ index $oe "HERMES_GATEWAY_BUSY_ACK_ENABLED" | default "true" | quote }}
           startupProbe:
             exec:
               command: ["/bin/sh", "-c", "test -d /opt/data"]
