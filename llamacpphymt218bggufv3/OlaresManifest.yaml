@@ -1,0 +1,235 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacpphymt218bggufv3
+  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/hymt2.png
+  description: "Hy-MT2-1.8B (GGUF Q4_K_M) served with llama.cpp."
+  appid: llamacpphymt218bggufv3
+  title: Hy-MT2-1.8B (llama.cpp)
+  version: '1.0.15'
+  categories:
+    - AI
+sharedEntrances:
+  - name: llamacpphymt218bggufv3
+    host: sharedentrances-api
+    port: 0
+    title: Hy-MT2-1.8B
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/hymt2.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: Hy-MT2-1.8B
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/hymt2.png
+    openMethod: window
+    authLevel: internal
+#   llamacpphymt218bggufv3 — engine Deployment (== appid / Release.Name)
+#   llminit                  — llm-init / entrance Deployment
+workloadReplicas:
+  llamacpphymt218bggufv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'tencent/Hy-MT2-1.8B-GGUF:Q4_K_M'
+  upgradeDescription: |
+    v1.0.15: accelerator memory = engine + llm-init (nvidia 5Gi/10Gi; gb10 5Gi/6Gi).
+    v1.0.14: align system RAM with pod defaults (requiredMemory 4Gi, limitedMemory 8Gi).
+    v1.0.13: llm-init beclab/v1.3.2; llama.cpp server-cuda12-b10143.
+    v1.0.12: TRANSLATE_LANGUAGES from Hy-MT2 model card (per-model /languages catalog).
+    v1.0.11: llm-init harveyff/v1.2.31-ui-3-amd.
+    v1.0.10: app icon hymt2.png.
+    v1.0.9: HF_ENDPOINT from OLARES_SYSTEM_HUGGINGFACE_SERVICE (not USER).
+    v1.0.8: llm-init harveyff/v1.2.31-ui-2-amd (Translate Base URL + endpoints in Status).
+    v1.0.7: force MODEL_SUPPORTS=translate when unset/none so /translate mounts on upgrade.
+    v1.0.6: llm-init harveyff/v1.2.31-ui-1-amd; default MODEL_SUPPORTS=translate.
+    v1.0.5: context 32K (balance speed vs length); keep q4_0 KV + full GPU.
+    v1.0.0: initial release — Hy-MT2-1.8B GGUF Q4_K_M via llama.cpp + llm-init.
+  fullDescription: |
+    **Model Overview**
+    Hy-MT2-1.8B is a lightweight multilingual translation model from Tencent Hunyuan (Hy-MT2 family). It supports translation among 33+ languages and follows complex translation instructions (terminology, style, structured data). This app serves the `Q4_K_M` GGUF build from `tencent/Hy-MT2-1.8B-GGUF` via llama.cpp.
+
+    Tuned for low-latency translation: 32K context, quantized KV cache, and full GPU offload.
+
+    **Preset Configuration**
+    - Model: `tencent/Hy-MT2-1.8B-GGUF:Q4_K_M` (~1.1 GiB weights)
+    - Capabilities: translate (`/translate` on Model Console)
+    - Engine args: `-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 1`
+    - Required GPU memory: `4Gi`
+
+    **Accelerator modes**
+    | Mode           | Device            | Details                                          |
+    |----------------|-------------------|--------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Uses `4Gi` GPU memory; `-ngl all` for full GPU   |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp**: Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
+
+  developer: Tencent
+  website: https://huggingface.co/tencent/Hy-MT2-1.8B
+  sourceCode: https://huggingface.co/tencent/Hy-MT2-1.8B
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF
+
+  accelerator:
+    # Sum rule: accelerator >= engine (llamacpp) + llm-init.
+    # nvidia: MEMORY_REQUEST 4Gi + llm-init 256Mi; MEMORY_LIMIT 8Gi + llm-init 2Gi.
+    # nvidia-gb10: engine host mem = GPU 4Gi (+ llm-init); limit 4Gi + 2Gi.
+    - mode: nvidia
+      limitedCpu: "15360m"
+      requiredCpu: "500m"
+      requiredDisk: 50Mi
+      limitedDisk: 100Gi
+      limitedMemory: "10Gi"
+      requiredMemory: "5Gi"
+      requiredGPUMemory: "4Gi"
+      limitedGPUMemory: "8Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "15360m"
+      requiredCpu: "500m"
+      requiredDisk: 50Mi
+      limitedDisk: 100Gi
+      limitedMemory: "6Gi"
+      requiredMemory: "5Gi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://tencent/Hy-MT2-1.8B-GGUF --include Hy-MT2-1.8B-Q4_K_M.gguf"
+    description:  "Example: hf://unsloth/Qwen3-0.6B-GGUF --include Qwen3-0.6B-Q4_K_M.gguf. The source to download your model."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tencent/Hy-MT2-1.8B-GGUF:Q4_K_M"
+    description:  "Example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M. The name of your model in `owner/repo:quant` format"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "translate"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: Translate
+      value: translate
+    - title: None
+      value: none
+    description:  "The model capabilities. Translate enables /translate (default for this MT preset)."
+  - envName: ENGINE_ARGS
+    required: true
+    default: "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 1"
+    type: string
+    editable: true
+    applyOnChange: true
+    description:  "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST # + llm-init 256Mi <= requiredMemory (nvidia/gb10 5Gi)
+    required: true
+    default: "4Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT
+    required: true
+    default: "4"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT # + llm-init 2Gi <= limitedMemory (nvidia 10Gi / gb10 6Gi)
+    required: true
+    default: "8Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "4Gi"
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model."
+    regex: "^[0-9]+(Gi|Mi)?$"
