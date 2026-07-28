@@ -3,10 +3,10 @@
 
 {{- $smtpServer := .Values.olaresEnv.SMTP_SERVER | default "" }}
 {{- $defaultSmtpPort := "" }}
-{{- $enableRegistration := "false" }}
+{{- $mailMailer := "log" }}
 {{- if (ne $smtpServer "") }}
   {{- $defaultSmtpPort = "25" }}
-  {{- $enableRegistration = "true" }}
+  {{- $mailMailer = "smtp" }}
 {{- end }}
 {{- $smtpPort := .Values.olaresEnv.SMTP_PORT | default $defaultSmtpPort }}
 {{- $smtpSecure := "null" }}
@@ -34,7 +34,7 @@ data:
   APP_DEBUG: "false"
   APP_URL: "https://{{ $solidtimeDomain }}"
   APP_FORCE_HTTPS: "true"
-  APP_ENABLE_REGISTRATION: "{{ $enableRegistration }}"
+  APP_ENABLE_REGISTRATION: "true"
   TRUSTED_PROXIES: "0.0.0.0/0,2000:0:0:0:0:0:0:0/3"
   APP_DOMAIN: "{{ $solidtimeDomain }}"
 
@@ -52,7 +52,7 @@ data:
 
   GOTENBERG_URL: "http://127.0.0.1:3000"
 
-  MAIL_MAILER: "smtp"
+  MAIL_MAILER: "{{ $mailMailer }}"
   MAIL_HOST: "{{ $smtpServer }}"
   MAIL_PORT: "{{ $smtpPort }}"
   MAIL_ENCRYPTION: "{{ $smtpSecure }}"
@@ -61,6 +61,7 @@ data:
   MAIL_USERNAME: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
 
   QUEUE_CONNECTION: "database"
+  OCTANE_SERVER: "frankenphp"
 
   FILESYSTEM_DISK: "local"
   PUBLIC_FILESYSTEM_DISK: "public"
