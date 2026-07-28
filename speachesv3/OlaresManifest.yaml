@@ -6,8 +6,8 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/speaches/icon.png
   description: OpenAI-compatible TTS/STT server
   appid: speachesv3
-  title: Speaches V3 for test
-  version: '1.1.3'
+  title: Speaches
+  version: '1.1.10'
   categories:
     - Utilities_v112
     - AI
@@ -61,6 +61,7 @@ permission:
   # (appCommon/huggingface, mounted at the fixed /cache/hf/hub container path).
   appCommon: true
 spec:
+  onlyAdmin: true
   versionName: '0.8.2'
   promoteImage:
   - https://app.cdn.olares.com/appstore/speaches/1.webp
@@ -107,6 +108,8 @@ spec:
     - text: MIT
       url: https://github.com/speaches-ai/speaches/blob/main/LICENSE
   upgradeDescription: |
+    Bump llm-init image to `beclab/llm-init:v1.3.1`.
+
     V3 shared-app migration of Speaches (engine 0.8.2).
     - Added nvidia-gb10 (GB10/Spark) accelerator support; on Spark unified memory the GPU is carved from requiredMemory, so nvidia-gb10 requiredMemory is 12Gi (>= the 8Gi GPU need). On nvidia-gb10 the speaches container also raises its memory request/limit (10Gi/19Gi) since the GPU working set lives in pod RAM; discrete GPU keeps 6Gi/18Gi.
     - Flattened the speachesserver / speaches sub-charts into a single chart.
@@ -170,7 +173,6 @@ spec:
 options:
   shared: true
   apiTimeout: 0
-  allowMultipleInstall: true
   onlyAdmin: true
   conflicts:
     - name: speaches
@@ -182,10 +184,6 @@ options:
     - name: olares
       type: system
       version: '>=1.12.6-0'
-  appScope:
-    clusterScoped: true
-    appRef:
-      - speaches
 envs:
   - envName: SPEACHES_GPU
     required: false
@@ -211,7 +209,7 @@ envs:
   # Hugging Face mirror / token: system-sourced, NOT install-dialog fields.
   # v3 forbids referencing OLARES_USER_* names inside chart template files; the
   # sanctioned pattern declares app-local names here and pulls the system value
-  # in via valueFrom. Templates reference .Values.olaresEnv.HF_ENDPOINT / .HF_TOKEN.
+  # in via valueFrom. Templates reference .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE / .HF_TOKEN.
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true

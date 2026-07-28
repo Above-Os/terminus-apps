@@ -6,7 +6,7 @@ metadata:
   namespace: "{{ .Release.Namespace }}"
   name: worker
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.worker.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: worker
@@ -35,6 +35,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: firecrawl-config
+            - secretRef:
+                name: {{ .Release.Name }}-secrets
           env:
             - name: FLY_PROCESS_GROUP
               value: "worker"
@@ -65,7 +67,7 @@ metadata:
   namespace: "{{ .Release.Namespace }}"
   name: nuq-worker
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "nuq-worker").replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: nuq-worker
@@ -94,6 +96,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: firecrawl-config
+            - secretRef:
+                name: {{ .Release.Name }}-secrets
           env:
             - name: FLY_PROCESS_GROUP
               value: "nuq-worker"

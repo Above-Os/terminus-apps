@@ -19,6 +19,8 @@ stringData:
   MINIO_ROOT_USER: "minio"
   MINIO_ROOT_PASSWORD: "olarestestpwd"
   REDIS_PASSWORD: "olares"
+  DATABASE_URL: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.langfuse }}"
+  POSTGRES_PASSWORD: "{{ .Values.postgres.password }}"
 
 ---
 apiVersion: v1
@@ -56,7 +58,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: { app: clickhouse }
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.clickhouse.replicaCount }}
   selector: { matchLabels: { app: clickhouse } }
   strategy: { type: Recreate }
   template:
@@ -133,7 +135,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: { app: minio }
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.minio.replicaCount }}
   selector: { matchLabels: { app: minio } }
   strategy: { type: Recreate }
   template:
@@ -226,7 +228,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: { app: langfuse }
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.langfuse.replicaCount }}
   selector: { matchLabels: { app: langfuse } }
   strategy: { type: Recreate }
   template:
@@ -255,9 +257,15 @@ spec:
             - name: NEXTAUTH_SECRET
               valueFrom: { secretKeyRef: { name: langfuse-secrets, key: NEXTAUTH_SECRET } }
             - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.langfuse }}"
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: DATABASE_URL
             - name: POSTGRES_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: POSTGRES_PASSWORD
             - name: SALT
               valueFrom: { secretKeyRef: { name: langfuse-secrets, key: SALT } }
             - name: ENCRYPTION_KEY
@@ -358,7 +366,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: { app: langfuse-worker }
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "langfuse-worker").replicaCount }}
   selector: { matchLabels: { app: langfuse-worker } }
   strategy: { type: Recreate }
   template:
@@ -383,9 +391,15 @@ spec:
             - name: NEXTAUTH_URL
               valueFrom: { configMapKeyRef: { name: langfuse-config, key: NEXTAUTH_URL } }
             - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.langfuse }}"
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: DATABASE_URL
             - name: POSTGRES_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: POSTGRES_PASSWORD
             - name: SALT
               valueFrom: { secretKeyRef: { name: langfuse-secrets, key: SALT } }
             - name: ENCRYPTION_KEY

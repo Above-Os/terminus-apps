@@ -1,16 +1,20 @@
-olaresManifest.version: '0.10.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  docmost: 1
+  docmost-redis: 1
 metadata:
   name: docmost
   description: Open-source collaborative wiki and documentation software.
   icon: https://app.cdn.olares.com/appstore/docmost/icon.png
   appid: docmost
-  version: '1.0.12'
+  version: '1.0.16'
   title: Docmost
   categories:
   - Productivity_v112  
-  - Productivity  
-  - Utilities  
+
 permission:
   appData: true
   appCache: true
@@ -57,6 +61,12 @@ spec:
     - **Read/Edit Mode:** Set a default page mode to prevent accidental edits.
     - **Translations:** Available in 12+ languages
   upgradeDescription: |
+    v1.0.16: Move `DATABASE_URL` and `SMTP_PASSWORD` into Secret (`secretKeyRef`); keep `APP_SECRET`.
+
+    Storage: durable storage moved from `appCache` to `appData`. On first start after upgrade, an initContainer copies legacy `appCache` into `appData` when the destination is empty (marker: `.migration_from_appcache_done`). Old appCache data is left intact for rollback.
+
+    Drop legacy `sysVersion >= 1.12.3` appData path branching for Redis; Olares minimum is now 1.12.6.
+
     Upgrade to v0.21.0
 
     Highlight
@@ -117,7 +127,7 @@ options:
   dependencies:
   - name: olares
     type: system
-    version: '>=1.12.2-0'
+    version: '>=1.12.6-0'
   policies:
     - uriRegex: ^/(share/)
       level: public

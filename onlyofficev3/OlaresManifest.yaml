@@ -1,4 +1,4 @@
-olaresManifest.version: "0.12.0"
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
@@ -6,11 +6,10 @@ metadata:
   description: Run your private office with the ONLYOFFICE
   icon: https://app.cdn.olares.com/appstore/onlyoffice/icon.png
   appid: onlyofficev3
-  version: '1.1.0'
-  title: OnlyOffice V3 for test
+  version: '1.1.11'
+  title: OnlyOffice
   categories:
     - Productivity_v112
-    - Productivity
 
 entrances:
   - name: onlyofficeproxy
@@ -21,12 +20,6 @@ entrances:
     authLevel: internal
     openMethod: window
 
-# Declares every workload's replica count (v3 schema). Keys MUST match the
-# rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   onlyofficev3     — ONLYOFFICE DocumentServer (name: {{ .Release.Name }} == appid)
-#   jwtgeter         — JWT helper service
-#   onlyofficeclient — example/web node app
-#   onlyofficeproxy  — nginx entrance proxy
 workloadReplicas:
   onlyofficev3: 1
   jwtgeter: 1
@@ -36,8 +29,6 @@ workloadReplicas:
 permission:
   appData: true
   appCache: true
-  userData:
-    - Home
 
 spec:
   versionName: '9.2.0'
@@ -67,6 +58,10 @@ spec:
     **Spell-checking**
 
   upgradeDescription: |
+    v1.1.11: Move `DB_PWD` and `REDIS_SERVER_PASS` into Secret (`secretKeyRef`).
+
+    v1.1.10: Inject `JWT_SECRET` via `secretKeyRef` from `office-secret` (stop plaintext env.value).
+
     Migrated ONLYOFFICE to apiVersion v3 shared app pattern (onlyofficev2 → onlyofficev3).
 
     **What's Changed**
@@ -93,12 +88,11 @@ spec:
     - text: AGPL-3.0
       url: https://github.com/ONLYOFFICE/DocumentServer?tab=AGPL-3.0-1-ov-file#readme
 
-  requiredMemory: 800Mi
+  requiredMemory: 2Gi
   requiredDisk: 50Mi
-  requiredCpu: 1
+  requiredCpu: 1.5
   limitedMemory: 9.5Gi
   limitedCpu: 4
-
   supportArch:
     - amd64
   onlyAdmin: true
@@ -115,7 +109,6 @@ middleware:
 
 options:
   shared: true
-  allowMultipleInstall: true
   conflicts:
     - name: onlyofficev2
       type: application

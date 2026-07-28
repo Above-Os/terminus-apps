@@ -1,7 +1,6 @@
 {{- $appDomainENV := split "," .Values.domain.vane -}}
 {{- $appDomain := index $appDomainENV "_0" -}}
 {{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
-{{- $isNewVersion := and .Values.sysVersion (semverCompare ">=1.12.3-0" (toString .Values.sysVersion)) -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -32,11 +31,7 @@ data:
     MODEL_NAME = "{{ .Values.olaresEnv.CUSTOM_OPENAI_MODEL_NAME }}"
 
     [MODELS.OLLAMA]
-    {{- if $isNewVersion }}
-    API_URL = "http://d54536a50.shared.{{ $topDomain }}" # Ollama API URL for system version >= 1.12.3
-    {{- else }}
-    API_URL = "http://ollama.ollama-{{ .Values.admin }}:11434" # Ollama API URL
-    {{- end }}
+    API_URL = "{{ .Values.olaresEnv.OLLAMA_BASE_URL | default "" }}"
     {{- if .Values.olaresEnv.OLLAMA_CONNECTION_NAME }}
     NAME = "{{ .Values.olaresEnv.OLLAMA_CONNECTION_NAME }}" # Connection name for Ollama
     {{- else }}
@@ -52,11 +47,7 @@ data:
     API_KEY = ""
 
     [API_ENDPOINTS]
-    {{- if $isNewVersion }}
-    SEARXNG = "http://d1236e020.shared.{{ $topDomain }}" # SearxNG API URL for system version >= 1.12.3
-    {{- else }}
-    SEARXNG = "http://searxng.searxng-{{ .Values.admin }}:8080" # SearxNG API URL
-    {{- end }}
+    SEARXNG = "{{ .Values.olaresEnv.SEARXNG_API_URL | default "" }}"
 
 ---
 apiVersion: apps/v1
@@ -67,7 +58,7 @@ metadata:
   labels:
     io.kompose.service: vane
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.vane.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: vane
@@ -79,6 +70,130 @@ spec:
         io.kompose.service: vane
     spec:
       initContainers:
+      - name: migrate-appcache-to-appdata-data
+        image: "docker.io/beclab/busybox:1.37"
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            SOURCE=/old-data
+            DEST=/new-data
+            MARKER="${DEST}/.migration_from_appcache_data_done"
+            if [ -f "$MARKER" ]; then echo "[migrate] marker present, skip."; exit 0; fi
+            if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_data_done$' || true)" ]; then
+              echo "[migrate] appData already has data, skip."
+              echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              exit 0
+            fi
+            if [ -n "$(ls -A "$SOURCE" 2>/dev/null || true)" ]; then
+              echo "[migrate] copying appCache/data -> appData/data..."
+              cp -a "$SOURCE"/. "$DEST"/
+              echo "migrated from appCache at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              echo "[migrate] done; legacy appCache left intact for rollback."
+            else
+              echo "[migrate] no legacy data, fresh install."
+              echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+            fi
+        volumeMounts:
+        - name: appcache-legacy
+          mountPath: /old-data
+          readOnly: true
+        - name: appcache
+          mountPath: /new-data
+      - name: migrate-appcache-to-appdata-uploads
+        image: "docker.io/beclab/busybox:1.37"
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            SOURCE=/old-data
+            DEST=/new-data
+            MARKER="${DEST}/.migration_from_appcache_uploads_done"
+            if [ -f "$MARKER" ]; then echo "[migrate] marker present, skip."; exit 0; fi
+            if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_uploads_done$' || true)" ]; then
+              echo "[migrate] appData already has data, skip."
+              echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              exit 0
+            fi
+            if [ -n "$(ls -A "$SOURCE" 2>/dev/null || true)" ]; then
+              echo "[migrate] copying appCache/uploads -> appData/uploads..."
+              cp -a "$SOURCE"/. "$DEST"/
+              echo "migrated from appCache at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              echo "[migrate] done; legacy appCache left intact for rollback."
+            else
+              echo "[migrate] no legacy data, fresh install."
+              echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+            fi
+        volumeMounts:
+        - name: appuploads-legacy
+          mountPath: /old-data
+          readOnly: true
+        - name: appuploads
+          mountPath: /new-data
+      - name: migrate-appcache-to-appdata-config
+        image: "docker.io/beclab/busybox:1.37"
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            SOURCE=/old-data
+            DEST=/new-data
+            MARKER="${DEST}/.migration_from_appcache_config_done"
+            if [ -f "$MARKER" ]; then echo "[migrate] marker present, skip."; exit 0; fi
+            if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_config_done$' || true)" ]; then
+              echo "[migrate] appData already has data, skip."
+              echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              exit 0
+            fi
+            if [ -n "$(ls -A "$SOURCE" 2>/dev/null || true)" ]; then
+              echo "[migrate] copying appCache/config -> appData/config..."
+              cp -a "$SOURCE"/. "$DEST"/
+              echo "migrated from appCache at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              echo "[migrate] done; legacy appCache left intact for rollback."
+            else
+              echo "[migrate] no legacy data, fresh install."
+              echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+            fi
+        volumeMounts:
+        - name: appconfig-legacy
+          mountPath: /old-data
+          readOnly: true
+        - name: appconfig
+          mountPath: /new-data
+      - name: migrate-appcache-to-appdata-root
+        image: "docker.io/beclab/busybox:1.37"
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            SOURCE=/old-data
+            DEST=/new-data
+            MARKER="${DEST}/.migration_from_appcache_root_done"
+            if [ -f "$MARKER" ]; then echo "[migrate] marker present, skip."; exit 0; fi
+            if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_root_done$' || true)" ]; then
+              echo "[migrate] appData already has data, skip."
+              echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              exit 0
+            fi
+            if [ -n "$(ls -A "$SOURCE" 2>/dev/null || true)" ]; then
+              echo "[migrate] copying appCache/root -> appData/root..."
+              cp -a "$SOURCE"/. "$DEST"/
+              echo "migrated from appCache at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              echo "[migrate] done; legacy appCache left intact for rollback."
+            else
+              echo "[migrate] no legacy data, fresh install."
+              echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+            fi
+        volumeMounts:
+        - name: app-cache-root-legacy
+          mountPath: /old-data
+          readOnly: true
+        - name: app-cache-root
+          mountPath: /new-data
       - name: getconfigfile
         image: "docker.io/itzcrazykns1337/vane:main"
         imagePullPolicy: IfNotPresent
@@ -116,31 +231,22 @@ spec:
         image: "docker.io/itzcrazykns1337/vane:main"
         env:
         - name: SEARXNG_API_URL
-          {{- if $isNewVersion }}
-          value: "http://d1236e020.shared.{{ $topDomain }}"
-          {{- else }}
-          value: "http://searxng.searxng-{{ .Values.admin }}:8080"
-          {{- end }}
+          value: {{ .Values.olaresEnv.SEARXNG_API_URL | default "" | quote }}
         - name: OLLAMA_API_URL
-          {{- if $isNewVersion }}
-          value: "http://d54536a50.shared.{{ $topDomain }}"
-          {{- else }}
-          value: "http://ollama.ollama-{{ .Values.admin }}:11434"
-          {{- end }}
+          value: {{ .Values.olaresEnv.OLLAMA_BASE_URL | default "" | quote }}
         - name: LLM_PROVIDER
           value: "ollama"
         - name: OLLAMA_BASE_URL
-          {{- if $isNewVersion }}
-          value: "http://d54536a50.shared.{{ $topDomain }}"
-          {{- else }}
-          value: "http://ollama.ollama-{{ .Values.admin }}:11434"
-          {{- end }}
+          value: {{ .Values.olaresEnv.OLLAMA_BASE_URL | default "" | quote }}
         {{- if .Values.olaresEnv.OLLAMA_MODEL }}
         - name: OLLAMA_MODEL
           value: "{{ .Values.olaresEnv.OLLAMA_MODEL }}"
         {{- end }}
         - name: DATABASE_URL
-          value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.vane }}"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: DATABASE_URL
         - name: HOME
           value: "/home/vane"
         - name: HF_HOME
@@ -168,21 +274,37 @@ spec:
           subPath: config.toml        
       volumes:
       - hostPath:
-          path: '{{ if $isNewVersion }}{{ .Values.userspace.appCache }}/data{{ else }}{{ .Values.userspace.appCache }}/vane/data{{ end }}'
+          path: '{{ .Values.userspace.appData }}/data'
           type: DirectoryOrCreate
         name: appcache
       - hostPath:
-          path: '{{ if $isNewVersion }}{{ .Values.userspace.appCache }}/uploads{{ else }}{{ .Values.userspace.appCache }}/vane/uploads{{ end }}'
+          path: '{{ .Values.userspace.appCache }}/data'
+          type: DirectoryOrCreate
+        name: appcache-legacy
+      - hostPath:
+          path: '{{ .Values.userspace.appData }}/uploads'
           type: DirectoryOrCreate
         name: appuploads
       - hostPath:
-          path: '{{ if $isNewVersion }}{{ .Values.userspace.appCache }}/config{{ else }}{{ .Values.userspace.appCache }}/vane/config{{ end }}'
+          path: '{{ .Values.userspace.appCache }}/uploads'
+          type: DirectoryOrCreate
+        name: appuploads-legacy
+      - hostPath:
+          path: '{{ .Values.userspace.appData }}/config'
           type: DirectoryOrCreate
         name: appconfig
       - hostPath:
-          path: '{{ if $isNewVersion }}{{ .Values.userspace.appCache }}{{ else }}{{ .Values.userspace.appCache }}/vane{{ end }}'
+          path: '{{ .Values.userspace.appCache }}/config'
+          type: DirectoryOrCreate
+        name: appconfig-legacy
+      - hostPath:
+          path: '{{ .Values.userspace.appData }}'
           type: DirectoryOrCreate
         name: app-cache-root
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}'
+          type: DirectoryOrCreate
+        name: app-cache-root-legacy
       - name: config
         configMap:
           name: app-config

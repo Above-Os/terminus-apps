@@ -1,20 +1,24 @@
-olaresManifest.version: '0.13.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  homeassistant: 1
 metadata:
   name: homeassistant
   description: Awaken your home
   icon: https://app.cdn.olares.com/appstore/homeassistant/icon.png
   appid: homeassistant
-  version: '1.0.19'
+  version: '1.0.26'
   title: Home Assistant
   categories:
   - Lifestyle
-  - Utilities
+
 permission:
   appData: true
   appCache: true
 spec:
-  versionName: '2026.3.1'
+  versionName: '2026.7.2'
   featuredImage: https://app.cdn.olares.com/appstore/homeassistant/promote_image_1v2.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/homeassistant/promote_image_1v2.webp
@@ -46,22 +50,24 @@ spec:
     Home Assistant allows you to get on top of your energy use with its home energy management feature. Gain new insights, optimize your solar panel production, plan energy usage and save money.
 
   upgradeDescription: |
-    Upgrade app version to 2026.3.1
+    v1.0.26: Fix CrashLoop from empty `.HA_VERSION`; migrate legacy `appData/homeassistant` into `appData` on first start after path cleanup.
 
-    Home Assistant 2026.3 brings stability improvements and several new features.
+    v1.0.25: Pin pods to control-plane (master) via nodeAffinity; drop legacy `sysVersion >= 1.12.3` appData path branching (Olares minimum is 1.12.6).
 
-    Highlights
-    - Robot vacuums can now map cleaning segments to Home Assistant areas, making room-specific cleaning easier.
-    - Automations now support "Continue on Error" directly in the UI.
-    - Energy dashboard improvements, including clearer electricity monitoring and better tooltips.
-    - Android devices can now act as voice satellites with wake word detection.
-    - Proxmox integration adds sensors for CPU, memory, disk usage, and VM status.
-    - OneDrive for Business is now supported as a backup destination.
-    - Runs on Python 3.14 with multiple performance and stability improvements.
-    - 50+ new integrations and many enhancements to existing ones.
+    Upgrade app version to 2026.7.2
+
+    This release upgrades Home Assistant to the 2026.7 series and fixes the
+    onboarding login flow behind the Olares entrance: the reverse-proxy scheme
+    is now reported correctly, HA resolves the real client IP through the
+    in-cluster proxy chain, and IP banning is disabled so a shared proxy IP
+    can no longer lock everyone out of the app.
+
+    It also carries the recent improvements:
+    - Optional USB passthrough for a Zigbee/Thread/Z-Wave coordinator dongle.
+    - Persistent automations/scripts/scenes includes across restarts and upgrades.
 
     Full release notes:
-    https://www.home-assistant.io/blog/2026/03/04/release-20263/
+    https://www.home-assistant.io/blog/categories/core/
 
   developer: Home Assistant
   website: https://www.home-assistant.io/
@@ -90,7 +96,7 @@ options:
   dependencies:
   - name: olares
     type: system
-    version: '>=1.11.6-0'
+    version: '>=1.12.6-0'
 entrances:
 - name: homeassistant
   port: 8001
@@ -105,3 +111,18 @@ overlayGateway:
     workload: homeassistant
     description: "Access Home Assistant using IP address in LAN"
     protocol: tcp
+envs:
+- envName: USB_PASSTHROUGH
+  type: bool
+  required: false
+  editable: true
+  applyOnChange: true
+  default: "false"
+  description: "Pass a USB serial dongle (Zigbee/Thread/Z-Wave coordinator) into Home Assistant. Enabling runs the container privileged (≈ host root) and requires the dongle to be physically plugged into the Olares host, otherwise the app will not start. Network coordinators accessed via socket://<ip>:6638 do NOT need this."
+- envName: USB_DEVICE_PATH
+  type: string
+  required: false
+  editable: true
+  applyOnChange: true
+  default: "/dev/ttyUSB0"
+  description: "Host device path of the USB dongle, used only when USB_PASSTHROUGH is enabled. Prefer a stable /dev/serial/by-id/... path, since /dev/ttyUSB0 (or /dev/ttyACM0) can change across reboots/replugs."

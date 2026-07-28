@@ -1,16 +1,28 @@
 ---
-olaresManifest.version: "0.10.0"
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  mastodon-sidekiq: 1
+  mastodon-streaming: 1
+  mastodon-web: 1
+  mastodon: 1
+  mastodon-elasticsearch-coordinating: 1
+  mastodon-elasticsearch-data: 1
+  mastodon-elasticsearch-ingest: 1
+  mastodon-elasticsearch-master: 1
+  mastodon-redis-master: 1
 metadata:
   name: mastodon
   description: Your self-hosted, globally interconnected microblogging community
   icon: https://app.cdn.olares.com/appstore/mastodon/icon.png
   appid: mastodon
-  version: "1.0.14"
+  version: '1.0.18'
   title: Mastodon
   categories:
     - Fun
-    - Social Network
+
 permission:
   appData: true
   appCache: true
@@ -45,7 +57,13 @@ spec:
     - Mastodon acts as an OAuth2 provider, so 3rd party apps can use the REST and Streaming APIs. This results in a rich app ecosystem with a lot of choices!
 
   upgradeDescription: |
-    **Upgrade to 4.5.4**
+    v1.0.18: Move DB/SMTP/AWS credentials into Secret (`secretKeyRef`).
+
+    Storage: durable volumes moved from `appCache` to `appData`. On first start after upgrade, initContainers copy legacy appCache contents into appData when the destination is empty (marker: `.migration_from_appcache_done`). Old appCache data is left intact for rollback.
+
+    Drop legacy `sysVersion >= 1.12.3` appCache path branching; Olares minimum is now 1.12.6.
+
+    Redis and Elasticsearch durable data migrated from appCache to appData.
 
     This release includes security fixes and bug fixes. Assets will be automatically recompiled during upgrade.
 
@@ -100,7 +118,7 @@ options:
   dependencies:
     - name: olares
       type: system
-      version: ">=1.12.3-0"
+      version: '>=1.12.6-0'
     - name: minio
       type: middleware
       version: ">=1.0.0-0"

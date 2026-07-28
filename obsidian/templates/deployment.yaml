@@ -23,6 +23,11 @@ data:
 
         location / {
           proxy_pass http://127.0.0.1:5984;
+          proxy_redirect off;
+          proxy_buffering off;
+          proxy_read_timeout 3600s;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
       }
     }
@@ -90,7 +95,7 @@ metadata:
   labels:
     app: obsidian
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.obsidian.replicaCount }}
   selector:
     matchLabels:
       app: obsidian
@@ -103,7 +108,7 @@ spec:
     spec:
       initContainers:
         - name: init-config
-          image: docker.io/beclab/couchdb:3.5.1
+          image: docker.io/beclab/couchdb:3.5.2.1
           command:
             - sh
             - -c
@@ -170,7 +175,7 @@ spec:
             - name: nginx-run
               mountPath: /var/run
         - name: server
-          image: docker.io/beclab/couchdb:3.5.1
+          image: docker.io/beclab/couchdb:3.5.2.1
           env:
             - name: PGID
               value: "1000"

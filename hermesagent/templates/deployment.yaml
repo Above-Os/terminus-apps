@@ -1,12 +1,88 @@
-# 3 runtime containers (gateway / dashboard / workspace) + init containers
-# share /opt/data (hostPath). The s6-overlay v3 image MUST start as root (s6
-# chowns /run + /opt/data, then s6-setuidgid-drops to hermes); pinning
-# runAsUser breaks that drop, so we start root and let s6 drop to hermes.
-# The custom image bakes hermes at UID/GID 1000 (= Olares user-data owner),
-# so no HERMES_UID/GID override is needed: stage2's build-tree chown is a
-# no-op (no overlayfs copy-up on boot) and the runtime identity (1000) can
-# write the Olares user-data mounts.
-{{- $hermesImage := "beclab/harveyff-hermes-agent:v2026.6.19-uid1000" -}}
+# Single supervised runtime container (gateway + dashboard + terminal) + init
+# containers, sharing /opt/data (hostPath). Upstream deprecated the multi-
+# container split (gateway/dashboard separate): dashboard gateway-liveness needs
+# a SHARED PID namespace with the gateway, which K8s can only provide via
+# shareProcessNamespace -- and that breaks s6-overlay (it hard-fails unless it is
+# PID 1). So the supported layout is ONE container: `gateway run` auto-redirects
+# to s6 supervision (auto-restart on crash) and HERMES_DASHBOARD=1 supervises the
+# dashboard alongside it; the Olares terminal exec's into the SAME s6 tree, so
+# the dashboard/Channels/Profiles AND `hermes gateway start/stop/restart` all see
+# and control the real gateway. The `gateway run` CMD becomes a `sleep infinity`
+# heartbeat, so the container stays up (CLI recovery possible) even if the gateway
+# crash-loops.
+#
+# Dashboard auth: Hermes v0.18+ requires auth on non-loopback binds. We bind the
+# dashboard to 127.0.0.1:19119 (no Hermes auth gate) and expose :9119 via an
+# nginx sidecar; Olares entrance authLevel: internal is the sole gate.
+#
+# The s6-overlay v3 image MUST start as root (s6 chowns /run + /opt/data, then
+# s6-setuidgid-drops to hermes); pinning runAsUser breaks that drop, so we start
+# root and let s6 drop to hermes. The custom image bakes hermes at UID/GID 1000
+# (= Olares user-data owner), so no HERMES_UID/GID override is needed: stage2's
+# build-tree chown is a no-op (no overlayfs copy-up on boot) and the runtime
+# identity (1000) can write the Olares user-data mounts.
+#
+# Opt-in Python deps (Feishu, Honcho, Firecrawl, …): rely on upstream
+# HERMES_LAZY_INSTALL_TARGET=/opt/data/lazy-packages (baked in the hermes
+# image). Chart only sets HERMES_HOME=/opt/data; no init-time pip overlays.
+#
+# /opt/hermes is an immutable install tree (read-only). Node/npm writes there
+# fail with EACCES by design. Per upstream Docker guidance, all mutable state
+# goes to /opt/data: we point npm's global prefix at /opt/data/npm-global
+# (NPM_CONFIG_PREFIX) so `npm install -g` and `npx` work and persist, and add
+# that prefix bin to PATH. Local `npm install` works from any writable cwd
+# (e.g. HOME=/opt/data). We do NOT mount over or re-open /opt/hermes.
+{{- $hermesImage := "beclab/harveyff-hermes-agent:v2026.7.20-uid1000" -}}
+{{- $oe := .Values.olaresEnv | default dict }}
+---
+# Loopback dashboard (no Hermes auth gate) + nginx sidecar on :9119.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermesagent-dashboard-proxy
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: hermesagent
+data:
+  nginx.conf: |
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      upstream hermes-dashboard {
+        server 127.0.0.1:19119;
+      }
+
+      map $http_upgrade $connection_upgrade {
+        default upgrade;
+        '' close;
+      }
+
+      server {
+        listen 9119;
+        server_name _;
+
+        client_max_body_size 100m;
+        proxy_connect_timeout 60s;
+
+        location / {
+          proxy_pass http://hermes-dashboard;
+          proxy_http_version 1.1;
+          # Loopback dashboard only accepts loopback Host/Origin (GHSA-ppp5-vxwm-4cf7).
+          proxy_set_header Host 127.0.0.1:19119;
+          proxy_set_header Origin "http://127.0.0.1:19119";
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_buffering off;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+        }
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -16,7 +92,7 @@ metadata:
   name: "{{ .Release.Name }}"
   namespace: "{{ .Release.Namespace }}"
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.hermesagent.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: hermesagent
@@ -44,6 +120,8 @@ spec:
             - "-c"
             - |
               mkdir -p /opt/data/.olares-cli/data
+              # Writable npm global prefix on the data volume (npm install -g / npx).
+              mkdir -p /opt/data/npm-global/lib/node_modules /opt/data/npm-global/bin
               chown -R 1000:1000 /opt/data || true
               chmod -R u+rwX,g+rwX /opt/data || true
               # Hook interactive shells into drop-to-hermes (kubectl exec is root).
@@ -57,7 +135,7 @@ spec:
                   } >> "$rc"
                 fi
               done
-              # Keep brew + hermes on PATH after bash -l resets profile (hermes uid shells).
+              # Keep brew + hermes + npm-global on PATH after bash -l resets profile.
               PATH_MARKER="# hermesagent: brew-path"
               for rc in /opt/data/.bashrc /opt/data/.profile; do
                 if ! grep -qF "$PATH_MARKER" "$rc" 2>/dev/null; then
@@ -66,7 +144,9 @@ spec:
                     echo "$PATH_MARKER"
                     echo 'export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"'
                     echo 'export HOMEBREW_NO_AUTO_UPDATE="${HOMEBREW_NO_AUTO_UPDATE:-1}"'
-                    echo 'export PATH="/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+                    echo 'export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-/opt/data/npm-global}"'
+                    echo 'export NODE_PATH="${NODE_PATH:-/opt/data/npm-global/lib/node_modules:/opt/data/node_modules}"'
+                    echo 'export PATH="/opt/data/npm-global/bin:/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
                   } >> "$rc"
                 fi
               done
@@ -79,7 +159,7 @@ spec:
 
         # Materialize Linuxbrew + olares-cli + CLI shims onto the brew-volume.
         - name: init-install-brew
-          image: "beclab/harveyff-openclaw-brew-base:2026.5.29-cli"
+          image: "beclab/harveyff-openclaw-brew-base:2026.7.6-cli"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -100,20 +180,6 @@ spec:
                 cp -a /brew-staging/.linuxbrew/. /home/linuxbrew/.linuxbrew/
               fi
 
-              # olares-cli ships in the brew base and arrives via the cp above.
-
-              # python3 shim -> hermes venv.
-              printf '#!/bin/sh\nexec /opt/hermes/.venv/bin/python3 "$@"\n' > /cli-bin/python3
-              chmod 0755 /cli-bin/python3
-
-              # restart-gateway: touch sentinel + wait (cross-container restart).
-              printf '#!/bin/sh\nset -eu\nS="${HERMES_GATEWAY_RESTART_SENTINEL:-/opt/data/.gateway-restart-requested}"\ntouch "$S"\necho "[restart-gateway] sentinel touched at $S, waiting ~6s for gateway to come back..."\nsleep 6\necho "[restart-gateway] done"\n' > /cli-bin/restart-gateway
-              chmod 0755 /cli-bin/restart-gateway
-
-              # Neutralize 02-reconcile-profiles: its per-profile s6 logger
-              # deadlocks on the shared /opt/data log lock across containers.
-              printf '#!/bin/sh\nexit 0\n' > /cli-bin/02-reconcile-profiles
-              chmod 0755 /cli-bin/02-reconcile-profiles
               # drop-to-hermes: interactive root kubectl exec re-execs as hermes (1000).
               printf '%s\n' \
                 '#!/bin/sh' \
@@ -129,7 +195,9 @@ spec:
                 'export OLARES_CLI_DATA_DIR="${OLARES_CLI_DATA_DIR:-/opt/data/.olares-cli/data}"' \
                 'export HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"' \
                 'export HOMEBREW_NO_AUTO_UPDATE="${HOMEBREW_NO_AUTO_UPDATE:-1}"' \
-                'export PATH="/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
+                'export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-/opt/data/npm-global}"' \
+                'export NODE_PATH="${NODE_PATH:-/opt/data/npm-global/lib/node_modules:/opt/data/node_modules}"' \
+                'export PATH="/opt/data/npm-global/bin:/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
                 'DROP_SHELL=/bin/bash' \
                 '[ -x "$DROP_SHELL" ] || DROP_SHELL=/bin/sh' \
                 'exec "$S6_SUID" hermes "$DROP_SHELL" -l' \
@@ -148,7 +216,7 @@ spec:
         # Flatten olares-* skills from the brew-base image (/skills-staging) into
         # /opt/data/skills (per-dir refresh; skipped if /skills-staging absent).
         - name: init-skills
-          image: "beclab/harveyff-openclaw-brew-base:2026.5.29-cli"
+          image: "beclab/harveyff-openclaw-brew-base:2026.7.6-cli"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -177,162 +245,58 @@ spec:
               name: app-data-home
 
       containers:
-        # Gateway sidecar. Wrapper loop auto-restarts `hermes gateway run` and
-        # polls a sentinel so a TUI `gateway restart` elsewhere triggers a restart.
-        - name: gateway
+        # Single supervised runtime: `gateway run` registers the s6 slot,
+        # supervises the gateway (auto-restart on crash), and sleeps as the
+        # container heartbeat; HERMES_DASHBOARD=1 supervises the dashboard in
+        # the same PID namespace so Channels/Profiles/Terminal all see the
+        # real gateway and `hermes gateway start/stop/restart` works natively.
+        - name: hermesagent
           image: "{{ $hermesImage }}"
           imagePullPolicy: IfNotPresent
+          # Image ENTRYPOINT should be /init + main-wrapper; only override CMD.
           args:
-            - "/bin/bash"
-            - "-c"
-            - |
-              set -u
-              RETRY_DELAY="${HERMES_GATEWAY_RESTART_DELAY_SECONDS:-30}"
-              SENTINEL="${HERMES_GATEWAY_RESTART_SENTINEL:-/opt/data/.gateway-restart-requested}"
-              POLL="${HERMES_GATEWAY_SENTINEL_POLL_SECONDS:-2}"
-              SENTINEL_DELAY="${HERMES_GATEWAY_SENTINEL_RESTART_DELAY_SECONDS:-3}"
-              FLAG="/tmp/.gateway-wrapper-sentinel-fired"
-
-              # Trap SIGTERM so pod delete tears down children promptly.
-              cleanup() {
-                echo "[gateway-wrapper] SIGTERM received, exiting"
-                [ -n "${stub:-}"    ] && kill -TERM "$stub"    2>/dev/null || true
-                [ -n "${watcher:-}" ] && kill -TERM "$watcher" 2>/dev/null || true
-                [ -n "${child:-}"   ] && kill -TERM "$child"   2>/dev/null || true
-                exit 0
-              }
-              trap cleanup TERM
-
-              # Clear any stale sentinel/flag left over from a crashed wrapper
-              rm -f "$SENTINEL" "$FLAG" 2>/dev/null || true
-
-              # API server disabled: bind :8642 with a stub serving /health[/detailed]
-              # from gateway_state.json (for the dashboard probe), 503 otherwise.
-              if [ "${API_SERVER_ENABLED:-false}" != "true" ]; then
-                echo "[gateway-wrapper] API server disabled, starting health-relay stub on :8642"
-                python3 -c '
-              import http.server, json, os
-              STATE_PATH = os.environ.get("HERMES_HOME", "/opt/data") + "/gateway_state.json"
-              DISABLED = {"error": "Core API services are currently disabled. Please enable them by setting API_SERVER_ENABLED=true."}
-              DISABLED_BODY = json.dumps(DISABLED).encode()
-              def read_state():
-                try:
-                  with open(STATE_PATH, "r") as f:
-                    return json.load(f)
-                except Exception:
-                  return {}
-              class H(http.server.BaseHTTPRequestHandler):
-                def _send(self, code, body):
-                  self.send_response(code)
-                  self.send_header("Content-Type", "application/json")
-                  self.send_header("Content-Length", str(len(body)))
-                  self.end_headers()
-                  self.wfile.write(body)
-                def do_GET(self):
-                  path = self.path.split("?",1)[0].rstrip("/") or "/"
-                  if path == "/health":
-                    self._send(200, json.dumps({"status":"ok","platform":"hermes-agent"}).encode())
-                  elif path == "/health/detailed":
-                    rt = read_state()
-                    payload = {
-                      "status": "ok",
-                      "platform": "hermes-agent",
-                      "gateway_state": rt.get("gateway_state"),
-                      "platforms": rt.get("platforms", {}),
-                      "active_agents": rt.get("active_agents", 0),
-                      "exit_reason": rt.get("exit_reason"),
-                      "updated_at": rt.get("updated_at"),
-                      "pid": rt.get("pid"),
-                    }
-                    self._send(200, json.dumps(payload).encode())
-                  else:
-                    self._send(503, DISABLED_BODY)
-                do_POST = do_PUT = do_DELETE = do_PATCH = lambda s: s._send(503, DISABLED_BODY)
-                def log_message(self, *a): pass
-              http.server.HTTPServer(("0.0.0.0", 8642), H).serve_forever()
-              ' &
-                stub=$!
-              fi
-
-              while :; do
-                echo "[gateway-wrapper] starting hermes gateway run (HERMES_HOME=${HERMES_HOME})"
-                hermes gateway run &
-                child=$!
-
-                # Watcher: on sentinel touch, kill the child + flag the reason.
-                (
-                  while kill -0 "$child" 2>/dev/null; do
-                    if [ -f "$SENTINEL" ]; then
-                      echo "[gateway-wrapper] restart requested via $SENTINEL"
-                      rm -f "$SENTINEL" 2>/dev/null
-                      : > "$FLAG"
-                      kill -TERM "$child" 2>/dev/null
-                      break
-                    fi
-                    sleep "$POLL"
-                  done
-                ) &
-                watcher=$!
-
-                wait "$child"
-                rc=$?
-
-                # Reap the watcher whether it triggered or self-exited
-                kill "$watcher" 2>/dev/null || true
-                wait "$watcher" 2>/dev/null || true
-
-                if [ -f "$FLAG" ]; then
-                  rm -f "$FLAG"
-                  delay="$SENTINEL_DELAY"
-                  reason="restart requested via sentinel"
-                else
-                  delay="$RETRY_DELAY"
-                  reason="natural exit (code=${rc})"
-                fi
-                echo "[gateway-wrapper] gateway ${reason}; sleeping ${delay}s before restart"
-
-                # Sleep, but let the sentinel short-circuit the backoff.
-                end_ts=$(( $(date +%s) + delay ))
-                while [ "$(date +%s)" -lt "$end_ts" ]; do
-                  if [ -f "$SENTINEL" ]; then
-                    echo "[gateway-wrapper] sentinel observed during backoff, restarting immediately"
-                    rm -f "$SENTINEL" 2>/dev/null
-                    break
-                  fi
-                  sleep 1
-                done
-              done
+            - gateway
+            - run
           ports:
+            - name: dashboard
+              containerPort: 19119
+              protocol: TCP
             - name: gateway
               containerPort: 8642
               protocol: TCP
           env:
+            - name: TERM
+              value: xterm-256color
             - name: HOME
               value: /opt/data
             - name: HERMES_HOME
               value: /opt/data
-            - name: HERMES_GATEWAY_NO_SUPERVISE
+            - name: HERMES_DASHBOARD
               value: "1"
-            - name: HERMES_GATEWAY_RESTART_DELAY_SECONDS
-              value: "30"
-            - name: HERMES_GATEWAY_RESTART_SENTINEL
-              value: "/opt/data/.gateway-restart-requested"
-            - name: HERMES_GATEWAY_SENTINEL_POLL_SECONDS
-              value: "2"
-            - name: HERMES_GATEWAY_SENTINEL_RESTART_DELAY_SECONDS
-              value: "3"
+            # Loopback bind: Hermes skips dashboard auth gate; nginx sidecar
+            # exposes :9119 to the pod network for Olares internal entrance.
+            - name: HERMES_DASHBOARD_HOST
+              value: "127.0.0.1"
+            - name: HERMES_DASHBOARD_PORT
+              value: "19119"
             - name: HOMEBREW_PREFIX
               value: /home/linuxbrew/.linuxbrew
             - name: HOMEBREW_NO_AUTO_UPDATE
               value: "1"
+            - name: NPM_CONFIG_PREFIX
+              value: /opt/data/npm-global
+            - name: NODE_PATH
+              value: /opt/data/npm-global/lib/node_modules:/opt/data/node_modules
             - name: PATH
-              value: "/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              value: "/opt/data/npm-global/bin:/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             - name: OLARES_CLI_HOME
               value: /opt/data/.olares-cli
             - name: OLARES_CLI_DATA_DIR
               value: /opt/data/.olares-cli/data
+            # dash reads $ENV before interactive input (kubectl exec sh).
+            - name: ENV
+              value: /etc/profile.d/99-drop-to-hermes.sh
             # API server binds 0.0.0.0:8642 only when enabled AND a key is set.
-            {{- $oe := .Values.olaresEnv | default dict }}
             {{- $apiEnabled := eq (toString (index $oe "API_SERVER_ENABLED")) "true" }}
             {{- $apiKey := index $oe "HERMES_API_SERVER_KEY" | default "" }}
             {{- if and $apiEnabled $apiKey }}
@@ -341,8 +305,67 @@ spec:
             - name: API_SERVER_HOST
               value: "0.0.0.0"
             - name: API_SERVER_KEY
-              value: {{ $apiKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: API_SERVER_KEY
+            {{- $cors := index $oe "API_SERVER_CORS_ORIGINS" | default "" }}
+            {{- if $cors }}
+            - name: API_SERVER_CORS_ORIGINS
+              value: {{ $cors | quote }}
             {{- end }}
+            {{- $modelName := index $oe "API_SERVER_MODEL_NAME" | default "" }}
+            {{- if $modelName }}
+            - name: API_SERVER_MODEL_NAME
+              value: {{ $modelName | quote }}
+            {{- end }}
+            {{- end }}
+            # Optional provider keys from Olares user settings (Settings → Integration).
+            {{- $openai := index $oe "OPENAI_API_KEY" | default "" }}
+            {{- if $openai }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: OPENAI_API_KEY
+            {{- end }}
+            {{- $anthropic := index $oe "ANTHROPIC_API_KEY" | default "" }}
+            {{- if $anthropic }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
+            # Messaging allowlists (v0.19 still warns without these on gateways).
+            {{- if eq (toString (index $oe "GATEWAY_ALLOW_ALL_USERS" | default "false")) "true" }}
+            - name: GATEWAY_ALLOW_ALL_USERS
+              value: "true"
+            {{- end }}
+            {{- $gwUsers := index $oe "GATEWAY_ALLOWED_USERS" | default "" }}
+            {{- if $gwUsers }}
+            - name: GATEWAY_ALLOWED_USERS
+              value: {{ $gwUsers | quote }}
+            {{- end }}
+            {{- $tgUsers := index $oe "TELEGRAM_ALLOWED_USERS" | default "" }}
+            {{- if $tgUsers }}
+            - name: TELEGRAM_ALLOWED_USERS
+              value: {{ $tgUsers | quote }}
+            {{- end }}
+            {{- $dcUsers := index $oe "DISCORD_ALLOWED_USERS" | default "" }}
+            {{- if $dcUsers }}
+            - name: DISCORD_ALLOWED_USERS
+              value: {{ $dcUsers | quote }}
+            {{- end }}
+            # Cron + busy-input (Quicksilver / v0.19).
+            - name: HERMES_CRON_TIMEOUT
+              value: {{ index $oe "HERMES_CRON_TIMEOUT" | default "600" | quote }}
+            - name: HERMES_CRON_MAX_PARALLEL
+              value: {{ index $oe "HERMES_CRON_MAX_PARALLEL" | default "4" | quote }}
+            - name: HERMES_GATEWAY_BUSY_INPUT_MODE
+              value: {{ index $oe "HERMES_GATEWAY_BUSY_INPUT_MODE" | default "queue" | quote }}
+            - name: HERMES_GATEWAY_BUSY_ACK_ENABLED
+              value: {{ index $oe "HERMES_GATEWAY_BUSY_ACK_ENABLED" | default "true" | quote }}
           startupProbe:
             exec:
               command: ["/bin/sh", "-c", "test -d /opt/data"]
@@ -350,186 +373,25 @@ spec:
             periodSeconds: 10
             failureThreshold: 60
           readinessProbe:
-            exec:
-              command: ["/bin/sh", "-c", "test -d /opt/data"]
+            tcpSocket:
+              port: 19119
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 5
           resources:
             limits:
-              cpu: "4"
-              memory: 12Gi
+              cpu: "8"
+              memory: 20Gi
             requests:
-              cpu: "1"
-              memory: 2Gi
-          volumeMounts:
-            - mountPath: /opt/data
-              name: app-data-home
-            - mountPath: /home/linuxbrew
-              name: brew-volume
-            - mountPath: /usr/local/bin/python3
-              name: cli-bin
-              subPath: python3
-              readOnly: true
-            - mountPath: /usr/local/bin/restart-gateway
-              name: cli-bin
-              subPath: restart-gateway
-              readOnly: true
-            - mountPath: /etc/cont-init.d/02-reconcile-profiles
-              name: cli-bin
-              subPath: 02-reconcile-profiles
-              readOnly: true
-            - mountPath: /dev/shm
-              name: dshm
-            {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
-            - mountPath: /home/userdata/home/
-              name: olares-home-dir
-            {{- end }}
-            {{- if eq (toString .Values.olaresEnv.ALLOW_EXTERNAL_DIR_ACCESS) "true" }}
-            - mountPath: /home/userdata/external/
-              name: olares-external-dir
-            {{- end }}
-          # Hardening (gateway only for now; validate before extending). Caps are
-          # the minimal set s6's root stage needs to chown + s6-setuidgid-drop.
-          securityContext:
-            allowPrivilegeEscalation: false
-            seccompProfile:
-              type: RuntimeDefault
-            capabilities:
-              drop: ["ALL"]
-              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "SETUID", "SETGID", "KILL"]
-
-        # Dashboard sidecar: web UI on 9119. --insecure binds non-localhost
-        # behind the Olares SSO ingress.
-        - name: dashboard
-          image: "{{ $hermesImage }}"
-          imagePullPolicy: IfNotPresent
-          args:
-            - "dashboard"
-            - "--host"
-            - "0.0.0.0"
-            - "--insecure"
-            - "--no-open"
-          ports:
-            - name: dashboard
-              containerPort: 9119
-              protocol: TCP
-          env:
-            - name: HOME
-              value: /opt/data
-            - name: HERMES_GATEWAY_NO_SUPERVISE
-              value: "1"
-            - name: GATEWAY_HEALTH_URL
-              value: "http://localhost:8642"
-            - name: HOMEBREW_PREFIX
-              value: /home/linuxbrew/.linuxbrew
-            - name: HOMEBREW_NO_AUTO_UPDATE
-              value: "1"
-            - name: PATH
-              value: "/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            - name: OLARES_CLI_HOME
-              value: /opt/data/.olares-cli
-            - name: OLARES_CLI_DATA_DIR
-              value: /opt/data/.olares-cli/data
-          startupProbe:
-            tcpSocket:
-              port: 9119
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 60
-          readinessProbe:
-            tcpSocket:
-              port: 9119
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 5
-          resources:
-            limits:
-              cpu: "2"
-              memory: 3Gi
-            requests:
-              cpu: 500m
-              memory: 768Mi
-          volumeMounts:
-            - mountPath: /opt/data
-              name: app-data-home
-            - mountPath: /home/linuxbrew
-              name: brew-volume
-            - mountPath: /usr/local/bin/python3
-              name: cli-bin
-              subPath: python3
-              readOnly: true
-            - mountPath: /usr/local/bin/restart-gateway
-              name: cli-bin
-              subPath: restart-gateway
-              readOnly: true
-            - mountPath: /etc/cont-init.d/02-reconcile-profiles
-              name: cli-bin
-              subPath: 02-reconcile-profiles
-              readOnly: true
-            {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
-            - mountPath: /home/userdata/home/
-              name: olares-home-dir
-            {{- end }}
-            {{- if eq (toString .Values.olaresEnv.ALLOW_EXTERNAL_DIR_ACCESS) "true" }}
-            - mountPath: /home/userdata/external/
-              name: olares-external-dir
-            {{- end }}
-          securityContext:
-            allowPrivilegeEscalation: false
-
-        # Workspace for the TUI: `sleep infinity` so the terminal can exec in
-        # and run `hermes setup` / `hermes`.
-        - name: hermesagent
-          image: "{{ $hermesImage }}"
-          imagePullPolicy: IfNotPresent
-          args: ["sleep", "infinity"]
-          env:
-            - name: TERM
-              value: xterm-256color
-            - name: HOME
-              value: /opt/data
-            - name: HERMES_HOME
-              value: /opt/data
-            - name: HERMES_GATEWAY_NO_SUPERVISE
-              value: "1"
-            - name: HOMEBREW_PREFIX
-              value: /home/linuxbrew/.linuxbrew
-            - name: HOMEBREW_NO_AUTO_UPDATE
-              value: "1"
-            - name: PATH
-              value: "/opt/hermes/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            - name: OLARES_CLI_HOME
-              value: /opt/data/.olares-cli
-            - name: OLARES_CLI_DATA_DIR
-              value: /opt/data/.olares-cli/data
-            # dash reads $ENV before interactive input (kubectl exec sh).
-            - name: ENV
-              value: /etc/profile.d/99-drop-to-hermes.sh
-          resources:
-            limits:
               cpu: "2"
               memory: 4Gi
-            requests:
-              cpu: 500m
-              memory: 512Mi
           volumeMounts:
             - mountPath: /opt/data
               name: app-data-home
             - mountPath: /home/linuxbrew
               name: brew-volume
-            - mountPath: /usr/local/bin/python3
-              name: cli-bin
-              subPath: python3
-              readOnly: true
-            - mountPath: /usr/local/bin/restart-gateway
-              name: cli-bin
-              subPath: restart-gateway
-              readOnly: true
-            - mountPath: /etc/cont-init.d/02-reconcile-profiles
-              name: cli-bin
-              subPath: 02-reconcile-profiles
-              readOnly: true
+            - mountPath: /dev/shm
+              name: dshm
             - mountPath: /etc/profile.d/99-drop-to-hermes.sh
               name: cli-bin
               subPath: drop-to-hermes
@@ -545,6 +407,35 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
 
+        # TCP/HTTP proxy: pod :9119 → loopback dashboard :19119 (shared net ns).
+        - name: dashboard-proxy
+          image: "docker.io/beclab/aboveos-nginx:1.27.0"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: dashboard
+              containerPort: 9119
+              protocol: TCP
+          volumeMounts:
+            - name: dashboard-proxy-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          readinessProbe:
+            tcpSocket:
+              port: 9119
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+
       restartPolicy: Always
       volumes:
         - name: app-data-home
@@ -557,6 +448,13 @@ spec:
             type: DirectoryOrCreate
         - name: cli-bin
           emptyDir: {}
+        - name: dashboard-proxy-config
+          configMap:
+            name: hermesagent-dashboard-proxy
+            defaultMode: 438
+            items:
+              - key: nginx.conf
+                path: nginx.conf
         - name: dshm
           emptyDir:
             medium: Memory

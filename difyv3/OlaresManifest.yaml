@@ -1,16 +1,15 @@
-olaresManifest.version: "0.12.0"
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: difyv3
   description: The Innovation Engine for GenAI Applications
   icon: https://app.cdn.olares.com/appstore/dify/icon-new.png
-  version: '1.1.2'
+  version: '1.1.11'
   appid: difyv3
-  title: Dify Shared V3 for test
+  title: Dify
   categories:
     - Productivity_v112
-    - Productivity
 
 sharedEntrances:
   - name: difyv3
@@ -86,7 +85,15 @@ spec:
     7. Backend-as-a-Service: All of Dify's offerings come with corresponding APIs, so you could effortlessly integrate Dify into your own business logic.
 
   upgradeDescription: |
-    Migrated Dify to apiVersion v3 shared app pattern (difyv2 → difyv3).
+    v1.1.11: Move `PGVECTOR_*` passwords, Weaviate/sandbox/plugin API keys into Secret; wire plugin-daemon and sandbox via `secretKeyRef`.
+
+    v1.1.10: Move `DB_PASSWORD`, `REDIS_PASSWORD`, `CELERY_BROKER_URL`, `SMTP_PASSWORD`, and `SECRET_KEY` into Kubernetes Secret (`envFrom.secretRef`).
+
+    Storage: durable volumes moved from `appCache` to `appData`. On first start after upgrade, initContainers copy legacy appCache contents into appData when the destination is empty (marker: `.migration_from_appcache_done`). Old appCache data is left intact for rollback.
+
+    Drop legacy `sysVersion >= 1.12.3` appCache path branching; Olares minimum is now 1.12.6.
+
+    Dify durable volumes migrated from appCache to appData.
 
     **What's Changed**
 
@@ -113,10 +120,10 @@ spec:
     - text: Apache-2.0
       url: https://github.com/langgenius/dify?tab=License-1-ov-file#readme
 
-  requiredMemory: 2200Mi
+  requiredMemory: 6.5Gi
   requiredDisk: 512Mi
-  requiredCpu: 1
-  limitedMemory: 16Gi
+  requiredCpu: 3.5
+  limitedMemory: 14Gi
   limitedCpu: 8
   limitedDisk: 50Gi
 
@@ -139,14 +146,11 @@ middleware:
 
 options:
   shared: true
-  allowMultipleInstall: true
   allowedOutboundPorts:
     - 3128
   apiTimeout: 0
   conflicts:
-    - name: difyfusion
-      type: application
-    - name: difyfusionclient
+    - name: dify
       type: application
     - name: difyv2
       type: application

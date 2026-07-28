@@ -17,3 +17,9 @@
 {{- int $g -}}
 {{- end -}}
 {{- end -}}
+{{- /* llamacppllmbasev3.engineArgs: pass ENGINE_ARGS through unchanged.
+       Usage: {{ include "llamacppllmbasev3.engineArgs" (dict "Args" $engineArgs) }} */ -}}
+{{- define "llamacppllmbasev3.engineArgs" -}}
+{{- $in := . -}}
+{{- trim ($in.Args | default "") -}}
+{{- end -}}

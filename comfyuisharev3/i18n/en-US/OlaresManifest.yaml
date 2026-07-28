@@ -1,5 +1,5 @@
 metadata:
-  title: ComfyUI Shared
+  title: ComfyUI
   description: The most powerful and modular stable diffusion GUI and backend.
 spec:
   fullDescription: |
@@ -77,14 +77,32 @@ spec:
     The shared model hub lives in the App Common directory
     `appCommon/comfyui/model` (SSD on single-node, JuiceFS on multi-node).
 
-  upgradeDescription: |
-    ComfyUI Shared apiVersion v3 release (comfyuisharev3).
+    **Data layout**
+    - App install (plugins, cache, config): `appData/comfyui` (host `/app/comfyui`)
+    - Input / output: `appCommon/comfyui/input` and `appCommon/comfyui/output`
 
-    **What's Changed**
-    - **Architecture**: single engine pod; `comfyuientrance` Service maps entrance
-      8080 → ComfyUI proxy :8190 and 8081 → Launcher gateway :8080 (handles `/api`
-      → :3000 internally). No separate nginx client workload.
-    - **Resources**: GPU declared via `spec.accelerator` (nvidia / nvidia-gb10).
-    - **Runtime**: ComfyUI 0.24.0 with launcher 0.2.43.
-    - **Model storage**: models use the shared App Common store `appCommon/comfyui/model`.
-    - **Upgrade migration**: init container copies from `sharedlib/ai/model`, renames legacy `main/` to `checkpoints/`, verifies by file size, then removes legacy copies (pod fails if verify fails).
+  upgradeDescription: |
+    v1.1.19: Schedule only on control-plane (master) via nodeAffinity.
+
+    Upgrade ComfyUI to 0.28.0
+
+    **Highlights**
+    - Added and frequently updated AGENTS.md documentation.
+    - Various improvements and fixes in partner nodes (ByteDance, Ideogram, StabilityAI, Tencent, Google).
+    - Security: Fixed four vulnerabilities (GHSA-779p-m5rp-r4h4).
+    - Added support for new models: Seed Audio 1.0, Seedream 5 Pro, SeedVR2, PID 1.5, sync-3, and more.
+    - Fixed issues in embedding, model loading, tokenizer crashing, video/audio stream handling, color picker transparency, VAE attributes, 3D node output, and model patchers.
+    - Improved text model sampling speed and added/undeprecated text node.
+    - Updated workflow templates and embedded documentation to latest versions.
+    - Added support/features for attention mechanisms, including gqa across all backends and dropped pytorch 2.4 support.
+    - Enhanced API: exposed extension filters, request ComfyUI Core version in headers, and allow --comfy-api-base for ephemeral test environments.
+    - Introduced and updated Save/Advanced Save nodes for image, video, and 3D data.
+    - Improved performance for int4/int8/FP8 models and resolved regressions on Turing/16xx series GPUs.
+    - Enabled comfy-kitchen Triton backend improvements and automatic enablement logic for ROCm/AMD platforms.
+    - Maintained, refactored, and adjusted category names and preview nodes.
+    - Added and removed symlinks as needed, e.g., CLAUDE.md symlink, deleted outdated symlinks.
+    - Updated CI: added CLA Assistant workflow, updated cla.yml.
+    - Fixed caching, job output handling, and reference image encoding.
+    - Minor doc, semantic, and contract updates; aligned tag semantics, and synced shared API contract.
+
+    Full changelog: https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.28.0

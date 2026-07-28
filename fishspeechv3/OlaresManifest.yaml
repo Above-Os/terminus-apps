@@ -1,4 +1,4 @@
-olaresManifest.version: "0.12.0"
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
@@ -6,34 +6,29 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
   description: SOTA Open Source TTS
   appid: fishspeechv3
-  title: Fish Speech V3 for test
-  version: '1.1.3'
+  title: Fish Speech
+  version: '1.1.10'
   categories:
-    - AI
+  - AI
 
 sharedEntrances:
-  - name: fishspeechv3
-    title: Fish Speech
-    host: sharedentrances-api
-    icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
-    port: 0
-    invisible: true
-    authLevel: internal
+- name: fishspeechv3
+  title: Fish Speech
+  host: sharedentrances-api
+  icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
+  port: 0
+  invisible: true
+  authLevel: internal
 
 entrances:
-  - authLevel: internal
-    host: fishspeechclient
-    icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
-    name: fishspeechclient
-    openMethod: window
-    port: 8080
-    title: Fish Speech
+- authLevel: internal
+  host: fishspeechclient
+  icon: https://app.cdn.olares.com/appstore/fishspeech/icon.png
+  name: fishspeechclient
+  openMethod: window
+  port: 8080
+  title: Fish Speech
 
-# Declares every workload's replica count (v3 schema). Keys MUST match the
-# rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   fishspeechv3         — Fish Speech WebUI engine Deployment (name: {{ .Release.Name }} == appid)
-#   fishspeechv3download — llm-init download-only Deployment (shared HF cache)
-#   fishspeechclient     — nginx entrance Deployment
 workloadReplicas:
   fishspeechv3: 1
   fishspeechv3download: 1
@@ -46,7 +41,7 @@ permission:
   # llm-init downloader and read by the WebUI to materialise checkpoints/s2-pro.
   appCommon: true
   userData:
-    - Home
+  - Home
 
 spec:
   versionName: 'webui-cuda-cu129-20260422'
@@ -79,12 +74,20 @@ spec:
     - GUI Inference: Offers a PyQt6 graphical interface that works seamlessly with the API server. Supports Linux, Windows, and macOS.
 
   upgradeDescription: |
-    Switched model provisioning to the shared llm-init downloader.
+    Storage: durable volumes moved from `appCache` to `appData`. On first start after upgrade, initContainers copy legacy appCache contents into appData when the destination is empty (marker: `.migration_from_appcache_done`). Old appCache data is left intact for rollback.
+
+    Drop legacy `sysVersion >= 1.12.3` appCache path branching; Olares minimum is now 1.12.6.
+
+    `HF_TOKEN` / `HF_ENDPOINT` now map from `OLARES_SYSTEM_HUGGINGFACE_TOKEN` / `OLARES_SYSTEM_HUGGINGFACE_SERVICE` (system-level), not user-level Hugging Face env.
+
+    Bump downloader image to `beclab/llm-init:v1.3.1`.
+
+    User data root moved from appCache to appData; compile-cache stays on appCache.
 
     **What's Changed**
 
     - **Download architecture**: replaced the bespoke `harveyff-hf-downloader`
-      Job with an `llm-init:v1.2.4` download-only Deployment
+      Job with an `llm-init:v1.3.1` download-only Deployment
       (`fishspeechv3download`). The fishaudio/s2-pro checkpoint now lands in the
       shared cross-app Hugging Face cache (App Common, `/cache/hf/hub`) instead
       of a per-app App Data copy, so it is de-duplicated across apps and survives
@@ -110,49 +113,41 @@ spec:
   sourceCode: https://github.com/fishaudio/fish-speech
   submitter: Olares
   locale:
-    - en-US
-    - zh-CN
+  - en-US
+  - zh-CN
   doc: https://speech.fish.audio/
   license:
-    - text: Apache-2.0
-      url: https://github.com/fishaudio/fish-speech/blob/main/LICENSE
-
-  accelerator:
-  # nvidia — discrete GPU; GPU memory via nvidia.com/gpumem. amd64 only.
-  - mode: nvidia
-    requiredCpu: "1"
-    limitedCpu: "7"
-    requiredMemory: 16Gi
-    limitedMemory: 40Gi
-    requiredDisk: 50Mi
-    limitedDisk: 50Gi
-    requiredGPUMemory: 4Gi
-    limitedGPUMemory: 22Gi
-
+  - text: Apache-2.0
+    url: https://github.com/fishaudio/fish-speech/blob/main/LICENSE
   supportArch:
-    - amd64
+  - amd64
   onlyAdmin: true
 
+  requiredCpu: "1"
+  limitedCpu: "7"
+  requiredMemory: 16Gi
+  limitedMemory: 40Gi
+  requiredDisk: 50Mi
+  limitedDisk: 50Gi
 envs:
-  - envName: HF_TOKEN
-    required: true
-    applyOnChange: true
-    valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_TOKEN
-  - envName: HF_ENDPOINT
-    required: true
-    applyOnChange: true
-    valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_SERVICE
+- envName: HF_TOKEN
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+- envName: HF_ENDPOINT
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
 
 options:
   shared: true
-  allowMultipleInstall: true
   apiTimeout: 0
   conflicts:
-    - name: fishspeechv2
-      type: application
+  - name: fishspeechv2
+    type: application
   dependencies:
-    - name: olares
-      type: system
-      version: '>=1.12.6-0'
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'

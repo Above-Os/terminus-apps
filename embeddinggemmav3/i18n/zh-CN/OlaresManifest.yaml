@@ -1,21 +1,29 @@
 metadata:
-  title: EmbeddingGemma 300M
+  title: EmbeddingGemma
   description: "基于 IREmbeddingServer 的 EmbeddingGemma-300M 文本向量服务（OpenVINO / ONNX）"
 
 spec:
   fullDescription: |
-    **EmbeddingGemma-300M** 文本向量服务，由 IREmbeddingServer 提供推理，
-    兼容 OpenAI `/v1/embeddings` 接口（8080 端口）。
+    **EmbeddingGemma-300M** 文本向量服务，由 EmbeddingServer 提供支持。在 8080 端口提供兼容 OpenAI 的 `/v1/embeddings` 和 `/v1/models` 接口。
 
-    **加速模式**
-    - `cpu` — ov-intel 镜像，OpenVINO IR，`EMBED_DEVICE=auto`（非 onnx-cpu）
-    - `nvidia` — onnx-cuda12/13，`EMBED_DEVICE=cuda`
-    - `nvidia-gb10` — onnx-cuda13 统一内存
-    - `strix-halo` — onnx-rocm，`EMBED_DEVICE=rocm`
+    **加速器模式**
+    | Olares 模式 | 镜像 | 后端 | `EMBED_DEVICE` |
+    |-------------|------|------|----------------|
+    | `intel` | `embed-server:v0.1.0-ov-intel` | OpenVINO IR | `igpu` |
+    | `cpu` | `embed-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `embed-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
+    | `nvidia-gb10` | `embed-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
 
-    llm-init 会从 Hugging Face 下载 OV 与 ONNX 两个模型仓库到共享 App Common 缓存。
-    可通过 `GET /v1/capabilities` 的 `configured_device_kind` 确认实际运行设备。
+    **模型下载**
+    首次启动时，llm-init 从统一 Hugging Face 仓库下载到 App Common 缓存：
+    - [beclab/embeddinggemma-300m](https://huggingface.co/beclab/embeddinggemma-300m)
+    - `intel` 模式：仅 `openvino/` 子目录
+    - 其他模式：仅 `onnx/` 子目录
 
-    **Web Console**（`console` 入口）：Embedding Playground、文本相似度对比、
-    设备/能力诊断与可选 API Key。浏览器仅请求 Console 同源 `/api`，由 nginx
-    反代至 embed-server。模型仍在下载时请使用 **embedclient** 查看进度。
+    **设备挂载**
+    - `intel`：`/dev/dri`, `/sys/class/drm` 用于 Intel iGPU
+    - `nvidia` / `nvidia-gb10`：通过 Olares 调度器注入 GPU
+
+    **技术栈**
+    - **embed-server**（`beclab/embed-server:v0.1.0`，内部 8080）：Rust 向量推理。
+    - **llm-init**（`beclab/llm-init:test_v1`，`ENGINE_KIND=embed`，8090）：模型下载、进度 UI 与 OpenAI API 代理。

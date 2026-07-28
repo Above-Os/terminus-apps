@@ -6,11 +6,11 @@ metadata:
   description: The most powerful and modular stable diffusion GUI and backend.
   icon: https://app.cdn.olares.com/appstore/comfyui/icon2.png
   appid: comfyuisharev3
-  version: '1.1.7'
-  title: ComfyUI Shared
+  version: '1.1.19'
+  title: ComfyUI
   categories:
   - Creativity
-  - Productivity
+
 sharedEntrances:
 - name: comfyuisharev3
   title: ComfyUI
@@ -35,16 +35,10 @@ entrances:
   authLevel: private
   openMethod: window
 
-# Declares every workload's replica count (v3 schema). Keys MUST match the
-# rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   comfyuisharev3 — ComfyUI engine / server Deployment (== appid / Release.Name)
 workloadReplicas:
   comfyuisharev3: 1
 
 permission:
-  provider:
-  - appName: olares-app
-    providerName: desktop
   appData: true
   appCache: true
   appCommon: true
@@ -52,7 +46,8 @@ permission:
   userData:
   - Home
 spec:
-  versionName: '0.24.0'
+  onlyAdmin: true
+  versionName: '0.28.0'
   featuredImage: https://app.cdn.olares.com/appstore/comfyui/1.png
   promoteImage:
   - https://app.cdn.olares.com/appstore/comfyui/1.png
@@ -68,7 +63,7 @@ spec:
     This ui will let you design and execute advanced stable diffusion pipelines using a graph/nodes/flowchart based interface.
 
     **Features**
-    
+
     - Nodes/graph/flowchart interface to experiment and create complex Stable Diffusion workflows without needing to code anything.
     - NOTE: There are many more models supported than the list below, if you want to see what is supported see our templates list inside ComfyUI.
     - Image Models
@@ -135,23 +130,36 @@ spec:
     `appCommon/comfyui/model` (SSD on single-node, JuiceFS on multi-node).
     All ComfyUI-based apps mount the same path so models deduplicate across apps.
 
-  upgradeDescription: |
-    ComfyUI Shared apiVersion v3 release (comfyuisharev3).
+    **Data layout**
+    - App install (plugins, cache, config): `appData/comfyui` (host `/app/comfyui`)
+    - Input / output: `appCommon/comfyui/input` and `appCommon/comfyui/output`
 
-    **What's Changed**
-    - **Architecture**: single engine pod; `comfyuientrance` Service maps entrance
-      8080 → ComfyUI proxy :8190 and 8081 → Launcher gateway :8080 (handles `/api`
-      → :3000 internally). No separate nginx client workload.
-    - **Resources**: GPU declared via `spec.accelerator` (nvidia / nvidia-gb10).
-      GB10 unified-memory mode raises the engine memory request to 22Gi.
-    - **Runtime**: ComfyUI 0.24.0 with launcher 0.2.43.
-    - **Model storage**: models now use the shared App Common store
-      `appCommon/comfyui/model` instead of `sharedlib/ai/model`.
-    - **Upgrade migration**: on first start after upgrade, an init container
-      copies models from `sharedlib/ai/model` into `appCommon/comfyui/model`,
-      renames legacy `main/` to `checkpoints/`, verifies each file by size,
-      then removes the legacy copies. If verification fails the pod will not
-      start and legacy files are kept.
+  upgradeDescription: |
+    v1.1.19: Schedule only on control-plane (master) via nodeAffinity.
+
+    Stop recursively chowning appCommon shared model/I/O trees on startup; only fix ownership on appData.
+    Upgrade ComfyUI to 0.28.0
+
+    **Highlights**
+    - Added and frequently updated AGENTS.md documentation.
+    - Various improvements and fixes in partner nodes (ByteDance, Ideogram, StabilityAI, Tencent, Google).
+    - Security: Fixed four vulnerabilities (GHSA-779p-m5rp-r4h4).
+    - Added support for new models: Seed Audio 1.0, Seedream 5 Pro, SeedVR2, PID 1.5, sync-3, and more.
+    - Fixed issues in embedding, model loading, tokenizer crashing, video/audio stream handling, color picker transparency, VAE attributes, 3D node output, and model patchers.
+    - Improved text model sampling speed and added/undeprecated text node.
+    - Updated workflow templates and embedded documentation to latest versions.
+    - Added support/features for attention mechanisms, including gqa across all backends and dropped pytorch 2.4 support.
+    - Enhanced API: exposed extension filters, request ComfyUI Core version in headers, and allow --comfy-api-base for ephemeral test environments.
+    - Introduced and updated Save/Advanced Save nodes for image, video, and 3D data.
+    - Improved performance for int4/int8/FP8 models and resolved regressions on Turing/16xx series GPUs.
+    - Enabled comfy-kitchen Triton backend improvements and automatic enablement logic for ROCm/AMD platforms.
+    - Maintained, refactored, and adjusted category names and preview nodes.
+    - Added and removed symlinks as needed, e.g., CLAUDE.md symlink, deleted outdated symlinks.
+    - Updated CI: added CLA Assistant workflow, updated cla.yml.
+    - Fixed caching, job output handling, and reference image encoding.
+    - Minor doc, semantic, and contract updates; aligned tag semantics, and synced shared API contract.
+
+    Full changelog: https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.28.0
 
   developer: Comfy Org
   website: https://www.comfy.org/
@@ -194,20 +202,13 @@ spec:
 options:
   shared: true
   apiTimeout: 0
-  allowMultipleInstall: true
   onlyAdmin: true
   conflicts:
   - name: comfyuisharev2
     type: application
-  - name: comfyui
-    type: application
-  - name: comfyuiclient
+  - name: comfyuishare
     type: application
   dependencies:
   - name: olares
     type: system
     version: '>=1.12.6-0'
-  appScope:
-    clusterScoped: true
-    appRef:
-    - comfyuisharev3

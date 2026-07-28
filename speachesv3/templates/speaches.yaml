@@ -1,10 +1,6 @@
 {{- $env := .Values.olaresEnv | default dict -}}
 {{- $speachesGpu := ne (index $env "SPEACHES_GPU" | default "true") "false" }}
-{{- $speachesDomainENV := split "," .Values.domain.speaches -}}
-{{- $speachesDomain := index $speachesDomainENV "_0" -}}
-{{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $speachesDomain "$1" -}}
-{{- $defaultChatUrl := printf "http://d54536a50.shared.%s/v1" $topDomain -}}
-{{- $userChatUrl := index $env "CHAT_COMPLETION_BASE_URL" | default "" | trim -}}
+{{- $chatCompletionBaseUrl := index $env "CHAT_COMPLETION_BASE_URL" | default "" | trim -}}
 {{- $hfEndpoint := $env.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $env.HF_TOKEN | default "" -}}
 {{- /* Accelerator type (Olares-injected, same detection as the llm* base charts).
@@ -396,18 +392,17 @@ spec:
 {{- end }}
 {{- if $hfToken }}
             - name: HF_TOKEN
-              value: "{{ $hfToken }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
 {{- end }}
             - name: SPEACHES_WHISPER_MODEL
               value: {{ index $env "SPEACHES_WHISPER_MODEL" | default "Systran/faster-whisper-small" | quote }}
             - name: LOOPBACK_HOST_URL
               value: "http://localhost:8000"
             - name: CHAT_COMPLETION_BASE_URL
-              {{- if $userChatUrl }}
-              value: {{ $userChatUrl | quote }}
-              {{- else }}
-              value: {{ $defaultChatUrl | quote }}
-              {{- end }}
+              value: {{ $chatCompletionBaseUrl | quote }}
           ports:
             - containerPort: 8000
               protocol: TCP

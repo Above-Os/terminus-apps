@@ -107,7 +107,7 @@ metadata:
     app.kubernetes.io/version: "v2.48.4-ce"
     app.kubernetes.io/managed-by: Helm
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.hasura.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: hasura
@@ -141,7 +141,10 @@ spec:
             - name: POSTGRESQL_PORT
               value: "{{ .Values.postgres.port }}"
             - name: POSTGRESQL_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: POSTGRESQL_PASSWORD
             - name: HASURA_GRAPHQL_DATABASE_URL
               value: "postgres://{{ .Values.postgres.username }}:$(POSTGRESQL_PASSWORD)@$(POSTGRESQL_HOST):$(POSTGRESQL_PORT)/{{ .Values.postgres.databases.hasura }}"
           ports:

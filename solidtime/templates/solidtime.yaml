@@ -23,7 +23,7 @@ metadata:
   labels:
     io.kompose.service: solidtime
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.solidtime.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: solidtime
@@ -93,7 +93,10 @@ spec:
             - name: CONTAINER_MODE
               value: scheduler
             - name: ADMIN_PASSWORD
-              value: "{{ .Values.olaresEnv.ADMIN_PASSWORD }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: ADMIN_PASSWORD
             - name: AUTO_DB_MIGRATE
               value: "true"
           envFrom:

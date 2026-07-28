@@ -6,11 +6,11 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/facefusion/icon.png
   description: Industry leading face manipulation platform
   appid: facefusionv3
-  title: FaceFusion V3 for test
-  version: '1.1.0'
+  title: FaceFusion
+  version: '1.1.6'
   categories:
     - Creativity
-    - Utilities
+
 sharedEntrances:
   - name: facefusion
     host: sharedentrances-facefusion
@@ -46,6 +46,7 @@ permission:
   # snapshots so all users on the cluster share one deduplicated copy.
   appCommon: true
 spec:
+  onlyAdmin: true
   versionName: '3.6.1'
   featuredImage: https://app.cdn.olares.com/appstore/facefusion/1.webp
   promoteImage:
@@ -84,6 +85,8 @@ spec:
     `/facefusion/.assets/models` view it expects as an ephemeral symlink farm over
     the cached snapshots. Model bytes are de-duplicated and reused across apps.
   upgradeDescription: |
+    Bump llm-init image to `beclab/llm-init:v1.3.1`.
+
     V3 shared-app migration of FaceFusion (engine 3.6.1).
 
     **What's Changed**
@@ -96,7 +99,7 @@ spec:
       on `download-svc:/readyz` instead of per-repo `.done` sentinels and rebuilds
       the flat `/facefusion/.assets/models` layout as a symlink farm at startup.
       Declared `permission.appCommon: true` for the shared HF store. Downloader
-      image bumped to `llm-init:v1.2.4` (default LFS; chart no longer sets
+      image bumped to `llm-init:v1.3.1` (default LFS; chart no longer sets
       `HF_HUB_DISABLE_XET`).
     - **Entrance routing**: rewrote nginx to match acestep15v3 — llm-init API
       paths (`/api/*`, `/healthz`, `/livez`, `/readyz`, `/static/*`) pin to
@@ -147,7 +150,6 @@ spec:
 options:
   shared: true
   apiTimeout: 0
-  allowMultipleInstall: true
   onlyAdmin: true
   conflicts:
     - name: facefusion
@@ -159,14 +161,10 @@ options:
     - name: olares
       type: system
       version: '>=1.12.6-0'
-  appScope:
-    clusterScoped: true
-    appRef:
-      - facefusion
 # HF mirror/token: system-sourced, NOT install-dialog fields.
 # v3 forbids referencing OLARES_USER_* names inside chart template files; the
 # sanctioned pattern declares app-local names here and pulls the system value
-# in via valueFrom. Templates reference .Values.olaresEnv.HF_ENDPOINT / .HF_TOKEN.
+# in via valueFrom. Templates reference .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE / .HF_TOKEN.
 # HF_ENDPOINT is required because llm-init always wires it as an env var (acestep15v3 style).
 envs:
   - envName: HF_ENDPOINT

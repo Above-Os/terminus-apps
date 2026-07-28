@@ -17,7 +17,7 @@ metadata:
   name: "{{ .Release.Name }}"
   namespace: "{{ .Release.Namespace }}"
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.pool.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: pool
@@ -137,16 +137,27 @@ spec:
             {{- end }}
             {{- if eq (toString .Values.olaresEnv.USE_LOCAL_LLM) "true" }}
             - name: POOLSIDE_STANDALONE_BASE_URL
-              value: {{ .Values.olaresEnv.POOLSIDE_STANDALONE_BASE_URL | default (printf "http://ollama.ollama-%s:11434/v1" .Values.admin) | quote }}
+              value: {{ .Values.olaresEnv.POOLSIDE_STANDALONE_BASE_URL | default "" | quote }}
             - name: POOLSIDE_API_KEY
-              value: {{ .Values.olaresEnv.POOLSIDE_API_KEY | default "ollama" | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: POOLSIDE_API_KEY
             {{- else }}
             - name: POOLSIDE_API_URL
               value: "{{ .Values.olaresEnv.POOLSIDE_API_URL }}"
             - name: POOLSIDE_API_KEY
-              value: "{{ .Values.olaresEnv.POOLSIDE_API_KEY }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: POOLSIDE_API_KEY
+            {{- if .Values.olaresEnv.POOLSIDE_TOKEN }}
             - name: POOLSIDE_TOKEN
-              value: "{{ .Values.olaresEnv.POOLSIDE_TOKEN }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: POOLSIDE_TOKEN
+            {{- end }}
             {{- end }}
           command:
             - sleep

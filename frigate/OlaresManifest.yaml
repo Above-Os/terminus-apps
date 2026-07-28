@@ -1,17 +1,21 @@
 ---
-olaresManifest.version: '0.11.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  frigate: 1
 metadata:
   name: frigate
   description: NVR with realtime local object detection for IP cameras
   icon: https://app.cdn.olares.com/appstore/frigate/icon.png
   appid: frigate
-  version: '1.0.4'
+  version: '1.0.9'
   title: Frigate NVR
   categories:
     - Lifestyle
     - Utilities_v112
-    - Utilities
+
 permission:
   appData: true
   appCache: true
@@ -19,13 +23,17 @@ permission:
     - Home
 spec:
   versionName: '0.17.0'
+  upgradeDescription: |
+    v1.0.9: Move `FRIGATE_RTSP_PASSWORD` into Kubernetes Secret (`secretKeyRef`).
+
+    Storage: durable `/media/frigate` recordings moved from `appCache` to `appData`. On first start after upgrade, an initContainer copies legacy `appCache/media` into `appData/media` when the destination is empty (marker: `.migration_from_appcache_done_media`). Old appCache data is left intact for rollback.
   promoteImage:
     - https://app.cdn.olares.com/appstore/frigate/1.webp
     - https://app.cdn.olares.com/appstore/frigate/2.webp
     - https://app.cdn.olares.com/appstore/frigate/3.webp
   fullDescription: |
     Frigate is a complete and local NVR designed for Home Assistant with AI object detection. Uses OpenCV and Tensorflow to perform realtime object detection locally for IP cameras.
-    
+
     **Main Features**
     - Tight integration with Home Assistant via a custom component
     - Designed to minimize resource use and maximize performance by only looking for objects when and where it is necessary
@@ -45,14 +53,23 @@ spec:
   locale:
     - en-US
     - zh-CN
-  requiredMemory: 1Gi
-  limitedMemory: 6Gi
-  requiredDisk: 1Gi
-  limitedDisk: 100Gi
-  requiredCpu: 0.5
-  limitedCpu: 2
-  requiredGpu: 6Gi
-  limitedGpu: 14Gi
+  accelerator:
+  - mode: cpu
+    requiredMemory: 1Gi
+    limitedMemory: 6Gi
+    requiredDisk: 1Gi
+    limitedDisk: 100Gi
+    requiredCpu: "1"
+    limitedCpu: "4"
+  - mode: nvidia
+    requiredMemory: 1Gi
+    limitedMemory: 6Gi
+    requiredDisk: 1Gi
+    limitedDisk: 100Gi
+    requiredCpu: "1"
+    limitedCpu: "4"
+    requiredGPUMemory: 6Gi
+    limitedGPUMemory: 14Gi
   doc: https://docs.frigate.video
   supportArch:
     - amd64
@@ -61,7 +78,7 @@ options:
   dependencies:
     - name: olares
       type: system
-      version: '>=1.12.3-0'
+      version: '>=1.12.6-0'
 entrances:
   - name: frigate
     port: 5000
@@ -69,5 +86,4 @@ entrances:
     title: Frigate NVR
     icon: https://app.cdn.olares.com/appstore/frigate/icon.png
     openMethod: window
-
 
