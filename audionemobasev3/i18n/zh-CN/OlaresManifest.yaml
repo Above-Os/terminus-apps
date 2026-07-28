@@ -1,0 +1,26 @@
+metadata:
+  description: "NVIDIA NeMo 音频基座（Streaming Sortformer 流式说话人分离）。安装时通过环境变量选择模型与能力。"
+  title: Audio NeMo Base V3
+
+spec:
+  fullDescription: |
+    **重要提示**
+    此应用是一个模板，不能单独使用。请按下方环境变量设置模型后，方可使用本应用提供模型服务。
+
+    **环境变量设置指南**
+    - `MODEL_SOURCE`：`hf://<repo>`。llm-init 下载到共享 HF 缓存的来源，如 `hf://nvidia/diar_streaming_sortformer_4spk-v2.1`。该仓库是受限（gated）仓库，会自动注入你在 Olares HuggingFace 集成里的 token，**不要手工传**。
+    - `MODEL_NAME`：对客户端公布的模型 id，须与引擎 `/v1/models` 中的 id 一致。
+    - `MODEL_SUPPORTS`：本实例提供的能力：`diar_stream`（流式说话人分离，WebSocket）。必填。
+    - `AUDIO_REQUIRED_GPU_MEMORY`：所需显存，如 Sortformer 4spk v2.1 用 `6Gi`。
+    - `DIAR_LATENCY_PRESET`：延迟/准确率档位，`low`（约 1 秒，直播优先）、`high`（约 10 秒，准确率优先，默认）、`veryhigh`（约 30 秒）。
+    - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。
+
+    **工作流程说明**
+    `llm-init` 先下载并准备模型，NeMo 引擎在模型就绪后启动服务。引擎镜像已把 wrapper 与依赖烤入，并自报 `/v1/models`（id + mode + supports + endpoints）与 `/metrics`（gpu_*）；llm-init 原样反代 `/v1/*`（含 WebSocket）。
+
+    **技术栈说明**
+    - **audio-nemo 引擎**（8000 端口）：NVIDIA Streaming Sortformer，WebSocket 端点 `/v1/audio/diarize/stream`。它是独立能力而非「diar 加个开关」：流式分离必须在有界延迟下保持说话人标签跨时间一致，Sortformer 用到达序说话人缓存（AOSC）端到端解决。会话长度无上限：只把新到达的音频送进增量接口（每块 O(1)），若某个 NeMo 版本缺该接口则退回有界窗口重算。
+    - **llm-init**：下载模型、展示进度，并通过 8090 端口提供 OpenAI API，反代到引擎。
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`）。

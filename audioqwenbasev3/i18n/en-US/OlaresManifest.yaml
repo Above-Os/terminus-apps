@@ -1,0 +1,25 @@
+metadata:
+  description: "Audio base for the Qwen ASR family (qwen-asr in-process vLLM). Pick a model + capabilities at install via env."
+  title: Audio Qwen Base V3
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This app is a template and cannot be used on its own. Set the environment variables below to connect a specific model.
+
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo>`. The source llm-init downloads into the shared HF cache, e.g. `hf://Qwen/Qwen3-ASR-1.7B`.
+    - `MODEL_NAME`: The model id advertised to clients; must match the engine's `/v1/models` id, e.g. `Qwen/Qwen3-ASR-1.7B`.
+    - `MODEL_SUPPORTS`: Capabilities this model exposes (multi-select): `stt` (offline transcription), `stt_stream` (streaming ASR, WebSocket), `align` (forced alignment). Required.
+    - `AUDIO_REQUIRED_GPU_MEMORY`: GPU memory needed, e.g. `12Gi` for Qwen3-ASR stt/stt_stream, `4Gi` for Qwen3-ForcedAligner align. `0` or empty means CPU-only.
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
+
+    **How It Works**
+    `llm-init` downloads your model and gets it ready, then the Qwen engine starts serving when it's ready. The engine image bakes the wrapper + deps and self-reports `/v1/models` (id + mode + supports + endpoints) and `/metrics` (gpu_*); llm-init reverse-proxies `/v1/*` unchanged.
+
+    **Stack**
+    - **audio-qwen engine**: qwen-asr's in-process vLLM engine (port 8000). `stt` + `stt_stream` share ONE model load; `align` is a separate model (its own instance).
+    - **llm-init**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to the engine.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.

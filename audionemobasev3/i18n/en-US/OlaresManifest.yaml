@@ -1,0 +1,26 @@
+metadata:
+  description: "Audio base for NVIDIA NeMo (Streaming Sortformer speaker diarization). Pick a model + capability at install via env."
+  title: Audio NeMo Base V3
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This app is a template and cannot be used on its own. Set the environment variables below to connect a specific model.
+
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo>`. The source llm-init downloads into the shared HF cache, e.g. `hf://nvidia/diar_streaming_sortformer_4spk-v2.1`. That repo is gated: the token from your Olares HuggingFace integration is injected automatically — never pass it by hand.
+    - `MODEL_NAME`: The model id advertised to clients; must match the engine's `/v1/models` id.
+    - `MODEL_SUPPORTS`: The capability this instance serves: `diar_stream` (streaming speaker diarization, WebSocket). Required.
+    - `AUDIO_REQUIRED_GPU_MEMORY`: GPU memory needed, e.g. `6Gi` for Sortformer 4spk v2.1.
+    - `DIAR_LATENCY_PRESET`: Latency/accuracy preset — `low` (~1s, live-first), `high` (~10s, accuracy-first, default), `veryhigh` (~30s).
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
+
+    **How It Works**
+    `llm-init` downloads your model and gets it ready, then the NeMo engine starts serving when it's ready. The engine image bakes the wrapper + deps and self-reports `/v1/models` (id + mode + supports + endpoints) and `/metrics` (gpu_*); llm-init reverse-proxies `/v1/*` (incl. WebSocket) unchanged.
+
+    **Stack**
+    - **audio-nemo engine** (port 8000): NVIDIA Streaming Sortformer on a WebSocket at `/v1/audio/diarize/stream`. It is its own capability rather than `diar` with a flag, because streaming diarization must keep speaker labels consistent over time at bounded latency — solved end-to-end by Sortformer's Arrival-Order Speaker Cache. Sessions are unbounded in length: only newly-arrived audio is fed through the incremental API (O(1) per chunk), with a bounded-window re-diarize as fallback.
+    - **llm-init**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to the engine.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.

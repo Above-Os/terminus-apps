@@ -1,0 +1,25 @@
+metadata:
+  description: "Audio base for pyannote / torch / speechbrain. Pick a model + capability (vad / diar / speaker_embed / enhance) at install via env."
+  title: Audio Pyannote Base V3
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This app is a template and cannot be used on its own. Set the environment variables below to connect a specific model.
+
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo>`. The source llm-init downloads into the shared HF cache, e.g. `hf://pyannote/speaker-diarization-community-1`. Gated repos use the token from your Olares HuggingFace integration, injected automatically — never pass it by hand.
+    - `MODEL_NAME`: The model id advertised to clients; must match the engine's `/v1/models` id.
+    - `MODEL_SUPPORTS`: The capability this instance serves: `vad` (voice activity detection), `diar` (who spoke when), `speaker_embed` (voiceprint vector), `enhance` (denoise). These are four DIFFERENT models, so clone one instance each.
+    - `AUDIO_REQUIRED_GPU_MEMORY`: GPU memory needed, e.g. `4Gi` for diar, `2Gi` for enhance; vad and speaker_embed are fine on CPU (`0`).
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
+
+    **How It Works**
+    `llm-init` downloads your model and gets it ready, then the engine starts serving when it's ready. The engine image bakes the wrapper + deps and self-reports `/v1/models` (id + mode + supports + endpoints) and `/metrics` (gpu_*); llm-init reverse-proxies `/v1/*` unchanged.
+
+    **Stack**
+    - **audio-pyannote engine** (port 8000): `vad` is Silero VAD; `diar` and `speaker_embed` are pyannote.audio; `enhance` is SpeechBrain with the inference class auto-detected, streaming long clips through a crossfaded sliding window so peak VRAM stays bounded.
+    - **llm-init**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to the engine.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.

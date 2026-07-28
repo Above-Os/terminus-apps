@@ -1,0 +1,25 @@
+metadata:
+  description: "Audio base for the Whisper family on CTranslate2 (faster-whisper). Pick a model + capability at install via env."
+  title: Faster-Whisper Base V3
+
+spec:
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This app is a template and cannot be used on its own. Set the environment variables below to connect a specific model.
+
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo>`. The source llm-init downloads into the shared HF cache; must be a CTranslate2 Whisper conversion, e.g. `hf://Systran/faster-whisper-large-v3`.
+    - `MODEL_NAME`: The model id advertised to clients; must match the engine's `/v1/models` id, e.g. `Systran/faster-whisper-large-v3`.
+    - `MODEL_SUPPORTS`: The capability this model exposes: `stt` (offline transcription). Required.
+    - `AUDIO_REQUIRED_GPU_MEMORY`: GPU memory needed, e.g. `6Gi` for large-v3. `0` or empty runs on CPU (int8).
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
+
+    **How It Works**
+    `llm-init` downloads your model and gets it ready, then the faster-whisper engine starts serving when it's ready. The engine image bakes the wrapper + deps and self-reports `/v1/models` (id + mode + supports + endpoints) and `/metrics` (gpu_*); llm-init reverse-proxies `/v1/*` unchanged.
+
+    **Stack**
+    - **audio-fasterwhisper engine**: faster-whisper's `WhisperModel` on CTranslate2, driven by a `BatchedInferencePipeline` (VAD-cut + parallel decode) on port 8000. Alongside `/v1/audio/transcriptions` (single + batch `segments`) it serves `/v1/audio/translations`, Whisper's native speech-to-English task.
+    - **llm-init**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to the engine.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.

@@ -1,0 +1,25 @@
+metadata:
+  description: "Whisper 家族音频基座（faster-whisper / CTranslate2 引擎）。安装时通过环境变量选择模型与能力。"
+  title: Faster-Whisper Base V3
+
+spec:
+  fullDescription: |
+    **重要提示**
+    此应用是一个模板，不能单独使用。请按下方环境变量设置模型后，方可使用本应用提供模型服务。
+
+    **环境变量设置指南**
+    - `MODEL_SOURCE`：`hf://<repo>`。llm-init 下载到共享 HF 缓存的来源，须是 CTranslate2 版 Whisper，如 `hf://Systran/faster-whisper-large-v3`。
+    - `MODEL_NAME`：对客户端公布的模型 id，须与引擎 `/v1/models` 中的 id 一致，如 `Systran/faster-whisper-large-v3`。
+    - `MODEL_SUPPORTS`：本模型公开的能力：`stt`（离线转写）。必填。
+    - `AUDIO_REQUIRED_GPU_MEMORY`：所需显存，如 large-v3 用 `6Gi`。填 `0` 或留空表示纯 CPU（int8）。
+    - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。
+
+    **工作流程说明**
+    `llm-init` 先下载并准备模型，faster-whisper 引擎在模型就绪后启动服务。引擎镜像已把 wrapper 与依赖烤入，并自报 `/v1/models`（id + mode + supports + endpoints）与 `/metrics`（gpu_*）；llm-init 原样反代 `/v1/*`。
+
+    **技术栈说明**
+    - **audio-fasterwhisper 引擎**：faster-whisper（CTranslate2）的 `WhisperModel` + 批量推理管线（VAD 切分 + 并行解码，8000 端口）。除 `/v1/audio/transcriptions`（支持单条与 `segments` 批量）外，还提供 Whisper 原生的语音转英文 `/v1/audio/translations`。
+    - **llm-init**：下载模型、展示进度，并通过 8090 端口提供 OpenAI API，反代到引擎。
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`）。

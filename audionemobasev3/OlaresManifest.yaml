@@ -1,0 +1,203 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audionemobasev3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: Audio model base (NVIDIA NeMo — Streaming Sortformer, llm-init reverse-proxy). One instance = one model; capability via MODEL_SUPPORTS (diar_stream). The engine image self-reports /v1/models + /metrics; llm-init downloads the model AND reverse-proxies the engine's OpenAI /v1/* directly.
+  appid: audionemobasev3
+  title: Audio NeMo Base V3
+  version: '1.0.0'
+  categories:
+    - AI
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1, off the edge (no SSO).
+sharedEntrances:
+  - name: audionemobasev3api
+    host: sharedentrances-api
+    port: 0
+    title: Audio NeMo Base V3 API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", the engine's /v1/* reverse-proxied; internal auth.
+entrances:
+  - name: audionemobasev3
+    port: 8090
+    host: download-svc
+    title: Audio NeMo Base V3
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audionemobasev3: 1
+  llminit: 1
+spec:
+  versionName: '1.0.0'
+  fullDescription: |
+    **Audio model base — NVIDIA NeMo (`audionemobasev3`)**
+    A generic *base* for NeMo speaker models. One installed instance = one model.
+    The capability is chosen at install time via `MODEL_SUPPORTS`: `diar_stream`.
+
+    **HOW IT WORKS**
+    llm-init does BOTH jobs: (1) downloads the configured model into the shared HF
+    cache, and (2) IS the OpenAI-compatible data plane — it reverse-proxies `/v1/*`
+    (incl. WebSocket streaming) to the sibling audio engine at
+    `http://audio-engine:8000` and serves its control plane / dashboard on `/`. The
+    engine image (`beclab/audio-nemo`) bakes the wrapper + all deps and self-reports
+    `/v1/models` (id + mode + supports + endpoints) and generic `/metrics` (gpu_*);
+    llm-init proxies these unchanged. The engine container waits for llm-init's
+    download sentinel rather than polling, avoiding the proxy<->engine deadlock.
+
+    **Model storage (App Common)**
+    Model files go to `appCommon/huggingface`, mounted at `/cache/hf/hub`. llm-init
+    writes, the engine reads the `.nemo` checkpoint offline.
+
+    **Clone form (5 fields)**
+    - `MODEL_SOURCE` — `hf://<repo>` (llm-init download spec). The Sortformer repo is
+      gated: the HF token from your Olares HuggingFace integration is injected
+      automatically — never pass it by hand.
+    - `MODEL_NAME` — model id advertised to clients (must match the engine's /v1/models id).
+    - `MODEL_SUPPORTS` — `diar_stream` (streaming speaker diarization, WebSocket).
+    - `AUDIO_REQUIRED_GPU_MEMORY` — e.g. Sortformer 4spk v2.1 `6Gi`.
+
+    **Engine** — NVIDIA Streaming Sortformer over a WebSocket at
+    `/v1/audio/diarize/stream`. It is its own capability (not `diar` plus a flag)
+    because streaming diarization has to keep speaker labels CONSISTENT over time at
+    bounded latency, which Sortformer solves end-to-end with an Arrival-Order Speaker
+    Cache. Sessions are unbounded in length: the engine feeds only newly-arrived audio
+    through the incremental API (O(1) per chunk), and falls back to a bounded-window
+    re-diarize if a NeMo build lacks that API. Latency/accuracy is set by
+    `DIAR_LATENCY_PRESET` (`low` / `high` / `veryhigh`, default `high` ≈ 10s input
+    latency, which resolves rapid speaker turns far better and is ~18x cheaper).
+    GPU engines force `GPU_CORE_UTILIZATION_POLICY=disable` so they run full-speed
+    under time-sliced vGPU.
+
+    **Example clone set**
+    - Streaming diarization (Sortformer 4spk v2.1):
+      MODEL_SOURCE=hf://nvidia/diar_streaming_sortformer_4spk-v2.1
+      MODEL_NAME=diar-streaming-sortformer  MODEL_SUPPORTS=diar_stream
+      AUDIO_REQUIRED_GPU_MEMORY=6Gi
+
+  upgradeDescription: |
+    v1.0.0: initial NeMo base. Engine + wrapper baked into one image
+    (beclab/audio-nemo); the image self-reports /v1/models + /metrics and llm-init
+    (ENGINE_KIND=audio) reverse-proxies it. Capability chosen at clone via
+    MODEL_SUPPORTS (diar_stream); latency preset via DIAR_LATENCY_PRESET.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/llm-init
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  # MODEL_SUPPORTS: one capability here, kept in the other bases' multi-select shape for one clone form.
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Diarization Stream (streaming speakers, WebSocket)
+      value: diar_stream
+  - envName: AUDIO_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  # Sortformer preset: `high` (~10s) is the accuracy-first default for meetings, `low` (~1s) is for live-first UIs.
+  - envName: DIAR_LATENCY_PRESET
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "high"
+    options:
+    - title: Low latency (~1s, live-first)
+      value: low
+    - title: High latency (~10s, accuracy-first)
+      value: high
+    - title: Very high latency (~30s)
+      value: veryhigh
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN

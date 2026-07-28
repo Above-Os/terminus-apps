@@ -1,0 +1,199 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiopyannotebasev3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: Audio model base (pyannote / torch / speechbrain, llm-init reverse-proxy). One instance = one model; capability via MODEL_SUPPORTS (vad / diar / speaker_embed / enhance). The engine image self-reports /v1/models + /metrics; llm-init downloads the model AND reverse-proxies the engine's OpenAI /v1/* directly.
+  appid: audiopyannotebasev3
+  title: Audio Pyannote Base V3
+  version: '1.0.0'
+  categories:
+    - AI
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1, off the edge (no SSO).
+sharedEntrances:
+  - name: audiopyannotebasev3api
+    host: sharedentrances-api
+    port: 0
+    title: Audio Pyannote Base V3 API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", the engine's /v1/* reverse-proxied; internal auth.
+entrances:
+  - name: audiopyannotebasev3
+    port: 8090
+    host: download-svc
+    title: Audio Pyannote Base V3
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiopyannotebasev3: 1
+  llminit: 1
+spec:
+  versionName: '1.0.0'
+  fullDescription: |
+    **Audio model base — pyannote / torch / speechbrain (`audiopyannotebasev3`)**
+    A generic *base* for the torch audio-analysis family. One installed instance =
+    one model. Which capability the instance exposes is chosen at install time via
+    `MODEL_SUPPORTS`: `vad` / `diar` / `speaker_embed` / `enhance`. These are four
+    DIFFERENT models, so each one is its own clone.
+
+    **HOW IT WORKS**
+    llm-init does BOTH jobs: (1) downloads the configured model into the shared HF
+    cache, and (2) IS the OpenAI-compatible data plane — it reverse-proxies `/v1/*`
+    to the sibling audio engine at `http://audio-engine:8000` and serves its control
+    plane / dashboard on `/`. The engine image (`beclab/audio-pyannote`) bakes the
+    wrapper + all deps and self-reports `/v1/models` (id + mode + supports +
+    endpoints) and generic `/metrics` (gpu_*); llm-init proxies these unchanged. The
+    engine container waits for llm-init's download sentinel rather than polling,
+    avoiding the proxy<->engine deadlock.
+
+    **Model storage (App Common)**
+    Model files go to `appCommon/huggingface`, mounted at `/cache/hf/hub`. llm-init
+    writes, the engine reads offline.
+
+    **Clone form (5 fields)**
+    - `MODEL_SOURCE` — `hf://<repo>` (llm-init download spec). Gated repos (pyannote
+      diar / embedding) use the HF token from your Olares HuggingFace integration,
+      injected automatically — never pass it by hand.
+    - `MODEL_NAME` — model id advertised to clients (must match the engine's /v1/models id).
+    - `MODEL_SUPPORTS` — the capability this model exposes: `vad` (speech segments),
+      `diar` (who spoke when), `speaker_embed` (one vector per clip), `enhance`
+      (denoise, returns 16k mono WAV).
+    - `AUDIO_REQUIRED_GPU_MEMORY` — e.g. diar `4Gi`, enhance `2Gi`; vad and
+      speaker_embed run fine on CPU (`0`).
+
+    **Engines** — `vad` is Silero VAD, `diar` and `speaker_embed` are pyannote.audio
+    (Pipeline / Inference with `window="whole"`), `enhance` is SpeechBrain with the
+    inference class auto-detected (WaveformEnhancement / SpectralMaskEnhancement /
+    SepformerSeparation) and long clips streamed through a sliding window with
+    crossfade so peak VRAM is bounded. GPU engines force
+    `GPU_CORE_UTILIZATION_POLICY=disable` so they run full-speed under time-sliced vGPU.
+
+    **Example clone sets**
+    - VAD (Silero v5): MODEL_SOURCE=hf://onnx-community/silero-vad
+      MODEL_NAME=silero-v5  MODEL_SUPPORTS=vad  AUDIO_REQUIRED_GPU_MEMORY=0
+    - Diarization (pyannote community-1): MODEL_SOURCE=hf://pyannote/speaker-diarization-community-1
+      MODEL_NAME=pyannote-community-1  MODEL_SUPPORTS=diar  AUDIO_REQUIRED_GPU_MEMORY=4Gi
+    - Speaker embedding: MODEL_SOURCE=hf://pyannote/embedding
+      MODEL_NAME=pyannote-embedding  MODEL_SUPPORTS=speaker_embed  AUDIO_REQUIRED_GPU_MEMORY=0
+    - Enhance (SpeechBrain MTL-MIMIC): MODEL_SOURCE=hf://speechbrain/mtl-mimic-voicebank
+      MODEL_NAME=mtl-mimic-voicebank  MODEL_SUPPORTS=enhance  AUDIO_REQUIRED_GPU_MEMORY=2Gi
+
+  upgradeDescription: |
+    v1.0.0: initial pyannote base. Engine + wrapper baked into one image
+    (beclab/audio-pyannote); the image self-reports /v1/models + /metrics and llm-init
+    (ENGINE_KIND=audio) reverse-proxies it. Capability chosen at clone via
+    MODEL_SUPPORTS (vad / diar / speaker_embed / enhance), one model per instance.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/llm-init
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: nvidia-gb10
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  # MODEL_SUPPORTS: these are four different models, so pick ONE and clone the others separately.
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: VAD (voice activity detection)
+      value: vad
+    - title: Diarization (who spoke when)
+      value: diar
+    - title: Speaker embedding (voiceprint)
+      value: speaker_embed
+    - title: Enhance (denoise)
+      value: enhance
+  - envName: AUDIO_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN

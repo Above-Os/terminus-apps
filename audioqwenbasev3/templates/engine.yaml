@@ -1,0 +1,194 @@
+{{- /* Qwen ASR engine: one baked image serves stt / stt_stream / align off a single load; this only sizes the GPU. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $supportsRaw := $oe.MODEL_SUPPORTS | default "stt" -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen:v1.0.0" -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $cpuRequest := trim ($oe.AUDIO_CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.AUDIO_MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.AUDIO_CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.AUDIO_MEMORY_LIMIT | default "24Gi") -}}
+{{- /* GPU is OPTIONAL (AUDIO_REQUIRED_GPU_MEMORY = "" or "0" => CPU-only). */ -}}
+{{- $gpuRaw := trim ($oe.AUDIO_REQUIRED_GPU_MEMORY | default "") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- /* qwen-asr's vLLM gpu-memory-utilization scaled to the HAMi gpumem quota. */ -}}
+{{- $vllmUtil := $oe.MODEL_GPU_MEM_UTIL | default "" -}}
+{{- if and (not $vllmUtil) $wantGpu -}}
+{{- $totalMiB := float64 (int ($oe.AUDIO_GPU_TOTAL_MIB | default "24454")) -}}
+{{- $u := divf (mulf (float64 (int $gpuMiB)) 0.85) $totalMiB -}}
+{{- if gt $u 0.9 -}}{{- $u = 0.9 -}}{{- end -}}
+{{- if lt $u 0.1 -}}{{- $u = 0.1 -}}{{- end -}}
+{{- $vllmUtil = printf "%.2f" $u -}}
+{{- end -}}
+{{- if not $vllmUtil -}}{{- $vllmUtil = "0.45" -}}{{- end -}}
+{{- /* max_model_len derived from the quota, stepping down so a small slice still boots; STREAM_MAX_LEN overrides. */ -}}
+{{- $streamMaxLen := trim ($oe.STREAM_MAX_LEN | default "") -}}
+{{- if and (eq $streamMaxLen "") $wantGpu -}}
+{{- $g := int $gpuMiB -}}
+{{- if ge $g 18000 -}}{{- $streamMaxLen = "65536" -}}
+{{- else if ge $g 15000 -}}{{- $streamMaxLen = "49152" -}}
+{{- else if ge $g 13000 -}}{{- $streamMaxLen = "32768" -}}
+{{- else if ge $g 11000 -}}{{- $streamMaxLen = "16384" -}}
+{{- else -}}{{- $streamMaxLen = "8192" -}}{{- end -}}
+{{- end -}}
+{{- if eq $streamMaxLen "" -}}{{- $streamMaxLen = "16384" -}}{{- end -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audioqwenbasev3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+            defaultMode: 0555
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/qwen.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: audio
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: WRAPPER_PORT
+              value: "{{ $enginePort }}"
+            - name: VLLM_GPU_UTIL
+              value: "{{ $vllmUtil }}"
+            - name: STREAM_MAX_LEN
+              value: "{{ $streamMaxLen }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+{{- /* Escape hatches for the image's own defaults; unset means the image decides. */ -}}
+{{- range $k := list "LOAD_TIMEOUT_S" "TASK_TTL_S" "VLLM_CAPTURE_SIZES" "VLLM_ENFORCE_EAGER" }}
+{{- if get $oe $k }}
+            - name: {{ $k }}
+              value: "{{ get $oe $k }}"
+{{- end }}
+{{- end }}
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # No readinessProbe (like llamacpp): Ready at start so the app runs while the model downloads; llm-init gates /v1/*.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP

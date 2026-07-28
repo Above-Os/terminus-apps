@@ -1,0 +1,25 @@
+metadata:
+  description: "Qwen ASR 家族音频基座（qwen-asr 进程内 vLLM 引擎）。安装时通过环境变量选择模型与能力。"
+  title: Audio Qwen Base V3
+
+spec:
+  fullDescription: |
+    **重要提示**
+    此应用是一个模板，不能单独使用。请按下方环境变量设置模型后，方可使用本应用提供模型服务。
+
+    **环境变量设置指南**
+    - `MODEL_SOURCE`：`hf://<repo>`。llm-init 下载到共享 HF 缓存的来源，如 `hf://Qwen/Qwen3-ASR-1.7B`。
+    - `MODEL_NAME`：对客户端公布的模型 id，须与引擎 `/v1/models` 中的 id 一致，如 `Qwen/Qwen3-ASR-1.7B`。
+    - `MODEL_SUPPORTS`：本模型公开的能力（多选）：`stt`（离线转写）、`stt_stream`（流式 ASR，WebSocket）、`align`（强制对齐）。必填。
+    - `AUDIO_REQUIRED_GPU_MEMORY`：所需显存，如 Qwen3-ASR 的 stt/stt_stream 用 `12Gi`、Qwen3-ForcedAligner 的 align 用 `4Gi`。填 `0` 或留空表示纯 CPU。
+    - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。
+
+    **工作流程说明**
+    `llm-init` 先下载并准备模型，Qwen 引擎在模型就绪后启动服务。引擎镜像已把 wrapper 与依赖烤入，并自报 `/v1/models`（id + mode + supports + endpoints）与 `/metrics`（gpu_*）；llm-init 原样反代 `/v1/*`。
+
+    **技术栈说明**
+    - **audio-qwen 引擎**：qwen-asr 的进程内 vLLM 引擎（8000 端口）。`stt` 与 `stt_stream` 共用同一份模型加载；`align` 是独立模型（单独实例）。
+    - **llm-init**：下载模型、展示进度，并通过 8090 端口提供 OpenAI API，反代到引擎。
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`）。

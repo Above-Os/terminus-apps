@@ -1,0 +1,25 @@
+metadata:
+  description: "pyannote / torch / speechbrain 音频基座。安装时通过环境变量选择模型与能力（vad / diar / speaker_embed / enhance）。"
+  title: Audio Pyannote Base V3
+
+spec:
+  fullDescription: |
+    **重要提示**
+    此应用是一个模板，不能单独使用。请按下方环境变量设置模型后，方可使用本应用提供模型服务。
+
+    **环境变量设置指南**
+    - `MODEL_SOURCE`：`hf://<repo>`。llm-init 下载到共享 HF 缓存的来源，如 `hf://pyannote/speaker-diarization-community-1`。受限（gated）仓库会自动注入你在 Olares HuggingFace 集成里的 token，**不要手工传**。
+    - `MODEL_NAME`：对客户端公布的模型 id，须与引擎 `/v1/models` 中的 id 一致。
+    - `MODEL_SUPPORTS`：本实例提供的能力：`vad`（语音活动检测）、`diar`（说话人分离）、`speaker_embed`（声纹向量）、`enhance`（降噪增强）。四者是**四个不同模型**，各自单独 clone 一个实例。
+    - `AUDIO_REQUIRED_GPU_MEMORY`：所需显存，如 diar 用 `4Gi`、enhance 用 `2Gi`；vad 与 speaker_embed 填 `0` 走 CPU 即可。
+    - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。
+
+    **工作流程说明**
+    `llm-init` 先下载并准备模型，引擎在模型就绪后启动服务。引擎镜像已把 wrapper 与依赖烤入，并自报 `/v1/models`（id + mode + supports + endpoints）与 `/metrics`（gpu_*）；llm-init 原样反代 `/v1/*`。
+
+    **技术栈说明**
+    - **audio-pyannote 引擎**（8000 端口）：`vad` 用 Silero VAD；`diar` 与 `speaker_embed` 用 pyannote.audio；`enhance` 用 SpeechBrain，推理类自动识别，长音频按滑动窗口交叉淡化处理，显存占用有上界。
+    - **llm-init**：下载模型、展示进度，并通过 8090 端口提供 OpenAI API，反代到引擎。
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`）。
