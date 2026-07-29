@@ -1,0 +1,199 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiopyannotediarv3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: "Pyannote speaker-diarization-community-1 (review submission)."
+  appid: audiopyannotediarv3
+  title: Pyannote Diarization
+  version: '1.0.0'
+  categories:
+    - AI
+# sharedEntrances stub: http://sharedentrances-api.<ns>:80/v1 (in-cluster).
+sharedEntrances:
+  - name: audiopyannotediarv3api
+    host: sharedentrances-api
+    port: 0
+    title: Pyannote Diarization API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Entrance -> llm-init:8090 (dashboard + /v1/* proxy); authLevel internal.
+entrances:
+  - name: audiopyannotediarv3
+    port: 8090
+    host: download-svc
+    title: Pyannote Diarization
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiopyannotediarv3: 1
+  llminit: 1
+spec:
+  versionName: 'pyannote-community-1'
+  fullDescription: |
+    **Model Overview**
+    Pyannote speaker-diarization-community-1 (review submission).
+
+    **Preset Configuration**
+    - Model: `pyannote-community-1`
+    - Source: `hf://pyannote/speaker-diarization-community-1`
+    - Capabilities: `diar`
+    - Required GPU memory: `4Gi`
+    - Engine: Pyannote speaker diarization
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Stack**
+    - **audio engine**: Pyannote speaker diarization (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: initial direct-install preset (public entrance, fixed model env defaults).
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+    - mode: nvidia
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "4Gi"
+      limitedGPUMemory: "4Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "8Gi"
+      requiredMemory: "4352Mi"
+
+  supportArch:
+
+
+
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://pyannote/speaker-diarization-community-1"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "pyannote-community-1"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "diar"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Diarization (who spoke when)
+      value: diar
+    description: "Capabilities this preset exposes (locked for this model app)."
+  - envName: AUDIO_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+    description: "GPU memory required for this model. `0` means CPU-only."
+  - envName: AUDIO_CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: AUDIO_MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2Gi"
+  - envName: AUDIO_CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4"
+  - envName: AUDIO_MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
