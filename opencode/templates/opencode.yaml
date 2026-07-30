@@ -3,7 +3,9 @@
 {{- $env := .Values.olaresEnv | default dict -}}
 {{- $enableOMO := ne (index $env "OPENCODE_OMO" | default "false") "false" }}
 {{- $enableDind := ne (index $env "ENABLE_DIND" | default "true") "false" }}
-{{- $image := "beclab/opencode:1.17.13.1" }}
+{{- $serverPassword := index $env "OPENCODE_SERVER_PASSWORD" | default "" }}
+{{- $serverUsername := index $env "OPENCODE_SERVER_USERNAME" | default "opencode" }}
+{{- $image := "beclab/opencode:1.18.9.1" }}
 
 ---
 apiVersion: apps/v1
@@ -172,6 +174,13 @@ spec:
             - name: DOCKER_HOST
               value: "tcp://localhost:2375"
             {{- end }}
+            {{- if $serverPassword }}
+            # Optional HTTP basic auth for opencode web/serve (off when unset).
+            - name: OPENCODE_SERVER_PASSWORD
+              value: {{ $serverPassword | quote }}
+            - name: OPENCODE_SERVER_USERNAME
+              value: {{ $serverUsername | quote }}
+            {{- end }}
           resources:
             limits:
               cpu: "4"
@@ -257,15 +266,12 @@ spec:
               cpu: 100m
               memory: 64Mi
         - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          image: "docker.io/openresty/openresty:1.29.2.5-bookworm-fat"
           ports:
             - containerPort: 8080
               protocol: TCP
             - containerPort: 8081
               protocol: TCP
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
           startupProbe:
             tcpSocket:
               port: 8080
@@ -273,20 +279,20 @@ spec:
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
             successThreshold: 1
             failureThreshold: 10
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: 8080
-            initialDelaySeconds: 30
-            timeoutSeconds: 60
-            periodSeconds: 60
+            initialDelaySeconds: 15
+            timeoutSeconds: 5
+            periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
           resources:
@@ -298,10 +304,7 @@ spec:
               memory: 64Mi
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-            - name: nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
+              mountPath: /etc/nginx/conf.d/default.conf
               subPath: nginx.conf
         - name: pkg-manager
           image: "{{ $image }}"
