@@ -3,7 +3,7 @@
 {{- $env := .Values.olaresEnv | default dict -}}
 {{- $enableOMO := ne (index $env "OPENCODE_OMO" | default "false") "false" }}
 {{- $enableDind := ne (index $env "ENABLE_DIND" | default "true") "false" }}
-{{- $image := "docker.io/beclab/lovehunter9-anomalyco-opencode:1.17.13.1" }}
+{{- $image := "beclab/opencode:1.17.13.1" }}
 
 ---
 apiVersion: apps/v1
@@ -137,7 +137,7 @@ spec:
             - name: opencode-home
               mountPath: /home/opencode
         {{- end }}
-
+      serviceAccountName: proxylistener
       containers:
         - name: opencode
           image: "{{ $image }}"
@@ -221,6 +221,41 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
+        - name: port-watcher
+          image: beclab/proxy-listener:0.0.1
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: PORT_WATCHER_ADDR
+            value: "127.0.0.1:19790"
+          - name: PORT_WATCHER_DENYLIST
+            value: "19790"
+          - name: PORT_WATCHER_DEBOUNCE
+            value: "1s"
+          - name: ENTRANCE_HOST
+            value: "{{ $opencodeDomain }}"
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_UID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.uid
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
         - name: nginx
           image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
           ports:
@@ -451,3 +486,38 @@ spec:
     io.kompose.service: opencode
 status:
   loadBalancer: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: proxylistener
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: proxylistener
+rules:
+  - apiGroups:
+      - app.bytetrade.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: proxylistener
+subjects:
+  - kind: ServiceAccount
+    name: proxylistener
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: proxylistener
+  apiGroup: rbac.authorization.k8s.io
