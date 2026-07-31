@@ -8,7 +8,9 @@ data:
   nginx.conf: |
     # Whisper-WebUI entrance (:8080): gate Gradio on llm-init /readyz AND engine
     # readiness (gradio_api/info). llm-init API paths pin to download-svc; the
-    # dashboard auto-reloads once /__app_ready flips 200.
+    # dashboard auto-reloads once /__app_ready flips 200. K8s probes use
+    # /__entrance_ready (lightweight) instead of GET / to avoid re-rendering
+    # the Gradio homepage every few seconds while idle.
     server {
         listen 8080;
         access_log /usr/local/openresty/nginx/logs/access.log;
@@ -75,6 +77,28 @@ data:
                 local models = ngx.location.capture("/__models_ready")
                 if models.status ~= 200 then
                     ngx.status = 503
+                    return
+                end
+                local main = ngx.location.capture("/__main_ready")
+                if main.status ~= 200 then
+                    ngx.status = 503
+                    return
+                end
+                ngx.status = 200
+                ngx.say("ok")
+            }
+        }
+
+        # Probe-only readiness: keep the entrance Ready while models download
+        # (downloader UI must stay reachable), but once models are present
+        # require Gradio /gradio_api/info — never fetch the ~482KB HTML homepage.
+        location = /__entrance_ready {
+            default_type text/plain;
+            content_by_lua_block {
+                local models = ngx.location.capture("/__models_ready")
+                if models.status ~= 200 then
+                    ngx.status = 200
+                    ngx.say("downloading")
                     return
                 end
                 local main = ngx.location.capture("/__main_ready")
@@ -240,19 +264,22 @@ spec:
               protocol: TCP
             - containerPort: 8082
               protocol: TCP
-          readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
-                  [ $http_code -ge 200 ] && [ $http_code -lt 500 ]
+          startupProbe:
+            httpGet:
+              path: /__entrance_ready
+              port: 8080
             initialDelaySeconds: 2
             timeoutSeconds: 3
             periodSeconds: 3
-            successThreshold: 1
             failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /__entrance_ready
+              port: 8080
+            timeoutSeconds: 3
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 3
           resources:
             limits:
               cpu: 500m

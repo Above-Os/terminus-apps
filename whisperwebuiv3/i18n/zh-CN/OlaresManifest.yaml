@@ -49,10 +49,16 @@ spec:
     使用 pyannote 模型进行说话人区分后处理
 
   upgradeDescription: |
-    将反向代理镜像从 Bitnami OpenResty（`beclab/aboveos-bitnami-openresty:1.25.3-2`）切换为官方 OpenResty 镜像 `openresty/openresty:1.29.2.5-bookworm-fat`。
+    修复空闲态 readiness 探针负载（Chart 1.1.11）。
 
-    同步调整 nginx 配置挂载与日志路径以匹配官方镜像布局（`/etc/nginx/conf.d/default.conf`、`/usr/local/openresty/nginx/logs/...`），并移除 Bitnami 专用的 `OPENRESTY_CONF_FILE` 配置。
+    此前 client-proxy 每 3 秒对 `GET /` 做探针，会迫使 Gradio 反复渲染约 482KB
+    的完整首页（空闲时仍约 160 KB/s 内部流量与持续后端 CPU）。
 
-    v1.1.9: 将 HF_TOKEN / HF_ENDPOINT 映射为 OLARES_SYSTEM_HUGGINGFACE_*（系统级）；HF_TOKEN required: false。
+    变更详情：
+    - 新增 nginx `/__entrance_ready`：模型下载中返回 200，保证下载进度页可访问；
+      模型就绪后改为校验 Gradio `/gradio_api/info`，不再拉取 HTML 首页。
+    - 将 exec/`curl GET /` readinessProbe 改为 `httpGet /__entrance_ready`
+     （`periodSeconds: 15`），并增加对应 `startupProbe`（`periodSeconds: 3`，
+      `failureThreshold: 60`）覆盖冷启动窗口。
 
-    将 Whisper-WebUI 迁移到 apiVersion v3 共享应用模式，模型下载改为 llm-init（whisperwebuiv2 → whisperwebuiv3）。以 llm-init:v1.3.1 替换 CDN tar.zst downloader-init，从 HF 拉取 Systran/faster-whisper-large-v2 与 pyannote 仓库到共享 App Common 缓存；引擎通过符号链接读取并等待 /readyz。扁平化子 chart，nginx 入口支持下载完成后自动刷新，新增 accelerator、appCommon 与 workloadReplicas。说话人分离（pyannote）需 HF token 已接受条款。
+    v1.1.10: 反向代理切换为官方 OpenResty `1.29.2.5-bookworm-fat`。
