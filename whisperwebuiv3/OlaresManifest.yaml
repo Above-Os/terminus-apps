@@ -6,7 +6,7 @@ metadata:
   description: A Web UI for easy subtitle using whisper model.
   icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
   appid: whisperwebuiv3
-  version: '1.1.11'
+  version: '1.1.12'
   title: Whisper-WebUI
   categories:
   - AI
@@ -105,20 +105,20 @@ spec:
     Post-processing with speaker diarization using the pyannote model
 
   upgradeDescription: |
-    Fix idle readiness probe load (chart 1.1.11).
+    Fix HF cache symlink path (chart 1.1.12).
 
-    The client-proxy readiness probe previously `GET /` every 3s, which forced
-    Gradio to re-render the full ~482KB homepage (~160 KB/s internal traffic and
-    constant backend CPU while the app was unused).
+    Engine startup used `tr '/' '--'` to build Hugging Face hub dir names, but
+    `tr` maps characters one-to-one, so the second `-` was dropped. The lookup
+    became `models--org-repo` instead of `models--org--repo`, every `link_repo`
+    missed the cache, and logs showed three `[warn] missing HF cache dir` lines
+    even though llm-init had already downloaded the models. Existing HF cache
+    is reused — this does not re-download weights.
 
     Change Details:
-    - Add nginx `/__entrance_ready`: while models download return 200 so the
-      downloader UI stays reachable; once models are ready, require Gradio
-      `/gradio_api/info` (never the HTML homepage).
-    - Replace the exec/`curl GET /` readinessProbe with `httpGet /__entrance_ready`
-      (`periodSeconds: 15`) and a matching `startupProbe` (`periodSeconds: 3`,
-      `failureThreshold: 60`) for cold-start grace.
+    - Replace `tr '/' '--'` with `sed 's|/|--|g'` so softlinks under
+      `/Whisper-WebUI/models/...` point at the real HF hub dirs.
 
+    v1.1.11: Lightweight `/__entrance_ready` probe (no Gradio homepage GET).
     v1.1.10: Switch reverse-proxy to official OpenResty `1.29.2.5-bookworm-fat`.
   developer: jhj0517
   website: https://github.com/jhj0517/Whisper-WebUI
