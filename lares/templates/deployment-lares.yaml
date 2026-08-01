@@ -1,3 +1,7 @@
+{{- $appDomainENV := split "," .Values.domain.lares -}}
+{{- $appDomain := index $appDomainENV "_0" -}}
+{{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,13 +43,11 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
         - name: LLM_GATEWAY_URL
-          value: "{{ .Values.olaresEnv.LLM_GATEWAY_URL }}"
-        - name: LARES_GATEWAY_API_KEY
-          value: "{{ .Values.olaresEnv.LARES_GATEWAY_API_KEY }}"
+          value: "http://3a77b15d.shared.{{ $topDomain }}/v1"
         - name: OLARES_APP_ID
-          value: olares
+          value: lares
         - name: PI_DEFAULT_MODEL
-          value: "{{ .Values.olaresEnv.PI_DEFAULT_MODEL }}"
+          value: "olares/Qwen3.6-27B (llama.cpp)/unsloth/Qwen3.6-27B-GGUF:Q4_K_M"
         ports:
         - containerPort: 30141
           protocol: TCP
