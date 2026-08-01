@@ -11,10 +11,9 @@
 {{- if not $gpuType -}}
 {{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
 {{- end -}}
-{{- /* CUDA-only app: refuse cpu/intel at render time. */ -}}
-{{- if or (eq $gpuType "cpu") (eq $gpuType "intel") -}}
-{{- fail (printf "dotsocr supports CUDA only (nvidia / nvidia-gb10); got gpu=%q" $gpuType) -}}
-{{- end -}}
+{{- /* Do not fail() on cpu/intel: Market check-chart helm-renders mode=cpu to extract images.
+       Installability is gated by OlaresManifest accelerator (nvidia / nvidia-gb10 only). */ -}}
+{{- $isCpuMode := or (eq $gpuType "cpu") (eq $gpuType "intel") -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
 {{- $gpuMiB := include "dotsocr.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "11Gi") -}}
 {{- if $unifiedMem -}}
@@ -115,13 +114,13 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if not $unifiedMem }}
+{{- if and (not $isCpuMode) (not $unifiedMem) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if not $unifiedMem }}
+{{- if and (not $isCpuMode) (not $unifiedMem) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
