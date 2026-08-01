@@ -58,10 +58,10 @@ spec:
 
     **Model (Q8 only)**
     Source: [ggml-org/dots.ocr-GGUF](https://huggingface.co/ggml-org/dots.ocr-GGUF)
-    llm-init downloads **only**:
-    - `dots.ocr-Q8_0.gguf` (~1.8 GiB)
-    - `mmproj-dots.ocr-Q8_0.gguf` (~1.3 GiB)
-    F16 blobs in the same repo are **not** downloaded (`--include` filter).
+    llm-init downloads **only** (comma dual-source, one `--include` each):
+    - `dots.ocr-Q8_0.gguf` (~1.8 GiB) — main
+    - `mmproj-dots.ocr-Q8_0.gguf` (~1.3 GiB) — extra
+    F16 blobs in the same repo are **not** downloaded.
 
     **Accelerator**
     CUDA only (`nvidia` / `nvidia-gb10`). No CPU / Intel mode.
@@ -132,8 +132,10 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "hf://ggml-org/dots.ocr-GGUF --include dots.ocr-Q8_0.gguf --include mmproj-dots.ocr-Q8_0.gguf"
-    description: "HF source; two --include keep download to Q8 text + Q8 mmproj only (skip F16)."
+    # Comma dual-source (each one --include) → two single-file hf downloads.
+    # Do NOT use one hf:// with two --include: that path left only mmproj in snapshot.
+    default: "hf://ggml-org/dots.ocr-GGUF --include dots.ocr-Q8_0.gguf,hf://ggml-org/dots.ocr-GGUF --include mmproj-dots.ocr-Q8_0.gguf"
+    description: "Comma dual hf:// (main GGUF + mmproj). Each segment one --include so only Q8 files download (skip F16)."
     regex: "^hf://"
   - envName: MODEL_NAME
     required: true

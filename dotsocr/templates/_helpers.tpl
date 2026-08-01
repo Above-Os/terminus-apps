@@ -18,9 +18,10 @@
 {{- define "dotsocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:test_v2{{- end -}}
 {{- define "dotsocr.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
 
-{{- /* Q8-only pair from ggml-org/dots.ocr-GGUF (skips F16 blobs). */ -}}
+{{- /* Q8-only pair: comma dual-source, each one --include (single-file hf path).
+       Avoids one hf:// with two --include, which can leave snapshot without main GGUF. */ -}}
 {{- define "dotsocr.modelSource" -}}
-hf://ggml-org/dots.ocr-GGUF --include dots.ocr-Q8_0.gguf --include mmproj-dots.ocr-Q8_0.gguf
+hf://ggml-org/dots.ocr-GGUF --include dots.ocr-Q8_0.gguf,hf://ggml-org/dots.ocr-GGUF --include mmproj-dots.ocr-Q8_0.gguf
 {{- end -}}
 
 {{- define "dotsocr.modelName" -}}dots{{- end -}}
