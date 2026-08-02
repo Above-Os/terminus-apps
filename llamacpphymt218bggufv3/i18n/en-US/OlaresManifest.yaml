@@ -1,0 +1,32 @@
+metadata:
+  description: "Hy-MT2-1.8B (GGUF Q4_K_M) served with llama.cpp."
+  title: Hy-MT2-1.8B (llama.cpp)
+
+spec:
+  fullDescription: |
+    **Model Overview**
+    Hy-MT2-1.8B is a lightweight multilingual translation model from Tencent Hunyuan (Hy-MT2 family). It supports translation among 33+ languages and follows complex translation instructions (terminology, style, structured data). This app serves the `Q4_K_M` GGUF build from `tencent/Hy-MT2-1.8B-GGUF` via llama.cpp.
+
+    Tuned for low-latency translation: 32K context, quantized KV cache, and full GPU offload.
+
+    **Preset Configuration**
+    - Model: `tencent/Hy-MT2-1.8B-GGUF:Q4_K_M` (~1.1 GiB weights)
+    - Capabilities: translate (`/translate` on Model Console)
+    - Engine args: `-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 1`
+    - Required GPU memory: `4Gi`
+
+    **Accelerator modes**
+    | Mode           | Device            | Details                                          |
+    |----------------|-------------------|--------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Uses `4Gi` GPU memory; `-ngl all` for full GPU   |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp**: Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
