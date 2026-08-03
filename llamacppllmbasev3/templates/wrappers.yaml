@@ -21,9 +21,24 @@ data:
     ENGINE_RESTART_FILE=${ENGINE_RESTART_FILE:-/run/llm-init/engine_restart}
     WAIT_INTERVAL=${WAIT_INTERVAL:-5}
     WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
+    ENGINE_ARGS_WAIT_TIMEOUT=${ENGINE_ARGS_WAIT_TIMEOUT:-60}
     RESTART_POLL_INTERVAL=${RESTART_POLL_INTERVAL:-2}
     ENGINE_STOP_GRACE_SECONDS=${ENGINE_STOP_GRACE_SECONDS:-15}
     log() { printf '[wrapper-%s] %s\n' "$ENGINE" "$*"; }
+
+    wait_for_engine_args_handoff() {
+        elapsed=0
+        while [ ! -f "$ENGINE_ARGS_FILE" ]; do
+            if [ "$elapsed" -ge "$ENGINE_ARGS_WAIT_TIMEOUT" ]; then
+                log "timed out after ${ENGINE_ARGS_WAIT_TIMEOUT}s waiting for $ENGINE_ARGS_FILE; using chart ENGINE_ARGS"
+                return 0
+            fi
+            log "waiting for $ENGINE_ARGS_FILE (elapsed=${elapsed}s)"
+            sleep "$WAIT_INTERVAL"
+            elapsed=$((elapsed + WAIT_INTERVAL))
+        done
+        log "engine_args handoff $ENGINE_ARGS_FILE found after ${elapsed}s"
+    }
 
     looks_like_hf_repo_id() {
         s=$1
@@ -172,6 +187,7 @@ data:
         elapsed=$((elapsed + WAIT_INTERVAL))
     done
     log "sentinel $SENTINEL found after ${elapsed}s"
+    wait_for_engine_args_handoff
 
     if ! looks_like_hf_repo_id "${MODEL_NAME:-}"; then
         log "MODEL_NAME must be owner/repo or owner/repo:quant for -hf (got ${MODEL_NAME:-<empty>})"
