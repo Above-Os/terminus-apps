@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowstudio
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.workloads.flowstudio.replicaCount }}
+  # hostPath 与滚动更新不兼容。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: flowstudio
+  template:
+    metadata:
+      labels:
+        app: flowstudio
+    spec:
+      enableServiceLinks: false
+      {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+      serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
+      {{- end }}
+      initContainers:
+      # appData 根属 root；uid1000 需 chown（OPA 仅允许 beclab busybox 以 root 跑）。
+      - name: fix-userdata-perms
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /appdata/userData && chown 1000:1000 /appdata/userData"]
+        volumeMounts:
+        - name: app-data
+          mountPath: /appdata
+      {{- if (default dict .Values.dev).hotReload }}
+      # 热重载：勿用 subPath 预建目录（会属 root）。已存在则不覆盖。
+      - name: fix-dev-perms
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext:
+          runAsUser: 0
+        env:
+        - name: DEV_SUBPATH
+          value: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" | quote }}
+        command: ["sh", "-c", "mkdir -p \"/appdata/$DEV_SUBPATH\" && chown -R 1000:1000 \"/appdata/$DEV_SUBPATH\""]
+        volumeMounts:
+        - name: app-data
+          mountPath: /appdata
+      - name: seed-dev-src
+        image: {{ coalesce .Values.appImage .Values.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+        env:
+        - name: DEV_SUBPATH
+          value: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" | quote }}
+        command: ["sh", "-c", "d=/appdata/$DEV_SUBPATH; if [ ! -e \"$d/app/main.py\" ]; then cp -a /app/. \"$d/\" && echo seeded; else echo 'already populated'; fi"]
+        volumeMounts:
+        - name: app-data
+          mountPath: /appdata
+      {{- end }}
+      containers:
+      - name: flowstudio
+        image: {{ coalesce .Values.appImage .Values.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+        {{- if (default dict .Values.dev).hotReload }}
+        # 只 watch Python 包，勿 watch /app/static（易重载风暴 OOM）。
+        # graceful 超时兜底：重载时若仍有未结束的连接任务，超时即强退，避免热重载死等。
+        command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/app", "--timeout-graceful-shutdown", "20"]
+        {{- end }}
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 6Gi
+        env:
+        - name: STATIC_DIR
+          value: /app/static
+        - name: ENGINE_MODE
+          value: comfyui
+        - name: ENGINE_BASE_URL
+          value: http://flowstudio-engine-svc:8188
+        - name: ENGINE_WS_URL
+          value: ws://flowstudio-engine-svc:8188/ws
+        {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+        - name: DYNAMIC_ENGINE
+          value: "true"
+        - name: ENGINE_IMAGE
+          value: {{ .Values.engineImage | quote }}
+        - name: ENGINE_IMAGE_PULL_POLICY
+          value: {{ .Values.engineImagePullPolicy | default "IfNotPresent" | quote }}
+        - name: ENGINE_GPU_VENDOR
+          value: {{ (default dict .Values.dynamicEngine).gpuVendor | default "auto" | quote }}
+        - name: ENGINE_IMAGE_AMD
+          value: {{ .Values.engineImageAmd | default "" | quote }}
+        - name: OLARES_APP_NAME
+          value: "flowstudio"
+        - name: OLARES_GPU_API_URL
+          value: {{ (default dict .Values.dynamicEngine).gpuApiUrl | default "" | quote }}
+        {{- if .Values.GPU }}
+        - name: OLARES_GPU_VENDOR
+          value: {{ .Values.GPU.Type | default .Values.gpu | default "" | quote }}
+        {{- end }}
+        # 勿用 gpumem-percentage。
+        - name: ENGINE_GPU_EXCLUSIVE
+          value: {{ (default dict .Values.dynamicEngine).exclusiveGpu | default true | quote }}
+        - name: ENGINE_GPU_MEM_MIB
+          value: {{ (default dict .Values.dynamicEngine).gpuMemMiB | default 6144 | quote }}
+        - name: ENGINE_IDLE_TTL
+          value: {{ (default dict .Values.dynamicEngine).idleTtlSeconds | default 900 | quote }}
+        - name: ENGINE_STARTUP_REAP
+          value: {{ (default dict .Values.dynamicEngine).startupReap | default "preserve_active" | quote }}
+        - name: ENGINE_WS_IDLE_TIMEOUT
+          value: {{ (default dict .Values.dynamicEngine).wsIdleTimeoutSeconds | default 300 | quote }}
+        - name: ENGINE_EXEC_TIMEOUT
+          value: {{ (default dict .Values.dynamicEngine).execTimeoutSeconds | default 600 | quote }}
+        - name: APP_COMMON_HOST_PATH
+          value: {{ .Values.userspace.appCommon | quote }}
+        - name: APP_DATA_HOST_PATH
+          value: {{ .Values.userspace.appData | quote }}
+        - name: NODE_AUTO_INSTALL
+          value: {{ (default dict .Values.nodeInstall).enabled | default false | quote }}
+        {{- end }}
+        # 私有入口属主回退（网关头缺失时）；须显式允许假身份。
+        - name: ALLOW_DEV_FAKE_AUTH
+          value: "true"
+        - name: DEV_FAKE_OWNER_ID
+          value: "{{ .Values.bfl.username }}"
+        - name: DEV_FAKE_IS_ADMIN
+          value: "{{ if eq .Values.bfl.username .Values.admin }}true{{ else }}false{{ end }}"
+        - name: DB_AUTO_CREATE
+          value: "true"
+        - name: DATABASE_URL
+          value: "postgresql+asyncpg://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.flowstudio }}"
+        - name: MODEL_DOWNLOAD_ENABLED
+          value: {{ (default dict .Values.modelDownload).enabled | default true | quote }}
+        - name: MODEL_REQUIRE_ALL_RESOLVED
+          value: {{ (default dict .Values.modelDownload).requireAllResolved | default true | quote }}
+        - name: HF_TOKEN
+          value: {{ (default dict .Values.modelDownload).hfToken | default "" | quote }}
+        - name: CIVITAI_TOKEN
+          value: {{ (default dict .Values.modelDownload).civitaiToken | default "" | quote }}
+        - name: NETWORK_REGION
+          value: {{ (default dict .Values.network).region | default "global" | quote }}
+        - name: GITHUB_MIRROR_PREFIX
+          value: {{ (default dict .Values.network).githubMirror | default "" | quote }}
+        - name: NODE_PIP_INDEX_URL
+          value: {{ (default dict .Values.network).pipIndexUrl | default "" | quote }}
+        - name: USER_DATA_DIR
+          value: /data/appData/userData
+        - name: MODELS_DIR
+          value: /data/appCommon/comfyui
+        - name: PUBLIC_BASE_URL
+          value: "https://{{ .Values.domain.flowstudio }}"
+        - name: CORS_ORIGINS
+          value: "https://{{ .Values.domain.flowstudio }}"
+        volumeMounts:
+        - name: app-data
+          mountPath: /data/appData
+        - name: app-common
+          mountPath: /data/appCommon
+        {{- if (default dict .Values.dev).hotReload }}
+        - name: app-data
+          mountPath: /app
+          subPath: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" }}
+        {{- end }}
+        # TCP：envoy ext_authz 会拦 httpGet /healthz → 403 → 421。
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 20
+      volumes:
+      - name: app-data
+        hostPath:
+          path: {{ .Values.userspace.appData }}
+          type: DirectoryOrCreate
+      - name: app-common
+        hostPath:
+          path: {{ .Values.userspace.appCommon }}
+          type: DirectoryOrCreate

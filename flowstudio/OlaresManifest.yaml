@@ -1,0 +1,105 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+metadata:
+  name: flowstudio
+  appid: flowstudio
+  title: FlowStudio
+  description: All-in-one AI workflow production app on Olares
+  # 必须公网直链；源文件 icons/icon.png，改图需同步 ffkijjkokok/flowstudio-assets。
+  icon: https://raw.githubusercontent.com/ffkijjkokok/flowstudio-assets/main/icon.png
+  version: 0.3.13
+  categories:
+  - Creativity
+  - AI
+
+entrances:
+- name: flowstudio
+  host: flowstudio-svc
+  port: 8080
+  title: FlowStudio
+  icon: https://raw.githubusercontent.com/ffkijjkokok/flowstudio-assets/main/icon.png
+  authLevel: private
+  openMethod: window
+
+spec:
+  versionName: "0.3.13"
+  runAsUser: true
+  fullDescription: |
+    FlowStudio is an all-in-one AI workflow production app on Olares.
+
+    - Import ComfyUI workflows, parse dependencies, and manage projects end to end.
+    - Built-in engine orchestration with dynamic GPU allocation per project.
+    - Model download and node install during project initialization.
+    - Dual-end UI (PC + mobile) with private entrance auth.
+
+    Usage:
+    - Install, bind a NVIDIA GPU when prompted, then open the FlowStudio entrance.
+    - Create a project from a workflow JSON and follow the init progress until ready.
+    - Generate and iterate from the project workspace.
+  developer: beclab
+  website: https://github.com/beclab/flowstudio
+  sourceCode: https://github.com/beclab/flowstudio
+  submitter: ffkijjkokok
+  locale:
+  - en-US
+  - zh-CN
+  # accelerator 与扁平 requiredCpu 互斥；封套须覆盖 api+引擎 limits 之和。
+  # 勿用 gpumem-percentage。业务侧 gpumem 由探测锁定上限写入。
+  supportArch:
+  - amd64
+  accelerator:
+  - mode: nvidia
+    supportMultiCard: false
+    supportMultiNodes: false
+    requiredCpu: "1"
+    limitedCpu: "6"
+    requiredMemory: 4Gi
+    # api(≤6Gi)+引擎(≤32Gi)；不足会导致引擎 Pending → 整应用 stopped。
+    limitedMemory: 40Gi
+    requiredDisk: 2Gi
+    limitedDisk: 10Gi
+    requiredGPUMemory: 6Gi
+    limitedGPUMemory: 24Gi
+
+permission:
+  appData: true
+  appCommon: true
+
+middleware:
+  postgres:
+    username: flowstudio
+    password: flowstudio
+    databases:
+    - name: flowstudio
+
+options:
+  apiTimeout: 0
+  # PWA 资源需 public；页面与 API 仍走 private。
+  policies:
+  - entranceName: flowstudio
+    description: PWA service worker
+    uriRegex: ^/sw\.js$
+    level: public
+  # pc bundle 的资源在站点根，mobile(UniApp) 在 /static/ 下，两端路径都需放行。
+  - entranceName: flowstudio
+    description: PWA web app manifest
+    uriRegex: ^/(static/)?site\.webmanifest$
+    level: public
+  - entranceName: flowstudio
+    description: PWA icons and touch assets
+    uriRegex: ^/(static/)?(icon-(192|256|512)\.png|apple-touch-icon\.png|favicon\.ico|logo(-mark)?\.(svg|png))$
+    level: public
+  dependencies:
+  - name: olares
+    version: '>=1.12.6-0'
+    type: system
+  - name: postgres
+    version: '>=0.0.1-0'
+    type: middleware
+    mandatory: true
+
+workloadReplicas:
+  flowstudio: 1
+  flowstudioengine: 1
