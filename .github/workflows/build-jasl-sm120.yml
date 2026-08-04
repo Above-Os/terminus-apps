@@ -1,0 +1,93 @@
+# Build thin jasl/vLLM SM120 image for DeepSeek-V4-Flash-0731 + DSpark.
+# Trigger: Actions → build-jasl-sm120 → Run workflow
+name: build-jasl-sm120
+
+on:
+  workflow_dispatch:
+    inputs:
+      jasl_ref:
+        description: jasl/vllm git SHA or tag
+        required: true
+        default: 9a9c41c0cf4f3f66d3d721f0042fa68ffc2582c1
+      image_tag:
+        description: tag under ghcr.io/<owner>/vllm-jasl-dsv4
+        required: true
+        default: sm120-20260804
+      max_jobs:
+        description: ninja/cmake parallelism (keep low on 16Gi runners)
+        required: true
+        default: "2"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    env:
+      JASL_REF: ${{ inputs.jasl_ref }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      MAX_JOBS: ${{ inputs.max_jobs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name
+        id: meta
+        run: |
+          OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${OWNER_LC}/vllm-jasl-dsv4:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Building ghcr.io/${OWNER_LC}/vllm-jasl-dsv4:${IMAGE_TAG} from ${JASL_REF}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: scripts
+          file: scripts/Dockerfile.jasl-sm120-thin
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ghcr.io/${{ steps.meta.outputs.owner_lc }}/vllm-jasl-dsv4:sm120-${{ github.run_number }}
+          build-args: |
+            JASL_REF=${{ env.JASL_REF }}
+            TORCH_CUDA_ARCH_LIST=12.0
+            MAX_JOBS=${{ env.MAX_JOBS }}
+            PIP_INDEX_URL=https://pypi.org/simple
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        run: |
+          {
+            echo "## Image"
+            echo "\`${{ steps.meta.outputs.image }}\`"
+            echo ""
+            echo "jasl ref: \`${JASL_REF}\`"
+            echo ""
+            echo "Make the GHCR package public (or grant the Olares node a pull token), then hard-pin the chart image and enable DSpark K5."
+          } >> "$GITHUB_STEP_SUMMARY"

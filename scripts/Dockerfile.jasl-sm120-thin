@@ -1,0 +1,79 @@
+# Thin SM120 image — eric8810-style venv build (NOT upstream multi-stage Dockerfile).
+# Avoids gdrcopy / rust / 400+ csrc docker stages that often look "stuck".
+#
+# Pin: jasl/vllm tag sm120-pr-41834-stable-preview-20260804 (0731 + DSpark).
+#
+#   docker build -f scripts/Dockerfile.jasl-sm120-thin \
+#     -t ghcr.io/YOU/vllm-jasl-dsv4:sm120-20260804 \
+#     --build-arg MAX_JOBS=2 \
+#     --build-arg TORCH_CUDA_ARCH_LIST=12.0 \
+#     scripts/
+#
+# Optional: place vllm.tgz in the build context to skip GitHub download.
+
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+
+ARG JASL_REF=9a9c41c0cf4f3f66d3d721f0042fa68ffc2582c1
+ARG TORCH_CUDA_ARCH_LIST=12.0
+ARG MAX_JOBS=2
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    MAX_JOBS=${MAX_JOBS} \
+    CUDA_HOME=/usr/local/cuda \
+    PATH=/opt/vllm-venv/bin:/usr/local/cuda/bin:${PATH} \
+    VIRTUAL_ENV=/opt/vllm-venv \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1 \
+    VLLM_USE_FLASHINFER_SAMPLER=0 \
+    FLASHINFER_DISABLE_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.10 python3.10-venv python3-pip \
+      git curl ca-certificates \
+      build-essential ninja-build cmake \
+      pkg-config libnuma-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.10 -m venv /opt/vllm-venv \
+ && pip install -U pip setuptools wheel ninja cmake \
+      'setuptools-scm>=8' setuptools-rust \
+      -i "${PIP_INDEX_URL}"
+
+# Match jasl requirements/cuda.txt @ 20260804 (SM120 sparse-MLA needs ≥0.6.14).
+RUN pip install -i "${PIP_INDEX_URL}" \
+      --extra-index-url https://flashinfer.ai/whl/ \
+      torch==2.13.0 \
+      flashinfer-python==0.6.16 \
+      flashinfer-cubin==0.6.16
+
+WORKDIR /opt/src
+# Optional: put vllm.tgz in the build context (scripts/) to skip GitHub.
+COPY vllm.tgz* /tmp/
+RUN set -eux; \
+    if ls /tmp/vllm.tgz 1>/dev/null 2>&1; then \
+      tar -xzf /tmp/vllm.tgz -C /opt/src; \
+    else \
+      curl -fL --retry 8 --retry-delay 5 -o /tmp/vllm.tgz \
+        "https://codeload.github.com/jasl/vllm/tar.gz/${JASL_REF}" \
+      || curl -fL --retry 8 --retry-delay 5 -o /tmp/vllm.tgz \
+        "https://ghfast.top/https://github.com/jasl/vllm/archive/${JASL_REF}.tar.gz"; \
+      tar -xzf /tmp/vllm.tgz -C /opt/src; \
+    fi; \
+    mv /opt/src/vllm-* /opt/src/vllm; \
+    rm -f /tmp/vllm.tgz
+
+WORKDIR /opt/src/vllm
+# tarball has no .git — setuptools-scm cannot resolve a version.
+RUN printf '__version__ = "0.26.0.post1+sm120.jasl.%s"\n' "${JASL_REF}" > vllm/_version.py \
+ && pip install -e . --no-build-isolation -i "${PIP_INDEX_URL}" \
+      --extra-index-url https://flashinfer.ai/whl/
+
+# Smoke: entrypoint must resolve.
+RUN vllm --help >/dev/null
+
+WORKDIR /work
+EXPOSE 8000
+ENTRYPOINT ["vllm"]
+CMD ["--help"]
