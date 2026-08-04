@@ -1,4 +1,5 @@
 # Build thin jasl/vLLM SM120 image for DeepSeek-V4-Flash-0731 + DSpark.
+# Runs on Above-Os 64Gi runner (label: linux-ubuntu22.04).
 name: build-jasl-sm120
 
 on:
@@ -19,9 +20,9 @@ on:
         required: true
         default: sm120-20260804
       max_jobs:
-        description: ninja parallelism (1 on 16Gi runners — Cutlass SM120 OOMs at 4)
+        description: ninja parallelism (4 is fine on 64Gi; use 1 on 16Gi)
         required: true
-        default: "1"
+        default: "4"
 
 permissions:
   contents: read
@@ -29,38 +30,39 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Above-Os org runner (~64Gi). Personal forks cannot see this label.
+    runs-on: linux-ubuntu22.04
     timeout-minutes: 420
     env:
       JASL_REF: ${{ github.event.inputs.jasl_ref || '9a9c41c0cf4f3f66d3d721f0042fa68ffc2582c1' }}
       IMAGE_TAG: ${{ github.event.inputs.image_tag || 'sm120-20260804' }}
-      MAX_JOBS: ${{ github.event.inputs.max_jobs || '1' }}
+      MAX_JOBS: ${{ github.event.inputs.max_jobs || '4' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@v1.3.1
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
-      # Cutlass SM120 nvcc routinely needs >16Gi peak; add large swap as safety net.
-      - name: Add 32Gi swap
+      - name: Runner resources
         run: |
           set -eux
-          sudo swapoff -a || true
-          sudo fallocate -l 32G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=32768
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
           free -h
+          df -h
+          nproc
+          docker version
+
+      # Do NOT run free-disk-space on shared self-hosted runners (destructive).
+      # Optional swap only if free RAM is tight.
+      - name: Ensure swap headroom
+        run: |
+          set -eux
+          free -h
+          if ! swapon --show | grep -q .; then
+            sudo fallocate -l 16G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+          fi
           swapon --show
+          free -h
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -78,7 +80,6 @@ jobs:
           echo "Building ghcr.io/${OWNER_LC}/vllm-jasl-dsv4:${IMAGE_TAG} from ${JASL_REF} MAX_JOBS=${MAX_JOBS}"
 
       # Use classic docker build --progress=plain so ninja [N/M] streams to Actions logs.
-      # build-push-action buffers BuildKit output and looks "stuck" for hours.
       - name: Build image (plain progress)
         run: |
           set -eux
@@ -106,4 +107,5 @@ jobs:
             echo ""
             echo "jasl ref: \`${JASL_REF}\`"
             echo "MAX_JOBS: \`${MAX_JOBS}\`"
+            echo "runner: \`linux-ubuntu22.04\`"
           } >> "$GITHUB_STEP_SUMMARY"
