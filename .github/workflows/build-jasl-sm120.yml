@@ -3,6 +3,14 @@
 name: build-jasl-sm120
 
 on:
+  # workflow_dispatch only works after this file is on the default branch;
+  # push to the build branch starts the first build immediately.
+  push:
+    branches: [build/jasl-sm120-20260804]
+    paths:
+      - ".github/workflows/build-jasl-sm120.yml"
+      - "scripts/Dockerfile.jasl-sm120-thin"
+      - "scripts/build-jasl-vllm-sm120.sh"
   workflow_dispatch:
     inputs:
       jasl_ref:
@@ -27,9 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 420
     env:
-      JASL_REF: ${{ inputs.jasl_ref }}
-      IMAGE_TAG: ${{ inputs.image_tag }}
-      MAX_JOBS: ${{ inputs.max_jobs }}
+      JASL_REF: ${{ github.event.inputs.jasl_ref || '9a9c41c0cf4f3f66d3d721f0042fa68ffc2582c1' }}
+      IMAGE_TAG: ${{ github.event.inputs.image_tag || 'sm120-20260804' }}
+      MAX_JOBS: ${{ github.event.inputs.max_jobs || '2' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
