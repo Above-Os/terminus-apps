@@ -23,11 +23,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MAX_JOBS=${MAX_JOBS} \
     CUDA_HOME=/usr/local/cuda \
     PATH=/opt/vllm-venv/bin:/usr/local/cuda/bin:${PATH} \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64 \
+    LIBRARY_PATH=/usr/local/cuda/lib64 \
     VIRTUAL_ENV=/opt/vllm-venv \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1 \
+    FORCE_CUDA=1 \
     VLLM_USE_FLASHINFER_SAMPLER=0 \
-    FLASHINFER_DISABLE_VERSION_CHECK=1
+    FLASHINFER_DISABLE_VERSION_CHECK=1 \
+    # GitHub tarball has no .git — setuptools-scm needs a pretend version.
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.26.0.post1 \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM=0.26.0.post1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.10 python3.10-venv python3-pip \
@@ -65,8 +71,10 @@ RUN set -eux; \
     rm -f /tmp/vllm.tgz
 
 WORKDIR /opt/src/vllm
-# tarball has no .git — setuptools-scm cannot resolve a version.
+# Runtime version string (setuptools-scm still uses SETUPTOOLS_SCM_PRETEND_* above).
 RUN printf '__version__ = "0.26.0.post1+sm120.jasl.%s"\n' "${JASL_REF}" > vllm/_version.py \
+ && ls -la /usr/local/cuda/lib64/libcudart.so* \
+ && python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)" \
  && pip install -e . --no-build-isolation -i "${PIP_INDEX_URL}" \
       --extra-index-url https://flashinfer.ai/whl/
 
