@@ -96,7 +96,8 @@ Bump together:
 
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
-See Manifest `upgradeDescription` for this release (0.3.20).
+See Manifest `upgradeDescription` for this release (0.3.20).  
+QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
 
