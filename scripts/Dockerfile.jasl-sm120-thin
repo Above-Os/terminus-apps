@@ -1,28 +1,22 @@
 # Thin SM120 image — eric8810-style venv build (NOT upstream multi-stage Dockerfile).
-# Avoids gdrcopy / rust / 400+ csrc docker stages that often look "stuck".
-#
 # Pin: jasl/vllm tag sm120-pr-41834-stable-preview-20260804 (0731 + DSpark).
 #
-#   docker build -f scripts/Dockerfile.jasl-sm120-thin \
-#     -t ghcr.io/YOU/vllm-jasl-dsv4:sm120-20260804 \
-#     --build-arg MAX_JOBS=2 \
-#     --build-arg TORCH_CUDA_ARCH_LIST=12.0 \
-#     scripts/
-#
-# Optional: place vllm.tgz in the build context to skip GitHub download.
+# Build with --progress=plain so ninja [N/M] lines are visible in CI logs.
 
-# torch 2.13 ships cu13 — CUDA 12.8 nvcc fails on cooperative_topk PTX APIs
-# (cuda::ptx::mbarrier_* / cp_async_bulk). Match toolkit to torch.
+# torch 2.13 ships cu13 — match toolkit (12.8 nvcc fails cooperative_topk PTX).
 FROM nvidia/cuda:13.0.2-devel-ubuntu22.04
 
 ARG JASL_REF=9a9c41c0cf4f3f66d3d721f0042fa68ffc2582c1
-ARG TORCH_CUDA_ARCH_LIST=12.0
-ARG MAX_JOBS=2
+# 12.0a matches jasl's -gencode arch=compute_120a,code=sm_120a
+ARG TORCH_CUDA_ARCH_LIST=12.0a
+ARG MAX_JOBS=4
 ARG PIP_INDEX_URL=https://pypi.org/simple
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
     MAX_JOBS=${MAX_JOBS} \
+    CMAKE_BUILD_PARALLEL_LEVEL=${MAX_JOBS} \
+    NINJA_STATUS="[%f/%t %es] " \
     CUDA_HOME=/usr/local/cuda \
     PATH=/opt/vllm-venv/bin:/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64 \
@@ -33,7 +27,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FORCE_CUDA=1 \
     VLLM_USE_FLASHINFER_SAMPLER=0 \
     FLASHINFER_DISABLE_VERSION_CHECK=1 \
-    # GitHub tarball has no .git — setuptools-scm needs a pretend version.
     SETUPTOOLS_SCM_PRETEND_VERSION=0.26.0.post1 \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM=0.26.0.post1
 
@@ -49,7 +42,6 @@ RUN python3.10 -m venv /opt/vllm-venv \
       'setuptools-scm>=8' setuptools-rust \
       -i "${PIP_INDEX_URL}"
 
-# Match jasl requirements/cuda.txt @ 20260804 (SM120 sparse-MLA needs ≥0.6.14).
 RUN pip install -i "${PIP_INDEX_URL}" \
       --extra-index-url https://flashinfer.ai/whl/ \
       torch==2.13.0 \
@@ -57,7 +49,6 @@ RUN pip install -i "${PIP_INDEX_URL}" \
       flashinfer-cubin==0.6.16
 
 WORKDIR /opt/src
-# Optional: put vllm.tgz in the build context (scripts/) to skip GitHub.
 COPY vllm.tgz* /tmp/
 RUN set -eux; \
     if ls /tmp/vllm.tgz 1>/dev/null 2>&1; then \
@@ -73,15 +64,17 @@ RUN set -eux; \
     rm -f /tmp/vllm.tgz
 
 WORKDIR /opt/src/vllm
-# Runtime version string (setuptools-scm still uses SETUPTOOLS_SCM_PRETEND_* above).
+# stdbuf -oL keeps ninja/pip lines flowing under BuildKit.
 RUN printf '__version__ = "0.26.0.post1+sm120.jasl.%s"\n' "${JASL_REF}" > vllm/_version.py \
- && ls -la /usr/local/cuda/lib64/libcudart.so* \
- && python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)" \
- && pip install -e . --no-build-isolation -i "${PIP_INDEX_URL}" \
-      --extra-index-url https://flashinfer.ai/whl/
+ && python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'arch', __import__('os').environ.get('TORCH_CUDA_ARCH_LIST'))" \
+ && echo "MAX_JOBS=${MAX_JOBS} CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL}" \
+ && stdbuf -oL -eL pip install -e . --no-build-isolation -v \
+      -i "${PIP_INDEX_URL}" \
+      --extra-index-url https://flashinfer.ai/whl/ \
+      2>&1 | stdbuf -oL -eL tee /tmp/vllm-build.log \
+ && test -x /opt/vllm-venv/bin/vllm
 
-# Smoke: entrypoint must resolve.
-RUN vllm --help >/dev/null
+RUN vllm --help >/dev/null && python -c "import vllm; print(vllm.__version__)"
 
 WORKDIR /work
 EXPOSE 8000

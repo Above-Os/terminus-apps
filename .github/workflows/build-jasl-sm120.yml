@@ -1,10 +1,7 @@
 # Build thin jasl/vLLM SM120 image for DeepSeek-V4-Flash-0731 + DSpark.
-# Trigger: Actions → build-jasl-sm120 → Run workflow
 name: build-jasl-sm120
 
 on:
-  # workflow_dispatch only works after this file is on the default branch;
-  # push to the build branch starts the first build immediately.
   push:
     branches: [build/jasl-sm120-20260804]
     paths:
@@ -22,9 +19,9 @@ on:
         required: true
         default: sm120-20260804
       max_jobs:
-        description: ninja/cmake parallelism (keep low on 16Gi runners)
+        description: ninja/cmake parallelism (ubuntu-latest has 4 cores)
         required: true
-        default: "2"
+        default: "4"
 
 permissions:
   contents: read
@@ -37,7 +34,7 @@ jobs:
     env:
       JASL_REF: ${{ github.event.inputs.jasl_ref || '9a9c41c0cf4f3f66d3d721f0042fa68ffc2582c1' }}
       IMAGE_TAG: ${{ github.event.inputs.image_tag || 'sm120-20260804' }}
-      MAX_JOBS: ${{ github.event.inputs.max_jobs || '2' }}
+      MAX_JOBS: ${{ github.event.inputs.max_jobs || '4' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,9 +50,6 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -69,25 +63,28 @@ jobs:
           OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${OWNER_LC}/vllm-jasl-dsv4:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "Building ghcr.io/${OWNER_LC}/vllm-jasl-dsv4:${IMAGE_TAG} from ${JASL_REF}"
+          echo "Building ghcr.io/${OWNER_LC}/vllm-jasl-dsv4:${IMAGE_TAG} from ${JASL_REF} MAX_JOBS=${MAX_JOBS}"
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: scripts
-          file: scripts/Dockerfile.jasl-sm120-thin
-          push: true
-          tags: |
-            ${{ steps.meta.outputs.image }}
-            ghcr.io/${{ steps.meta.outputs.owner_lc }}/vllm-jasl-dsv4:sm120-${{ github.run_number }}
-          build-args: |
-            JASL_REF=${{ env.JASL_REF }}
-            TORCH_CUDA_ARCH_LIST=12.0
-            MAX_JOBS=${{ env.MAX_JOBS }}
-            PIP_INDEX_URL=https://pypi.org/simple
-          platforms: linux/amd64
-          provenance: false
-          sbom: false
+      # Use classic docker build --progress=plain so ninja [N/M] streams to Actions logs.
+      # build-push-action buffers BuildKit output and looks "stuck" for hours.
+      - name: Build image (plain progress)
+        run: |
+          set -eux
+          docker build --progress=plain \
+            --build-arg "JASL_REF=${JASL_REF}" \
+            --build-arg "TORCH_CUDA_ARCH_LIST=12.0a" \
+            --build-arg "MAX_JOBS=${MAX_JOBS}" \
+            --build-arg "PIP_INDEX_URL=https://pypi.org/simple" \
+            -t "${{ steps.meta.outputs.image }}" \
+            -t "ghcr.io/${{ steps.meta.outputs.owner_lc }}/vllm-jasl-dsv4:sm120-${{ github.run_number }}" \
+            -f scripts/Dockerfile.jasl-sm120-thin \
+            scripts
+
+      - name: Push image
+        run: |
+          set -eux
+          docker push "${{ steps.meta.outputs.image }}"
+          docker push "ghcr.io/${{ steps.meta.outputs.owner_lc }}/vllm-jasl-dsv4:sm120-${{ github.run_number }}"
 
       - name: Summary
         run: |
@@ -96,6 +93,5 @@ jobs:
             echo "\`${{ steps.meta.outputs.image }}\`"
             echo ""
             echo "jasl ref: \`${JASL_REF}\`"
-            echo ""
-            echo "Make the GHCR package public (or grant the Olares node a pull token), then hard-pin the chart image and enable DSpark K5."
+            echo "MAX_JOBS: \`${MAX_JOBS}\`"
           } >> "$GITHUB_STEP_SUMMARY"
