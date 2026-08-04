@@ -71,7 +71,7 @@ spec:
           runAsUser: 0
       containers:
       - name: ragflow
-        image: "docker.io/infiniflow/ragflow:v0.26.1"
+        image: "docker.io/infiniflow/ragflow:v0.26.4"
         args:
           - --enable-adminserver
         ports:
@@ -94,19 +94,28 @@ spec:
         - name: MYSQL_USER
           value: "{{ .Values.mysql.username }}"
         - name: MYSQL_PASSWORD
-          value: "{{ .Values.mysql.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: MYSQL_PASSWORD
         - name: MYSQL_DBNAME
           value: "{{ .Values.mysql.databases.rag_flow }}"
         - name: ES_HOST
           value: 'es01'
         - name: ELASTIC_PASSWORD
-          value: 'infini_rag_flow'
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: ELASTIC_PASSWORD
         - name: REDIS_HOST
           value: 'redis'
         - name: REDIS_PORT
           value: '6379'
         - name: REDIS_PASSWORD
-          value: 'infini_rag_flow'
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: REDIS_PASSWORD
         - name: MINIO_HOST
           value: 'minio'
         - name: MINIO_PORT
@@ -114,7 +123,10 @@ spec:
         - name: MINIO_USER
           value: 'rag_flow'
         - name: MINIO_PASSWORD
-          value: 'infini_rag_flow'
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: MINIO_PASSWORD
         resources:
           limits:
             cpu: "4"

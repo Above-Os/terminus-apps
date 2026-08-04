@@ -77,7 +77,10 @@ spec:
             - name: LISTMONK_db__user
               value: '{{ .Values.postgres.username }}'
             - name: LISTMONK_db__password
-              value: '{{ .Values.postgres.password }}'
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: LISTMONK_db__password
             - name: LISTMONK_db__database
               value: '{{ .Values.postgres.databases.listmonk }}'
             - name: LISTMONK_db__ssl_mode
@@ -90,15 +93,15 @@ spec:
               ./listmonk --install --idempotent --yes --config '' && \
               ./listmonk --upgrade --yes --config '' && \
               ./listmonk --config ''
-          image: "docker.io/beclab/listmonk-listmonk:v4.1.0"
+          image: "docker.io/listmonk/listmonk:v6.2.0"
           name: listmonk
           resources:
             requests:
               cpu: 500m
-              memory: 512Mi
+              memory: 768Mi
             limits:
-              cpu: 1000m
-              memory: 1Gi
+              cpu: 1500m
+              memory: 2Gi
           ports:
             - containerPort: 9000
           volumeMounts:

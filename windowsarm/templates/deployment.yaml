@@ -1,6 +1,6 @@
 # windowsarm config lifecycle:
 # 1) ConfigMap windows-env: first install from .Values; upgrade preserves existing (lookup).
-# 2) Init sync: merge ConfigMap (non-empty) > PVC .env > empty, write to appData/windowsarm/config/.env.
+# 2) Init sync: merge ConfigMap (non-empty) > PVC .env > empty, write to appCache/config/.env.
 # 3) Runtime: VERSION/CDN_HOST from /config/.env; RAM_SIZE/CPU_CORES/DISK_SIZE etc from env.
 ---
 apiVersion: v1
@@ -44,38 +44,14 @@ spec:
       labels:
         name: windows
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
       initContainers:
-        - name: migrate-appcache-to-appdata
-          image: "docker.io/beclab/busybox:1.37"
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c"]
-          args:
-            - |
-              set -e
-              SOURCE=/old-data
-              DEST=/new-data
-              MARKER="${DEST}/.migration_from_appcache_done"
-              if [ -f "$MARKER" ]; then echo "[migrate] marker present, skip."; exit 0; fi
-              if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_done$' || true)" ]; then
-                echo "[migrate] appData already has data, skip."
-                echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
-                exit 0
-              fi
-              if [ -n "$(ls -A "$SOURCE" 2>/dev/null || true)" ]; then
-                echo "[migrate] copying appCache -> appData..."
-                cp -a "$SOURCE"/. "$DEST"/
-                echo "migrated from appCache at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
-                echo "[migrate] done; legacy appCache left intact for rollback."
-              else
-                echo "[migrate] no legacy data, fresh install."
-                echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
-              fi
-          volumeMounts:
-            - name: storage-legacy
-              mountPath: /old-data
-              readOnly: true
-            - name: storage
-              mountPath: /new-data
         - name: sync-env-to-pvc
           image: docker.io/beclab/aboveos-busybox:1.37.0
           imagePullPolicy: IfNotPresent
@@ -138,7 +114,10 @@ spec:
             - name: USERNAME
               value: "{{ .Values.olaresEnv.USERNAME }}"
             - name: PASSWORD
-              value: "{{ .Values.olaresEnv.PASSWORD }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: PASSWORD
         {{- if and .Values.deviceName (eq .Values.deviceName "Olares One") }}
             - name: GPU
               value: "Y"
@@ -178,15 +157,11 @@ spec:
       terminationGracePeriodSeconds: 300
       volumes:
         - hostPath:
-            path: '{{ .Values.userspace.appCache }}'
-            type: DirectoryOrCreate
-          name: storage-legacy
-        - hostPath:
-            path: '{{ .Values.userspace.appData }}/storage'
+            path: '{{ .Values.userspace.appCache }}/storage'
             type: DirectoryOrCreate
           name: storage
         - hostPath:
-            path: '{{ .Values.userspace.appData }}/config'
+            path: '{{ .Values.userspace.appCache }}/config'
             type: DirectoryOrCreate
           name: windows-config
         - hostPath:

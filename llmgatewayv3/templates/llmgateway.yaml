@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: llm-gateway-frontend
-          image: docker.io/beclab/llm-gateway-frontend:v2.0.3
+          image: docker.io/beclab/llm-gateway-frontend:v2.0.12
           resources:
             requests:
               cpu: 500m
@@ -60,7 +60,7 @@ spec:
           ports:
             - containerPort: 80
         - name: llm-gateway-backend
-          image: docker.io/beclab/llm-gateway-backend:v2.0.3
+          image: docker.io/beclab/llm-gateway-backend:v2.0.12
           imagePullPolicy: IfNotPresent
           env:
             - name: PGID
@@ -71,10 +71,11 @@ spec:
               value: Etc/UTC
             - name: LLM_GATEWAY_CONFIG
               value: "/configs/config.yaml"
-            - name: LLM_GATEWAY_LOGGING_FORMAT
-              value: "json"
             - name: LLM_GATEWAY_CRYPTO_ENCRYPTION_KEY
-              value: "{{ randAlphaNum 32 | b64enc }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: LLM_GATEWAY_CRYPTO_ENCRYPTION_KEY
           resources:
             requests:
               cpu: 200m
@@ -130,3 +131,19 @@ spec:
       port: 8080
       targetPort: 8080
       protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-llmgateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-gateway-backend
+spec:
+  ports:
+    - name: "80"
+      port: 80
+      targetPort: 8080
+  selector:
+    app: llmgateway
+  type: ClusterIP

@@ -1,0 +1,142 @@
+# llama.cpp wrapper: wait on llm-init sentinel, load main GGUF from model_path,
+# auto-attach sibling *mmproj*.gguf (covers surya-2-mmproj.gguf and mmproj-*.gguf).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llamacpp
+data:
+  common.sh: |
+    #!/bin/sh
+    set -eu
+
+    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
+    MODEL_PATH_FILE=${MODEL_PATH_FILE:-/run/llm-init/model_path}
+    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
+    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
+
+    log() {
+        printf '[wrapper-%s] %s\n' "${ENGINE:-engine}" "$*"
+    }
+
+    wait_for_sentinel() {
+        elapsed=0
+        while [ ! -f "$SENTINEL" ]; do
+            if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+                log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
+                exit 1
+            fi
+            log "waiting for $SENTINEL (elapsed=${elapsed}s)"
+            sleep "$WAIT_INTERVAL"
+            elapsed=$((elapsed + WAIT_INTERVAL))
+        done
+        log "sentinel $SENTINEL found after ${elapsed}s"
+    }
+
+    read_model_path() {
+        if [ ! -f "$MODEL_PATH_FILE" ]; then
+            log "model path file $MODEL_PATH_FILE not found"
+            exit 1
+        fi
+        tr -d '\r\n' < "$MODEL_PATH_FILE"
+    }
+
+  llamacpp.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=llamacpp
+    . "$(dirname "$0")/common.sh"
+
+    wait_for_sentinel
+    MODEL_PATH=$(read_model_path)
+
+    # HF multi-include → snapshot dir; pick main GGUF (not *mmproj*).
+    # surya uses surya-2-mmproj.gguf (suffix), dots uses mmproj-*.gguf (prefix).
+    if [ -d "$MODEL_PATH" ]; then
+        GGUF_FILE=""
+        for f in "$MODEL_PATH"/*.gguf; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            case "$base" in
+                mmproj*|MMPROJ*|*mmproj*|*MMPROJ*) continue ;;
+            esac
+            GGUF_FILE="$f"
+            break
+        done
+        if [ -z "$GGUF_FILE" ]; then
+            log "no main .gguf under $MODEL_PATH"
+            exit 1
+        fi
+        log "resolved MODEL_PATH directory $MODEL_PATH -> $GGUF_FILE"
+        MODEL_PATH="$GGUF_FILE"
+    fi
+
+    MODEL_DIR=$(dirname "$MODEL_PATH")
+
+    LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-}"
+    if [ -z "$LLAMA_SERVER_BIN" ]; then
+        if [ -x /app/llama-server ]; then
+            LLAMA_SERVER_BIN=/app/llama-server
+        else
+            LLAMA_SERVER_BIN="$(command -v llama-server 2>/dev/null || true)"
+        fi
+    fi
+    if [ -z "$LLAMA_SERVER_BIN" ] || [ ! -x "$LLAMA_SERVER_BIN" ]; then
+        log "llama-server binary not found"
+        exit 127
+    fi
+
+    LLAMA_SERVER_DIR=$(dirname "$LLAMA_SERVER_BIN")
+    export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    if [ -d "${LLAMA_SERVER_DIR}/lib" ]; then
+        export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}/lib:${LD_LIBRARY_PATH}"
+    fi
+
+    ARGV=""
+    HAS_MMPROJ=0
+    if [ -n "${ENGINE_ARGS:-}" ]; then
+        # shellcheck disable=SC2086
+        set -- $ENGINE_ARGS
+        for tok in "$@"; do
+            case "$tok" in
+                --mmproj) HAS_MMPROJ=1; ARGV="$ARGV $tok" ;;
+                -*)       ARGV="$ARGV $tok" ;;
+                LLAMA_ARG_*=*) export "$tok" && log "engine_args export: $tok" ;;
+                *=*)      log "engine_args drop non-LLAMA_ARG env: $tok" ;;
+                *)        ARGV="$ARGV $tok" ;;
+            esac
+        done
+    fi
+
+    # Auto --mmproj if not already in ENGINE_ARGS.
+    if [ "$HAS_MMPROJ" -eq 0 ]; then
+        MMPROJ=""
+        for f in "$MODEL_DIR"/mmproj*.gguf "$MODEL_DIR"/MMPROJ*.gguf \
+                 "$MODEL_DIR"/*mmproj*.gguf "$MODEL_DIR"/*MMPROJ*.gguf; do
+            if [ -f "$f" ]; then
+                MMPROJ="$f"
+                break
+            fi
+        done
+        if [ -n "$MMPROJ" ]; then
+            ARGV="$ARGV --mmproj $MMPROJ"
+            log "auto mmproj=$MMPROJ"
+        else
+            log "WARN: no *mmproj*.gguf beside $MODEL_PATH (vision OCR may fail)"
+        fi
+    fi
+
+    log "starting llama-server -m=$MODEL_PATH alias=${MODEL_NAME:-surya2} argv=${ARGV:-<empty>}"
+    # shellcheck disable=SC2086
+    exec "$LLAMA_SERVER_BIN" \
+        -m "$MODEL_PATH" \
+        --alias "${MODEL_NAME:-surya2}" \
+        --host 0.0.0.0 \
+        --port "${LLAMACPP_PORT:-8081}" \
+        --metrics \
+        --temp 0 \
+        $ARGV \
+        "$@"

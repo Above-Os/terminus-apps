@@ -72,7 +72,13 @@ spec:
       containers:
       - name: redis
         image: "docker.io/beclab/valkey-valkey:8"
-        command: ["redis-server", "--requirepass", "infini_rag_flow", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+        command: ["sh", "-c", "redis-server --requirepass \"$REDIS_PASSWORD\" --maxmemory 128mb --maxmemory-policy allkeys-lru"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: REDIS_PASSWORD
         ports:
         - containerPort: 6379
         volumeMounts:
