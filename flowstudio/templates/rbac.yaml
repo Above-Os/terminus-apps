@@ -1,7 +1,7 @@
 {{- $de := (default dict .Values.dynamicEngine) }}
 {{- $sa := ($de.serviceAccountName | default "flowstudio-engine-orchestrator") }}
 {{- if ne (toString $de.enabled) "false" }}
-# 本 ns 内编排引擎；无集群级权限。enabled 显式 false 时不建。
+# Namespace-scoped engine orchestration only (no cluster-wide Role).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -44,8 +44,8 @@ roleRef:
   name: {{ $sa }}
   apiGroup: rbac.authorization.k8s.io
 ---
-# 集群级 GPUBinding：自愈「resume 多绑一张卡 → 引擎 Pending → 整应用 stopped」。
-# 代码侧只 mutate spec.namespace==本 ns 的条目。
+# ClusterRole for GPUBinding heal + pre-delete purge.
+# Runtime mutates only this instance's entries (ns / appName+owner).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -1,5 +1,5 @@
 {{- if eq (toString (default dict .Values.dynamicEngine).enabled) "false" }}
-# 仅 dynamicEngine.enabled=false 时部署（默认走动态引擎）。
+# Static-engine fallback only; default is dynamicEngine.enabled=true.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,6 +7,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: {{ .Values.workloads.flowstudioengine.replicaCount }}
+  # hostPath volumes cannot roll safely.
   strategy:
     type: Recreate
   selector:
@@ -17,7 +18,7 @@ spec:
       labels:
         app: flowstudioengine
       annotations:
-        # 动态引擎由 EngineManager 写 gpumem；勿用 percentage。
+        # Absolute gpumem only — never percentage (dynamic path uses EngineManager).
         applications.app.bytetrade.io/gpu-inject: "engine"
     spec:
       enableServiceLinks: false
@@ -29,7 +30,8 @@ spec:
         securityContext:
           runAsUser: 1000
         workingDir: /opt/ComfyUI
-        # /opt/ComfyUI 属 root；可写目录放 emptyDir。--disable-dynamic-vram：HAMi 下 aimdo NVML 会崩。
+        # /opt/ComfyUI is root-owned → writable dirs on emptyDir.
+        # --disable-dynamic-vram: aimdo NVML crashes under HAMi.
         command:
         - sh
         - -c
@@ -43,7 +45,7 @@ spec:
         env:
         - name: HOME
           value: /run/comfyui
-        # 镜像无 uid1000 passwd 条目；供 getpass.getuser()。
+        # Image has no uid1000 passwd entry; required for getpass.getuser().
         - name: USER
           value: comfyui
         - name: LOGNAME
@@ -52,10 +54,10 @@ spec:
         - containerPort: 8188
         resources:
           requests:
-            cpu: 500m
+            cpu: "1"
             memory: 3Gi
           limits:
-            cpu: "4"
+            cpu: "8"
             memory: 12Gi
             nvidia.com/gpu: "1"
             nvidia.com/gpumem: "6144"
