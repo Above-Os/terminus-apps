@@ -1,0 +1,29 @@
+# Make the SM120 jasl image publicly pullable for Olares nodes.
+name: publish-jasl-ghcr
+
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  make-public:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set package visibility public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          OWNER="${{ github.repository_owner }}"
+          # Org package visibility API
+          gh api --method PUT \
+            "/orgs/${OWNER}/packages/container/vllm-jasl-dsv4/visibility" \
+            -f visibility=public \
+            || gh api --method PUT \
+            "/users/${OWNER}/packages/container/vllm-jasl-dsv4/visibility" \
+            -f visibility=public
+          echo "Checking anonymous pull..."
+          curl -fsSIL "https://ghcr.io/v2/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/vllm-jasl-dsv4/manifests/sm120-20260804" | head -n 20
