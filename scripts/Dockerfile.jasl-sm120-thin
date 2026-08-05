@@ -26,6 +26,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1 \
     FORCE_CUDA=1 \
+    VLLM_TARGET_DEVICE=cuda \
     VLLM_USE_FLASHINFER_SAMPLER=0 \
     FLASHINFER_DISABLE_VERSION_CHECK=1 \
     SETUPTOOLS_SCM_PRETEND_VERSION=0.26.0.post1 \
@@ -75,9 +76,11 @@ RUN printf '__version__ = "0.26.0.post1+sm120.jasl.%s"\n' "${JASL_REF}" > vllm/_
       2>&1 | stdbuf -oL -eL tee /tmp/vllm-build.log \
  && test -x /opt/vllm-venv/bin/vllm
 
-RUN vllm --help >/dev/null && python -c "import vllm; print(vllm.__version__)"
+# CI runners have no GPU/CUDA runtime; `vllm --help` infers device and fails.
+# Compile already verified the entrypoint exists above.
+RUN python -c "import vllm; print('vllm', vllm.__version__)"
 
 WORKDIR /work
 EXPOSE 8000
 ENTRYPOINT ["vllm"]
-CMD ["--help"]
+CMD ["serve", "--help"]
