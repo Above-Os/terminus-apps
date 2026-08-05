@@ -12,7 +12,7 @@ metadata:
   description: DeerFlow 2.0 is an open-source super agent harness for deep research.
   icon: https://app.cdn.olares.com/appstore/deerflow/icon.png
   appid: deerflowv2
-  version: '1.0.7'
+  version: '1.0.8'
   title: DeerFlow 2.0
   categories:
     - Productivity_v112
@@ -49,7 +49,7 @@ spec:
     **Core Capabilities**
     - Super Agent Harness
       - Coordinates sub-agents for parallel task execution
-      - Sandbox-based code execution (Docker or local)
+      - Sandbox-based code execution (AIO container via DinD by default; image configurable via SANDBOX_IMAGE)
       - Persistent long-term memory across conversations
       - Extensible skills system (Markdown-based workflows)
     - LLM Integration
@@ -82,20 +82,12 @@ spec:
       - Custom skills for specialized workflows
       - Podcast script generation and audio synthesis
   upgradeDescription: |
-    Upgrade to DeerFlow **v2.1.1** (`beclab/harveyff-deerflow-backend` + `beclab/harveyff-deerflow-frontend`, multi-arch amd64/arm64). Runtime matches upstream: LangGraph runs inside the gateway (no standalone `:2024` sidecar); single `DATABASE_URL` for ORM + checkpointer.
-    Switch the clientproxy reverse-proxy image from Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) to the official OpenResty image `openresty/openresty:1.29.2.5-bookworm-fat`. Align nginx config mounts and log paths with the official image layout (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`), and drop Bitnami-specific `OPENRESTY_CONF_FILE` wiring.
+    **ENABLE_SANDBOX** async DinD pull (chart 1.0.8).
 
-
-    **Migrate legacy conversations (one-time, optional)** — if you used DeerFlow before the PostgreSQL migration, old chat history may still be in `<appData>/deerflowv2/deer-flow/checkpoints.db`. To bring those conversations into the sidebar:
-
-    1. Finish the upgrade and open the app, complete `/setup` to create the admin account (remember the email).
-    2. Open **Control Hub** → **Olares** → **Terminal**, then run (replace `<EMAIL>`):
-       ```
-       kubectl exec -it -n $(kubectl get pods -A -l app=deerflowv2-backend -o jsonpath='{.items[0].metadata.namespace}') deploy/deerflowv2-backend -c gateway -- sh /migrate/migrate_legacy_sqlite.sh <EMAIL>
-       ```
-    3. Refresh the browser — old conversations appear in the admin sidebar.
-
-    The script is idempotent. Attachments are not migrated. Skip on a clean install.
+    - Removed blocking `init-prefetch-sandbox`; gateway starts once dockerd is up
+    - DinD pulls `SANDBOX_IMAGE` in the background (retries forever); other features work meanwhile
+    - Sandbox tools become available after the image lands in `appData/docker`
+    - `ENABLE_SANDBOX=false` skips DinD and uses LocalSandbox + `allow_host_bash`
 
   developer: Bytedance Inc.
   website: https://deerflow.tech
@@ -108,12 +100,12 @@ spec:
   license:
     - text: MIT License
       url: https://github.com/bytedance/deer-flow?tab=MIT-1-ov-file
-  requiredMemory: 1088Mi
-  limitedMemory: 5Gi
-  requiredDisk: 512Mi
+  requiredMemory: 2Gi
+  limitedMemory: 8Gi
+  requiredDisk: 2Gi
   limitedDisk: 50Gi
-  requiredCpu: 210m
-  limitedCpu: 4
+  requiredCpu: 500m
+  limitedCpu: 6
   supportArch:
     - amd64
     - arm64
@@ -123,3 +115,18 @@ options:
     - name: olares
       type: system
       version: '>=1.12.6-0'
+envs:
+  - envName: ENABLE_SANDBOX
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "true"
+    description: "Enable AIO container sandbox via DinD (default on). When true, DinD starts and pulls SANDBOX_IMAGE in the background (non-blocking); sandbox works after the pull succeeds. When false, skips DinD and uses LocalSandbox with host bash."
+  - envName: SANDBOX_IMAGE
+    type: string
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "beclab/agent-infra-sandbox:1.11.0"
+    description: "AIO sandbox image pulled asynchronously by DinD into appData/docker and used by AioSandboxProvider. Only used when ENABLE_SANDBOX=true."
