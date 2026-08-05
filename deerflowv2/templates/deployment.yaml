@@ -25,6 +25,9 @@ since Olares always terminates TLS upstream.
     {{- $gatewayOrigins = append $gatewayOrigins (printf "https://%s" $h) -}}
   {{- end -}}
 {{- end -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $sandboxImage := index $oe "SANDBOX_IMAGE" | default "beclab/agent-infra-sandbox:1.11.0" -}}
+{{- $enableSandbox := eq (toString (index $oe "ENABLE_SANDBOX" | default "true")) "true" -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -87,17 +90,6 @@ spec:
                 # migrated config.yaml is a no-op. The deer-flow image
                 # already ships python3.12, no extra deps needed.
                 python3 /init-config/migrate_database_to_postgres.py /config/config.yaml
-                # Idempotent migration for chart >= 1.0.6: upstream PR #1547
-                # gates the bash tool behind sandbox.allow_host_bash; without
-                # the flag the LLM cannot pip/apt install runtime helpers and
-                # OCR on uploaded images silently breaks. Existing users with
-                # a 1.0.5-or-earlier config.yaml on persistent storage need
-                # the flag injected here, since the new ConfigMap default
-                # never touches their on-disk file.
-                if grep -qE '^sandbox:' /config/config.yaml && ! grep -qE 'allow_host_bash' /config/config.yaml; then
-                  echo "Migrating /config/config.yaml: enabling sandbox.allow_host_bash"
-                  sed -i '/^sandbox:$/a\  allow_host_bash: true  # auto-added by chart 1.0.6 init: restores OCR/runtime-install path (upstream PR #1547)' /config/config.yaml
-                fi
 
                 # Chart 1.0.8 additions -- aligns existing config.yaml with
                 # upstream's config.example.yaml v8. Each top-level key is
@@ -162,6 +154,12 @@ spec:
 
               fi
 
+              # Chart >= 1.0.12: always apply ENABLE_SANDBOX (default true) so a
+              # fresh copy of the AIO template is rewritten to Local when the
+              # toggle is off, and existing installs flip between AIO/Local.
+              ENABLE_SANDBOX="{{ if $enableSandbox }}true{{ else }}false{{ end }}" \
+                python3 /init-config/migrate_sandbox_to_aio.py /config/config.yaml
+
               if [ ! -f /config/extensions_config.json ]; then
                 echo "Copying initial extensions_config.json..."
                 cp /init-config/extensions_config.json /config/extensions_config.json
@@ -208,13 +206,33 @@ spec:
               mountPath: /skills
           securityContext:
             runAsUser: 0
+        {{- if $enableSandbox }}
+        # Copy docker CLI so the gateway can wait on DinD (`docker info`).
+        - name: init-docker-cli
+          image: docker.io/beclab/docker:29.3.0-dind
+          imagePullPolicy: IfNotPresent
+          command: ["cp", "/usr/local/bin/docker", "/docker-cli/docker"]
+          resources: {}
+          volumeMounts:
+            - name: docker-cli-bin
+              mountPath: /docker-cli
+        {{- end }}
       containers:
         - name: gateway
           image: docker.io/beclab/harveyff-deerflow-backend:v2.1.1
           command:
             - sh
             - -c
-            - "cd /app/backend && PYTHONPATH=. uv run --no-sync uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers 2"
+            - |
+              set -e
+              {{- if $enableSandbox }}
+              echo "Waiting for DinD (DOCKER_HOST=$DOCKER_HOST)..."
+              until docker info >/dev/null 2>&1; do sleep 1; done
+              echo "DinD ready; starting gateway"
+              {{- else }}
+              echo "ENABLE_SANDBOX=false; starting gateway without DinD"
+              {{- end }}
+              cd /app/backend && PYTHONPATH=. uv run --no-sync uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001 --workers 2
           # Delay SIGTERM by 5s so K8s has time to (1) flip the pod's
           # readiness off, (2) propagate the endpoint removal to
           # kube-proxy / clientproxy, and (3) drain any in-flight
@@ -273,10 +291,20 @@ spec:
               value: "true"
             - name: DEER_FLOW_HOME
               value: "/data/deer-flow"
+            # Same path in gateway + DinD so AioSandboxProvider bind-mounts
+            # (host_base_dir/threads/... → sandbox /mnt/user-data) resolve
+            # inside dockerd. Classic DooD uses a different host path; with
+            # in-pod DinD the "host" IS the DinD filesystem.
+            - name: DEER_FLOW_HOST_BASE_DIR
+              value: "/data/deer-flow"
             - name: DEER_FLOW_CONFIG_PATH
               value: "/config/config.yaml"
             - name: DEER_FLOW_EXTENSIONS_CONFIG_PATH
               value: "/config/extensions_config.json"
+            {{- if $enableSandbox }}
+            - name: DOCKER_HOST
+              value: "tcp://127.0.0.1:2375"
+            {{- end }}
             - name: PGID
               value: "1000"
             - name: PUID
@@ -339,6 +367,12 @@ spec:
               mountPath: /data/deer-flow
             - name: skills-volume
               mountPath: /app/skills
+            {{- if $enableSandbox }}
+            - name: docker-cli-bin
+              mountPath: /usr/local/bin/docker
+              subPath: docker
+              readOnly: true
+            {{- end }}
             # On-demand legacy SQLite -> postgres migration tool. Mounted
             # into the gateway container; the operator runs it via
             # `kubectl exec deploy/... -c gateway`.
@@ -349,6 +383,98 @@ spec:
             # script source and operator usage instructions.
             - name: migrate-vol
               mountPath: /migrate
+
+        {{- if $enableSandbox }}
+        # Docker-in-Docker sidecar for AioSandboxProvider.
+        # dockerd becomes Ready quickly; SANDBOX_IMAGE is pulled in the
+        # background with retries so a cold ~3.5GiB pull never blocks
+        # gateway / other features. Sandbox tools work once the image lands.
+        - name: docker-dind
+          image: docker.io/beclab/docker:29.3.0-dind
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+            - name: SANDBOX_IMAGE
+              value: {{ $sandboxImage | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # --tls=false skips Docker 29's intentional ~15s insecure-TCP
+              # startup delay. Clear stale containerd locks from a previous
+              # Recreate/kill.
+              rm -f /var/lib/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock \
+                    /var/lib/docker/containerd/daemon/io.containerd.metadata.v1.bolt/*.lock 2>/dev/null || true
+              dockerd \
+                --host tcp://0.0.0.0:2375 \
+                --host unix:///var/run/docker.sock \
+                --mtu=1450 \
+                --tls=false &
+              DOCKERD_PID=$!
+              i=0
+              until docker info >/dev/null 2>&1; do
+                i=$((i+1))
+                if [ "$i" -ge 90 ]; then
+                  echo "[dind] dockerd failed to become ready within 90s" >&2
+                  kill "$DOCKERD_PID" 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 1
+              done
+              echo "[dind] dockerd ready; pulling sandbox image in background ($SANDBOX_IMAGE)"
+              (
+                if docker image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1; then
+                  echo "[dind] sandbox image already present"
+                  exit 0
+                fi
+                attempt=0
+                while true; do
+                  attempt=$((attempt+1))
+                  echo "[dind] pulling $SANDBOX_IMAGE (attempt $attempt)..."
+                  if docker pull "$SANDBOX_IMAGE"; then
+                    echo "[dind] sandbox image ready"
+                    exit 0
+                  fi
+                  echo "[dind] pull failed; sandbox unavailable until next retry (30s)"
+                  sleep 30
+                done
+              ) &
+              wait $DOCKERD_PID
+          ports:
+            - containerPort: 2375
+          startupProbe:
+            exec:
+              command: ["docker", "info"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["docker", "info"]
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 15
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1500m"
+              memory: 3Gi
+          volumeMounts:
+            - name: dind-storage
+              mountPath: /var/lib/docker
+            - name: data-volume
+              mountPath: /data/deer-flow
+            - name: skills-volume
+              mountPath: /app/skills
+        {{- end }}
       volumes:
         - name: init-config-vol
           configMap:
@@ -380,6 +506,14 @@ spec:
           hostPath:
             path: '{{ .Values.userspace.appData }}/skills'
             type: DirectoryOrCreate
+        {{- if $enableSandbox }}
+        - name: docker-cli-bin
+          emptyDir: {}
+        - name: dind-storage
+          hostPath:
+            path: '{{ .Values.userspace.appData }}/docker'
+            type: DirectoryOrCreate
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
