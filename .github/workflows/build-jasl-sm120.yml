@@ -11,6 +11,12 @@ on:
       - "scripts/build-jasl-vllm-sm120.sh"
   workflow_dispatch:
     inputs:
+      action:
+        description: build image, or only make GHCR package public
+        required: true
+        default: build
+        type: choice
+        options: [build, make-public]
       jasl_ref:
         description: jasl/vllm git SHA or tag
         required: true
@@ -29,7 +35,25 @@ permissions:
   packages: write
 
 jobs:
+  make-public:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'make-public'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set package visibility public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          OWNER="${{ github.repository_owner }}"
+          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          gh api --method PUT \
+            "/orgs/${OWNER}/packages/container/vllm-jasl-dsv4/visibility" \
+            -f visibility=public
+          sleep 3
+          curl -fsSIL "https://ghcr.io/v2/${OWNER_LC}/vllm-jasl-dsv4/manifests/sm120-20260804" | head -n 15
+
   build:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'make-public')
     # Above-Os org runner (~64Gi). Personal forks cannot see this label.
     runs-on: linux-ubuntu22.04
     timeout-minutes: 420
