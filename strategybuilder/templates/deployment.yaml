@@ -1,45 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: strategybuilderdev
+  name: strategybuilder
   namespace: '{{ .Release.Namespace }}'
   labels:
-    app.kubernetes.io/name: strategybuilderdev
+    app.kubernetes.io/name: strategybuilder
     app.kubernetes.io/instance: '{{ .Release.Name }}'
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.strategybuilder.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: strategybuilderdev
+      app.kubernetes.io/name: strategybuilder
       app.kubernetes.io/instance: '{{ .Release.Name }}'
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: strategybuilderdev
+        app.kubernetes.io/name: strategybuilder
         app.kubernetes.io/instance: '{{ .Release.Name }}'
     spec:
       containers:
         - name: strategybuilder
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          workingDir: /runtime
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -eu
-              rm -rf /runtime/src
-              mkdir -p /runtime/src /app/data/strategies /app/data/freqtrade/user_data/strategies /app/data/custom-outputs
-              base64 -d /source/strategybuilder-app.tar.gz.b64 > /tmp/strategybuilder-app.tar.gz
-              tar -xzf /tmp/strategybuilder-app.tar.gz -C /runtime/src --strip-components=1
-              cd /runtime/src
-              python - <<'PY'
-              import fastapi, uvicorn, jinja2, pydantic, multipart
-              print('Strategy Builder dependencies OK:', fastapi.__version__, pydantic.__version__)
-              PY
-              exec uvicorn app.main:app --host 0.0.0.0 --port {{ .Values.service.targetPort }}
           ports:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
@@ -66,34 +50,24 @@ spec:
               path: /api/health
               port: {{ .Values.service.targetPort }}
               scheme: HTTP
-            initialDelaySeconds: 15
+            initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 90
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /api/health
               port: {{ .Values.service.targetPort }}
               scheme: HTTP
-            initialDelaySeconds: 60
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 5
           volumeMounts:
-            - name: strategybuilder-runtime
-              mountPath: /runtime
-            - name: strategybuilder-source
-              mountPath: /source
-              readOnly: true
             - name: strategybuilder-data
               mountPath: /app/data
       restartPolicy: Always
       volumes:
-        - name: strategybuilder-source
-          configMap:
-            name: '{{ .Release.Name }}-source'
-        - name: strategybuilder-runtime
-          emptyDir: {}
         - name: strategybuilder-data
           hostPath:
-            path: '{{ .Values.userspace.appData | default "/tmp/strategybuilderdevdata" }}'
+            path: '{{ .Values.userspace.appData | default "/tmp/strategybuilderdata" }}'
             type: DirectoryOrCreate
