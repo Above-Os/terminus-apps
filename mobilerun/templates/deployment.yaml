@@ -1,0 +1,272 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $provider := index $oe "MOBILERUN_LLM_PROVIDER" | default "OpenAILike" -}}
+{{- $model := index $oe "MOBILERUN_LLM_MODEL" | default "qwen3-vl:8b" -}}
+{{- $baseUrl := index $oe "MOBILERUN_LLM_BASE_URL" | default "" -}}
+{{- $apiKey := index $oe "MOBILERUN_LLM_API_KEY" | default "" -}}
+{{- $vision := index $oe "MOBILERUN_VISION" | default "false" -}}
+{{- $maxSteps := index $oe "MOBILERUN_MAX_STEPS" | default "15" -}}
+{{- $device := index $oe "MOBILERUN_DEVICE" | default "" -}}
+{{- if not $device -}}
+{{- $appDomainENV := split "," .Values.domain.terminal -}}
+{{- $appDomain := index $appDomainENV "_0" -}}
+{{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
+{{- $device = printf "beb583c3.%s.%s:46878" .Values.bfl.username $topDomain -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: mobilerun
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: {{ .Values.workloads.mobilerun.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: mobilerun
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: mobilerun
+        bytetrade.io/terminal: mobilerun
+    spec:
+      securityContext:
+        fsGroup: 1000
+
+      initContainers:
+        # hostPath volumes are created root-owned, so hand the tree to the
+        # image's non-root `mobilerun` user (uid/gid 1000) before anything
+        # tries to write ADB keys or the generated config.
+        - name: init-chmod-data
+          image: "beclab/ubuntu:24.04"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /opt/data/.config/mobilerun /opt/data/.android /opt/data/.local/bin
+              chown -R 1000:1000 /opt/data
+              chmod -R 0755 /opt/data
+              echo "[init-chmod-data] /opt/data owned by 1000:1000"
+          resources: {}
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+
+        # Regenerate config.yaml on every start so that edits to the app's
+        # environment variables take effect. Provider kwargs differ per
+        # backend: llama-index's Ollama class takes `base_url`, while the
+        # OpenAI-compatible classes take `api_base`.
+        - name: init-config
+          image: "ghcr.io/droidrun/mobilerun:v0.6.15"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /opt/data
+            - name: MOBILERUN_LLM_PROVIDER
+              value: {{ $provider | quote }}
+            - name: MOBILERUN_LLM_MODEL
+              value: {{ $model | quote }}
+            - name: MOBILERUN_LLM_BASE_URL
+              value: {{ $baseUrl | quote }}
+            {{- if $apiKey }}
+            - name: MOBILERUN_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Release.Name }}-secrets
+                  key: MOBILERUN_LLM_API_KEY
+            {{- end }}
+            - name: MOBILERUN_DEVICE
+              value: {{ $device | quote }}
+            - name: MOBILERUN_VISION
+              value: {{ $vision | quote }}
+            - name: MOBILERUN_MAX_STEPS
+              value: {{ $maxSteps | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+
+              CFG=/opt/data/.config/mobilerun/config.yaml
+              mkdir -p /opt/data/.config/mobilerun
+
+              case "$(echo "${MOBILERUN_VISION:-false}" | tr '[:upper:]' '[:lower:]')" in
+                true|1|yes|on) VISION=true ;;
+                *) VISION=false ;;
+              esac
+
+              STEPS="${MOBILERUN_MAX_STEPS:-15}"
+              case "$STEPS" in
+                ''|*[!0-9]*) STEPS=15 ;;
+              esac
+
+              PROVIDER="${MOBILERUN_LLM_PROVIDER:-OpenAILike}"
+              MODEL="${MOBILERUN_LLM_MODEL:-}"
+              BASE_URL="${MOBILERUN_LLM_BASE_URL:-}"
+              API_KEY="${MOBILERUN_LLM_API_KEY:-}"
+
+              # LLMProfile declares base_url/api_base as top-level fields; only
+              # the api_key belongs in kwargs, where it also short-circuits the
+              # provider's environment-variable key lookup.
+              emit_profile() {
+                profile="$1"
+                temp="$2"
+                {
+                  printf '  %s:\n' "$profile"
+                  printf '    provider: "%s"\n' "$PROVIDER"
+                  printf '    model: "%s"\n' "$MODEL"
+                  printf '    temperature: %s\n' "$temp"
+                  if [ -n "$BASE_URL" ]; then
+                    if [ "$PROVIDER" = "Ollama" ]; then
+                      printf '    base_url: "%s"\n' "$BASE_URL"
+                    else
+                      printf '    api_base: "%s"\n' "$BASE_URL"
+                    fi
+                  fi
+                  if [ -n "$API_KEY" ] && [ "$PROVIDER" != "Ollama" ]; then
+                    printf '    kwargs:\n'
+                    printf '      api_key: "%s"\n' "$API_KEY"
+                  fi
+                } >> "$CFG"
+              }
+
+              # _version is mandatory: the loader rejects any config without it
+              # as outdated. 7 is the schema version shipped with this image;
+              # older values would be migrated and rewritten on load.
+              cat > "$CFG" <<EOF
+              _version: 7
+              agent:
+                name: mobilerun
+                max_steps: ${STEPS}
+                reasoning: false
+                streaming: true
+                fast_agent:
+                  vision: ${VISION}
+                manager:
+                  vision: ${VISION}
+                executor:
+                  vision: ${VISION}
+              device:
+                serial: "${MOBILERUN_DEVICE}"
+                platform: android
+                use_tcp: true
+                portal_mode: auto
+                auto_setup: true
+              logging:
+                debug: false
+                save_trajectory: none
+                trajectory_path: /home/mobilerun/trajectories
+              telemetry:
+                enabled: false
+              llm_profiles:
+              EOF
+
+              emit_profile fast_agent 0.2
+              emit_profile manager 0.2
+              emit_profile executor 0.1
+              emit_profile app_opener 0.0
+              emit_profile structured_output 0.0
+
+              # Never dump the file itself; it carries the API key.
+              echo "[init-config] wrote $CFG for provider $PROVIDER model $MODEL"
+
+              # Interactive shells opened from the web terminal must find the
+              # mobilerun entrypoint, which lives in the image's venv.
+              PROFILE=/opt/data/.bashrc
+              if ! grep -qs 'mobilerun/.venv/bin' "$PROFILE" 2>/dev/null; then
+                echo 'export PATH=/mobilerun/.venv/bin:$HOME/.local/bin:$PATH' >> "$PROFILE"
+              fi
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+
+      containers:
+        # Long-lived workspace. The image's entrypoint is a one-shot CLI, so
+        # it is replaced with a keepalive; the terminal sidecar execs in here.
+        - name: mobilerun
+          image: "ghcr.io/droidrun/mobilerun:v0.6.15"
+          imagePullPolicy: IfNotPresent
+          workingDir: /home/mobilerun
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: TERM
+              value: xterm-256color
+            - name: HOME
+              value: /home/mobilerun
+            - name: PATH
+              value: "/mobilerun/.venv/bin:/home/mobilerun/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            - name: MOBILERUN_CONFIG
+              value: /home/mobilerun/.config/mobilerun/config.yaml
+            - name: MOBILERUN_LLM_PROVIDER
+              value: {{ $provider | quote }}
+            - name: MOBILERUN_LLM_MODEL
+              value: {{ $model | quote }}
+            - name: MOBILERUN_LLM_BASE_URL
+              value: {{ $baseUrl | quote }}
+            {{- if $apiKey }}
+            - name: MOBILERUN_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Release.Name }}-secrets
+                  key: MOBILERUN_LLM_API_KEY
+            {{- end }}
+            - name: MOBILERUN_DEVICE
+              value: {{ $device | quote }}
+            - name: MOBILERUN_VISION
+              value: {{ $vision | quote }}
+            - name: MOBILERUN_MAX_STEPS
+              value: {{ $maxSteps | quote }}
+          command:
+            - bash
+            - -c
+            - |
+              if [ -n "${MOBILERUN_DEVICE}" ]; then
+                adb connect "${MOBILERUN_DEVICE}" || true
+              fi
+              exec sleep infinity
+          resources:
+            limits:
+              cpu: "4"
+              memory: 6Gi
+            requests:
+              cpu: 100m
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /home/mobilerun
+              name: app-data-home
+
+      restartPolicy: Always
+      volumes:
+        - name: app-data-home
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/home"
+            type: DirectoryOrCreate

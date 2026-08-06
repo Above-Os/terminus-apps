@@ -1,0 +1,35 @@
+metadata:
+  title: Mobilerun
+  description: 用自然语言和本地大模型操控安卓设备
+entrances:
+- name: terminal
+  title: Mobilerun 命令行
+spec:
+  fullDescription: |
+    **概述**
+    Mobilerun 是一个开源框架，用大模型智能体来操控安卓设备。它可以读取无障碍树、理解截图，执行点击、滑动、输入等操作，规划多步骤任务并汇报结果——这一切都只需要用自然语言下达指令。
+
+    本 Olares 应用把官方 `mobilerun` 命令行工具封装进网页终端，通过网络 ADB 连接 redroid 实例。所有环节都跑在你自己的 Olares 集群里：智能体调用的是本地部署的大模型，提示词和截图都不会离开你的设备。
+
+    **前置条件**
+    使用前请先安装以下两个应用：
+    - **redroid** —— Mobilerun 操控的安卓实例，通过 5555 端口提供 ADB 服务。
+    - **任一 Ollama 应用**（例如 `Qwen3.5 9B Q4_K_M (Ollama)`）—— 本地大模型后端。如果打算开启 `MOBILERUN_VISION`，建议选择支持视觉的模型。
+
+    **配置说明**
+    在应用设置中填写以下环境变量：
+    - `MOBILERUN_LLM_BASE_URL` —— 本地大模型的 OpenAI 兼容接口地址，例如 `http://sharedentrances-api.ollamaqwen359bv2-shared.svc.cluster.local/v1`
+    - `MOBILERUN_LLM_MODEL` —— 该接口实际提供的模型名称
+    - `MOBILERUN_DEVICE` —— 目标设备的 ADB 地址。留空则自动指向你自己账号下安装的 redroid 应用。
+
+    修改上述任意变量都会重启应用并重新生成 `~/.config/mobilerun/config.yaml`。
+
+    **快速上手**
+    打开 `Mobilerun 命令行` 入口，依次执行：
+    - `mobilerun devices` —— 确认 redroid 实例已连接
+    - `mobilerun setup` —— 在设备上安装 Portal APK
+    - `mobilerun ping` —— 验证 Portal 是否可用
+    - `mobilerun run "打开设置并告诉我安卓版本号"`
+
+    **其他说明**
+    家目录持久化在应用数据目录下，ADB 密钥、生成的配置文件以及保存的执行轨迹都会在重启后保留。匿名遥测默认关闭。

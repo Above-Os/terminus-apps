@@ -1,0 +1,140 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  mobilerun: 1
+  terminal: 1
+metadata:
+  name: mobilerun
+  icon: https://app.cdn.olares.com/appstore/mobilerun/icon.png
+  description: Control Android devices with natural language using local LLMs
+  appid: mobilerun
+  title: Mobilerun
+  version: 0.0.1
+  categories:
+  - AI
+  - Developer Tools
+
+entrances:
+- name: terminal
+  host: terminal
+  port: 80
+  title: Mobilerun CLI
+  icon: https://app.cdn.olares.com/appstore/mobilerun/icon.png
+  openMethod: window
+  authLevel: internal
+spec:
+  versionName: '0.6.15'
+  fullDescription: |
+    **Overview**
+    Mobilerun is an open-source framework that drives Android devices with LLM agents. It inspects the accessibility tree, reads screenshots, taps, swipes, types, plans multi-step workflows, and reports results — all from natural language instructions.
+
+    This Olares package wraps the official `mobilerun` CLI in a web terminal and targets a redroid instance over network ADB. Everything runs on your own Olares cluster: the agent talks to a locally deployed LLM, so no prompt or screenshot leaves your machine.
+
+    **Prerequisites**
+    Install these two apps before using Mobilerun:
+    - **redroid** — the Android instance that Mobilerun controls. It exposes ADB on port 5555.
+    - **An Ollama app** (for example `Qwen3.5 9B Q4_K_M (Ollama)`) — the local LLM backend. A vision-capable model is recommended if you plan to enable `MOBILERUN_VISION`.
+
+    **Configuration**
+    Set these environment variables in the app settings:
+    - `MOBILERUN_LLM_BASE_URL` — OpenAI-compatible endpoint of your local LLM, for example `http://sharedentrances-api.ollamaqwen359bv2-shared.svc.cluster.local/v1`
+    - `MOBILERUN_LLM_MODEL` — model name exposed by that endpoint
+    - `MOBILERUN_DEVICE` — ADB address of the device. Leave it empty to auto-target the redroid app installed under your own account.
+
+    Changing any of these restarts the workload and regenerates `~/.config/mobilerun/config.yaml`.
+
+    **Getting Started**
+    Open the `Mobilerun CLI` entrance and run:
+    - `mobilerun devices` — confirm the redroid instance is connected
+    - `mobilerun setup` — install the Portal APK on the device
+    - `mobilerun ping` — verify the Portal is reachable
+    - `mobilerun run "Open the settings app and tell me the Android version"`
+
+    **Notes**
+    The home directory is persisted under app data, so ADB keys, the generated config, and saved trajectories survive restarts. Anonymous telemetry is disabled by default.
+  developer: droidrun
+  website: https://mobilerun.ai
+  sourceCode: https://github.com/droidrun/mobilerun
+  submitter: Olares
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://docs.mobilerun.ai
+  license:
+  - text: MIT
+    url: https://github.com/droidrun/mobilerun/blob/main/LICENSE
+  requiredMemory: 1Gi
+  limitedMemory: 6Gi
+  requiredDisk: 2Gi
+  limitedDisk: 20Gi
+  requiredCpu: 200m
+  limitedCpu: 4
+  supportArch:
+  - amd64
+  - arm64
+permission:
+  appData: true
+  appCache: true
+options:
+  apiTimeout: 0
+  allowedOutboundPorts:
+  - 80
+  - 443
+  - 5555
+  - 11434
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
+envs:
+- envName: MOBILERUN_LLM_PROVIDER
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "OpenAILike"
+  description: "LLM provider used by every agent. Keep OpenAILike for an OpenAI-compatible local endpoint (Ollama proxy, LM Studio, vLLM). Other accepted values include Ollama, OpenAI, GoogleGenAI, Anthropic, DeepSeek and OpenRouter."
+- envName: MOBILERUN_LLM_MODEL
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "qwen3-vl:8b"
+  description: "Model name exposed by the local endpoint, e.g. qwen3-vl:8b or qwen3.5:9b. Must match a model your LLM app actually serves."
+- envName: MOBILERUN_LLM_BASE_URL
+  type: url
+  required: true
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "OpenAI-compatible base URL of the local LLM, e.g. http://sharedentrances-api.ollamaqwen359bv2-shared.svc.cluster.local/v1 for an Olares-hosted Ollama app."
+- envName: MOBILERUN_LLM_API_KEY
+  type: password
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "ollama"
+  description: "Token sent to the local endpoint. Local gateways ignore the value but usually require a non-empty placeholder."
+- envName: MOBILERUN_DEVICE
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "ADB address of the target device, e.g. redroid-svc.redroid-<username>.svc.cluster.local:5555. Leave empty to target the redroid app installed under your own Olares account."
+- envName: MOBILERUN_VISION
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Send screenshots to the model in addition to the accessibility tree. Requires a vision-capable local model and noticeably more VRAM."
+- envName: MOBILERUN_MAX_STEPS
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "15"
+  description: "Maximum number of agent steps per task before Mobilerun gives up."
