@@ -2,7 +2,10 @@
   # 1) First deploy: init-chmod-data creates .openclaw dir, copies openclaw.json from ConfigMap when missing, sets ownership.
   # 2) Runtime: app reads/writes openclaw.json on app-data-config; changes persist across restarts.
   # 3) Helm upgrade: init only copies default when file is missing; never overwrites.
-{{- $openclawImage := "beclab/openclaw-openclaw:2026.7.1" -}}
+{{- $openclawImage := "beclab/openclaw-openclaw:2026.7.1-1" -}}
+{{- $brewBaseImage := "beclab/harveyff-openclaw-brew-base:2026.8.7-2-cli" -}}
+{{- $brewBinPath := "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/linuxbrew/.linuxbrew/opt/unzip/bin" -}}
+{{- $containerPath := printf "%s:/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" $brewBinPath -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -31,7 +34,7 @@ spec:
 
       initContainers:
         - name: init-install-brew
-          image: "beclab/harveyff-openclaw-brew-base:2026.8.7-cli"
+          image: "{{ $brewBaseImage }}"
           securityContext:
             runAsUser: 0
           command: ["/bin/bash", "-c"]
@@ -46,6 +49,18 @@ spec:
                 echo "[init-brew] done"
               fi
               chown -R 1000:1000 /home/linuxbrew
+              # Homebrew 4.x tap trust: upstream skills (camsnap, nano-pdf, …) use steipete/tap.
+              export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+              export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+              export HOMEBREW_NO_AUTO_UPDATE=1
+              if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+                su linuxbrew -s /bin/bash -c \
+                  'export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"; \
+                   export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew; \
+                   export HOMEBREW_NO_AUTO_UPDATE=1; \
+                   brew trust steipete/tap 2>/dev/null || true'
+                echo "[init-brew] steipete/tap trust seeded (idempotent)"
+              fi
           resources: {}
           volumeMounts:
             - mountPath: /home/linuxbrew
@@ -120,7 +135,7 @@ spec:
         # user/bundled skills are never touched; skipped if the image has no
         # /skills-staging.
         - name: init-skills
-          image: "beclab/harveyff-openclaw-brew-base:2026.8.7-cli"
+          image: "{{ $brewBaseImage }}"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -179,7 +194,7 @@ spec:
             - name: DOCKER_HOST
               value: "tcp://localhost:2375"
             - name: PATH
-              value: "/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin"
+              value: "{{ $containerPath }}"
             - name: CUSTOM_API_KEY
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
@@ -285,7 +300,7 @@ spec:
             - name: OPENCLAW_SYSTEMD_UNIT
               value: "openclaw-gateway.service"
             - name: PATH
-              value: "/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin"
+              value: "{{ $containerPath }}"
             - name: CUSTOM_API_KEY
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
