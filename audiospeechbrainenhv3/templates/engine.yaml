@@ -1,0 +1,211 @@
+{{- /* Pyannote/torch engine; sizes GPU from resource envs. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- /* Bare MODEL_SUPPORTS tokens expand to supports_* for llm-init and the engine. */ -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ($oe.MODEL_SUPPORTS | default "diar") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $supportsRaw := join "," $supportsKeys -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-pyannote:v1.0.0" -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.CPU_LIMIT | default "2") -}}
+{{- $memLimit := trim ($oe.MEMORY_LIMIT | default "6Gi") -}}
+{{- /* GPU optional: empty or "0" => CPU-only. */ -}}
+{{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "2Gi") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- /* Derive ENHANCE_CHUNK_S from GPU quota (one window peak VRAM). */ -}}
+{{- $enhanceChunk := trim ($oe.ENHANCE_CHUNK_S | default "") -}}
+{{- if and (eq $enhanceChunk "") $wantGpu -}}
+{{- $g := int $gpuMiB -}}
+{{- if ge $g 4000 -}}{{- $enhanceChunk = "120" -}}
+{{- else if ge $g 2000 -}}{{- $enhanceChunk = "60" -}}
+{{- else -}}{{- $enhanceChunk = "30" -}}{{- end -}}
+{{- end -}}
+{{- if eq $enhanceChunk "" -}}{{- $enhanceChunk = "30" -}}{{- end -}}
+{{- $segBatch := trim ($oe.DIAR_SEG_BATCH | default "") -}}
+{{- $embBatch := trim ($oe.DIAR_EMB_BATCH | default "") -}}
+{{- if and $wantGpu (or (eq $segBatch "") (eq $embBatch "")) -}}
+{{- $g := int $gpuMiB -}}
+{{- $tier := "4" -}}
+{{- if ge $g 16000 -}}{{- $tier = "32" -}}
+{{- else if ge $g 8000 -}}{{- $tier = "16" -}}
+{{- else if ge $g 4000 -}}{{- $tier = "8" -}}{{- end -}}
+{{- if eq $segBatch "" -}}{{- $segBatch = $tier -}}{{- end -}}
+{{- if eq $embBatch "" -}}{{- $embBatch = $tier -}}{{- end -}}
+{{- end -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audiospeechbrainenhv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+            defaultMode: 0555
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/pyannote.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: audio
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: WRAPPER_PORT
+              value: "{{ $enginePort }}"
+            - name: ENHANCE_CHUNK_S
+              value: "{{ $enhanceChunk }}"
+{{- if $segBatch }}
+            - name: DIAR_SEG_BATCH
+              value: "{{ $segBatch }}"
+{{- end }}
+{{- if $embBatch }}
+            - name: DIAR_EMB_BATCH
+              value: "{{ $embBatch }}"
+{{- end }}
+{{- if $oe.ENHANCE_AMP }}
+            - name: ENHANCE_AMP
+              value: "{{ $oe.ENHANCE_AMP }}"
+{{- end }}
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+{{- /* Optional image knobs; unset means the image decides. */ -}}
+{{- range $k := list "LOAD_TIMEOUT_S" "TASK_TTL_S" }}
+{{- if get $oe $k }}
+            - name: {{ $k }}
+              value: "{{ get $oe $k }}"
+{{- end }}
+{{- end }}
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # No readinessProbe; Ready while downloading; llm-init gates /v1/*.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP
