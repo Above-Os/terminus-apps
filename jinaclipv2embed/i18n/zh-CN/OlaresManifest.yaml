@@ -1,0 +1,29 @@
+metadata:
+  title: Jina Clip V2 Embed
+  description: "基于 IREmbeddingServer 的 Jina CLIP v2 split 图文向量服务（OpenVINO / ONNX）"
+
+spec:
+  fullDescription: |
+    **Jina CLIP v2 split** 双塔图文向量服务，由 EmbeddingServer 提供支持。在 8080 端口提供兼容 OpenAI 的 `/v1/embeddings`（文本与图片）和 `/v1/models` 接口。
+
+    **加速器模式**
+    | Olares 模式 | 镜像 | 后端 | `EMBED_DEVICE` |
+    |-------------|------|------|----------------|
+    | `intel` | `embed-server:v0.1.2-ov-intel` | OpenVINO IR | `igpu` |
+    | `cpu` | `embed-server:v0.1.2-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `embed-server:v0.1.2-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
+    | `nvidia-gb10` | `embed-server:v0.1.2-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
+
+    **模型下载**
+    首次启动时，llm-init 从统一 Hugging Face 仓库下载到 App Common 缓存：
+    - [beclab/jina-clip-v2-split](https://huggingface.co/beclab/jina-clip-v2-split)
+    - `intel` 模式：仅 `openvino/` 子目录（约 9GB）
+    - 其他模式：仅 `onnx/` 子目录
+
+    **设备挂载**
+    - `intel`：`/dev/dri`, `/sys/class/drm` 用于 Intel iGPU
+    - `nvidia` / `nvidia-gb10`：通过 Olares 调度器注入 GPU
+
+    **技术栈**
+    - **embed-server**（`beclab/embed-server:v0.1.2`，内部 8080）：Rust CLIP 推理。
+    - **llm-init**（`beclab/llm-init:v1.3.5`，`ENGINE_KIND=clipembed`，8090）：模型下载、进度 UI 与 OpenAI API 代理。
