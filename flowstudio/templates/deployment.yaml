@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: {{ .Values.workloads.flowstudio.replicaCount }}
-  # hostPath 与滚动更新不兼容。
+  # hostPath volumes cannot roll safely.
   strategy:
     type: Recreate
   selector:
@@ -21,7 +21,7 @@ spec:
       serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
       {{- end }}
       initContainers:
-      # appData 根属 root；uid1000 需 chown（OPA 仅允许 beclab busybox 以 root 跑）。
+      # appData is root-owned; uid 1000 needs chown (OPA allows only beclab busybox as root).
       - name: fix-userdata-perms
         image: beclab/aboveos-busybox:1.37.0
         securityContext:
@@ -31,7 +31,7 @@ spec:
         - name: app-data
           mountPath: /appdata
       {{- if (default dict .Values.dev).hotReload }}
-      # 热重载：勿用 subPath 预建目录（会属 root）。已存在则不覆盖。
+      # Do not create via subPath first — kubelet would own it as root.
       - name: fix-dev-perms
         image: beclab/aboveos-busybox:1.37.0
         securityContext:
@@ -59,18 +59,18 @@ spec:
         image: {{ coalesce .Values.appImage .Values.image }}
         imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
         {{- if (default dict .Values.dev).hotReload }}
-        # 只 watch Python 包，勿 watch /app/static（易重载风暴 OOM）。
-        # graceful 超时兜底：重载时若仍有未结束的连接任务，超时即强退，避免热重载死等。
+        # Watch /app/app only — watching /app/static causes reload storms / OOM.
+        # --timeout-graceful-shutdown: force-exit if open work would hang reload.
         command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/app", "--timeout-graceful-shutdown", "20"]
         {{- end }}
         ports:
         - containerPort: 8080
         resources:
           requests:
-            cpu: 100m
+            cpu: 200m
             memory: 512Mi
           limits:
-            cpu: "2"
+            cpu: "4"
             memory: 6Gi
         env:
         - name: STATIC_DIR
@@ -100,7 +100,7 @@ spec:
         - name: OLARES_GPU_VENDOR
           value: {{ .Values.GPU.Type | default .Values.gpu | default "" | quote }}
         {{- end }}
-        # 勿用 gpumem-percentage。
+        # Absolute gpumem only — never gpumem-percentage.
         - name: ENGINE_GPU_EXCLUSIVE
           value: {{ (default dict .Values.dynamicEngine).exclusiveGpu | default true | quote }}
         - name: ENGINE_GPU_MEM_MIB
@@ -109,10 +109,18 @@ spec:
           value: {{ (default dict .Values.dynamicEngine).idleTtlSeconds | default 900 | quote }}
         - name: ENGINE_STARTUP_REAP
           value: {{ (default dict .Values.dynamicEngine).startupReap | default "preserve_active" | quote }}
-        - name: ENGINE_WS_IDLE_TIMEOUT
-          value: {{ (default dict .Values.dynamicEngine).wsIdleTimeoutSeconds | default 300 | quote }}
-        - name: ENGINE_EXEC_TIMEOUT
-          value: {{ (default dict .Values.dynamicEngine).execTimeoutSeconds | default 600 | quote }}
+        {{- if (default dict .Values.dev).hotReload }}
+        # Keep engines across uvicorn reloads; production stop still cold-reaps.
+        - name: ENGINE_SHUTDOWN_REAP
+          value: "false"
+        - name: SHOW_TEST_WORKFLOW_TEMPLATES
+          value: "true"
+        {{- else }}
+        - name: ENGINE_SHUTDOWN_REAP
+          value: {{ (default dict .Values.dynamicEngine).shutdownReap | default true | quote }}
+        - name: SHOW_TEST_WORKFLOW_TEMPLATES
+          value: "false"
+        {{- end }}
         - name: APP_COMMON_HOST_PATH
           value: {{ .Values.userspace.appCommon | quote }}
         - name: APP_DATA_HOST_PATH
@@ -120,7 +128,7 @@ spec:
         - name: NODE_AUTO_INSTALL
           value: {{ (default dict .Values.nodeInstall).enabled | default false | quote }}
         {{- end }}
-        # 私有入口属主回退（网关头缺失时）；须显式允许假身份。
+        # Private entrance: owner fallback when gateway headers are missing.
         - name: ALLOW_DEV_FAKE_AUTH
           value: "true"
         - name: DEV_FAKE_OWNER_ID
@@ -148,7 +156,7 @@ spec:
         - name: USER_DATA_DIR
           value: /data/appData/userData
         - name: MODELS_DIR
-          value: /data/appCommon/comfyui
+          value: /data/appCommon/comfyui/model
         - name: PUBLIC_BASE_URL
           value: "https://{{ .Values.domain.flowstudio }}"
         - name: CORS_ORIGINS
@@ -163,7 +171,7 @@ spec:
           mountPath: /app
           subPath: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" }}
         {{- end }}
-        # TCP：envoy ext_authz 会拦 httpGet /healthz → 403 → 421。
+        # httpGet /healthz is blocked by envoy ext_authz (403 → 421); use TCP.
         readinessProbe:
           tcpSocket:
             port: 8080

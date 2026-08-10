@@ -1,29 +1,30 @@
-# 应用自有可覆盖项。系统注入（postgres / userspace / user / domain）勿在此重复。
-# Olares upgrade 会 reuse values：换镜像请 bump appImage（模板优先于 image）。
+# App-owned overrides only — do not duplicate system-injected
+# postgres / userspace / user / domain.
+# Upgrade reuses values: bump appImage (templates prefer it over image).
 
-appImage: docker.io/luolong01/flowstudio:0.1.17
-image: docker.io/luolong01/flowstudio:0.1.17
+appImage: docker.io/luolong01/flowstudio:0.3.24
+image: docker.io/luolong01/flowstudio:0.3.24
 imagePullPolicy: IfNotPresent
 
-engineImage: docker.io/luolong01/flowstudio:engine-1.0.1
+engineImage: docker.io/luolong01/flowstudio:engine-1.0.2
 engineImagePullPolicy: IfNotPresent
-# 留空则 AMD 不可用（不静默降级到 CUDA）。
+# Empty = AMD unavailable (never fall back to CUDA silently).
 engineImageAmd: docker.io/luolong01/flowstudio:engine-1.0.1-rocm
 
-# 动态引擎（默认）；exclusiveGpu 勿用 gpumem-percentage。
+# exclusiveGpu: absolute gpumem only — never gpumem-percentage.
 dynamicEngine:
   enabled: true
   serviceAccountName: flowstudio-engine-orchestrator
   exclusiveGpu: true
   gpuMemMiB: 6144
   idleTtlSeconds: 900
-  wsIdleTimeoutSeconds: 300
-  execTimeoutSeconds: 600
   gpuVendor: auto
-  # 可选 compute-resources URL；留空则试探默认 app-service。
+  # Empty → probe default app-service compute-resources URL.
   gpuApiUrl: ""
+  # On API SIGTERM / uninstall: delete dynamic engines (hotReload forces false).
+  shutdownReap: true
 
-# env 默认；管理台网络探测持久化后覆盖。
+# Defaults only; admin network probe may persist overrides later.
 network:
   region: global
   githubMirror: ""
@@ -44,7 +45,8 @@ workloads:
   flowstudioengine:
     replicaCount: 1
 
-# 正式发包 / 市场提交必须 false。
+# Must be false for release / Market submit.
+# true also sets SHOW_TEST_WORKFLOW_TEMPLATES (ControlNet fixtures).
 dev:
   hotReload: false
   sourceSubPath: devsrc

@@ -31,7 +31,39 @@ spec:
         command:
         - sh
         - -c
-        - '[ "$(stat -c %u /data)" = 1000 ] || chown 1000:1000 /data'
+        - |
+          set -e
+          mkdir -p /data/pi/agent
+          if [ ! -f /data/pi/agent/models.json ]; then
+          cat > /data/pi/agent/models.json <<'JSON'
+          {
+            "providers": {
+              "olares": {
+                "baseUrl": "http://127.0.0.1:30141/llm/v1",
+                "api": "openai-completions",
+                "apiKey": "olares",
+                "models": [
+                  {
+                    "id": "default",
+                    "name": "Gateway default"
+                  },
+                  {
+                    "id": "Qwen3.6-27B MTP (llama.cpp)/unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL",
+                    "name": "unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL (Qwen3.6-27B MTP (llama.cpp))",
+                    "reasoning": false,
+                    "input": [
+                      "text"
+                    ],
+                    "contextWindow": 128000,
+                    "maxTokens": 16384
+                  }
+                ]
+              }
+            }
+          }
+          JSON
+          fi
+          chown -R 1000:1000 /data
         securityContext:
           runAsUser: 0
         volumeMounts:
@@ -47,7 +79,7 @@ spec:
         - name: OLARES_APP_ID
           value: lares
         - name: PI_DEFAULT_MODEL
-          value: "olares/Qwen3.6-27B (llama.cpp)/unsloth/Qwen3.6-27B-GGUF:Q4_K_M"
+          value: "olares/Qwen3.6-27B MTP (llama.cpp)/unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL"
         ports:
         - containerPort: 30141
           protocol: TCP

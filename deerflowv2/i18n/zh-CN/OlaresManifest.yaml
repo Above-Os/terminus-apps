@@ -9,7 +9,7 @@ spec:
     **核心能力**
     - 超级智能体框架
       - 协调子智能体进行并行任务执行
-      - 基于沙盒的代码执行（Docker 或本地）
+      - 基于沙盒的代码执行（默认 DinD + AIO 容器；镜像可由 SANDBOX_IMAGE 配置）
       - 跨对话的持久化长期记忆
       - 可扩展的技能系统（基于 Markdown 的工作流）
     - LLM 集成
@@ -43,17 +43,9 @@ spec:
       - 播客脚本生成和音频合成
 
   upgradeDescription: |
-    升级到 DeerFlow **v2.1.1**（`beclab/harveyff-deerflow-backend` + `beclab/harveyff-deerflow-frontend`，amd64/arm64 多架构）。与上游一致：LangGraph 内嵌在 gateway（不再有独立 `:2024` sidecar）；ORM 与 checkpointer 共用单一 `DATABASE_URL`。
-    将 clientproxy 反向代理镜像从 Bitnami OpenResty（`beclab/aboveos-bitnami-openresty:1.25.3-2`）切换为官方 OpenResty 镜像 `openresty/openresty:1.29.2.5-bookworm-fat`。同步调整 nginx 配置挂载与日志路径以匹配官方镜像布局（`/etc/nginx/conf.d/default.conf`、`/usr/local/openresty/nginx/logs/...`），并移除 Bitnami 专用的 `OPENRESTY_CONF_FILE` 配置。
+    **ENABLE_SANDBOX** DinD 异步拉取（chart 1.0.8）。
 
-
-    **迁移老对话记录（一次性，可选）** —— 若旧聊天仍在 `<appData>/deerflowv2/deer-flow/checkpoints.db`：
-
-    1. 完成升级，打开 app，按 `/setup` 创建 admin（记住邮箱）。
-    2. 在 **Control Hub** → **Olares** → **Terminal** 执行（替换 `<EMAIL>`）：
-       ```
-       kubectl exec -it -n $(kubectl get pods -A -l app=deerflowv2-backend -o jsonpath='{.items[0].metadata.namespace}') deploy/deerflowv2-backend -c gateway -- sh /migrate/migrate_legacy_sqlite.sh <EMAIL>
-       ```
-    3. 刷新浏览器 —— 老对话出现在 admin 侧边栏。
-
-    脚本幂等。附件不迁移。全新安装可跳过。
+    - 去掉阻塞式 `init-prefetch-sandbox`；dockerd 就绪后即可启动 gateway
+    - DinD 后台拉取 `SANDBOX_IMAGE`（失败持续重试）；拉取期间其他功能不受影响
+    - 镜像落到 `appData/docker` 后 sandbox 工具可用
+    - `ENABLE_SANDBOX=false` 跳过 DinD，回退 LocalSandbox + `allow_host_bash`
