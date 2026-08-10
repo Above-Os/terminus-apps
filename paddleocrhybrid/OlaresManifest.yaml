@@ -1,0 +1,275 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: paddleocrhybrid
+  icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+  description: "PaddleOCR-VL hybrid OCR (GGUF + PP-DocLayoutV3) via llm-init + OCRAdapter + llama.cpp + layout"
+  appid: paddleocrhybrid
+  title: PaddleOCR Hybrid
+  version: '1.0.0'
+  categories:
+    - AI
+sharedEntrances:
+  - name: paddleocrhybrid
+    host: sharedentrances-api
+    port: 0
+    title: PaddleOCR Hybrid API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+entrances:
+  - name: ocrclient
+    port: 8090
+    host: download-svc
+    title: PaddleOCR Hybrid
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    openMethod: window
+    authLevel: internal
+  - name: ocrapi
+    port: 8090
+    host: download-svc
+    title: PaddleOCR Hybrid API
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    invisible: true
+    openMethod: window
+    authLevel: internal
+#   paddleocrhybrid — llama.cpp CUDA VLM (== appid / Release.Name)
+#   llminit         — llm-init (ENGINE_KIND=ocr): download + /v1/ocr* proxy
+#   ocradapter      — OCRAdapter job worker (paddle-hybrid)
+#   layout          — PP-DocLayoutV3 ONNX (CPU)
+workloadReplicas:
+  paddleocrhybrid: 1
+  llminit: 1
+  ocradapter: 1
+  layout: 1
+spec:
+  onlyAdmin: true
+  versionName: 'PaddlePaddle/PaddleOCR-VL-1.5-GGUF + beclab/PP-DocLayoutV3_onnx'
+  fullDescription: |
+    **PaddleOCR Hybrid** document OCR: layout detection (CPU ONNX) + PaddleOCR-VL-1.5 GGUF vision (CUDA).
+
+    **Stack** (same topology as llm-init `deploy/compose/paddle-ocr.yml`)
+    ```
+    Client → llm-init:8090 → ocradapter:8080 → llamacpp:8081
+                                ├─ Olares middleware Redis
+                                └─ layout:8090  (PP-DocLayoutV3 ONNX CPU)
+    ```
+    - **llm-init** (`ENGINE_KIND=ocr`, `MODEL_MODE=ocr`): downloads whole HF repos, progress UI, proxies `/v1/ocr*` / `/v1/tasks*` and `/v1/models`.
+    - **OCRAdapter**: async OCR jobs; pipeline `paddle-hybrid` (layout → crop → multi-turn VLM).
+    - **llama.cpp** (CUDA): PaddleOCR-VL-1.5 GGUF + mmproj (auto-resolved beside main GGUF).
+    - **layout**: PP-DocLayoutV3 ONNX via `ocrlayout.sh` reading `extra_model_path`.
+
+    **Models (whole-repo download, no `--include`)**
+    - VLM (main): [PaddlePaddle/PaddleOCR-VL-1.5-GGUF](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF) (~1.7 GiB)
+    - Layout (extra): [beclab/PP-DocLayoutV3_onnx](https://huggingface.co/beclab/PP-DocLayoutV3_onnx) (~136 MiB)
+
+    **Accelerator**
+    CUDA only for VLM (`nvidia` / `nvidia-gb10`). Layout runs on CPU.
+
+    **Sizing** (local full-stack profile 2026-08-11: png + pdf page1, `integration_test_ocr_paddle_resources.sh`)
+    - Peak VRAM **~8.4 GiB** (llamacpp, Adapter+layout smoke) → Olares request **8Gi** GPU memory
+    - llamacpp RAM peak **~1.3 GiB** → request **3Gi** / limit **6Gi**
+    - layout ONNX RAM peak **~1.1 GiB** → request **1Gi** / limit **2Gi**; CPU peak ~**2** cores on load
+
+  upgradeDescription: |
+    v1.0.0: initial — paddle-hybrid via llm-init + OCRAdapter + llama.cpp CUDA + layout ONNX; Olares Redis middleware.
+
+  developer: PaddlePaddle / beclab
+  website: https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF
+  sourceCode: https://huggingface.co/beclab/PP-DocLayoutV3_onnx
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF
+
+  accelerator:
+    # Σ requests ≈ llamacpp(750m) + llminit(200m) + ocradapter(100m) + layout(1) = 2050m → requiredCpu 3.
+    # Σ limits ≈ llamacpp(4/6Gi) + llminit(1/2Gi) + ocradapter(0.5/512Mi) + layout(2/2Gi) ≤ 8 CPU / 12Gi.
+    # GPU: full-stack VRAM peak ~8.4Gi; requiredGPUMemory stays 8Gi (product quota).
+    - mode: nvidia
+      requiredCpu: "3"
+      limitedCpu: "8"
+      requiredMemory: "6Gi"
+      limitedMemory: "12Gi"
+      requiredDisk: "5Gi"
+      limitedDisk: "50Gi"
+      requiredGPUMemory: "8Gi"
+      limitedGPUMemory: "10Gi"
+    - mode: nvidia-gb10
+      requiredCpu: "3"
+      limitedCpu: "8"
+      requiredMemory: "14Gi"
+      limitedMemory: "20Gi"
+      requiredDisk: "5Gi"
+      limitedDisk: "50Gi"
+
+  supportArch:
+    - amd64
+    - arm64
+
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+
+middleware:
+  redis:
+    namespace: paddleocrhybrid
+
+options:
+  apiTimeout: 0
+  allowMultipleInstall: true
+  LLMGatewaySupported: true
+  shared: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    # Comma dual-source, whole repos (no --include): main VLM + ROLE=extra layout.
+    default: "hf://PaddlePaddle/PaddleOCR-VL-1.5-GGUF,hf://beclab/PP-DocLayoutV3_onnx"
+    description: "Comma dual hf:// (VLM repo main + layout ONNX repo extra). Whole-repo download."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "paddle-hybrid"
+    description: "OCRAdapter pipeline id (must be paddle-hybrid)."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "ocr"
+    options:
+      - title: OCR
+        value: ocr
+  - envName: ENGINE_ARGS
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "-ngl 99"
+    description: "llama.cpp flags on the engine Pod only (not llm-init). mmproj is auto-resolved next to the main GGUF."
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "8Gi"
+    description: "Per-instance GPU memory (nvidia.com/gpumem). Full-stack peak ~8.4Gi; Olares request fixed at 8Gi."
+  - envName: LLAMACPP_CPU_REQUEST
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "750m"
+  - envName: LLAMACPP_CPU_LIMIT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "4"
+  - envName: LLAMACPP_MEMORY_REQUEST
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "3Gi"
+  - envName: LLAMACPP_MEMORY_LIMIT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "6Gi"
+  - envName: LAYOUT_CPU_REQUEST
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "1"
+  - envName: LAYOUT_CPU_LIMIT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "2"
+  - envName: LAYOUT_MEMORY_REQUEST
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "1Gi"
+  - envName: LAYOUT_MEMORY_LIMIT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "2Gi"
+  - envName: OCR_PIPELINE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "paddle-hybrid"
+  - envName: OCR_LAYOUT_URL
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "http://layout:8090"
+  - envName: OCR_MAX_INFLIGHT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "1"
+  - envName: OCR_PDF_STRATEGY
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "vision"
+    description: "paddle-hybrid only supports pdf_strategy=vision (hybrid returns 400)."
+  - envName: OCR_DEFAULT_FORMAT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "text"
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+      - title: debug
+        value: debug
+      - title: info
+        value: info
+      - title: warn
+        value: warn
+      - title: error
+        value: error
