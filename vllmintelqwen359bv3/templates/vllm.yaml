@@ -1,0 +1,147 @@
+{{- /* Intel XPU vLLM engine Deployment. ENGINE_ARGS = raw vLLM CLI flags. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $cpuRequest := trim ($oe.VLLM_CPU_REQUEST | default "400m") -}}
+{{- $memRequest := trim ($oe.VLLM_MEMORY_REQUEST | default "4Gi") -}}
+{{- $cpuLimit := trim ($oe.VLLM_CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.VLLM_MEMORY_LIMIT | default "16Gi") -}}
+{{- $gpuType := include "llmbase.gpuType" . -}}
+{{- $engineImage := include "vllmintelqwen359bv3.engineImage" . -}}
+{{- $engineArgs = include "vllmintelqwen359bv3.engineArgs" (dict "Args" $engineArgs) -}}
+{{- /* intel = unified / iGPU: size pod memory from VLLM_REQUIRED_GPU_MEMORY.
+       intel-gpu = discrete Arc: GPU quota via gpu-inject. */ -}}
+{{- $unifiedMem := eq $gpuType "intel" -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.VLLM_REQUIRED_GPU_MEMORY | default "28672") -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- $runStateHostPath := printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "vllm"
+    vllmintelqwen359bv3.io/engine-image: {{ $engineImage | quote }}
+spec:
+  replicas: {{ .Values.workloads.vllmintelqwen359bv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: vllm
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: vllm
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: llm-init-wrappers
+            defaultMode: 0555
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi
+      containers:
+        - name: vllm
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/llm-init/wrappers/vllm.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: vllm
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: VLLM_PORT
+              value: "8000"
+            - name: WAIT_TIMEOUT
+              value: "3600"
+            - name: ENGINE_ARGS
+              value: {{ $engineArgs | quote }}
+            - name: OLARES_GPU_MODE
+              value: {{ $gpuType | quote }}
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: VLLM_CACHE_ROOT
+              value: /cache/vllm
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: VLLM_WORKER_MULTIPROC_METHOD
+              value: spawn
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+          ports:
+            - name: vllm
+              containerPort: 8000
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+              readOnly: true
+            - name: hf-cache
+              mountPath: /cache/vllm
+              subPath: vllm-cache
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /llm-init/wrappers
+              readOnly: true
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+spec:
+  selector:
+    io.kompose.service: vllm
+  ports:
+    - name: vllm
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
