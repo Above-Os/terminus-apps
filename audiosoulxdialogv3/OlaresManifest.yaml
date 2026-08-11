@@ -1,0 +1,232 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiosoulxdialogv3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: "SoulX-Podcast for multi-speaker dialogue and podcast synthesis."
+  appid: audiosoulxdialogv3
+  title: SoulX-Podcast Dialogue
+  version: '1.0.0'
+  categories:
+    - AI
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiosoulxdialogv3api
+    host: sharedentrances-api
+    port: 0
+    title: SoulX-Podcast Dialogue API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiosoulxdialogv3
+    port: 8090
+    host: download-svc
+    title: SoulX-Podcast Dialogue
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiosoulxdialogv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'Soul-AILab/SoulX-Podcast-1.7B'
+  fullDescription: |
+    **Model Overview**
+    SoulX-Podcast (Soul AI Lab) synthesizes multi-speaker conversations — podcasts, interviews,
+    two-person dialogue — from a script. It is trained primarily on Chinese podcasts and leads
+    the open field on Chinese dialogue intelligibility.
+
+    **Configuration**
+    - Model: `Soul-AILab/SoulX-Podcast-1.7B`
+    - Source: `hf://Soul-AILab/SoulX-Podcast-1.7B`
+    - Capabilities: `tts_dialogue`
+    - Required GPU memory: `12Gi`
+    - Engine: SoulX-Podcast in-process (HuggingFace backend; no vLLM)
+    - License: Apache-2.0 for both code and weights
+
+    **Three things that surprise people**
+    - **Every speaker needs a reference clip.** This is a zero-shot cloning architecture with no
+      preset voices at all. A request without reference audio cannot be served — supply one clip
+      per voice, each with its verbatim transcript.
+    - **The script is synthesized as a unit.** Later turns are conditioned on earlier ones, which
+      is what makes the turn-taking sound like a conversation instead of concatenated lines.
+      Sending turns as separate requests loses exactly that, so there is no batch route.
+    - **The audio tokenizer ships inside the image.** Unlike every other model here, one of its
+      components is fetched from ModelScope rather than HuggingFace, so it is baked into the
+      engine image at build time and is not listed in `MODEL_SOURCE`.
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — `speakers[]` is an array of `{ref_audio, ref_text}` (1–4 voices,
+      `ref_audio` a `data:` URL); `turns[]` is the script as `{speaker, text}` where `speaker`
+      indexes into `speakers`. Returns the whole conversation as one audio file, or with
+      `per_turn: true` a JSON array of per-turn clips. Add `?async=1` for a task id.
+
+    There is no batch route (a script is already the unit of work) and no streaming route
+    (the model has no incremental decode path). There is no voices route either — it has no
+    preset speakers.
+
+    **Stack**
+    - **audio engine**: SoulX-Podcast in-process (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+    - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "24Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "12Gi"
+      limitedGPUMemory: "12Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "12544Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://Soul-AILab/SoulX-Podcast-1.7B"
+    description: "HuggingFace source llm-init downloads into the shared cache. One repo: the speaker-embedding model (campplus.onnx) is inside it, and the audio tokenizer comes from ModelScope and is already baked into the engine image."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "Soul-AILab/SoulX-Podcast-1.7B"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts_dialogue"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Dialogue TTS (multi-speaker conversation from a script)
+      value: tts_dialogue
+    description: "Surface: /speech only. No batch (a script is already the unit of work), no streaming (no incremental decode) and no voices (zero-shot cloning, so every speaker arrives with its own reference clip)."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "12Gi"
+    description: "GPU memory required for this model. `0` means CPU-only, which this engine does not support."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "20Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine-native flags (llm-init ENGINE_ARGS), empty by default. Two are taken here.
+      --fp16-flow halves the flow-matching decoder, saving roughly 1GB at some cost in fidelity;
+      it is off by default because the quota above already fits bf16. --seed <n> sets the seed
+      applied at load (default 1988); a per-request `seed` field overrides it for one call, which
+      is the better way to reproduce a specific take. The sampler settings (RAS window, tau) are
+      not exposed: upstream fixes them inside its own input pipeline."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
