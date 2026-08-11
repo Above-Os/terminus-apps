@@ -1,0 +1,38 @@
+metadata:
+  description: "Dasheng-AudioGen for text-to-sound-effect and ambience generation."
+  title: Dasheng-AudioGen SFX
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    **Model Overview**
+    Dasheng-AudioGen (Xiaomi LLM PLUS + SJTU X-LANCE) generates sound effects, ambience and
+    music from a text description. It is a flow-matching diffusion transformer, not an LLM.
+
+    **Configuration**
+    - Model: `mispeech/Dasheng-AudioGen`
+    - Source: `hf://mispeech/Dasheng-AudioGen` + `hf://google/flan-t5-large` + `hf://mispeech/dashengtokenizer`
+    - Capabilities: `sound_fx`
+    - Required GPU memory: `8Gi`
+    - Engine: Dasheng-AudioGen in-process (transformers, bf16)
+    - License: Apache-2.0 for both code and weights, with no research-only clause
+
+    **Two things that surprise people**
+    - **Descriptions must be English.** The text encoder is flan-t5-large and saw English
+      captions only. Translating a Chinese description is the caller's job.
+    - **Fixed length.** In our testing every clip comes back at about 10 seconds; length is
+      not a parameter.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — `input` is the caption; the optional `sfx`, `env`, `music`,
+      `speech` and `asr` fields are the model's own aspect tags. Add `?async=1` for a task id.
+    - `POST /v1/audio/speech/batch` — `items[]` (1–8) denoised in a single pass, base64 out.
+
+    No streaming route (diffusion emits the clip whole) and no voices route (no speakers).
+
+    **How It Works**
+    Model Console (llm-init) downloads the model; the audio engine serves once it is ready.
+    llm-init reverse-proxies `/v1/*` and serves its console on `/`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
