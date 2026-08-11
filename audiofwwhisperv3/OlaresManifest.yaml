@@ -1,0 +1,196 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiofwwhisperv3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: "OpenAI whisper-large-v3 via Faster-Whisper for offline STT (review submission)."
+  appid: audiofwwhisperv3
+  title: Whisper Large V3 (FW)
+  version: '1.0.0'
+  categories:
+    - AI
+# sharedEntrances stub: http://sharedentrances-api.<ns>:80/v1 (in-cluster).
+sharedEntrances:
+  - name: audiofwwhisperv3api
+    host: sharedentrances-api
+    port: 0
+    title: Whisper Large V3 (FW) API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Entrance -> llm-init:8090 (dashboard + /v1/* proxy); authLevel internal.
+entrances:
+  - name: audiofwwhisperv3
+    port: 8090
+    host: download-svc
+    title: Whisper Large V3 (FW)
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiofwwhisperv3: 1
+  llminit: 1
+spec:
+  versionName: 'openai/whisper-large-v3'
+  fullDescription: |
+    **Model Overview**
+    OpenAI whisper-large-v3 via Faster-Whisper for offline STT (review submission).
+
+    **Preset Configuration**
+    - Model: `openai/whisper-large-v3`
+    - Source: `hf://openai/whisper-large-v3`
+    - Capabilities: `stt`
+    - Required GPU memory: `8Gi`
+    - Engine: Faster-Whisper (CTranslate2)
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Stack**
+    - **audio engine**: Faster-Whisper (CTranslate2) (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: initial direct-install preset (public entrance, fixed model env defaults).
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+    - mode: nvidia
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 80Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "8Gi"
+      limitedGPUMemory: "8Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 80Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "8448Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://openai/whisper-large-v3"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "openai/whisper-large-v3"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "stt"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: STT (offline transcription)
+      value: stt
+    description: "Capabilities this preset exposes (locked for this model app)."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8Gi"
+    description: "GPU memory required for this model. `0` means CPU-only."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "12Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
