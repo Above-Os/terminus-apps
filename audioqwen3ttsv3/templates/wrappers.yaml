@@ -1,0 +1,33 @@
+# Sentinel-wait shell for the engine container: block on llm-init's download sentinel, then exec the baked wrapper.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+data:
+  qwen3tts.sh: |
+    #!/bin/sh
+    set -eu
+
+    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
+    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
+    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
+    log() { printf '[wrapper-qwen3tts] %s\n' "$*"; }
+
+    elapsed=0
+    while [ ! -f "$SENTINEL" ]; do
+        if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+            log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
+            exit 1
+        fi
+        log "waiting for $SENTINEL (elapsed=${elapsed}s)"
+        sleep "$WAIT_INTERVAL"
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    log "sentinel $SENTINEL found after ${elapsed}s; starting engine offline"
+
+    export HF_HUB_OFFLINE=1
+    export PYTHONUNBUFFERED=1
+    exec audio-python -m wrapper.app
