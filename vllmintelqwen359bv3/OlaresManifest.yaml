@@ -1,0 +1,227 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: vllmintelqwen359bv3
+  icon: https://app.cdn.olares.com/appstore/vllm/icon.png
+  description: "Qwen3.5-9B on Intel Arc XPU vLLM — optimized for Arc Pro B70 (intel-gpu, 32K context)."
+  appid: vllmintelqwen359bv3
+  title: Qwen3.5-9B Intel Arc vLLM
+  version: '1.0.6'
+  categories:
+    - AI
+sharedEntrances:
+  - name: vllmintelqwen359bv3
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3.5-9B
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/vllm/icon.png
+entrances:
+  - name: vllmclient
+    port: 8090
+    host: download-svc
+    title: Qwen3.5-9B
+    icon: https://app.cdn.olares.com/appstore/vllm/icon.png
+    openMethod: window
+    authLevel: internal
+#   vllmintelqwen359bv3 — engine Deployment (== appid / Release.Name)
+#   llminit             — llm-init / entrance Deployment
+workloadReplicas:
+  vllmintelqwen359bv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'Qwen/Qwen3.5-9B'
+  upgradeDescription: |
+    v1.0.6: intel-gpu mode context raised to 32K (32768 tokens).
+    v1.0.5: intel-gpu mode uses 8192 context (4K cap only on unified intel mode).
+    v1.0.4: Cap context at 4K for XE1 iGPU (fix slow/hung KV cache profiling).
+    v1.0.3: Force native RMSNorm on XE1 iGPU (fix bf16 xpu_kernels JIT error).
+    v1.0.2: Reinstall release with --language-model-only default env.
+    v1.0.1: Add --language-model-only to skip vision encoder (fixes XE1 XPU cutlass error).
+    v1.0.0: Initial release — Qwen/Qwen3.5-9B on intel/vllm:0.21.0-ubuntu24.04-20260805,
+    llm-init v1.3.5, tools + thinking parsers.
+  fullDescription: |
+    **Target hardware**
+    Tuned for **Intel Arc Pro B70** and other discrete Intel Arc GPUs with ~32GB VRAM.
+    Install with compute mode **`intel-gpu`**. The engine uses Intel **XPU** (oneAPI / Level Zero,
+    PyTorch XPU, vLLM `VLLM_TARGET_DEVICE=xpu`) via `intel/vllm:0.21.0-ubuntu24.04-20260805`.
+
+    **Model**
+    Official `Qwen/Qwen3.5-9B` fp16 safetensors with llm-init v1.3.5. Capabilities: thinking, tools
+    (text-only via `--language-model-only`).
+
+    **Preset (intel-gpu / B70 class)**
+    - Context: **32K** (`--max-model-len 32768`) — set by chart wrapper for `intel-gpu`
+    - GPU memory budget: `28Gi` (raise to `30Gi` if KV OOM)
+    - Engine: `--dtype half --enforce-eager --block-size 64 --gpu-memory-utilization 0.95
+      --trust-remote-code --language-model-only --enable-auto-tool-choice
+      --tool-call-parser qwen3_xml --reasoning-parser qwen3`
+
+    **Also supported (limited)**
+    Intel integrated GPU / unified memory: install with **`intel`** mode. Wrapper caps context at
+    **4K** to avoid slow KV profiling on older Xe iGPUs; not the primary target for this chart.
+
+    **Accelerator modes**
+    | Mode         | Device                      | Recommended | Context |
+    |--------------|-----------------------------|-------------|---------|
+    | `intel-gpu`  | Intel Arc discrete (B70…)   | Yes         | 32K     |
+    | `intel`      | Intel iGPU (unified memory) | Experimental| 4K cap  |
+
+    Model Console downloads weights into App Common HF cache; Intel vLLM starts after the sentinel.
+
+  developer: Qwen / Alibaba
+  website: https://qwen.ai/
+  sourceCode: https://huggingface.co/Qwen/Qwen3.5-9B
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/Qwen/Qwen3.5-9B
+
+  accelerator:
+    - mode: intel
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "32Gi"
+      requiredMemory: "29Gi"
+    - mode: intel-gpu
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # Engine MEMORY_LIMIT 16Gi + llm-init 4Gi
+      limitedMemory: "22Gi"
+      requiredMemory: "6Gi"
+      requiredGPUMemory: "28Gi"
+      limitedGPUMemory: "32Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://Qwen/Qwen3.5-9B"
+    description: "HuggingFace source for Qwen3.5-9B safetensors."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "Qwen/Qwen3.5-9B"
+    description: "vLLM --model / OpenAI alias."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "Qwen3.5-9B capabilities."
+  - envName: ENGINE_ARGS
+    required: true
+    default: "--dtype half --enforce-eager --block-size 64 --gpu-memory-utilization 0.95 --max-model-len 32768 --max-num-batched-tokens 32768 --trust-remote-code --language-model-only --ir-op-priority.fused_add_rms_norm=native --ir-op-priority.rms_norm=native --enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3"
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Intel XPU vLLM flags. Raise --max-model-len if VRAM allows."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: VLLM_CPU_REQUEST
+    required: true
+    default: "400m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_MEMORY_REQUEST
+    required: true
+    default: "4Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_CPU_LIMIT
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_MEMORY_LIMIT
+    required: true
+    default: "16Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "28Gi"
+    description: "GPU / unified memory budget for Qwen3.5-9B fp16 on Intel XPU."
+    regex: "^[0-9]+(Gi|Mi)?$"
