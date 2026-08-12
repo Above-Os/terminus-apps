@@ -7,7 +7,7 @@ metadata:
   description: "Generic vLLM engine base. Pick any HuggingFace Safetensors model at install via env."
   appid: vllmllmbasev3
   title: vLLM Engine Base
-  version: '1.2.28'
+  version: '1.2.29'
   categories:
     - AI
 sharedEntrances:
@@ -33,21 +33,28 @@ workloadReplicas:
   llminit: 1
 spec:
   onlyAdmin: true
-  versionName: '0.26.0'
+  versionName: '0.27.1'
   upgradeDescription: |
-    Upgrade vLLM from v0.25.0 to v0.26.0. Chart 1.2.28.
+    Upgrade vLLM from v0.26.0 to v0.27.1. Chart 1.2.29.
 
-    **What's Changed** (v0.26.0)
-    - New Inkling model family (piecewise CUDA graph, Hopper FA4, MTP=1, LoRA, ModelOpt NVFP4)
-    - DeepSeek-V4 performance: specialized routing, fused_topk_bias, sparse decode/prefill; DSpark on AMD/XPU
-    - New models: BertForMaskedLM, Roberta/XLMRoberta token classification, LongCat-Flash-Lite, Cosmos3, TranslateGemma
-    - Engine: fp32 lm_head via head_dtype; per-KV-cache-group attention backends; matured KV offloading & tiered storage
-    - Speculative decoding: runtime draft weight update, hybrid DFlash, Gemma4-12B DSpark
-    - Rust frontend: multimodal video/audio, Seed-OSS tool parser; Transformers 5.13.0 backend migrations
-    - Security: replace diskcache pickle path; concurrent sparse-invariant race fix; tighter endpoint validation
+    **What's Changed** (relevant to Olares)
+
+    v0.27.1
+    - Support quantized DSpark Markov heads
+
+    v0.27.0
+    - Kimi K3 full-stack support (kernels, DeepGEMM, compressed-tensors NVFP4, DSpark AR fusion)
+    - New models: Qwen3.5 dense/MoE, K-EXAONE-2.0, VaultGemma, jina-embeddings-v5; Inkling NVFP4/FP8
+    - PyTorch 2.13.0 upgrade (breaking environment change)
+    - FlashAttention 4 on SM100: FP8 KV cache and headdim-256; JIT warmup removes first-request stalls
+    - DeepSeek-V4: sequence parallelism, router/topk optimizations, compact MXFP4 indexer KV cache
+    - Model Runner V2: encoder-only attention, embedding/classification pooling, multimodal on CPU, multi-layer MTP
+    - KV offloading: tiered storage, P2P secondary tier, pluggable eviction policies
+    - Large-scale serving: fault-tolerance framework for DP+EP; NIXL P/D for hybrid MLA+SSM models
+    - Rust frontend: gRPC control plane (health, abort, model/KV discovery); `vllm-bench` in CLI
 
     For detailed release notes, visit:
-    https://github.com/vllm-project/vllm/releases/tag/v0.26.0
+    https://github.com/vllm-project/vllm/releases
   fullDescription: |
     **IMPORTANT NOTE**  
     This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
