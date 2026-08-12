@@ -110,6 +110,31 @@ spec:
               mountPath: /run/llm-init
           securityContext:
             runAsUser: 0
+        # Legacy installs (supports_translate + mode=chat) persist chat on
+        # hostPath model-spec.json; disk wins over MODEL_MODE=translate env.
+        # Patch mode before llm-init starts so /translate mounts immediately
+        # even on llm-init v1.3.6 without overlayModeFromEnvSeed.
+        - name: migrate-translate-mode
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              SPEC=/run/llm-init/model-spec.json
+              if [ ! -f "$SPEC" ]; then
+                exit 0
+              fi
+              if grep -qE '"mode"[[:space:]]*:[[:space:]]*"chat"' "$SPEC"; then
+                sed -i 's/"mode"[[:space:]]*:[[:space:]]*"chat"/"mode": "translate"/' "$SPEC"
+                echo "upgraded model-spec mode chat -> translate"
+              fi
+              chown 1000:1000 "$SPEC" || true
+          volumeMounts:
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
       containers:
         - name: llm-init
           # v1.3.6 is the first tag with MODEL_MODE=translate. It also defaults
