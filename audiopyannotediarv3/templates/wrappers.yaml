@@ -1,0 +1,55 @@
+# Sentinel-wait shell for the engine container: block on llm-init's download sentinel, then exec the baked wrapper.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+data:
+  pyannote.sh: |
+    #!/bin/sh
+    set -eu
+
+    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
+    MODEL_PATH_FILE=${MODEL_PATH_FILE:-/run/llm-init/model_path}
+    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
+    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
+    log() { printf '[wrapper-pyannote] %s\n' "$*"; }
+
+    want=""
+    case ${MODEL_SOURCE:-} in
+        hf://*)
+            repo=${MODEL_SOURCE#hf://}
+            repo=${repo%% *}
+            repo=${repo%%,*}
+            want="models--$(printf '%s' "$repo" | sed 's|/|--|g')"
+            ;;
+    esac
+
+    mine() {
+        [ -f "$SENTINEL" ] || return 1
+        [ -n "$want" ] || return 0
+        [ -f "$MODEL_PATH_FILE" ] || return 1
+        grep -q -- "$want" "$MODEL_PATH_FILE"
+    }
+
+    elapsed=0
+    while ! mine; do
+        if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+            log "timed out after ${WAIT_TIMEOUT}s waiting for a sentinel naming ${want:-any model}"
+            exit 1
+        fi
+        if [ -f "$SENTINEL" ] && [ -n "$want" ]; then
+            log "sentinel names $(tr -d '\r\n' < "$MODEL_PATH_FILE" 2>/dev/null || echo nothing), not $want (elapsed=${elapsed}s)"
+        else
+            log "waiting for $SENTINEL (elapsed=${elapsed}s)"
+        fi
+        sleep "$WAIT_INTERVAL"
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    log "sentinel $SENTINEL names ${want:-any model} after ${elapsed}s; starting engine offline"
+
+    export HF_HUB_OFFLINE=1
+    export PYTHONUNBUFFERED=1
+    exec audio-python -m wrapper.app

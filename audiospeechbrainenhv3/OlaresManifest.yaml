@@ -1,0 +1,203 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiospeechbrainenhv3
+  icon: https://app.cdn.olares.com/appstore/audioengines/speechbrain/icon.png
+  description: "SpeechBrain mtl-mimic-voicebank denoise / enhance."
+  appid: audiospeechbrainenhv3
+  title: SpeechBrain Enhance
+  version: '1.0.0'
+  categories:
+    - AI
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiospeechbrainenhv3api
+    host: sharedentrances-api
+    port: 0
+    title: SpeechBrain Enhance API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/speechbrain/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiospeechbrainenhv3
+    port: 8090
+    host: download-svc
+    title: SpeechBrain Enhance
+    icon: https://app.cdn.olares.com/appstore/audioengines/speechbrain/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiospeechbrainenhv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'mtl-mimic-voicebank'
+  fullDescription: |
+    **Model Overview**
+    SpeechBrain mtl-mimic-voicebank denoise / enhance.
+
+    **Configuration**
+    - Model: `mtl-mimic-voicebank`
+    - Source: `hf://speechbrain/mtl-mimic-voicebank`
+    - Capabilities: `enhance`
+    - Required GPU memory: `2Gi`
+    - Engine: SpeechBrain enhance
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Stack**
+    - **audio engine**: SpeechBrain enhance (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+    - mode: nvidia
+      limitedCpu: "3"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 30Gi
+      limitedMemory: "10Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "2Gi"
+      limitedGPUMemory: "2Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "3"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 30Gi
+      limitedMemory: "6Gi"
+      requiredMemory: "2304Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://speechbrain/mtl-mimic-voicebank"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "mtl-mimic-voicebank"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "enhance"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Enhance (denoise)
+      value: enhance
+    description: "Capabilities this app exposes."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2Gi"
+    description: "GPU memory required for this model. `0` means CPU-only."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine-native flags (llm-init ENGINE_ARGS), e.g. --amp to enable fp16."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN

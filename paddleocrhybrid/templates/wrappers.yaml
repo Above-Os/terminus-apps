@@ -1,0 +1,213 @@
+# Wrappers ConfigMap (llamacpp + layout).
+# - llamacpp.sh: wait sentinel, resolve main GGUF (skip mmproj*), auto --mmproj
+# - ocrlayout.sh: wait sentinel + extra_model_path → MODEL_PATH / LAYOUT_MODEL_DIR
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llamacpp
+data:
+  common.sh: |
+    #!/bin/sh
+    set -eu
+
+    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
+    MODEL_PATH_FILE=${MODEL_PATH_FILE:-/run/llm-init/model_path}
+    EXTRA_MODEL_PATH_FILE=${EXTRA_MODEL_PATH_FILE:-/run/llm-init/extra_model_path}
+    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
+    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
+
+    log() {
+        printf '[wrapper-%s] %s\n' "${ENGINE:-engine}" "$*"
+    }
+
+    wait_for_sentinel() {
+        elapsed=0
+        while [ ! -f "$SENTINEL" ]; do
+            if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+                log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
+                exit 1
+            fi
+            log "waiting for $SENTINEL (elapsed=${elapsed}s)"
+            sleep "$WAIT_INTERVAL"
+            elapsed=$((elapsed + WAIT_INTERVAL))
+        done
+        log "sentinel $SENTINEL found after ${elapsed}s"
+    }
+
+    read_model_path() {
+        if [ ! -f "$MODEL_PATH_FILE" ]; then
+            log "model path file $MODEL_PATH_FILE not found"
+            exit 1
+        fi
+        tr -d '\r\n' < "$MODEL_PATH_FILE"
+    }
+
+    wait_for_extra_model_path() {
+        elapsed=0
+        while [ ! -f "$EXTRA_MODEL_PATH_FILE" ]; do
+            if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+                log "timed out after ${WAIT_TIMEOUT}s waiting for $EXTRA_MODEL_PATH_FILE"
+                exit 1
+            fi
+            log "waiting for $EXTRA_MODEL_PATH_FILE (elapsed=${elapsed}s)"
+            sleep "$WAIT_INTERVAL"
+            elapsed=$((elapsed + WAIT_INTERVAL))
+        done
+        log "extra_model_path $EXTRA_MODEL_PATH_FILE found after ${elapsed}s"
+    }
+
+    read_extra_model_path_first_line() {
+        if [ ! -f "$EXTRA_MODEL_PATH_FILE" ]; then
+            log "extra model path file $EXTRA_MODEL_PATH_FILE not found"
+            exit 1
+        fi
+        line=$(head -n 1 "$EXTRA_MODEL_PATH_FILE" 2>/dev/null || sed -n '1p' "$EXTRA_MODEL_PATH_FILE")
+        line=$(printf '%s' "$line" | tr -d '\r')
+        if [ -z "$line" ]; then
+            log "extra model path file $EXTRA_MODEL_PATH_FILE has empty first line"
+            exit 1
+        fi
+        printf '%s' "$line"
+    }
+
+  llamacpp.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=llamacpp
+    . "$(dirname "$0")/common.sh"
+
+    wait_for_sentinel
+    MODEL_PATH=$(read_model_path)
+
+    # Whole-repo HF snapshot: pick main GGUF (not *mmproj*).
+    # Lexical first *.gguf would wrongly pick PaddleOCR-VL-1.5-mmproj.gguf.
+    if [ -d "$MODEL_PATH" ]; then
+        GGUF_FILE=""
+        for f in "$MODEL_PATH"/*.gguf; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            case "$base" in
+                *mmproj*|MMPROJ*|Mmproj*) continue ;;
+            esac
+            GGUF_FILE="$f"
+            break
+        done
+        if [ -z "$GGUF_FILE" ]; then
+            log "no main .gguf under $MODEL_PATH"
+            exit 1
+        fi
+        log "resolved MODEL_PATH directory $MODEL_PATH -> $GGUF_FILE"
+        MODEL_PATH="$GGUF_FILE"
+    fi
+
+    MODEL_DIR=$(dirname "$MODEL_PATH")
+
+    LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-}"
+    if [ -z "$LLAMA_SERVER_BIN" ]; then
+        if [ -x /app/llama-server ]; then
+            LLAMA_SERVER_BIN=/app/llama-server
+        else
+            LLAMA_SERVER_BIN="$(command -v llama-server 2>/dev/null || true)"
+        fi
+    fi
+    if [ -z "$LLAMA_SERVER_BIN" ] || [ ! -x "$LLAMA_SERVER_BIN" ]; then
+        log "llama-server binary not found"
+        exit 127
+    fi
+
+    LLAMA_SERVER_DIR=$(dirname "$LLAMA_SERVER_BIN")
+    export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    if [ -d "${LLAMA_SERVER_DIR}/lib" ]; then
+        export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}/lib:${LD_LIBRARY_PATH}"
+    fi
+
+    ARGV=""
+    HAS_MMPROJ=0
+    if [ -n "${ENGINE_ARGS:-}" ]; then
+        # shellcheck disable=SC2086
+        set -- $ENGINE_ARGS
+        for tok in "$@"; do
+            case "$tok" in
+                --mmproj) HAS_MMPROJ=1; ARGV="$ARGV $tok" ;;
+                -*)       ARGV="$ARGV $tok" ;;
+                LLAMA_ARG_*=*) export "$tok" && log "engine_args export: $tok" ;;
+                *=*)      log "engine_args drop non-LLAMA_ARG env: $tok" ;;
+                *)        ARGV="$ARGV $tok" ;;
+            esac
+        done
+    fi
+
+    if [ "$HAS_MMPROJ" -eq 0 ]; then
+        MMPROJ=""
+        for f in "$MODEL_DIR"/*mmproj*.gguf "$MODEL_DIR"/*MMPROJ*.gguf; do
+            if [ -f "$f" ]; then
+                MMPROJ="$f"
+                break
+            fi
+        done
+        if [ -n "$MMPROJ" ]; then
+            ARGV="$ARGV --mmproj $MMPROJ"
+            log "auto mmproj=$MMPROJ"
+        else
+            log "WARN: no *mmproj*.gguf beside $MODEL_PATH (vision OCR may fail)"
+        fi
+    fi
+
+    log "starting llama-server -m=$MODEL_PATH alias=${MODEL_NAME:-paddle-hybrid} argv=${ARGV:-<empty>}"
+    # shellcheck disable=SC2086
+    exec "$LLAMA_SERVER_BIN" \
+        -m "$MODEL_PATH" \
+        --alias "${MODEL_NAME:-paddle-hybrid}" \
+        --host 0.0.0.0 \
+        --port "${LLAMACPP_PORT:-8081}" \
+        --metrics \
+        --temp 0 \
+        $ARGV \
+        "$@"
+
+  ocrlayout.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=ocrlayout
+    . "$(dirname "$0")/common.sh"
+
+    wait_for_sentinel
+    wait_for_extra_model_path
+    LAYOUT_DIR=$(read_extra_model_path_first_line)
+
+    if [ -f "$LAYOUT_DIR" ]; then
+        parent=$(dirname "$LAYOUT_DIR")
+        log "extra path is a file; using parent directory $parent"
+        LAYOUT_DIR=$parent
+    fi
+
+    if [ ! -d "$LAYOUT_DIR" ]; then
+        log "LAYOUT_MODEL_DIR=$LAYOUT_DIR is not a directory"
+        exit 1
+    fi
+
+    export LAYOUT_MODEL_DIR="$LAYOUT_DIR"
+    export MODEL_PATH="$LAYOUT_DIR"
+    log "LAYOUT_MODEL_DIR=$LAYOUT_MODEL_DIR MODEL_PATH=$MODEL_PATH"
+
+    LAYOUT_BIN="${LAYOUT_BIN:-}"
+    if [ -z "$LAYOUT_BIN" ]; then
+        if [ -x /usr/local/bin/ocr-layout ]; then
+            LAYOUT_BIN=/usr/local/bin/ocr-layout
+        else
+            LAYOUT_BIN="$(command -v ocr-layout 2>/dev/null || true)"
+        fi
+    fi
+    if [ -z "$LAYOUT_BIN" ] || [ ! -x "$LAYOUT_BIN" ]; then
+        log "ocr-layout binary not found (checked /usr/local/bin/ocr-layout, \$PATH, \$LAYOUT_BIN)"
+        exit 127
+    fi
+
+    export LAYOUT_LISTEN="${LAYOUT_LISTEN:-0.0.0.0:8090}"
+    log "starting layout-service bin=$LAYOUT_BIN LAYOUT_LISTEN=$LAYOUT_LISTEN"
+    exec "$LAYOUT_BIN" "$@"

@@ -1,0 +1,48 @@
+metadata:
+  description: "SoulX-Podcast for multi-speaker dialogue and podcast synthesis."
+  title: SoulX-Podcast Dialogue
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    **Model Overview**
+    SoulX-Podcast (Soul AI Lab) synthesizes multi-speaker conversations — podcasts, interviews,
+    two-person dialogue — from a script. It is trained primarily on Chinese podcasts and leads
+    the open field on Chinese dialogue intelligibility.
+
+    **Configuration**
+    - Model: `Soul-AILab/SoulX-Podcast-1.7B`
+    - Source: `hf://Soul-AILab/SoulX-Podcast-1.7B`
+    - Capabilities: `tts_dialogue`
+    - Required GPU memory: `12Gi`
+    - Engine: SoulX-Podcast in-process (HuggingFace backend; no vLLM)
+    - License: Apache-2.0 for both code and weights
+
+    **Three things that surprise people**
+    - **Every speaker needs a reference clip.** This is a zero-shot cloning architecture with no
+      preset voices at all. A request without reference audio cannot be served — supply one clip
+      per voice, each with its verbatim transcript.
+    - **The script is synthesized as a unit.** Later turns are conditioned on earlier ones, which
+      is what makes the turn-taking sound like a conversation instead of concatenated lines.
+      Sending turns as separate requests loses exactly that, so there is no batch route.
+    - **The audio tokenizer ships inside the image.** Unlike every other model here, one of its
+      components is fetched from ModelScope rather than HuggingFace, so it is baked into the
+      engine image at build time and is not listed in `MODEL_SOURCE`.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — `speakers[]` is an array of `{ref_audio, ref_text}` (1–4 voices,
+      `ref_audio` a `data:` URL); `turns[]` is the script as `{speaker, text}` where `speaker`
+      indexes into `speakers`. Returns the whole conversation as one audio file, or with
+      `per_turn: true` a JSON array of per-turn clips. Add `?async=1` for a task id.
+
+    There is no batch route (a script is already the unit of work) and no streaming route
+    (the model has no incremental decode path). There is no voices route either — it has no
+    preset speakers.
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.

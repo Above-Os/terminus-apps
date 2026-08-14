@@ -1,0 +1,202 @@
+﻿olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacppamdqwen354bggufv3
+  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+  description: "Qwen3.5-4B GGUF UD-Q4_K_XL text chat on AMD ROCm llama.cpp."
+  appid: llamacppamdqwen354bggufv3
+  title: Qwen3.5-4B AMD llama.cpp
+  version: '1.0.1'
+  categories:
+    - AI
+sharedEntrances:
+  - name: llamacppamdqwen354bggufv3
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3.5-4B
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: Qwen3.5-4B
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  llamacppamdqwen354bggufv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'unsloth/Qwen3.5-4B-GGUF:UD-Q4_K_XL'
+  upgradeDescription: |
+    v1.0.0: Initial AMD ROCm release — Qwen3.5-4B-UD-Q4_K_XL, text-only, tools, 32K ctx.
+  fullDescription: |
+    **Target hardware**
+    AMD ROCm unified memory (install with **`amd`** compute mode), e.g. Olares gtr-pro.
+    Image: `beclab/ggml-org-llama.cpp:server-rocm-b10362` + llm-init v1.3.5.
+
+    **Model**
+    [unsloth/Qwen3.5-4B-GGUF](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF) — `Qwen3.5-4B-UD-Q4_K_XL.gguf` (text only).
+
+    **Preset**
+    - Capabilities: tools (thinking disabled)
+    - Engine args: `-c 32768 --no-mmproj-auto --reasoning-format none -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1`
+    - Pod memory: `12Gi`
+
+    **OpenWebUI tips**
+    - New chat after install; context 8K-16K is fine for daily use on 4B
+
+    **Accelerator**
+    | Mode  | Device             | Notes                         |
+    |-------|--------------------|-------------------------------|
+    | `amd` | AMD unified memory | Pod 12Gi; `-ngl all`          |
+
+    llm-init downloads GGUF into App Common cache; llama-server starts after the sentinel.
+
+  developer: Alibaba
+  website: https://qwen.ai/home
+  sourceCode: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF
+
+  accelerator:
+    - mode: amd
+      limitedCpu: "8192m"
+      requiredCpu: "800m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "13Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://unsloth/Qwen3.5-4B-GGUF --include Qwen3.5-4B-UD-Q4_K_XL.gguf"
+    description: "HuggingFace GGUF source for Qwen3.5-4B UD-Q4_K_XL (text only)."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "unsloth/Qwen3.5-4B-GGUF:UD-Q4_K_XL"
+    description: "llama-server -hf alias (owner/repo:quant)."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tools"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "Qwen3.5-4B text capabilities (tools only; thinking disabled)."
+  - envName: ENGINE_ARGS
+    required: true
+    default: "-c 32768 --no-mmproj-auto --reasoning-format none -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1"
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "llama.cpp flags. -np 1 single slot; lower -c if OOM."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST
+    required: true
+    default: "400m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST
+    required: true
+    default: "10Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT
+    required: true
+    default: "4"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT
+    required: true
+    default: "12Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "12Gi"
+    description: "Unified memory budget on amd mode (sizes engine pod memory)."
+    regex: "^[0-9]+(Gi|Mi)?$"

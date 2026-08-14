@@ -1,0 +1,39 @@
+metadata:
+  description: "Dasheng-AudioGen for text-to-sound-effect and ambience generation."
+  title: Dasheng-AudioGen SFX
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    **模型概览**
+    Dasheng-AudioGen（小米 LLM PLUS + 上海交大 X-LANCE）根据文字描述生成音效、
+    环境音与音乐。它是流匹配扩散模型，不是大语言模型。
+
+    **配置**
+    - 模型：`mispeech/Dasheng-AudioGen`
+    - 来源：`hf://mispeech/Dasheng-AudioGen` + `hf://google/flan-t5-large` + `hf://mispeech/dashengtokenizer`
+    - 能力：`sound_fx`
+    - GPU 显存：`8Gi`
+    - 引擎：Dasheng-AudioGen（进程内，transformers，bf16）
+    - 许可：代码与权重均为 Apache-2.0，无「仅限研究」条款
+
+    **两个容易踩的点**
+    - **描述必须用英文。** 文本编码器是 flan-t5-large，训练时只见过英文字幕。
+      中文描述的翻译由调用方负责，引擎侧刻意不做。
+    - **定长。** 实测目前每段都是约 10 秒，时长不是参数。
+
+    **接口**
+    - `POST /v1/audio/speech` —— OpenAI 形状：`input` 是主描述；可选的 `sfx`、`env`、
+      `music`、`speech`、`asr` 是模型自己的标签。`num_steps`、`guidance_scale`、
+      `sway_sampling_coef` 按请求传。加 `?async=1` 返回任务 id。
+    - `POST /v1/audio/speech/batch` —— `items[]`（1–8）在同一次去噪中完成，返回 base64。
+      一次前向只有一套采样计划，因此各条目的采样参数必须一致。
+
+    没有流式接口：扩散是整段出音，没有可以提前吐的东西。也没有音色接口：这个模型没有说话人。
+
+    **工作方式**
+    Model Console（llm-init）负责下载模型；音频引擎就绪后提供服务。llm-init
+    反向代理 `/v1/*`，并在 `/` 提供控制台。
+
+    **模型存储**
+    共享目录 `appCommon/huggingface`，挂载为 `/cache/hf/hub`。

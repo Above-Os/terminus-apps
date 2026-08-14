@@ -8,26 +8,30 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
-{{- $modelMode := $oe.MODEL_MODE | default "" -}}
+{{- /* MT preset: llm-init v1.3.6 mounts the MTran /translate surface from the
+       mode alone. Legacy installs carry chat (or nothing) in olaresEnv, so
+       coerce both to translate on upgrade. */ -}}
+{{- $modelMode := $oe.MODEL_MODE | default "translate" -}}
+{{- if or (eq (trim $modelMode) "") (eq (trim $modelMode) "chat") -}}
+{{- $modelMode = "translate" -}}
+{{- end -}}
 {{- /* MODEL_SUPPORTS is a multi-select of coarse capability GROUPS (vision /
        tools / thinking / embedding). Expand each group one-to-many into the
        supports_* keys llm-init validates against its gateway AllSupports mirror,
        then re-join into the CSV the container env expects. "none" is the
-       required-field fallback (no extra capabilities); legacy "embedding"
-       token is kept as an alias. Unknown tokens pass through verbatim so a raw supports_* key still
+       required-field fallback (no extra capabilities); legacy "embedding" and
+       "translate" tokens are kept as empty aliases — v1.3.6 retired
+       supports_translate and rejects it as an unknown capability key.
+       Unknown tokens pass through verbatim so a raw supports_* key still
        works. */ -}}
 {{- $supportsGroups := dict
       "vision" "supports_vision"
       "tools" "supports_function_calling,supports_parallel_function_calling,supports_tool_choice"
       "thinking" "supports_reasoning,supports_reasoning_effort"
-      "translate" "supports_translate"
+      "translate" ""
       "none" ""
       "embedding" "" -}}
-{{- /* MT preset: empty / none (legacy installs) -> translate so /translate mounts. */ -}}
-{{- $modelSupports := $oe.MODEL_SUPPORTS | default "translate" -}}
-{{- if or (eq (trim $modelSupports) "") (eq (trim $modelSupports) "none") -}}
-{{- $modelSupports = "translate" -}}
-{{- end -}}
+{{- $modelSupports := $oe.MODEL_SUPPORTS | default "none" -}}
 {{- $expandedSupports := list -}}
 {{- range $tok := splitList "," $modelSupports -}}
 {{- $tok = trim $tok -}}
@@ -106,12 +110,38 @@ spec:
               mountPath: /run/llm-init
           securityContext:
             runAsUser: 0
+        # Legacy installs (supports_translate + mode=chat) persist chat on
+        # hostPath model-spec.json; disk wins over MODEL_MODE=translate env.
+        # Patch mode before llm-init starts so /translate mounts immediately
+        # even on llm-init v1.3.6 without overlayModeFromEnvSeed.
+        - name: migrate-translate-mode
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              SPEC=/run/llm-init/model-spec.json
+              if [ ! -f "$SPEC" ]; then
+                exit 0
+              fi
+              if grep -qE '"mode"[[:space:]]*:[[:space:]]*"chat"' "$SPEC"; then
+                sed -i 's/"mode"[[:space:]]*:[[:space:]]*"chat"/"mode": "translate"/' "$SPEC"
+                echo "upgraded model-spec mode chat -> translate"
+              fi
+              chown 1000:1000 "$SPEC" || true
+          volumeMounts:
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
       containers:
         - name: llm-init
-          # v1.2.4 defaults to the stable LFS download path (hf_xet disabled
-          # unless HF_ENABLE_XET=true); LFS streams each file to disk with a
-          # bounded RAM footprint, avoiding the hf_xet OOM (huggingface_hub#3300).
-          image: docker.io/beclab/llm-init:v1.3.2
+          # v1.3.6 is the first tag with MODEL_MODE=translate. It also defaults
+          # to the stable LFS download path (hf_xet disabled unless
+          # HF_ENABLE_XET=true); LFS streams each file to disk with a bounded
+          # RAM footprint, avoiding the hf_xet OOM (huggingface_hub#3300).
+          image: docker.io/beclab/llm-init:v1.3.6
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND

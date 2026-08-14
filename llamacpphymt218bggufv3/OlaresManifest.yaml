@@ -7,7 +7,7 @@ metadata:
   description: "Hy-MT2-1.8B (GGUF Q4_K_M) served with llama.cpp."
   appid: llamacpphymt218bggufv3
   title: Hy-MT2-1.8B (llama.cpp)
-  version: '1.0.15'
+  version: '1.0.17'
   categories:
     - AI
 sharedEntrances:
@@ -35,6 +35,10 @@ spec:
   onlyAdmin: true
   versionName: 'tencent/Hy-MT2-1.8B-GGUF:Q4_K_M'
   upgradeDescription: |
+    v1.0.17: init migrates stale hostPath model-spec mode chat→translate so
+      /translate mounts and Status shows Translate API on upgrade.
+    v1.0.16: llm-init v1.3.6 — MODEL_MODE=translate mounts /translate (mode-based;
+      supports_translate retired, MODEL_SUPPORTS defaults to none).
     v1.0.15: accelerator memory = engine + llm-init (nvidia 5Gi/10Gi; gb10 5Gi/6Gi).
     v1.0.14: align system RAM with pod defaults (requiredMemory 4Gi, limitedMemory 8Gi).
     v1.0.13: llm-init beclab/v1.3.2; llama.cpp server-cuda12-b10143.
@@ -143,8 +147,10 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "chat"
+    default: "translate"
     options:
+    - title: Translate
+      value: translate
     - title: Chat
       value: chat
     - title: Embedding
@@ -154,7 +160,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "translate"
+    default: "none"
     multiSelect: true
     splitter: ","
     options:
@@ -164,11 +170,9 @@ envs:
       value: tools
     - title: Thinking
       value: thinking
-    - title: Translate
-      value: translate
     - title: None
       value: none
-    description:  "The model capabilities. Translate enables /translate (default for this MT preset)."
+    description:  "The model capabilities. /translate comes from MODEL_MODE=translate, not from this field."
   - envName: ENGINE_ARGS
     required: true
     default: "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 1"

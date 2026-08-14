@@ -1,0 +1,42 @@
+metadata:
+  description: "SoulX-Podcast for multi-speaker dialogue and podcast synthesis."
+  title: SoulX-Podcast Dialogue
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    **模型概览**
+    SoulX-Podcast（Soul App AI Lab）根据脚本合成多人对话——播客、访谈、双人对聊。
+    它以中文播客为主要训练语料，在开源对话合成里中文可懂度领先。
+
+    **配置**
+    - 模型：`Soul-AILab/SoulX-Podcast-1.7B`
+    - 来源：`hf://Soul-AILab/SoulX-Podcast-1.7B`
+    - 能力：`tts_dialogue`
+    - GPU 显存：`12Gi`
+    - 引擎：SoulX-Podcast（进程内，HuggingFace 后端，不用 vLLM）
+    - 许可：代码与权重均为 Apache-2.0
+
+    **三个容易踩的点**
+    - **每个说话人都必须给参考音频。** 这是零样本克隆架构，没有任何预置音色。
+      不带参考音频的请求无法合成，只能被拒。每个音色给一段音频，并附上它的逐字文稿。
+    - **整个脚本是一次合成的。** 后面的轮次会听到前面的轮次，对话的接话感正来自于此。
+      把每一轮拆成独立请求恰恰会丢掉这一点，所以这里没有批量接口。
+    - **音频分词器烤在镜像里。** 它是这批模型里唯一一个组件来自 ModelScope 而非
+      HuggingFace 的，因此在构建镜像时就下载好，不出现在 `MODEL_SOURCE` 里。
+
+    **接口**
+    - `POST /v1/audio/speech` —— `speakers[]` 是 `{ref_audio, ref_text}` 数组（1–4 个音色，
+      `ref_audio` 用 `data:` URL）；`turns[]` 是脚本，形如 `{speaker, text}`，其中 `speaker`
+      是 `speakers` 的下标。默认返回整段对话音频；传 `per_turn: true` 则返回逐轮切片的
+      JSON 数组。加 `?async=1` 返回任务 id。
+
+    没有批量接口（一个脚本本身就是一批），没有流式接口（模型没有增量解码通路），
+    也没有音色列表接口（零样本克隆，音色随请求带上来）。
+
+    **工作方式**
+    Model Console（llm-init）负责下载模型；音频引擎就绪后提供服务。llm-init
+    反向代理 `/v1/*`，并在 `/` 提供控制台。
+
+    **模型存储**
+    共享目录 `appCommon/huggingface`，挂载为 `/cache/hf/hub`。
