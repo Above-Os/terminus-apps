@@ -1,10 +1,11 @@
 {{- /*
   knowledge — shared knowledge backend for Wise (v3 shared app, admin-only).
 
-  Three containers in one Pod:
+  Four containers in one Pod:
     - knowledge      (knowledge-base-api, port 3010)
     - vectorcrawl    (vector indexing worker, port 8080)
-    - flaresolverr   (Cloudflare/CAPTCHA bypass, used in-pod via localhost)
+    - camoufox       (Cloudflare/CAPTCHA bypass, port 8191, in-pod via localhost)
+    - nginx          (openresty reverse-proxy sidecar, port 3009)
 
   Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
   image (TermiPass docker/wise/wise.conf) works unchanged — it hardcodes
@@ -274,7 +275,7 @@ spec:
               memory: 512Mi
             limits:
               cpu: "2"
-              memory: 1Gi         
+              memory: 1.5Gi         
           readinessProbe:
             httpGet:
               path: /health
