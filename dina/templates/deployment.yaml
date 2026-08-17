@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  replicas: {{ .Values.workloads.dina.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: fix-data-perms
+          image: beclab/aboveos-busybox:1.37.0
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /appdata/data /appdata/data/cli /appdata/data/dina /appdata/data/workspace
+              chown -R 1000:1000 /appdata/data
+          volumeMounts:
+            - name: app-data
+              mountPath: /appdata
+        {{- if .Values.dev.hotReload }}
+        - name: fix-dev-perms
+          image: beclab/aboveos-busybox:1.37.0
+          securityContext:
+            runAsUser: 0
+          env:
+            - name: DEV_SUBPATH
+              value: {{ .Values.dev.sourceSubPath | default "devsrc" | quote }}
+          command:
+            - sh
+            - -c
+            - mkdir -p "/appdata/$DEV_SUBPATH" && chown -R 1000:1000 "/appdata/$DEV_SUBPATH"
+          volumeMounts:
+            - name: app-data
+              mountPath: /appdata
+        - name: seed-dev-src
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: DEV_SUBPATH
+              value: {{ .Values.dev.sourceSubPath | default "devsrc" | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              target="/appdata/$DEV_SUBPATH"
+              mkdir -p "$target"
+              # Reseed the whole overlay (code + prod node_modules) only when the
+              # image changes. Same image across restarts keeps dev-synced code.
+              # Clear contents (not the dir itself: parent /appdata is root-owned).
+              if [ ! -f "$target/.dina-image-id" ] || ! cmp -s /app/.dina-image-id "$target/.dina-image-id"; then
+                find "$target" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+                cp -a /app/. "$target/"
+              fi
+          volumeMounts:
+            - name: app-data
+              mountPath: /appdata
+        {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          {{- if .Values.dev.hotReload }}
+          command:
+            - npm
+            - run
+            - start:watch
+          {{- end }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: PORT
+              value: "8080"
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: DINA_WORKSPACE
+              value: /data/workspace
+            - name: DINA_DATA_DIR
+              value: /data/dina
+            - name: LLM_GATEWAY_URL
+              value: {{ .Values.olaresEnv.LLM_GATEWAY_URL | default "http://router-svc.router-shared/v1" | quote }}
+            - name: OLARES_APP_ID
+              value: {{ .Values.olaresEnv.OLARES_APP_ID | default "dina" | quote }}
+            - name: DINA_ROUTER_API_KEY
+              value: {{ .Values.olaresEnv.DINA_ROUTER_API_KEY | default "" | quote }}
+            - name: DINA_DEFAULT_MODEL
+              value: {{ .Values.olaresEnv.DINA_DEFAULT_MODEL | default "" | quote }}
+            - name: DINA_CLI_ROOT
+              value: /data/cli
+            # dsh /api fence trusts only loopback Hosts; the entrance host is
+            # randomized per install, so it must come from the render context.
+            - name: DSH_TRUSTED_HOSTS
+              value: {{ .Values.domain.dina | default "" | quote }}
+            - name: HOT_RELOAD
+              value: {{ .Values.dev.hotReload | quote }}
+            - name: NODE_ENV
+              value: "production"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+              subPath: data
+            {{- if .Values.dev.hotReload }}
+            - name: app-data
+              mountPath: /app
+              subPath: {{ .Values.dev.sourceSubPath | default "devsrc" }}
+            {{- end }}
+      volumes:
+        - name: app-data
+          hostPath:
+            path: {{ .Values.userspace.appData }}
+            type: DirectoryOrCreate
