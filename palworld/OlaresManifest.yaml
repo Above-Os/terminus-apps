@@ -1,0 +1,105 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+workloadReplicas:
+  palworld: 1
+  terminal: 1
+
+metadata:
+  name: palworld
+  appid: palworld
+  title: Palworld
+  description: Palworld dedicated server.
+  icon: https://cdn.olares.com/images/2026/08/77e9ce1497f6244892da4437be85eac3.png
+  version: 0.1.4
+  categories:
+  - Fun
+
+entrances:
+- name: terminal
+  host: terminal
+  port: 80
+  title: Palworld Console
+  icon: https://cdn.olares.com/images/2026/08/77e9ce1497f6244892da4437be85eac3.png
+  authLevel: private
+  openMethod: window
+
+ports:
+- name: palworld
+  host: palworld
+  port: 8211
+  protocol: udp
+  exposePort: 8211
+- name: query
+  host: palworld
+  port: 27015
+  protocol: udp
+  exposePort: 27015
+
+overlayGateway:
+  enable: true
+  entrances:
+  - title: Palworld
+    workload: palworld
+    port: 8211
+    protocol: udp
+    description: Join with the Palworld client (UDP 8211)
+  - title: Palworld Query
+    workload: palworld
+    port: 27015
+    protocol: udp
+    description: Steam query (UDP 27015)
+
+tailscale:
+  acls:
+  - proto: udp
+    dst:
+    - "*:8211,27015"
+
+permission:
+  appData: true
+
+spec:
+  versionName: "1.0"
+  developer: Pocketpair
+  website: https://www.palworldgame.com/
+  sourceCode: https://github.com/thijsvanloef/palworld-server-docker
+  submitter: Olares
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://palworld-server-docker.loef.dev/
+  license:
+  - text: Palworld
+    url: https://store.steampowered.com/app/1623730/Palworld/
+  requiredMemory: 16Gi
+  limitedMemory: 32Gi
+  requiredDisk: 20Gi
+  limitedDisk: 80Gi
+  requiredCpu: 4
+  limitedCpu: 8
+  supportArch:
+  - amd64
+  - arm64
+  featuredImage: https://cdn.olares.com/images/2026/08/d625070f8d8e4bb353d1c05e762c9b42.png
+  promoteImage:
+  - https://cdn.olares.com/images/2026/08/d625070f8d8e4bb353d1c05e762c9b42.png
+  - https://cdn.olares.com/images/2026/08/db06d141861d52e1618c4d96a0847199.png
+  - https://cdn.olares.com/images/2026/08/c9643eb9a5a2e5031c7da010df20ff94.png
+  fullDescription: |
+    A Palworld dedicated server. There is no web UI — open the console terminal from the desktop, and join from the official Palworld client on Steam (Windows).
+
+    First start downloads the official dedicated server via SteamCMD (several GB, can take a while). World data is stored in this app's data directory. Hosting the server does not require owning Palworld; players who join must own the game.
+
+    Connect with the official Palworld client. Use the app third-level domain and UDP port 8211 (for example palworld.<olares-id>.olares.com:8211), or the Olares node IP on the same LAN. Community listing is off.
+
+  upgradeDescription: |
+    Add Market listing icon and live gameplay promotional images.
+
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
