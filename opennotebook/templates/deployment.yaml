@@ -126,6 +126,36 @@ spec:
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
+      - name: migrate-legacy-dirs
+        image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        command:
+          - sh
+          - '-c'
+          - |
+            set -e
+            for sub in uploads config; do
+              src="/mnt/legacy/$sub"
+              dst="/app-data-root/$sub"
+              if [ -d "$src" ] && [ -n "$(ls -A "$src" 2>/dev/null)" ]; then
+                mkdir -p "$dst"
+                if [ -z "$(ls -A "$dst" 2>/dev/null)" ]; then
+                  echo "[migrate-opennotebook] copying legacy $sub into /app/data/$sub..."
+                  cp -a "$src/." "$dst/"
+                else
+                  echo "[migrate-opennotebook] skip $sub (destination already has data)"
+                fi
+              fi
+            done
+        volumeMounts:
+          - name: appdata
+            mountPath: /app-data-root
+          - name: legacy-uploads
+            mountPath: /mnt/legacy/uploads
+          - name: legacy-config
+            mountPath: /mnt/legacy/config
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
       containers:
       - name: opennotebook
         image: "docker.io/lfnovo/open_notebook:1.14.0"
@@ -221,6 +251,14 @@ spec:
           path: '{{ .Values.userspace.appData }}/data'
           type: DirectoryOrCreate
         name: appdata
+      - hostPath:
+          path: '{{ .Values.userspace.appData }}/uploads'
+          type: DirectoryOrCreate
+        name: legacy-uploads
+      - hostPath:
+          path: '{{ .Values.userspace.appData }}/config'
+          type: DirectoryOrCreate
+        name: legacy-config
 ---
 apiVersion: v1
 kind: Service
