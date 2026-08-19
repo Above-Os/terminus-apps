@@ -9,7 +9,7 @@ metadata:
   description: A Headless Steam Service
   icon: https://app.cdn.olares.com/appstore/steamheadless/icon.png
   appid: steamheadless
-  version: '1.0.41'
+  version: '1.0.43'
   title: Steam Headless
   categories:
   - Fun
@@ -44,46 +44,46 @@ entrances:
 overlayGateway:
   enable: true
   entrances:
-  - title: tcp3
+  - title: "Sunshine Web UI"
     workload: steamheadless
     port: 47990
     protocol: tcp
-    description: "Access Steam Headless using IP address"
-  - title: tcp4
+    description: "HTTPS interface for managing Sunshine settings, applications, and client pairing."
+  - title: "Moonlight HTTPS"
     workload: steamheadless
     port: 47984
     protocol: tcp
-    description: "Access Steam Headless using IP address"
-  - title: tcp5
+    description: "Secure Moonlight/GameStream endpoint for pairing, host discovery, and session negotiation."
+  - title: "Moonlight HTTP"
     workload: steamheadless
     port: 47989
     protocol: tcp
-    description: "Access Steam Headless using IP address"
-  - title: tcp6
+    description: "Moonlight/GameStream HTTP endpoint for host information and application discovery."
+  - title: Moonlight RTSP
     workload: steamheadless
     port: 48010
     protocol: tcp
-    description: "Access Steam Headless using IP address"
-  - title: udp1
+    description: "TCP RTSP listener that establishes and negotiates a streaming session."
+  - title: "Video Stream"
     workload: steamheadless
     port: 47998
     protocol: udp
-    description: "Access Steam Headless using IP address"
-  - title: udp2
+    description: "Carries the low-latency encoded video stream from Sunshine to Moonlight."
+  - title: "Control Stream"
     workload: steamheadless
     port: 47999
     protocol: udp
-    description: "Access Steam Headless using IP address"
-  - title: udp3
+    description: "Carries real-time streaming control traffic between Moonlight and Sunshine."
+  - title: "Audio Stream"
     workload: steamheadless
     port: 48000
     protocol: udp
-    description: "Access Steam Headless using IP address"
-  - title: udp4
+    description: "Carries the low-latency game and system audio stream from Sunshine to Moonlight."
+  - title: "Reserved Mic Audio"
     workload: steamheadless
     port: 48002
     protocol: udp
-    description: "Access Steam Headless using IP address"
+    description: "Reserved legacy GameStream port for client-to-host microphone audio, which current Sunshine normally does not use."
 ports:
 - name: tcp3
   host: steamheadless
@@ -159,12 +159,11 @@ spec:
     Root access
     Based on Debian Bookworm
   upgradeDescription: |
-    v1.0.36: Keep durable volumes on `appCache` (no appData migration); require control-plane (master) affinity; move `SUNSHINE_PASS` into Secret (`secretKeyRef`).
-
-    Storage: durable volumes c0/c1 moved from `appCache` to `appData`. On first start after upgrade, initContainers copy legacy appCache contents into appData when the destination is empty (markers: `.migration_from_appcache_c0_done`, `.migration_from_appcache_c1_done`). Old appCache data is left intact for rollback.
-
-    Update Chart Config
-    - Fix Moonlight auto discovery when change ip
+    **Changes**
+    - Updated Steam Headless version
+    - Runs as user UID 1000 instead of root for improved security.
+    - Added support for Flatpak and persistent Flatpak applications.
+    - Enabled overlay support for direct IP access.
 
   developer: Steam-Headless
   sourceCode: https://github.com/Steam-Headless/docker-steam-headless
