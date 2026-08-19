@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: frappehrms
+      annotations:
+        checksum/nginx-bootstrap: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       enableServiceLinks: false
       securityContext:
@@ -185,11 +187,10 @@ spec:
             - |
               set -euo pipefail
               mkdir -p /home/frappe/frappe-bench/sites/frontend/public
-              python3 -c 'from pathlib import Path; Path("/home/frappe/frappe-bench/sites/frontend/public/login").write_text("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><title>Frappe HR</title><style>body{font-family:sans-serif;background:#f5f7fa;margin:0}.wrap{max-width:360px;margin:12vh auto;background:#fff;padding:28px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}h1{font-size:22px;margin:0 0 8px}p{color:#667085;margin:0 0 20px}label{display:block;font-size:13px;margin:12px 0 6px}input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d0d5dd;border-radius:8px}button{width:100%;margin-top:18px;padding:10px;border:0;border-radius:8px;background:#2490ef;color:#fff;font-weight:600;cursor:pointer}#err{color:#d92d20;min-height:1.2em;margin-top:12px;font-size:13px}</style></head><body><div class=\"wrap\"><h1>Frappe HR</h1><p>Sign in with your Administrator account.</p><form id=\"f\"><label for=\"usr\">User</label><input id=\"usr\" name=\"usr\" value=\"Administrator\" autocomplete=\"username\"/><label for=\"pwd\">Password</label><input id=\"pwd\" name=\"pwd\" type=\"password\" autocomplete=\"current-password\"/><button type=\"submit\">Sign in</button></form><div id=\"err\"></div></div><script>document.getElementById(\"f\").addEventListener(\"submit\",async function(e){e.preventDefault();var err=document.getElementById(\"err\");err.textContent=\"\";try{var r=await fetch(\"/api/method/login\",{method:\"POST\",headers:{\"Content-Type\":\"application/json\",\"Accept\":\"application/json\"},credentials:\"same-origin\",body:JSON.stringify({usr:document.getElementById(\"usr\").value,pwd:document.getElementById(\"pwd\").value})});var data=await r.json();if(r.ok&&(data.message===\"Logged In\"||(data.message&&data.message.home_page))){window.location.href=\"/app\";return;}err.textContent=data.message||data.exception||\"Login failed\";}catch(ex){err.textContent=String(ex);}});</script></body></html>")'
+              cp /olares/login.html /home/frappe/frappe-bench/sites/frontend/public/login
               sed -E '/^[[:space:]]*(exec[[:space:]]+)?nginx([[:space:]]|$)/d' /usr/local/bin/nginx-entrypoint.sh > /tmp/gen-nginx.sh
               bash /tmp/gen-nginx.sh
-              python3 -c 'import base64,pathlib; pathlib.Path("/tmp/patch_nginx.py").write_bytes(base64.b64decode("ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgphcGkgPSAiIiIKbG9jYXRpb24gL2FwaS8gewogcHJveHlfaHR0cF92ZXJzaW9uIDEuMTsKIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtRm9yICRyZW1vdGVfYWRkcjsKIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gJHByb3h5X3hfZm9yd2FyZGVkX3Byb3RvOwogcHJveHlfc2V0X2hlYWRlciBYLUZyYXBwZS1TaXRlLU5hbWUgZnJvbnRlbmQ7CiBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiBwcm94eV9yZWFkX3RpbWVvdXQgMTIwOwogcHJveHlfcmVkaXJlY3Qgb2ZmOwogcHJveHlfcGFzcyBodHRwOi8vYmFja2VuZC1zZXJ2ZXI7Cn0KIiIiCgpsb2dpbiA9ICIiIgpsb2NhdGlvbiA9IC8geyByZXR1cm4gMzAyIC9sb2dpbjsgfQpsb2NhdGlvbiA9IC9sb2dpbiB7IGRlZmF1bHRfdHlwZSB0ZXh0L2h0bWw7IGNoYXJzZXQgdXRmLTg7IHRyeV9maWxlcyAvZnJvbnRlbmQvcHVibGljL2xvZ2luID00MDQ7IH0KIiIiCgp3ZWIgPSAiIiJsb2NhdGlvbiBAd2Vic2VydmVyIHsKIHByb3h5X2hpZGVfaGVhZGVyIENvbnRlbnQtVHlwZTsKIGFkZF9oZWFkZXIgQ29udGVudC1UeXBlICJhcHBsaWNhdGlvbi94aHRtbCt4bWw7IGNoYXJzZXQ9dXRmLTgiIGFsd2F5czsKIHByb3h5X2hpZGVfaGVhZGVyIExpbms7IiIiCgpmb3IgcCBpbiBQYXRoKCIvZXRjL25naW54L2NvbmYuZCIpLmdsb2IoIiouY29uZiIpOgogICAgdCA9IHAucmVhZF90ZXh0KCkKICAgIHQgPSB0LnJlcGxhY2UoImd6aXAgb247IiwgImd6aXAgb2ZmOyIpCiAgICBpZiAibG9jYXRpb24gL2FwaS8iIG5vdCBpbiB0OgogICAgICAgIHQgPSB0LnJlcGxhY2UoImxvY2F0aW9uIC9hc3NldHMgeyIsIGFwaSArICJcbmxvY2F0aW9uIC9hc3NldHMgeyIpCiAgICBpZiAibG9jYXRpb24gPSAvbG9naW4iIG5vdCBpbiB0OgogICAgICAgIHQgPSB0LnJlcGxhY2UoImxvY2F0aW9uIC8geyIsIGxvZ2luICsgIlxubG9jYXRpb24gLyB7IikKICAgIGlmICJhcHBsaWNhdGlvbi94aHRtbCt4bWwiIG5vdCBpbiB0OgogICAgICAgIHQgPSB0LnJlcGxhY2UoImxvY2F0aW9uIEB3ZWJzZXJ2ZXIgeyIsIHdlYikKICAgIHAud3JpdGVfdGV4dCh0KQpwcmludCgicGF0Y2hlZCBuZ2lueCBjb25mIikK"))'
-              python3 /tmp/patch_nginx.py
+              python3 /olares/patch_nginx.py
               exec nginx -g "daemon off;"
           env:
             - name: BACKEND
@@ -228,6 +229,9 @@ spec:
               mountPath: /home/frappe/frappe-bench/sites
             - name: logs
               mountPath: /home/frappe/frappe-bench/logs
+            - name: nginx-bootstrap
+              mountPath: /olares
+              readOnly: true
         - name: backend
           image: docker.io/beclab/frappe-hrms:v16.16.0
           imagePullPolicy: IfNotPresent
@@ -335,6 +339,9 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 256Mi
+        - name: nginx-bootstrap
+          configMap:
+            name: {{ .Release.Name }}-nginx-bootstrap
 ---
 apiVersion: v1
 kind: Service
