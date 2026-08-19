@@ -3,7 +3,7 @@
 Olares 上的一体化 AI 工作流生产应用：导入 ComfyUI 工作流、解析模型与节点、
 按项目动态分配 GPU，并在 PC / 移动双端完成生成。
 
-当前 Chart 版本：**0.3.15**（须与 `Chart.yaml` / `OlaresManifest.yaml` 一致）。
+当前 Chart 版本：**0.3.28**（须与 `Chart.yaml` / `OlaresManifest.yaml` 一致）。
 
 ## 运行要求
 
@@ -65,6 +65,19 @@ olares-cli chart package deploy/flowstudio
 
 正式上架包必须 `dev.hotReload: false`。
 
+## Router 目录声明
+
+Manifest 声明了 `options.LLMGatewaySupported: true`，并在 `envs` 中把 `MODEL_MODE` 固定为
+`image_generation`。这两个值都不进 chart 模板：Market 直接从 Manifest 里取出来放进自己的
+provider 目录，Olares Router 据此在应用安装之前就把 FlowStudio 归到 Creative 能力域。所有模型
+应用的 category 一律是 AI，能区分能力域的只有 `MODEL_MODE`。
+
+`MODEL_SUPPORTS` 声明为空。它本来是给跑 `llm-init` 的应用拼模型卡用的，而 Router 的
+`supports_*` 白名单里没有图像生成对应的键，FlowStudio 也不跑 `llm-init`。
+
+这组声明只让 FlowStudio 在 Router 里可见、可安装，不代表可路由：FlowStudio 不是 shared 应用、
+没有 `sharedEntrances`，投影出来的 provider 行 base URL 是占位符，Router 无法把模型调用转发过去。
+
 ## 存储与中间件
 
 - **appData**：用户项目与业务数据（`USER_DATA_DIR` → `{owner_id}/comfyui/…`）
@@ -82,7 +95,8 @@ olares-cli chart package deploy/flowstudio
 
 从 Market 升级到本版本后：重新打开应用；若 GPU 绑定丢失，在 Olares 加速器中重新绑定后再启动。
 
-本版（0.3.15）变更摘要见 Manifest 中的 `upgradeDescription`。
+Manifest 中的 `upgradeDescription` 跟随 `spec.versionName`（应用发布版本），目前对应 0.3.24；
+0.3.25–0.3.28 都是只动 chart、不换镜像的版本号递增。
 
 ## Chart 结构
 
