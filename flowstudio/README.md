@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.22** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.28** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -65,6 +65,24 @@ Admins own project definition and environment; published projects can be used by
 
 Release packages must set `dev.hotReload: false`.
 
+## Router catalog declaration
+
+The Manifest declares `options.LLMGatewaySupported: true` and an `envs` entry pinning
+`MODEL_MODE` to `image_generation`. Neither value reaches a chart template: Market lifts
+them out of the Manifest and serves them in its provider catalog, which is how Olares
+Router files FlowStudio under the Creative capability domain before anything is installed.
+Every model application carries category AI, so `MODEL_MODE` is the only thing that
+distinguishes one domain from another.
+
+`MODEL_SUPPORTS` is declared empty. It exists for `llm-init`-backed applications to build a
+model card from, and Router's `supports_*` whitelist has no image-generation key to put
+there. FlowStudio does not run `llm-init`.
+
+The declaration makes FlowStudio visible and installable from Router; it does not make it
+routable. FlowStudio is not a shared application and exposes no `sharedEntrances`, so the
+projected provider row has a placeholder base URL and Router cannot forward model calls to
+it.
+
 ## Storage and middleware
 
 - **appData:** user projects and business data (`USER_DATA_DIR` → `{owner_id}/comfyui/…`)
@@ -97,7 +115,8 @@ Bump together:
 
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
-See Manifest `upgradeDescription` for this release (0.3.22).  
+Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
+covers 0.3.24. Chart versions 0.3.25–0.3.28 are chart-only bumps that ship the same image.  
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
