@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.28** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.30** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -26,6 +26,7 @@ Resource envelope (`spec.accelerator`; must cover business API + engine):
 ## Install
 
 1. In Olares **Market**, search **FlowStudio** (test or public source, depending on release).
+   **Admin-only:** `options.shared: true` installs one cluster instance (`flowstudio-shared`).
 2. Bind an NVIDIA GPU when prompted.
 3. When status is running, open the **FlowStudio** entrance from the desktop.
 
@@ -65,23 +66,35 @@ Admins own project definition and environment; published projects can be used by
 
 Release packages must set `dev.hotReload: false`.
 
-## Router catalog declaration
+## Olares Router (Market auto-discovery)
 
-The Manifest declares `options.LLMGatewaySupported: true` and an `envs` entry pinning
-`MODEL_MODE` to `image_generation`. Neither value reaches a chart template: Market lifts
-them out of the Manifest and serves them in its provider catalog, which is how Olares
-Router files FlowStudio under the Creative capability domain before anything is installed.
-Every model application carries category AI, so `MODEL_MODE` is the only thing that
-distinguishes one domain from another.
+Market lifts `options.LLMGatewaySupported` and `MODEL_MODE=image_generation` into the
+provider catalog. Router's Olares projector always types that row as `model_console` and
+sets `base_url` to `http://<shared-entrance>/v1`. This chart is therefore a **shared**
+admin install (`options.shared` + `spec.onlyAdmin`) with an internal `sharedEntrances`
+entry on `flowstudio-svc:8080` so the projector gets a real in-cluster address.
 
-`MODEL_SUPPORTS` is declared empty. It exists for `llm-init`-backed applications to build a
-model card from, and Router's `supports_*` whitelist has no image-generation key to put
-there. FlowStudio does not run `llm-init`.
+The data plane Router actually calls is OpenAI-shaped, not the FlowStudio adapter:
 
-The declaration makes FlowStudio visible and installable from Router; it does not make it
-routable. FlowStudio is not a shared application and exposes no `sharedEntrances`, so the
-projected provider row has a placeholder base URL and Router cannot forward model calls to
-it.
+| Purpose | Endpoint |
+|---------|----------|
+| Model card | `GET` / `PUT /api/model-spec` |
+| Console phase | `GET /api/progress` |
+| Engine restart | `POST /api/engine/restart` |
+| Model list | `GET /v1/models` |
+| Image generate (sync, `b64_json`) | `POST /v1/images/generations` |
+
+`GET /v1/models` lists every published, produce-ready scene whose output is image,
+video, audio, or 3D and that can run from a prompt (no required reference media).
+`id` is the scene name; collisions append the project id. Each row also has
+`output_type`: `image`, `video`, `audio`, or `model3d`.
+`POST /v1/images/generations` uses `model` to pick that scene and returns the first
+matching output as `b64_json`; omit `model` (or pass the Model Console card name) to
+use the newest eligible scene. Workflows that require uploaded media stay in the
+FlowStudio UI.
+
+`MODEL_SUPPORTS` stays empty (Router has no image-generation `supports_*` key). This app
+does not run `llm-init`.
 
 ## Storage and middleware
 
@@ -116,7 +129,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.24. Chart versions 0.3.25–0.3.28 are chart-only bumps that ship the same image.  
+covers 0.3.30. This chart ships `flowstudio:0.3.30` and `engine-1.0.6`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
