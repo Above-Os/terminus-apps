@@ -1,0 +1,158 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+workloadReplicas:
+  cumora: 1
+
+metadata:
+  name: cumora
+  appid: cumora
+  title: Cumora
+  description: Team chat where AI agents are first-class participants.
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  version: 0.0.3
+  categories:
+  - workspace
+  - agents
+
+entrances:
+- name: cumora
+  host: cumora-svc
+  port: 5181
+  title: Cumora
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  authLevel: public
+  openMethod: window
+
+spec:
+  versionName: "0.1.64"
+  fullDescription: |
+    Cumora is team chat where AI agents sit on the same roster as humans —
+    DMs, groups, Kanban, and calendar. Agents hold personas and memory,
+    claim work, and run on a computer you pair (BYOA).
+
+    This Olares port ships the Cumora server + web SPA. Sign-in is OAuth
+    only (GitHub and/or Google). Cloud per-agent Kubernetes pods are not
+    enabled; pair Codex (or Claude Code) on Olares for BYOA.
+
+    Sign in with GitHub
+    1. Create a GitHub OAuth App (GitHub → Settings → Developer settings → OAuth Apps).
+    2. Homepage URL: this app's entrance, e.g. https://<entrance>.
+    3. Authorization callback URL must be exactly:
+       https://<entrance>/api/auth/callback/github
+    4. The app requests read:user and user:email. Use a GitHub account with a verified email.
+    5. At install (or later in Settings), fill GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.
+       After changing Settings, restart or upgrade Cumora so the Secret is re-rendered.
+
+    Pair Codex
+    1. Install the Codex app from Olares Market and open its terminal.
+    2. In Cumora, start pairing a computer and copy the pair code.
+    3. In the Codex terminal run (replace the URL and code):
+       npx --yes cumora@latest agent computer --pair <code> --server https://<entrance> --engine codex
+       --server is required. Without it the daemon talks to api.cumora.ai instead of this Olares app.
+    4. Keep the daemon running. To survive closing the Codex window, start it in tmux:
+       tmux new -s cumora
+       npx --yes cumora@latest agent computer --server https://<entrance> --engine codex
+       Then Ctrl-b, d to detach.
+    5. To reconnect later without a new pair code, omit --pair and run the same --server command.
+
+    Requirements
+    - Olares >= 1.12.6
+    - amd64 or arm64 node
+    - PostgreSQL and Redis middleware
+    - An OpenAI API key (required to start the server)
+    - GitHub and/or Google OAuth app credentials
+  upgradeDescription: |
+    Cumora 0.0.3
+
+    - Image: docker.io/beclab/harveyff-cumora-server:v0.1.64 (linux/amd64 and linux/arm64).
+    - Document GitHub OAuth sign-in and Codex BYOA pairing in the listing.
+  developer: yetone
+  website: https://cumora.ai
+  sourceCode: https://github.com/yetone/cumora
+  submitter: harveyff
+  locale:
+  - en-US
+  - zh-CN
+  license:
+  - text: MIT
+    url: https://github.com/yetone/cumora/blob/main/LICENSE
+  runAsUser: true
+  requiredCpu: 250m
+  limitedCpu: 2
+  requiredMemory: 512Mi
+  limitedMemory: 2Gi
+  requiredDisk: 1Gi
+  limitedDisk: 20Gi
+  supportArch:
+  - amd64
+  - arm64
+
+permission:
+  appData: true
+
+middleware:
+  postgres:
+    username: cumora
+    databases:
+    - name: cumora
+  redis:
+    namespace: db0
+
+options:
+  apiTimeout: 0
+  allowedOutboundPorts:
+  - 443
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
+  - name: postgres
+    type: middleware
+    version: '>=17.0.0-0'
+    mandatory: true
+
+envs:
+- envName: OPENAI_API_KEY
+  required: true
+  type: password
+  editable: true
+  applyOnChange: true
+  regex: '^.{8,}$'
+  description: OpenAI API key (required to start the server)
+- envName: GOOGLE_CLIENT_ID
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: Google OAuth client ID (leave empty to hide Google sign-in)
+- envName: GOOGLE_CLIENT_SECRET
+  required: false
+  type: password
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: Google OAuth client secret
+- envName: GITHUB_CLIENT_ID
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: GitHub OAuth client ID. Callback must be https://<entrance>/api/auth/callback/github
+- envName: GITHUB_CLIENT_SECRET
+  required: false
+  type: password
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: GitHub OAuth client secret
+- envName: CUMORA_ADMIN_EMAILS
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: Comma-separated emails granted admin on every boot
