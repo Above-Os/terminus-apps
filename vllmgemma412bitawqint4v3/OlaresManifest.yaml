@@ -7,9 +7,12 @@ metadata:
   description: "Gemma-4-12B (AWQ-INT4) served with vLLM."
   appid: vllmgemma412bitawqint4v3
   title: Gemma-4-12B (vLLM)
-  version: '1.0.8'
+  version: '1.0.15'
   categories:
-    - AI
+  - AI
+  - models
+  tags:
+  - llm
 sharedEntrances:
   - name: vllmgemma412bitawqint4v3
     host: sharedentrances-api
@@ -35,6 +38,12 @@ spec:
   onlyAdmin: true
   versionName: 'cyankiwi/gemma-4-12B-it-AWQ-INT4'
   upgradeDescription: |
+    v1.0.12: ENGINE_ARGS uses the gemma4 tool-call and reasoning parsers.
+
+    v1.0.11: bump llm-init to v1.3.5.
+    v1.0.10: Move `HF_TOKEN` into Kubernetes Secret (`secretKeyRef`); map HF env from `OLARES_SYSTEM_HUGGINGFACE_*`.
+
+    v1.0.9: vllm engine add a environment variable HF_HUB_CACHE to point to the shared HF Hub cache.
     v1.0.8: VLLM_MEMORY_LIMIT 30Gi; llm-init limit 2Gi; limitedMemory 32Gi (30+2).
     v1.0.7: nvidia host memory — requiredMemory 22Gi, VLLM_MEMORY_REQUEST 21Gi, VLLM_MEMORY_LIMIT 26Gi, limitedMemory 30Gi.
     v1.0.6: nvidia host memory — requiredMemory 16Gi, VLLM_MEMORY_REQUEST 15Gi, VLLM_MEMORY_LIMIT 19Gi, limitedMemory 26Gi.
@@ -48,7 +57,7 @@ spec:
     **Preset Configuration**
     - Model: `cyankiwi/gemma-4-12B-it-AWQ-INT4`
     - Capabilities: thinking, tools, vision
-    - Engine args: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-prefix-caching --enable-auto-tool-choice`
+    - Engine args: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-auto-tool-choice`
     - Required GPU memory: `23Gi`
 
     **Accelerator modes**
@@ -162,7 +171,7 @@ envs:
     description: "The model capabilities. Pick what your model supports. If no extra capabilities, pick None."
   - envName: ENGINE_ARGS         # stability-first example for quantized Ornith 9B on 24GB: --max-model-len 131072 --gpu-memory-utilization 0.92 --tensor-parallel-size 1 --max-num-batched-tokens 4096 --kv-cache-dtype fp8 --quantization compressed-tensors --language-model-only --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --trust-remote-code --enforce-eager
     required: true
-    default: "--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-prefix-caching --enable-auto-tool-choice"
+    default: "--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-auto-tool-choice"
     type: string
     editable: true
     applyOnChange: true
@@ -191,7 +200,7 @@ envs:
     required: false
     applyOnChange: true
     valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_TOKEN
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
   - envName: VLLM_CPU_REQUEST    # default: 1060m
     required: true
     default: "1060m"

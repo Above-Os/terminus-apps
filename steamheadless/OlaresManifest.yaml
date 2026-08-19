@@ -9,10 +9,13 @@ metadata:
   description: A Headless Steam Service
   icon: https://app.cdn.olares.com/appstore/steamheadless/icon.png
   appid: steamheadless
-  version: '1.0.33'
+  version: '1.0.41'
   title: Steam Headless
   categories:
   - Fun
+  - homelab
+  tags:
+  - gaming
 
 entrances:
 - name: steamheadless
@@ -38,6 +41,49 @@ entrances:
   authLevel: internal
   openMethod: window
   invisible: true
+overlayGateway:
+  enable: true
+  entrances:
+  - title: tcp3
+    workload: steamheadless
+    port: 47990
+    protocol: tcp
+    description: "Access Steam Headless using IP address"
+  - title: tcp4
+    workload: steamheadless
+    port: 47984
+    protocol: tcp
+    description: "Access Steam Headless using IP address"
+  - title: tcp5
+    workload: steamheadless
+    port: 47989
+    protocol: tcp
+    description: "Access Steam Headless using IP address"
+  - title: tcp6
+    workload: steamheadless
+    port: 48010
+    protocol: tcp
+    description: "Access Steam Headless using IP address"
+  - title: udp1
+    workload: steamheadless
+    port: 47998
+    protocol: udp
+    description: "Access Steam Headless using IP address"
+  - title: udp2
+    workload: steamheadless
+    port: 47999
+    protocol: udp
+    description: "Access Steam Headless using IP address"
+  - title: udp3
+    workload: steamheadless
+    port: 48000
+    protocol: udp
+    description: "Access Steam Headless using IP address"
+  - title: udp4
+    workload: steamheadless
+    port: 48002
+    protocol: udp
+    description: "Access Steam Headless using IP address"
 ports:
 - name: tcp3
   host: steamheadless
@@ -88,7 +134,6 @@ tailscale:
     dst:
     - "*:47998,47999,48000,48002"    
 permission:
-  appData: true
   appCache: true
 spec:
   versionName: '0.2.0'
@@ -114,6 +159,10 @@ spec:
     Root access
     Based on Debian Bookworm
   upgradeDescription: |
+    v1.0.36: Keep durable volumes on `appCache` (no appData migration); require control-plane (master) affinity; move `SUNSHINE_PASS` into Secret (`secretKeyRef`).
+
+    Storage: durable volumes c0/c1 moved from `appCache` to `appData`. On first start after upgrade, initContainers copy legacy appCache contents into appData when the destination is empty (markers: `.migration_from_appcache_c0_done`, `.migration_from_appcache_c1_done`). Old appCache data is left intact for rollback.
+
     Update Chart Config
     - Fix Moonlight auto discovery when change ip
 

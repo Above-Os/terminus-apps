@@ -25,7 +25,10 @@ spec:
             - name: POSTGRES_USER
               value: "fastgpt"
             - name: POSTGRES_PASSWORD
-              value: "fastgpt"
+              valueFrom:
+                secretKeyRef:
+                  name: fastgpt-secrets
+                  key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: "postgres"
           volumeMounts:
@@ -113,15 +116,7 @@ spec:
             name: app-config
         - name: pg-storage
           hostPath:
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: "{{ .Values.userspace.appData }}/pg"
-              {{- else }}
-            path: "{{ .Values.userspace.appData }}/fastgpt/pg"
-              {{- end }}
-            {{- else }}
-            path: "{{ .Values.userspace.appData }}/fastgpt/pg"
-            {{- end }}
             type: DirectoryOrCreate
 
 ---

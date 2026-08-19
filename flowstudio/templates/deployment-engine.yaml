@@ -1,0 +1,86 @@
+{{- if eq (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+# Static-engine fallback only; default is dynamicEngine.enabled=true.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowstudioengine
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.workloads.flowstudioengine.replicaCount }}
+  # hostPath volumes cannot roll safely.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: flowstudioengine
+  template:
+    metadata:
+      labels:
+        app: flowstudioengine
+      annotations:
+        # Absolute gpumem only — never percentage (dynamic path uses EngineManager).
+        applications.app.bytetrade.io/gpu-inject: "engine"
+    spec:
+      enableServiceLinks: false
+      runtimeClassName: nvidia
+      containers:
+      - name: engine
+        image: {{ .Values.engineImage }}
+        imagePullPolicy: {{ .Values.engineImagePullPolicy | default "IfNotPresent" }}
+        securityContext:
+          runAsUser: 1000
+        workingDir: /opt/ComfyUI
+        # /opt/ComfyUI is root-owned → writable dirs on emptyDir.
+        # --disable-dynamic-vram: aimdo NVML crashes under HAMi.
+        command:
+        - sh
+        - -c
+        - >-
+          mkdir -p /run/comfyui/output /run/comfyui/input /run/comfyui/temp /run/comfyui/user
+          && exec python3 main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch
+          --disable-dynamic-vram
+          --extra-model-paths-config /opt/ComfyUI/extra_model_paths.yaml
+          --output-directory /run/comfyui/output --input-directory /run/comfyui/input
+          --temp-directory /run/comfyui/temp --user-directory /run/comfyui/user
+        env:
+        - name: HOME
+          value: /run/comfyui
+        # Image has no uid1000 passwd entry; required for getpass.getuser().
+        - name: USER
+          value: comfyui
+        - name: LOGNAME
+          value: comfyui
+        ports:
+        - containerPort: 8188
+        resources:
+          requests:
+            cpu: "1"
+            memory: 3Gi
+          limits:
+            cpu: "8"
+            memory: 12Gi
+            nvidia.com/gpu: "1"
+            nvidia.com/gpumem: "6144"
+        volumeMounts:
+        - name: app-common
+          mountPath: /data/appCommon
+        - name: engine-run
+          mountPath: /run/comfyui
+        readinessProbe:
+          tcpSocket:
+            port: 8188
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8188
+          initialDelaySeconds: 60
+          periodSeconds: 20
+      volumes:
+      - name: app-common
+        hostPath:
+          path: {{ .Values.userspace.appCommon }}
+          type: DirectoryOrCreate
+      - name: engine-run
+        emptyDir: {}
+{{- end }}

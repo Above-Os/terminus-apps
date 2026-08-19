@@ -23,7 +23,7 @@
 # identity (1000) can write the Olares user-data mounts.
 #
 # Opt-in Python deps (Feishu, Honcho, Firecrawl, …): rely on upstream
-# HERMES_LAZY_INSTALL_TARGET=/opt/data/lazy-packages (baked in v2026.7.7.2
+# HERMES_LAZY_INSTALL_TARGET=/opt/data/lazy-packages (baked in the hermes
 # image). Chart only sets HERMES_HOME=/opt/data; no init-time pip overlays.
 #
 # /opt/hermes is an immutable install tree (read-only). Node/npm writes there
@@ -32,7 +32,7 @@
 # (NPM_CONFIG_PREFIX) so `npm install -g` and `npx` work and persist, and add
 # that prefix bin to PATH. Local `npm install` works from any writable cwd
 # (e.g. HOME=/opt/data). We do NOT mount over or re-open /opt/hermes.
-{{- $hermesImage := "beclab/harveyff-hermes-agent:v2026.7.7.2-uid1000" -}}
+{{- $hermesImage := "beclab/harveyff-hermes-agent:v2026.8.3-uid1000" -}}
 {{- $oe := .Values.olaresEnv | default dict }}
 ---
 # Loopback dashboard (no Hermes auth gate) + nginx sidecar on :9119.
@@ -122,6 +122,21 @@ spec:
               mkdir -p /opt/data/.olares-cli/data
               # Writable npm global prefix on the data volume (npm install -g / npx).
               mkdir -p /opt/data/npm-global/lib/node_modules /opt/data/npm-global/bin
+              # certbot (brew-base): non-root defaults under $HOME=/opt/data; Olares TLS needs RSA.
+              mkdir -p /opt/data/.config/letsencrypt \
+                       /opt/data/letsencrypt/config \
+                       /opt/data/letsencrypt/work \
+                       /opt/data/letsencrypt/logs
+              if [ ! -f /opt/data/.config/letsencrypt/cli.ini ]; then
+                printf '%s\n' \
+                  '# Olares hermesagent: certbot paths for non-root (hermes) use.' \
+                  'config-dir = /opt/data/letsencrypt/config' \
+                  'work-dir = /opt/data/letsencrypt/work' \
+                  'logs-dir = /opt/data/letsencrypt/logs' \
+                  'key-type = rsa' \
+                  > /opt/data/.config/letsencrypt/cli.ini
+                echo "[init] seeded certbot cli.ini under /opt/data/.config/letsencrypt"
+              fi
               chown -R 1000:1000 /opt/data || true
               chmod -R u+rwX,g+rwX /opt/data || true
               # Hook interactive shells into drop-to-hermes (kubectl exec is root).
@@ -159,7 +174,7 @@ spec:
 
         # Materialize Linuxbrew + olares-cli + CLI shims onto the brew-volume.
         - name: init-install-brew
-          image: "beclab/harveyff-openclaw-brew-base:2026.7.6-cli"
+          image: "beclab/harveyff-openclaw-brew-base:2026.8.7-cli"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -216,7 +231,7 @@ spec:
         # Flatten olares-* skills from the brew-base image (/skills-staging) into
         # /opt/data/skills (per-dir refresh; skipped if /skills-staging absent).
         - name: init-skills
-          image: "beclab/harveyff-openclaw-brew-base:2026.7.6-cli"
+          image: "beclab/harveyff-openclaw-brew-base:2026.8.7-cli"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -253,6 +268,7 @@ spec:
         - name: hermesagent
           image: "{{ $hermesImage }}"
           imagePullPolicy: IfNotPresent
+          # Image ENTRYPOINT should be /init + main-wrapper; only override CMD.
           args:
             - gateway
             - run
@@ -304,8 +320,67 @@ spec:
             - name: API_SERVER_HOST
               value: "0.0.0.0"
             - name: API_SERVER_KEY
-              value: {{ $apiKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: API_SERVER_KEY
+            {{- $cors := index $oe "API_SERVER_CORS_ORIGINS" | default "" }}
+            {{- if $cors }}
+            - name: API_SERVER_CORS_ORIGINS
+              value: {{ $cors | quote }}
             {{- end }}
+            {{- $modelName := index $oe "API_SERVER_MODEL_NAME" | default "" }}
+            {{- if $modelName }}
+            - name: API_SERVER_MODEL_NAME
+              value: {{ $modelName | quote }}
+            {{- end }}
+            {{- end }}
+            # Optional provider keys from Olares user settings (Settings → Integration).
+            {{- $openai := index $oe "OPENAI_API_KEY" | default "" }}
+            {{- if $openai }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: OPENAI_API_KEY
+            {{- end }}
+            {{- $anthropic := index $oe "ANTHROPIC_API_KEY" | default "" }}
+            {{- if $anthropic }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermesagent-secrets
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
+            # Messaging allowlists (v0.19 still warns without these on gateways).
+            {{- if eq (toString (index $oe "GATEWAY_ALLOW_ALL_USERS" | default "false")) "true" }}
+            - name: GATEWAY_ALLOW_ALL_USERS
+              value: "true"
+            {{- end }}
+            {{- $gwUsers := index $oe "GATEWAY_ALLOWED_USERS" | default "" }}
+            {{- if $gwUsers }}
+            - name: GATEWAY_ALLOWED_USERS
+              value: {{ $gwUsers | quote }}
+            {{- end }}
+            {{- $tgUsers := index $oe "TELEGRAM_ALLOWED_USERS" | default "" }}
+            {{- if $tgUsers }}
+            - name: TELEGRAM_ALLOWED_USERS
+              value: {{ $tgUsers | quote }}
+            {{- end }}
+            {{- $dcUsers := index $oe "DISCORD_ALLOWED_USERS" | default "" }}
+            {{- if $dcUsers }}
+            - name: DISCORD_ALLOWED_USERS
+              value: {{ $dcUsers | quote }}
+            {{- end }}
+            # Cron + busy-input (Quicksilver / v0.19).
+            - name: HERMES_CRON_TIMEOUT
+              value: {{ index $oe "HERMES_CRON_TIMEOUT" | default "600" | quote }}
+            - name: HERMES_CRON_MAX_PARALLEL
+              value: {{ index $oe "HERMES_CRON_MAX_PARALLEL" | default "4" | quote }}
+            - name: HERMES_GATEWAY_BUSY_INPUT_MODE
+              value: {{ index $oe "HERMES_GATEWAY_BUSY_INPUT_MODE" | default "queue" | quote }}
+            - name: HERMES_GATEWAY_BUSY_ACK_ENABLED
+              value: {{ index $oe "HERMES_GATEWAY_BUSY_ACK_ENABLED" | default "true" | quote }}
           startupProbe:
             exec:
               command: ["/bin/sh", "-c", "test -d /opt/data"]
@@ -323,8 +398,8 @@ spec:
               cpu: "8"
               memory: 20Gi
             requests:
-              cpu: "2"
-              memory: 4Gi
+              cpu: "1"
+              memory: 2Gi
           volumeMounts:
             - mountPath: /opt/data
               name: app-data-home

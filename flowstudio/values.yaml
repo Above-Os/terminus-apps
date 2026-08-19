@@ -1,0 +1,52 @@
+# App-owned overrides only — do not duplicate system-injected
+# postgres / userspace / user / domain.
+# Upgrade reuses values: bump appImage (templates prefer it over image).
+
+appImage: docker.io/luolong01/flowstudio:0.3.24
+image: docker.io/luolong01/flowstudio:0.3.24
+imagePullPolicy: IfNotPresent
+
+engineImage: docker.io/luolong01/flowstudio:engine-1.0.2
+engineImagePullPolicy: IfNotPresent
+# Empty = AMD unavailable (never fall back to CUDA silently).
+engineImageAmd: docker.io/luolong01/flowstudio:engine-1.0.1-rocm
+
+# exclusiveGpu: absolute gpumem only — never gpumem-percentage.
+dynamicEngine:
+  enabled: true
+  serviceAccountName: flowstudio-engine-orchestrator
+  exclusiveGpu: true
+  gpuMemMiB: 6144
+  idleTtlSeconds: 900
+  gpuVendor: auto
+  # Empty → probe default app-service compute-resources URL.
+  gpuApiUrl: ""
+  # On API SIGTERM / uninstall: delete dynamic engines (hotReload forces false).
+  shutdownReap: true
+
+# Defaults only; admin network probe may persist overrides later.
+network:
+  region: global
+  githubMirror: ""
+  pipIndexUrl: ""
+
+modelDownload:
+  enabled: true
+  requireAllResolved: true
+  hfToken: ""
+  civitaiToken: ""
+
+nodeInstall:
+  enabled: true
+
+workloads:
+  flowstudio:
+    replicaCount: 1
+  flowstudioengine:
+    replicaCount: 1
+
+# Must be false for release / Market submit.
+# true also sets SHOW_TEST_WORKFLOW_TEMPLATES (ControlNet fixtures).
+dev:
+  hotReload: false
+  sourceSubPath: devsrc

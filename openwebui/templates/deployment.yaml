@@ -1,7 +1,6 @@
 {{- $appDomainENV := split "," .Values.domain.openwebui -}}
 {{- $appDomain := index $appDomainENV "_0" -}}
 {{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
-{{- $isNewVersion := and .Values.sysVersion (semverCompare ">=1.12.3-0" (toString .Values.sysVersion)) -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $persistSecretKey := true -}}
 {{- if hasKey $oe "ENABLE_WEBUI_SECRET_KEY_PERSIST" -}}
@@ -108,8 +107,32 @@ spec:
               mountPath: /data
 {{- end }}
       containers:
+        # Sidecar: fill missing user Settings→Interface keys with false after signup.
+        # Looping (not init) so registration after pod start is still covered.
+        # Failures are logged only — never blocks Open WebUI.
+        - name: seed-task-auto-gen
+          image: 'docker.io/library/python:3.14.6-alpine3.23'
+          command: ['python', '/scripts/seed_task_auto_gen.py', '--loop']
+          env:
+            - name: WEBUI_DB_PATH
+              value: /data/webui.db
+            - name: SEED_INTERVAL_SEC
+              value: "10"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: appdata
+              mountPath: /data
+            - name: seed-scripts
+              mountPath: /scripts
+              readOnly: true
         - name: openwebui
-          image: 'docker.io/openwebui/open-webui:0.10.2'
+          image: 'docker.io/openwebui/open-webui:0.11.0'
           ports:
             - containerPort: 8080
 
@@ -144,8 +167,13 @@ spec:
               value: "0"
             - name: HF_ENDPOINT
               value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
+            {{- if .Values.olaresEnv.HF_TOKEN }}
             - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.HF_TOKEN }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+            {{- end }}
 {{- else }}
             - name: HF_HUB_OFFLINE
               value: "1"
@@ -155,7 +183,7 @@ spec:
             - name: CORS_ALLOW_ORIGIN
               value: "*"
             - name: USER_AGENT
-              value: "OpenWebUI/0.10.2"
+              value: "OpenWebUI/0.11.0"
             - name: WEBSOCKET_EVENT_CALLER_TIMEOUT
               value: "600"
             - name: RAG_EMBEDDING_ENGINE
@@ -179,6 +207,10 @@ spec:
               mountPath: /app/backend/data/cache
 
       volumes:
+        - name: seed-scripts
+          configMap:
+            name: openwebui-seed-scripts
+            defaultMode: 0555
         - name: hf-cache
           hostPath:
             path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}"

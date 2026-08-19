@@ -27,4 +27,22 @@ spec:
     - **[引导配置](https://docs.openclaw.ai/start/wizard) + [技能体系](https://docs.openclaw.ai/tools/skills)** —— 提供完善的引导流程，内置/可管理/可扩展的技能体系
 
   upgradeDescription: |
-    Terminal 侧车镜像升级至 `beclab/terminal:v0.0.13`（原 v0.0.10）。
+    升级至 chart 1.0.21（原 1.0.20）。
+    上游补丁：https://github.com/openclaw/openclaw/releases/tag/v2026.7.1-1
+
+    镜像：
+    - 应用/网关：`beclab/openclaw-openclaw:2026.7.1-1`（原 2026.7.1）
+    - Brew base：`beclab/harveyff-openclaw-brew-base:2026.8.7-2-cli`（升级前需按 `clawdbot/docker/Dockerfile.brew-base-cli` 构建推送）
+
+    Brew base / certbot：
+    - Linuxbrew 安装 `certbot`；init 写入 `/home/node/.config/letsencrypt/cli.ini` 非 root 默认路径
+    - 预装 `unzip`；构建时 trust + tap `steipete/tap`，缓解 onboarding skills 依赖安装
+    - init 刷新 brew volume 时预 trust tap；PATH 优先 Linuxbrew
+
+    上游 v2026.7.1-1：Memory Core 启动修复、legacy migration、managed plugin npm lock 恢复等。
+
+    Onboarding 说明：经典引导批量装 skills 仍可能因网络或 brew 锁失败，通常不阻断核心功能；先完成模型与 Gateway 配置，必要时再运行 openclaw doctor。
+
+    说明：
+    - 升级不覆盖已有 `openclaw.json`
+    - 容器内请用 `restart-gateway`，不要用 `openclaw gateway restart`

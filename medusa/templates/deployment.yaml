@@ -7,8 +7,8 @@ data:
 
       absolute_redirect off;
 
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
+      access_log /usr/local/openresty/nginx/logs/access.log;
+      error_log /usr/local/openresty/nginx/logs/error.log;
 
       proxy_connect_timeout 30s;
       proxy_send_timeout 60s;
@@ -60,13 +60,10 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          image: "docker.io/openresty/openresty:1.29.2.5-bookworm-fat"
           ports:
             - containerPort: 8080
               protocol: TCP
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
           resources:
             requests:
               cpu: 10m
@@ -76,10 +73,7 @@ spec:
               memory: 128Mi
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-            - name: nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
+              mountPath: /etc/nginx/conf.d/default.conf
               subPath: nginx.conf
         - image: "beclab/aby913-medusa:2.12.5"
           name: medusa
@@ -112,13 +106,27 @@ spec:
             - name: REDIS_URL
               value: "redis://{{ .Values.redis.host }}:6379"
             - name: DATABASE_URL
-              value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:5432/{{ .Values.postgres.databases.medusa }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DATABASE_URL
             - name: DB_NAME
               value: "{{ .Values.postgres.databases.medusa }}"
             - name: JWT_SECRET
-              value: "supersecret"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: JWT_SECRET
             - name: COOKIE_SECRET
-              value: "supersecret"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: COOKIE_SECRET
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: ADMIN_PASSWORD
             - name: STORE_CORS
               value: "http://localhost:8000,https://docs.medusajs.com"
             - name: ADMIN_CORS
@@ -181,7 +189,10 @@ spec:
             - name: PG_USER
               value: "{{ .Values.postgres.username }}"
             - name: PGPASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: PGPASSWORD
             - name: PG_DB
               value: "{{ .Values.postgres.databases.medusa }}"
           ports:

@@ -1,0 +1,193 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowstudio
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.workloads.flowstudio.replicaCount }}
+  # hostPath volumes cannot roll safely.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: flowstudio
+  template:
+    metadata:
+      labels:
+        app: flowstudio
+    spec:
+      enableServiceLinks: false
+      {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+      serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
+      {{- end }}
+      initContainers:
+      # appData is root-owned; uid 1000 needs chown (OPA allows only beclab busybox as root).
+      - name: fix-userdata-perms
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /appdata/userData && chown 1000:1000 /appdata/userData"]
+        volumeMounts:
+        - name: app-data
+          mountPath: /appdata
+      {{- if (default dict .Values.dev).hotReload }}
+      # Do not create via subPath first — kubelet would own it as root.
+      - name: fix-dev-perms
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext:
+          runAsUser: 0
+        env:
+        - name: DEV_SUBPATH
+          value: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" | quote }}
+        command: ["sh", "-c", "mkdir -p \"/appdata/$DEV_SUBPATH\" && chown -R 1000:1000 \"/appdata/$DEV_SUBPATH\""]
+        volumeMounts:
+        - name: app-data
+          mountPath: /appdata
+      - name: seed-dev-src
+        image: {{ coalesce .Values.appImage .Values.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+        env:
+        - name: DEV_SUBPATH
+          value: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" | quote }}
+        command: ["sh", "-c", "d=/appdata/$DEV_SUBPATH; if [ ! -e \"$d/app/main.py\" ]; then cp -a /app/. \"$d/\" && echo seeded; else echo 'already populated'; fi"]
+        volumeMounts:
+        - name: app-data
+          mountPath: /appdata
+      {{- end }}
+      containers:
+      - name: flowstudio
+        image: {{ coalesce .Values.appImage .Values.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+        {{- if (default dict .Values.dev).hotReload }}
+        # Watch /app/app only — watching /app/static causes reload storms / OOM.
+        # --timeout-graceful-shutdown: force-exit if open work would hang reload.
+        command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/app", "--timeout-graceful-shutdown", "20"]
+        {{- end }}
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: "4"
+            memory: 6Gi
+        env:
+        - name: STATIC_DIR
+          value: /app/static
+        - name: ENGINE_MODE
+          value: comfyui
+        - name: ENGINE_BASE_URL
+          value: http://flowstudio-engine-svc:8188
+        - name: ENGINE_WS_URL
+          value: ws://flowstudio-engine-svc:8188/ws
+        {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+        - name: DYNAMIC_ENGINE
+          value: "true"
+        - name: ENGINE_IMAGE
+          value: {{ .Values.engineImage | quote }}
+        - name: ENGINE_IMAGE_PULL_POLICY
+          value: {{ .Values.engineImagePullPolicy | default "IfNotPresent" | quote }}
+        - name: ENGINE_GPU_VENDOR
+          value: {{ (default dict .Values.dynamicEngine).gpuVendor | default "auto" | quote }}
+        - name: ENGINE_IMAGE_AMD
+          value: {{ .Values.engineImageAmd | default "" | quote }}
+        - name: OLARES_APP_NAME
+          value: "flowstudio"
+        - name: OLARES_GPU_API_URL
+          value: {{ (default dict .Values.dynamicEngine).gpuApiUrl | default "" | quote }}
+        {{- if .Values.GPU }}
+        - name: OLARES_GPU_VENDOR
+          value: {{ .Values.GPU.Type | default .Values.gpu | default "" | quote }}
+        {{- end }}
+        # Absolute gpumem only — never gpumem-percentage.
+        - name: ENGINE_GPU_EXCLUSIVE
+          value: {{ (default dict .Values.dynamicEngine).exclusiveGpu | default true | quote }}
+        - name: ENGINE_GPU_MEM_MIB
+          value: {{ (default dict .Values.dynamicEngine).gpuMemMiB | default 6144 | quote }}
+        - name: ENGINE_IDLE_TTL
+          value: {{ (default dict .Values.dynamicEngine).idleTtlSeconds | default 900 | quote }}
+        - name: ENGINE_STARTUP_REAP
+          value: {{ (default dict .Values.dynamicEngine).startupReap | default "preserve_active" | quote }}
+        {{- if (default dict .Values.dev).hotReload }}
+        # Keep engines across uvicorn reloads; production stop still cold-reaps.
+        - name: ENGINE_SHUTDOWN_REAP
+          value: "false"
+        - name: SHOW_TEST_WORKFLOW_TEMPLATES
+          value: "true"
+        {{- else }}
+        - name: ENGINE_SHUTDOWN_REAP
+          value: {{ (default dict .Values.dynamicEngine).shutdownReap | default true | quote }}
+        - name: SHOW_TEST_WORKFLOW_TEMPLATES
+          value: "false"
+        {{- end }}
+        - name: APP_COMMON_HOST_PATH
+          value: {{ .Values.userspace.appCommon | quote }}
+        - name: APP_DATA_HOST_PATH
+          value: {{ .Values.userspace.appData | quote }}
+        - name: NODE_AUTO_INSTALL
+          value: {{ (default dict .Values.nodeInstall).enabled | default false | quote }}
+        {{- end }}
+        # Private entrance: owner fallback when gateway headers are missing.
+        - name: ALLOW_DEV_FAKE_AUTH
+          value: "true"
+        - name: DEV_FAKE_OWNER_ID
+          value: "{{ .Values.bfl.username }}"
+        - name: DEV_FAKE_IS_ADMIN
+          value: "{{ if eq .Values.bfl.username .Values.admin }}true{{ else }}false{{ end }}"
+        - name: DB_AUTO_CREATE
+          value: "true"
+        - name: DATABASE_URL
+          value: "postgresql+asyncpg://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.flowstudio }}"
+        - name: MODEL_DOWNLOAD_ENABLED
+          value: {{ (default dict .Values.modelDownload).enabled | default true | quote }}
+        - name: MODEL_REQUIRE_ALL_RESOLVED
+          value: {{ (default dict .Values.modelDownload).requireAllResolved | default true | quote }}
+        - name: HF_TOKEN
+          value: {{ (default dict .Values.modelDownload).hfToken | default "" | quote }}
+        - name: CIVITAI_TOKEN
+          value: {{ (default dict .Values.modelDownload).civitaiToken | default "" | quote }}
+        - name: NETWORK_REGION
+          value: {{ (default dict .Values.network).region | default "global" | quote }}
+        - name: GITHUB_MIRROR_PREFIX
+          value: {{ (default dict .Values.network).githubMirror | default "" | quote }}
+        - name: NODE_PIP_INDEX_URL
+          value: {{ (default dict .Values.network).pipIndexUrl | default "" | quote }}
+        - name: USER_DATA_DIR
+          value: /data/appData/userData
+        - name: MODELS_DIR
+          value: /data/appCommon/comfyui/model
+        - name: PUBLIC_BASE_URL
+          value: "https://{{ .Values.domain.flowstudio }}"
+        - name: CORS_ORIGINS
+          value: "https://{{ .Values.domain.flowstudio }}"
+        volumeMounts:
+        - name: app-data
+          mountPath: /data/appData
+        - name: app-common
+          mountPath: /data/appCommon
+        {{- if (default dict .Values.dev).hotReload }}
+        - name: app-data
+          mountPath: /app
+          subPath: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" }}
+        {{- end }}
+        # httpGet /healthz is blocked by envoy ext_authz (403 → 421); use TCP.
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 20
+      volumes:
+      - name: app-data
+        hostPath:
+          path: {{ .Values.userspace.appData }}
+          type: DirectoryOrCreate
+      - name: app-common
+        hostPath:
+          path: {{ .Values.userspace.appCommon }}
+          type: DirectoryOrCreate

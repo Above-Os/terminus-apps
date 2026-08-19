@@ -73,7 +73,9 @@ spec:
               link_repo() {
                 repo="$1"
                 dest_dir="$2"
-                hub_name="models--$(echo "$repo" | tr '/' '--')"
+                # HF hub dirs are models--{org}--{repo}; use sed (tr maps chars
+                # one-to-one, so tr '/' '--' would only replace with a single '-').
+                hub_name="models--$(echo "$repo" | sed 's|/|--|g')"
                 src="${CACHE}/${hub_name}"
                 dest="${dest_dir}/${hub_name}"
                 if [ -d "$src" ]; then
@@ -101,8 +103,13 @@ spec:
               value: Etc/UTC
             - name: HF_ENDPOINT
               value: "{{ $oe.HF_ENDPOINT }}"
+{{- if $hfToken }}
             - name: HF_TOKEN
-              value: "{{ $oe.HF_TOKEN }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+{{- end }}
             - name: HF_HOME
               value: /cache/hf
             - name: HF_HUB_CACHE
@@ -200,7 +207,7 @@ spec:
             runAsUser: 0
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.2.4
+          image: docker.io/beclab/llm-init:v1.3.1
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
@@ -215,7 +222,10 @@ spec:
               value: "{{ $oe.HF_ENDPOINT }}"
 {{- if $hfToken }}
             - name: HF_TOKEN
-              value: "{{ $hfToken }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
 {{- end }}
             - name: MAX_CONCURRENT_DOWNLOADS
               value: "1"

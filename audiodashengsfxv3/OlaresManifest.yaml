@@ -1,0 +1,240 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiodashengsfxv3
+  icon: https://app.cdn.olares.com/appstore/audioengines/mispeech/icon.png
+  description: "Dasheng-AudioGen for text-to-sound-effect and ambience generation."
+  appid: audiodashengsfxv3
+  title: Dasheng-AudioGen SFX
+  version: '1.0.5'
+  categories:
+    - AI
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiodashengsfxv3api
+    host: sharedentrances-api
+    port: 0
+    title: Dasheng-AudioGen SFX API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/mispeech/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiodashengsfxv3
+    port: 8090
+    host: download-svc
+    title: Dasheng-AudioGen SFX
+    icon: https://app.cdn.olares.com/appstore/audioengines/mispeech/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiodashengsfxv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'mispeech/Dasheng-AudioGen'
+  fullDescription: |
+    **Model Overview**
+    Dasheng-AudioGen (Xiaomi LLM PLUS + SJTU X-LANCE) generates sound effects, ambience and
+    music from a text description. It is a flow-matching diffusion transformer, not an LLM.
+
+    **Configuration**
+    - Model: `mispeech/Dasheng-AudioGen`
+    - Source: `hf://mispeech/Dasheng-AudioGen` + `hf://google/flan-t5-large` + `hf://mispeech/dashengtokenizer`
+    - Capabilities: `sound_fx`
+    - Required GPU memory: `8Gi`
+    - Engine: Dasheng-AudioGen in-process (transformers, bf16)
+    - License: Apache-2.0 for both code and weights, with no research-only clause
+
+    **Two things that surprise people**
+    - **Descriptions must be English.** The text encoder is flan-t5-large and saw English
+      captions only. Translating a Chinese description is the caller's job, deliberately not
+      done inside the engine.
+    - **Fixed length.** In our testing every clip comes back at about 10 seconds; length is
+      not a parameter.
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — OpenAI shape: `input` is the caption; the optional `sfx`, `env`,
+      `music`, `speech` and `asr` fields are the model's own aspect tags. `num_steps`,
+      `guidance_scale` and `sway_sampling_coef` are per-request. Add `?async=1` for a task id.
+    - `POST /v1/audio/speech/batch` — `items[]` (1–8) denoised in a single pass, base64 out.
+      Every item shares one sampler schedule, so they must agree on the sampler settings.
+
+    There is no streaming route: diffusion produces the clip whole, so there is nothing to emit
+    early. There is no voices route either — this model has no speakers.
+
+    **Stack**
+    - **audio engine**: Dasheng-AudioGen in-process (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+    - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "8Gi"
+      limitedGPUMemory: "8Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "8448Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://mispeech/Dasheng-AudioGen,hf://google/flan-t5-large --exclude *.msgpack --exclude *.h5 --exclude *.bin,hf://mispeech/dashengtokenizer"
+    description: "HuggingFace sources llm-init downloads into the shared cache. Three repos, because the model's config names its text encoder and codec as separate repos and loads them offline at startup; without them the engine cannot boot. The excludes on flan-t5-large are not an optimization: that repo carries the same 3GB of weights four times over (PyTorch, safetensors, Flax, TensorFlow), so downloading it whole is 12.8GB to obtain the 3.1GB of safetensors transformers actually loads."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "mispeech/Dasheng-AudioGen"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "audio"
+    options:
+    - title: Audio
+      value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "sound_fx"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Sound effects (text to sound effect / ambience)
+      value: sound_fx
+    description: "Surface: /speech and /speech/batch. No streaming (diffusion emits the clip whole) and no voices (no speakers). Descriptions must be English."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8Gi"
+    description: "GPU memory required for this model. `0` means CPU-only."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "16Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine-native flags (llm-init ENGINE_ARGS), empty by default. Four are taken.\
+      --dtype (auto|bf16|fp16|fp32) is left empty on purpose: auto resolves against the card,\
+      picking bf16 where the hardware supports it and fp32 where it does not, so a value written\
+      here would follow the app onto a card it does not suit. Pin it only deliberately — fp32\
+      roughly doubles the weights to ~12.5GB and will not fit this quota. The other three set the\
+      generation defaults: --num-steps (1–200, default 25) trades fidelity for latency almost\
+      linearly, --guidance-scale (default 5.0) how literally the description is followed, and\
+      --sway-sampling-coef (default -1.0) the sampler's step distribution. All three remain\
+      per-request fields of the same name, and a request that supplies one wins over the flag —\
+      what is set here is only what a caller gets for not asking."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN

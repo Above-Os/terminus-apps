@@ -1,0 +1,113 @@
+{{- $appDomainENV := split "," .Values.domain.lares -}}
+{{- $appDomain := index $appDomainENV "_0" -}}
+{{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lares
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: lares
+spec:
+  replicas: {{ .Values.workloads.lares.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: lares
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: lares
+    spec:
+      enableServiceLinks: false
+      initContainers:
+      # DirectoryOrCreate makes the appData subdirectory root-owned, which the
+      # uid-1000 app cannot write. The ownership test keeps upgrades working:
+      # re-chowning a directory the app already owns fails with EPERM here.
+      - name: fix-permissions
+        image: beclab/aboveos-busybox:1.37.0
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          mkdir -p /data/pi/agent
+          if [ ! -f /data/pi/agent/models.json ]; then
+          cat > /data/pi/agent/models.json <<'JSON'
+          {
+            "providers": {
+              "olares": {
+                "baseUrl": "http://127.0.0.1:30141/llm/v1",
+                "api": "openai-completions",
+                "apiKey": "olares",
+                "models": [
+                  {
+                    "id": "default",
+                    "name": "Gateway default"
+                  },
+                  {
+                    "id": "Qwen3.6-27B MTP (llama.cpp)/unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL",
+                    "name": "unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL (Qwen3.6-27B MTP (llama.cpp))",
+                    "reasoning": false,
+                    "input": [
+                      "text"
+                    ],
+                    "contextWindow": 128000,
+                    "maxTokens": 16384
+                  }
+                ]
+              }
+            }
+          }
+          JSON
+          fi
+          chown -R 1000:1000 /data
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: lares-data
+          mountPath: /data
+      containers:
+      - name: lares
+        image: docker.io/beclab/lares:v0.0.3
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: LLM_GATEWAY_URL
+          value: "http://3a77b15d.shared.{{ $topDomain }}/v1"
+        - name: OLARES_APP_ID
+          value: lares
+        - name: PI_DEFAULT_MODEL
+          value: "olares/Qwen3.6-27B MTP (llama.cpp)/unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL"
+        ports:
+        - containerPort: 30141
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 30141
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 30141
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        volumeMounts:
+        - name: lares-data
+          mountPath: /data
+      restartPolicy: Always
+      volumes:
+      - name: lares-data
+        hostPath:
+          path: {{ .Values.userspace.appData }}/lares
+          type: DirectoryOrCreate

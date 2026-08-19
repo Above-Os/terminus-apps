@@ -44,7 +44,7 @@ spec:
 
       containers:
         - name: yt-dlp
-          image: "beclab/ytdlp-server:v1.0.3"
+          image: "beclab/ytdlp-server:v1.0.7"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -82,7 +82,10 @@ spec:
             - name: YTDLP_PG_USERNAME
               value: "{{ .Values.postgres.username }}"
             - name: YTDLP_PG_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: YTDLP_PG_PASSWORD
             - name: YTDLP_PG_DATABASE
               value: "{{ .Values.postgres.databases.ytdlp }}"
             - name: DEBUG
@@ -96,11 +99,11 @@ spec:
               mountPath: /app/ytdlp/downloads
           resources:
             requests:
-              cpu: 20m
-              memory: 50Mi
+              cpu: 200m
+              memory: 200Mi
             limits:
               cpu: "1"
-              memory: 300Mi
+              memory: 1Gi
       volumes:
         # yt-dlp's private cookies/state. Final files are streamed to the
         # system download-provider via DOWNLOAD_SERVER_URL, so /app/downloads
