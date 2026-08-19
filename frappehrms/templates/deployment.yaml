@@ -1,0 +1,354 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: frappehrms
+spec:
+  replicas: {{ .Values.workloads.frappehrms.replicaCount }}
+  selector:
+    matchLabels:
+      app: frappehrms
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: frappehrms
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              for d in /data /data/sites /cache /cache/logs; do
+                mkdir -p "$d" && chown 1000:1000 "$d"
+              done
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+            - name: app-cache
+              mountPath: /cache
+        - name: configurator
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              cd /home/frappe/frappe-bench
+              mkdir -p sites
+              if [ ! -f sites/common_site_config.json ]; then
+                echo '{}' > sites/common_site_config.json
+              fi
+              ls -1 apps > sites/apps.txt
+              bench set-config -g db_host "$DB_HOST"
+              bench set-config -gp db_port "$DB_PORT"
+              bench set-config -g redis_cache "$REDIS_CACHE"
+              bench set-config -g redis_queue "$REDIS_QUEUE"
+              bench set-config -g redis_socketio "$REDIS_QUEUE"
+              bench set-config -gp socketio_port 9000
+              bench set-config -g chromium_path /usr/bin/chromium-headless-shell
+          env:
+            - name: DB_HOST
+              value: "{{ .Values.mariadb.host }}"
+            - name: DB_PORT
+              value: "{{ .Values.mariadb.port | default 3306 }}"
+            - name: REDIS_CACHE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: REDIS_CACHE
+            - name: REDIS_QUEUE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: REDIS_QUEUE
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+        - name: create-site
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              cd /home/frappe/frappe-bench
+              SITE_NAME="${SITE_NAME:-frontend}"
+              wait-for-it -t 180 "${DB_HOST}:${DB_PORT}"
+              wait-for-it -t 180 "${REDIS_HOST}:${REDIS_PORT}"
+              if [ ! -f "sites/${SITE_NAME}/.olares-ready-v2" ]; then
+                echo "Creating site ${SITE_NAME}"
+                HELP="$(bench new-site --help 2>&1 || true)"
+                ARGS=(
+                  --verbose
+                  --force
+                  --db-type mariadb
+                  --db-host "${DB_HOST}"
+                  --db-port "${DB_PORT}"
+                  --admin-password "${ADMIN_PASSWORD}"
+                  --set-default
+                  --install-app erpnext
+                  --install-app hrms
+                )
+                ARGS+=(--db-root-username root)
+                ARGS+=(--db-root-password "${MARIADB_ROOT_PASSWORD}")
+                ARGS+=(--mariadb-user-host-login-scope='%')
+                bench new-site "${SITE_NAME}" "${ARGS[@]}"
+                touch "sites/${SITE_NAME}/.olares-ready-v2"
+              else
+                echo "Site ${SITE_NAME} already provisioned"
+              fi
+              if [ -n "${FRAPPE_HOST_NAME:-}" ]; then
+                bench --site "${SITE_NAME}" set-config host_name "https://${FRAPPE_HOST_NAME}"
+              fi
+          env:
+            - name: SITE_NAME
+              value: frontend
+            - name: FRAPPE_HOST_NAME
+              value: "{{ .Values.domain.frappehrms }}"
+            - name: DB_HOST
+              value: "{{ .Values.mariadb.host }}"
+            - name: DB_PORT
+              value: "{{ .Values.mariadb.port | default 3306 }}"
+            - name: DB_NAME
+              value: "{{ .Values.mariadb.databases.frappehrms }}"
+            - name: DB_USER
+              value: "{{ .Values.mariadb.username }}"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DB_PASSWORD
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: ADMIN_PASSWORD
+            - name: MARIADB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: MARIADB_ROOT_PASSWORD
+            - name: REDIS_HOST
+              value: "{{ .Values.redis.host }}"
+            - name: REDIS_PORT
+              value: "{{ .Values.redis.port | default 6379 }}"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+      containers:
+        - name: frappehrms
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              mkdir -p /home/frappe/frappe-bench/sites/frontend/public
+              python3 -c 'from pathlib import Path; Path("/home/frappe/frappe-bench/sites/frontend/public/login").write_text("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><title>Frappe HR</title><style>body{font-family:sans-serif;background:#f5f7fa;margin:0}.wrap{max-width:360px;margin:12vh auto;background:#fff;padding:28px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}h1{font-size:22px;margin:0 0 8px}p{color:#667085;margin:0 0 20px}label{display:block;font-size:13px;margin:12px 0 6px}input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d0d5dd;border-radius:8px}button{width:100%;margin-top:18px;padding:10px;border:0;border-radius:8px;background:#2490ef;color:#fff;font-weight:600;cursor:pointer}#err{color:#d92d20;min-height:1.2em;margin-top:12px;font-size:13px}</style></head><body><div class=\"wrap\"><h1>Frappe HR</h1><p>Sign in with your Administrator account.</p><form id=\"f\"><label for=\"usr\">User</label><input id=\"usr\" name=\"usr\" value=\"Administrator\" autocomplete=\"username\"/><label for=\"pwd\">Password</label><input id=\"pwd\" name=\"pwd\" type=\"password\" autocomplete=\"current-password\"/><button type=\"submit\">Sign in</button></form><div id=\"err\"></div></div><script>document.getElementById(\"f\").addEventListener(\"submit\",async function(e){e.preventDefault();var err=document.getElementById(\"err\");err.textContent=\"\";try{var r=await fetch(\"/api/method/login\",{method:\"POST\",headers:{\"Content-Type\":\"application/json\",\"Accept\":\"application/json\"},credentials:\"same-origin\",body:JSON.stringify({usr:document.getElementById(\"usr\").value,pwd:document.getElementById(\"pwd\").value})});var data=await r.json();if(r.ok&&(data.message===\"Logged In\"||(data.message&&data.message.home_page))){window.location.href=\"/app\";return;}err.textContent=data.message||data.exception||\"Login failed\";}catch(ex){err.textContent=String(ex);}});</script></body></html>")'
+              sed -E '/^[[:space:]]*(exec[[:space:]]+)?nginx([[:space:]]|$)/d' /usr/local/bin/nginx-entrypoint.sh > /tmp/gen-nginx.sh
+              bash /tmp/gen-nginx.sh
+              python3 -c 'import base64,pathlib; pathlib.Path("/tmp/patch_nginx.py").write_bytes(base64.b64decode("ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgphcGkgPSAiIiIKbG9jYXRpb24gL2FwaS8gewogcHJveHlfaHR0cF92ZXJzaW9uIDEuMTsKIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtRm9yICRyZW1vdGVfYWRkcjsKIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gJHByb3h5X3hfZm9yd2FyZGVkX3Byb3RvOwogcHJveHlfc2V0X2hlYWRlciBYLUZyYXBwZS1TaXRlLU5hbWUgZnJvbnRlbmQ7CiBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiBwcm94eV9yZWFkX3RpbWVvdXQgMTIwOwogcHJveHlfcmVkaXJlY3Qgb2ZmOwogcHJveHlfcGFzcyBodHRwOi8vYmFja2VuZC1zZXJ2ZXI7Cn0KIiIiCgpsb2dpbiA9ICIiIgpsb2NhdGlvbiA9IC8geyByZXR1cm4gMzAyIC9sb2dpbjsgfQpsb2NhdGlvbiA9IC9sb2dpbiB7IGRlZmF1bHRfdHlwZSB0ZXh0L2h0bWw7IGNoYXJzZXQgdXRmLTg7IHRyeV9maWxlcyAvZnJvbnRlbmQvcHVibGljL2xvZ2luID00MDQ7IH0KIiIiCgp3ZWIgPSAiIiJsb2NhdGlvbiBAd2Vic2VydmVyIHsKIHByb3h5X2hpZGVfaGVhZGVyIENvbnRlbnQtVHlwZTsKIGFkZF9oZWFkZXIgQ29udGVudC1UeXBlICJhcHBsaWNhdGlvbi94aHRtbCt4bWw7IGNoYXJzZXQ9dXRmLTgiIGFsd2F5czsKIHByb3h5X2hpZGVfaGVhZGVyIExpbms7IiIiCgpmb3IgcCBpbiBQYXRoKCIvZXRjL25naW54L2NvbmYuZCIpLmdsb2IoIiouY29uZiIpOgogICAgdCA9IHAucmVhZF90ZXh0KCkKICAgIHQgPSB0LnJlcGxhY2UoImd6aXAgb247IiwgImd6aXAgb2ZmOyIpCiAgICBpZiAibG9jYXRpb24gL2FwaS8iIG5vdCBpbiB0OgogICAgICAgIHQgPSB0LnJlcGxhY2UoImxvY2F0aW9uIC9hc3NldHMgeyIsIGFwaSArICJcbmxvY2F0aW9uIC9hc3NldHMgeyIpCiAgICBpZiAibG9jYXRpb24gPSAvbG9naW4iIG5vdCBpbiB0OgogICAgICAgIHQgPSB0LnJlcGxhY2UoImxvY2F0aW9uIC8geyIsIGxvZ2luICsgIlxubG9jYXRpb24gLyB7IikKICAgIGlmICJhcHBsaWNhdGlvbi94aHRtbCt4bWwiIG5vdCBpbiB0OgogICAgICAgIHQgPSB0LnJlcGxhY2UoImxvY2F0aW9uIEB3ZWJzZXJ2ZXIgeyIsIHdlYikKICAgIHAud3JpdGVfdGV4dCh0KQpwcmludCgicGF0Y2hlZCBuZ2lueCBjb25mIikK"))'
+              python3 /tmp/patch_nginx.py
+              exec nginx -g "daemon off;"
+          env:
+            - name: BACKEND
+              value: 127.0.0.1:8000
+            - name: SOCKETIO
+              value: 127.0.0.1:9000
+            - name: FRAPPE_SITE_NAME_HEADER
+              value: frontend
+            - name: UPSTREAM_REAL_IP_ADDRESS
+              value: 0.0.0.0/0
+            - name: UPSTREAM_REAL_IP_HEADER
+              value: X-Forwarded-For
+            - name: UPSTREAM_REAL_IP_RECURSIVE
+              value: "on"
+            - name: PROXY_READ_TIMEOUT
+              value: "120"
+            - name: CLIENT_MAX_BODY_SIZE
+              value: 50m
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+        - name: backend
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GUNICORN_WORKERS
+              value: "2"
+            - name: GUNICORN_THREADS
+              value: "4"
+            - name: GUNICORN_TIMEOUT
+              value: "120"
+          ports:
+            - name: gunicorn
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+            - name: dshm
+              mountPath: /dev/shm
+        - name: websocket
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - node
+            - /home/frappe/frappe-bench/apps/frappe/socketio.js
+          ports:
+            - name: socketio
+              containerPort: 9000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+        - name: worker
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bench
+            - worker
+            - --queue
+            - short,default,long
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+        - name: scheduler
+          image: docker.io/beclab/frappe-hrms:v16.16.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bench
+            - schedule
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: sites
+              mountPath: /home/frappe/frappe-bench/sites
+            - name: logs
+              mountPath: /home/frappe/frappe-bench/logs
+      volumes:
+        - name: app-data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}"
+            type: DirectoryOrCreate
+        - name: app-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCache }}"
+            type: DirectoryOrCreate
+        - name: sites
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/sites"
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: "{{ .Values.userspace.appCache }}/logs"
+            type: DirectoryOrCreate
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frappehrms-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: frappehrms
+spec:
+  type: ClusterIP
+  selector:
+    app: frappehrms
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
