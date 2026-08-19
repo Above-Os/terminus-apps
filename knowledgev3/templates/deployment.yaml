@@ -1,10 +1,11 @@
 {{- /*
   knowledge — shared knowledge backend for Wise (v3 shared app, admin-only).
 
-  Three containers in one Pod:
+  Four containers in one Pod:
     - knowledge      (knowledge-base-api, port 3010)
     - vectorcrawl    (vector indexing worker, port 8080)
-    - flaresolverr   (Cloudflare/CAPTCHA bypass, used in-pod via localhost)
+    - camoufox       (Cloudflare/CAPTCHA bypass, port 8191, in-pod via localhost)
+    - nginx          (openresty reverse-proxy sidecar, port 3009)
 
   Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
   image (TermiPass docker/wise/wise.conf) works unchanged — it hardcodes
@@ -25,6 +26,10 @@ metadata:
   labels:
     app: knowledge
     applications.app.bytetrade.io/author: bytetrade.io
+  annotations:
+    # Default third-level domain routing for the `knowledge` entrance
+    # (appid knowledgev3 -> entrance knowledge -> https://knowledge.<user>.olares...).
+    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "knowledgev3","entranceName":"knowledge","thirdLevelDomain":"knowledge"}]'
 spec:
   replicas: {{ .Values.workloads.knowledgev3.replicaCount }}
   strategy:
@@ -76,7 +81,7 @@ spec:
               value: {{ .Values.postgres.databases.knowledge }}
       containers:
         - name: knowledge
-          image: "beclab/knowledge-base-api:v1.0.12"
+          image: "beclab/knowledge-base-api:v1.0.14"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -184,7 +189,7 @@ spec:
               memory: 6Gi
 
         - name: vectorcrawl
-          image: "beclab/vectorcrawl:v1.0.4"
+          image: "beclab/vectorcrawl:v1.0.7"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -252,17 +257,45 @@ spec:
               cpu: "1"
               memory: 2Gi
 
-        - name: flaresolverr
-          image: "beclab/flaresolverr:v0.0.2"
-          imagePullPolicy: IfNotPresent
+        - name: camoufox
+          image: beclab/camoufox:v1.0.0
+          ports:
+            - containerPort: 8191
+              name: http
+          env:
+            - name: PORT
+              value: "8191"
+            - name: MAX_CONCURRENCY
+              value: "1"          
+            - name: SOLVE_CHALLENGES
+              value: "true"
+            - name: ALLOW_NO_AUTH
+              value: "true"    
+            - name: ALLOW_PRIVATE_NETWORK
+              value: "false"
           resources:
             requests:
-              cpu: 20m
-              memory: 60Mi
+              cpu: "250m"
+              memory: 512Mi
             limits:
               cpu: "2"
-              memory: 500Mi
-
+              memory: 1.5Gi         
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+      
         # Reverse-proxy front door for the knowledge HTTP API. rss-svc:3010
         # targets this sidecar (3009), which serves /download/* from the
         # download provider-proxy and everything else from the knowledge
@@ -314,6 +347,11 @@ spec:
               readOnly: true
 
       volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi  
+
         - name: knowledge-nginx-config
           configMap:
             name: knowledge-nginx-config

@@ -9,7 +9,7 @@ metadata:
   description: All-in-one AI workflow production app on Olares
   # Public direct URL required by Market; source icons/icon.png — sync flowstudio-assets when changing.
   icon: https://raw.githubusercontent.com/ffkijjkokok/flowstudio-assets/main/icon.png
-  version: 0.3.24
+  version: 0.3.28
   categories:
   - Creativity
   - AI
@@ -96,6 +96,7 @@ middleware:
 options:
   # 0: long-running init / model download must not be cut by gateway default.
   apiTimeout: 0
+  LLMGatewaySupported: true
   # PWA assets public; pages and API stay private.
   policies:
   - entranceName: flowstudio
@@ -120,3 +121,26 @@ options:
 workloadReplicas:
   flowstudio: 1
   flowstudioengine: 1
+
+# Declarations only — no template reads these. Market lifts them out of the
+# rendered envs block so Router can file the app under a capability domain
+# before anything is installed; every model application is category AI.
+envs:
+- envName: MODEL_MODE
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: "image_generation"
+  options:
+  - title: Image Generation
+    value: image_generation
+# Empty: Router's supports_* whitelist has no image-generation key.
+- envName: MODEL_SUPPORTS
+  required: false
+  type: string
+  editable: false
+  applyOnChange: false
+  default: ""
+  multiSelect: true
+  splitter: ","

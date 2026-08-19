@@ -1,0 +1,105 @@
+apiVersion: v3
+olaresManifest.version: '0.15.0'
+olaresManifest.type: app
+metadata:
+  name: dina
+  appid: dina
+  title: Dina
+  description: Chat shell on DeepSeek Harness, wired to Olares Router
+  icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
+  version: 0.16.4
+  categories:
+    - Utilities_v112
+    - AI
+spec:
+  versionName: "0.16.0"
+  runAsUser: true
+  fullDescription: |
+    ## Overview
+    Dina is a chat app on Olares built on DeepSeek Harness (dsh web).
+    It uses the official dsh UI shell and talks to Olares Router for LLM access.
+
+    ## Highlights
+    - Official dsh web UI (three-column layout) with Dina product profile
+    - Zero-config Router auth via in-cluster app identity (`x-caller-appid`)
+    - Optional API key and default model overrides at install time
+    - Bundled client plugins (voice input, web search) when enabled in the build
+
+    ## Requirements
+    - Olares >= 1.12.7
+    - Router app installed and running (`router` dependency)
+    - Arch: amd64
+
+    ## Getting started
+    1. Install Dina from Market (test source: `market.test`).
+    2. Ensure Router is installed; leave `LLM_GATEWAY_URL` empty unless you use a custom gateway.
+    3. Open the Dina entrance and start a chat.
+  upgradeDescription: |
+    ## Dina 0.16.0
+
+    - Initial Chat test-market listing.
+    - dsh web shell + Olares Router LLM shim.
+    - Optional Router API key / default model envs.
+  developer: luolong
+  submitter: luolong
+  locale:
+    - en-US
+    - zh-CN
+  requiredCpu: 200m
+  limitedCpu: "2"
+  requiredMemory: 512Mi
+  limitedMemory: 4Gi
+  requiredDisk: 2Gi
+  limitedDisk: 20Gi
+  supportArch:
+    - amd64
+permission:
+  appData: true
+entrances:
+  - name: dina
+    host: dina-svc
+    port: 8080
+    title: Dina
+    icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
+    authLevel: private
+    openMethod: window
+envs:
+  - envName: LLM_GATEWAY_URL
+    description: OpenAI-compatible Router data plane (/v1). Empty points at this
+      machine's Router through its shared entrance; set it only to override.
+    type: url
+    editable: true
+    applyOnChange: true
+  - envName: OLARES_APP_ID
+    description: App id sent as x-caller-appid for zero-config Router auth.
+    default: dina
+    type: string
+    editable: false
+  - envName: DINA_ROUTER_API_KEY
+    description: Optional sk- key. Empty uses in-cluster app identity.
+    type: password
+    editable: true
+    applyOnChange: true
+  - envName: DINA_DEFAULT_MODEL
+    description: Default model id from Router catalog.
+    type: string
+    editable: true
+    applyOnChange: true
+options:
+  apiTimeout: 0
+  # Brand mark + PWA manifest public so the browser-tab favicon loads before the
+  # private-entrance auth redirect (same pattern Ashia uses for its icon assets).
+  policies:
+    - entranceName: dina
+      description: Brand mark and PWA manifest
+      uriRegex: ^/dina/(mark\.svg|manifest\.webmanifest)$
+      level: public
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+    - name: router
+      version: '>=1.0.0'
+      type: application
+workloadReplicas:
+  dina: 1
