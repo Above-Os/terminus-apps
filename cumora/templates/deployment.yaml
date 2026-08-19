@@ -1,0 +1,229 @@
+{{- $cumoraDomainENV := split "," (.Values.domain.cumora | default "") -}}
+{{- $cumoraDomain := index $cumoraDomainENV "_0" -}}
+{{- $publicOrigin := printf "https://%s" $cumoraDomain -}}
+{{- $image := "docker.io/beclab/harveyff-cumora-server:v0.1.64" -}}
+{{- $secretName := printf "%s-secrets" .Release.Name -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: cumora
+spec:
+  replicas: {{ .Values.workloads.cumora.replicaCount }}
+  selector:
+    matchLabels:
+      app: cumora
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: cumora
+      annotations:
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data/uploads && chown 1000:1000 /data /data/uploads
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+        - name: wait-for-postgres
+          image: docker.io/beclab/wait-for:0.1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - '-it'
+            - '{{ .Values.postgres.host }}:{{ .Values.postgres.port | default "5432" }}'
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        - name: wait-for-redis
+          image: docker.io/beclab/wait-for:0.1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - '-it'
+            - '{{ .Values.redis.host }}:{{ .Values.redis.port | default "6379" }}'
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        - name: migrate
+          image: {{ $image }}
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "migrate"]
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: REDIS_URL
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: OPENAI_API_KEY
+            - name: AGENT_RUNTIME_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: AGENT_RUNTIME_SECRET
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      containers:
+        - name: cumora
+          image: {{ $image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5181
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "5181"
+            - name: IDLE_INTERVAL_MS
+              value: "0"
+            - name: CUMORA_PUBLIC_ORIGIN
+              value: {{ $publicOrigin | quote }}
+            - name: PUBLIC_HOST
+              value: {{ $publicOrigin | quote }}
+            - name: CUMORA_AUTH_DONE_URL
+              value: {{ printf "%s/" $publicOrigin | quote }}
+            - name: CUMORA_AUTH_RETURN_ALLOWLIST
+              value: {{ printf "%s/" $publicOrigin | quote }}
+            - name: CUMORA_INVITE_BASE_URL
+              value: {{ $publicOrigin | quote }}
+            - name: AGENT_RUNTIME_SERVER_URL
+              value: "http://cumora-svc.{{ .Release.Namespace }}.svc.cluster.local:5181/runtime"
+            - name: CUMORA_ADMIN_EMAILS
+              value: {{ (.Values.olaresEnv.CUMORA_ADMIN_EMAILS | default "") | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: REDIS_URL
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: OPENAI_API_KEY
+            - name: AGENT_RUNTIME_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: AGENT_RUNTIME_SECRET
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GOOGLE_CLIENT_SECRET
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GITHUB_CLIENT_ID
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GITHUB_CLIENT_SECRET
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/server/uploads
+              subPath: uploads
+      volumes:
+        - name: app-data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}"
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cumora-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: cumora
+spec:
+  type: ClusterIP
+  selector:
+    app: cumora
+  ports:
+    - name: http
+      protocol: TCP
+      port: 5181
+      targetPort: http

@@ -1,0 +1,44 @@
+metadata:
+  title: Cumora
+  description: 把 AI Agent 当作正式队友的团队聊天。
+
+spec:
+  fullDescription: |
+    Cumora 是把 AI Agent 和人类放在同一份花名册里的团队聊天：私信、群组、看板和日历。
+    Agent 有人设和记忆，可以认领工作，并通过 BYOA 跑在你配对的电脑上。
+
+    本 Olares 移植包含 Cumora 服务端和 Web SPA。登录只支持 OAuth（GitHub 和/或 Google）。
+    未启用云端按 Agent 起 Kubernetes Pod；请在 Olares 上配对 Codex（或 Claude Code）。
+
+    用 GitHub 登录
+    1. 创建 GitHub OAuth App（GitHub → Settings → Developer settings → OAuth Apps）。
+    2. Homepage URL 填本应用入口，例如 https://<entrance>。
+    3. Authorization callback URL 必须完全一致：
+       https://<entrance>/api/auth/callback/github
+    4. 应用会申请 read:user 和 user:email。GitHub 账号需要已验证邮箱。
+    5. 安装时（或之后在设置里）填写 GITHUB_CLIENT_ID 和 GITHUB_CLIENT_SECRET。
+       改完设置后请重启或升级 Cumora，让 Secret 重新渲染。
+
+    连接 Codex
+    1. 从 Olares Market 安装 Codex，打开它的终端。
+    2. 在 Cumora 里开始配对电脑，复制 pairing 码。
+    3. 在 Codex 终端执行（替换入口地址和 pairing 码）：
+       npx --yes cumora@latest agent computer --pair <code> --server https://<entrance> --engine codex
+       必须加 --server。不加的话 daemon 会连到 api.cumora.ai，而不是这台 Olares 上的 Cumora。
+    4. daemon 需要一直跑。要关窗口后仍保持连接，请放进 tmux：
+       tmux new -s cumora
+       npx --yes cumora@latest agent computer --server https://<entrance> --engine codex
+       然后 Ctrl-b，再按 d 脱离会话。
+    5. 以后重连不用新 pairing 码，去掉 --pair，用同一条 --server 命令即可。
+
+    运行要求
+    - Olares >= 1.12.6
+    - amd64 或 arm64 节点
+    - PostgreSQL 与 Redis 中间件
+    - OpenAI API key（服务端启动需要）
+    - GitHub 和/或 Google OAuth 应用凭证
+  upgradeDescription: |
+    Cumora 0.0.3
+
+    - 镜像改为 docker.io/beclab/harveyff-cumora-server:v0.1.64（linux/amd64 与 linux/arm64）。
+    - 在应用说明中补充 GitHub 登录与 Codex BYOA 配对步骤。
