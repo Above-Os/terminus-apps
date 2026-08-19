@@ -2,7 +2,7 @@
 
 Chat shell on Olares: DeepSeek Harness (dsh web) UI wired to Olares Router.
 
-Current Chart version: **0.16.0** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.16.4** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Chart ownership (test / public index)
 
@@ -28,4 +28,6 @@ owners:
 3. Open the Dina entrance and chat.
 
 Optional install-time envs: `LLM_GATEWAY_URL`, `DINA_ROUTER_API_KEY`, `DINA_DEFAULT_MODEL`.
-Empty API key uses in-cluster app identity.
+Empty API key uses in-cluster app identity. Empty `LLM_GATEWAY_URL` renders Router's
+shared entrance (`3a77b15d.shared.<top-domain>/v1`), the only address the platform
+gateway stamps `x-caller-appid` on; Router's Service answers such a call with 401.
