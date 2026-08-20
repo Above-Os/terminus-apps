@@ -23,7 +23,10 @@ RUN apt-get update \
     && (command -v genoffice >/dev/null || ls -l /opt /usr/bin /usr/lib 2>/dev/null | head)
 
 COPY root/ /
+COPY patch_kasmvnc.py /tmp/patch_kasmvnc.py
 RUN chmod +x /usr/local/bin/genoffice-olares \
-    && sed -i 's/\r$//' /usr/local/bin/genoffice-olares /defaults/autostart
+    && sed -i 's/\r$//' /usr/local/bin/genoffice-olares /defaults/autostart \
+    && python3 /tmp/patch_kasmvnc.py \
+    && rm -f /tmp/patch_kasmvnc.py
 
 EXPOSE 3000
