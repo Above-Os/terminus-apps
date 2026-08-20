@@ -7,7 +7,7 @@ metadata:
   description: "Qwopus3.6-27B-v2 MTP Q4_K_M served with llama.cpp."
   appid: llamacppqwopus3627v2mtpq4kmv3
   title: Qwopus3.6-27B MTP (llama.cpp)
-  version: '1.0.12'
+  version: '1.0.13'
   categories:
   - AI
   - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M'
   upgradeDescription: |
+    v1.0.13: Lower the NVIDIA host-memory reservation so 1.12.6 timeslice nodes can install more easily (engine request 21Gi→6Gi, chart requiredMemory 22Gi→7Gi). GPU quota unchanged.
+
     v1.0.9: Move `HF_TOKEN` into Secret (`secretKeyRef`); map HF from `OLARES_SYSTEM_HUGGINGFACE_*`; bump llama.cpp to `server-cuda12-b10068`.
 
     v1.0.8: LLAMACPP_MEMORY_LIMIT 30Gi; llm-init limit 2Gi; limitedMemory 32Gi (30+2).
@@ -92,9 +94,9 @@ spec:
       requiredCpu: 500m
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # Engine MEMORY_REQUEST 21Gi + llm-init <= requiredMemory 22Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+      # Engine MEMORY_REQUEST 6Gi + llm-init <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
       limitedMemory: "32Gi"
-      requiredMemory: "22Gi"
+      requiredMemory: "7Gi"
       requiredGPUMemory: 23Gi
       limitedGPUMemory: 24Gi
     - mode: nvidia-gb10
@@ -205,9 +207,9 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: LLAMACPP_MEMORY_REQUEST # sum with llm-init <= requiredMemory 22Gi
+  - envName: LLAMACPP_MEMORY_REQUEST # sum with llm-init <= requiredMemory 7Gi
     required: true
-    default: "21Gi"
+    default: "6Gi"
     type: string
     editable: false
     applyOnChange: false
