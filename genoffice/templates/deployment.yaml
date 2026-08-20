@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genoffice
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: genoffice
+spec:
+  replicas: {{ .Values.workloads.genoffice.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      io.kompose.service: genoffice
+  template:
+    metadata:
+      labels:
+        io.kompose.service: genoffice
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: genoffice
+          image: docker.io/harveyff/genoffice:v0.0.1
+          imagePullPolicy: Always
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+            - name: TITLE
+              value: GenOffice
+            - name: START_DOCKER
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+            - containerPort: 3001
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: documents
+              mountPath: /config/Documents
+            - name: downloads
+              mountPath: /config/Downloads
+            - name: dshm
+              mountPath: /dev/shm
+      restartPolicy: Always
+      volumes:
+        - name: config
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}/config'
+        - name: documents
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.userData }}/Documents'
+        - name: downloads
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.userData }}/Downloads'
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

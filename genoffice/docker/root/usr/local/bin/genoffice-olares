@@ -1,0 +1,36 @@
+#!/bin/bash
+set -euo pipefail
+
+# Electron inside Docker/K8s cannot use the Chromium sandbox.
+FLAGS=(
+  --no-sandbox
+  --disable-gpu
+  --disable-dev-shm-usage
+  --disable-software-rasterizer
+  --ozone-platform=x11
+)
+
+BIN=""
+for candidate in \
+  /opt/GenOffice/genoffice \
+  /opt/genoffice/genoffice \
+  /usr/bin/genoffice \
+  /usr/lib/genoffice/genoffice
+do
+  if [ -x "$candidate" ]; then
+    BIN="$candidate"
+    break
+  fi
+done
+
+if [ -z "$BIN" ]; then
+  BIN="$(command -v genoffice || true)"
+fi
+
+if [ -z "$BIN" ]; then
+  echo "genoffice binary not found" >&2
+  find /opt /usr -iname '*genoffice*' 2>/dev/null | head -50 >&2 || true
+  sleep infinity
+fi
+
+exec "$BIN" "${FLAGS[@]}" "$@"
