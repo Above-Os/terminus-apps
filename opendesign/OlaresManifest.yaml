@@ -10,12 +10,12 @@ metadata:
   title: Open Design
   description: Local-first AI design studio for slides, prototypes, and decks on Olares.
   icon: https://cdn.olares.com/images/2026/08/919ec8a2cbd0b0285ee33e455376c90b.png
-  version: 0.0.11
+  version: 0.0.12
   categories:
   - Creativity
   - agents
 spec:
-  versionName: '0.19.1'
+  versionName: '0.19.2'
   featuredImage: https://cdn.olares.com/images/2026/08/0021804b205933301ee29bb63136a996.png
   promoteImage:
   - https://cdn.olares.com/images/2026/08/0021804b205933301ee29bb63136a996.png
@@ -33,11 +33,11 @@ spec:
     Recommended setup on Olares
     - Model: use a local Qwen3.8 model served by llama.cpp (for example Qwen3.8-27B) on your Olares node
     - Max tokens: set 65536 or 32768 in Open Design settings to reduce truncated runs on multi-step decks
-    - If Base URL points to another Olares app entrance, add its hostname to OD_ALLOWED_INTERNAL_HOSTS
+    - Olares-hosted model Base URLs are auto-allowed from your configured provider hostname; add extra hostnames in OD_ALLOWED_INTERNAL_HOSTS only when needed
 
     Requirements
     - Olares >= 1.12.6
-    - amd64 node
+    - amd64 or arm64 node
 
     Getting started
     1. Install Open Design from Market.
@@ -45,10 +45,11 @@ spec:
     3. In Open Design, open Settings → Models & Providers → API Provider. Set Base URL, model id, and Max tokens (65536 or 32768).
     4. Start with a simple single-slide prompt, then move to multi-page decks.
   upgradeDescription: |
-    Open Design 0.0.10
+    Open Design 0.0.12
 
-    - Fix Market listing copy formatting (remove oversized markdown headings).
-    - Add recommended local Qwen3.8 llama.cpp setup and Max tokens guidance (65536 or 32768).
+    - Switch to beclab/harveyff-opendesign:0.19.2-2 (amd64 and arm64).
+    - Fix OpenCode output cap and long-run inactivity timeout for local llama.cpp decks.
+    - Auto-allow Olares model API hostnames from configured BYOK Base URL.
   developer: nexu-io
   website: https://open-design.ai/
   sourceCode: https://github.com/nexu-io/open-design
@@ -68,6 +69,7 @@ spec:
   limitedDisk: 8Gi
   supportArch:
   - amd64
+  - arm64
 permission:
   appData: true
 options:
@@ -103,9 +105,9 @@ envs:
     applyOnChange: true
     default: ""
     description: >-
-      Comma-separated hostnames Open Design may call for Olares-hosted model APIs.
-      Required when Base URL points at another Olares app entrance (fixes
-      "Internal IPs blocked" when fetching models). Example:
+      Optional comma-separated extra hostnames for Olares-hosted model APIs.
+      The configured BYOK Base URL hostname is auto-allowed; use this for
+      additional entrances if needed. Example:
       abc12345.yourname.olares.com,def67890.shared.olares.com
 entrances:
 - name: opendesign

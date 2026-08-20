@@ -1,0 +1,107 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+workloadReplicas:
+  frappehrms: 1
+
+metadata:
+  name: frappehrms
+  appid: frappehrms
+  title: Frappe HR
+  description: Open source HR and payroll — employees, leave, attendance, and salary.
+  icon: https://cdn.olares.com/images/2026/08/778373e494af59eb8eaaa4c73795e8ed.png
+  version: 0.0.1
+  categories:
+  - workspace
+
+entrances:
+- name: frappehrms
+  host: frappehrms-svc
+  port: 8080
+  title: Frappe HR
+  icon: https://cdn.olares.com/images/2026/08/778373e494af59eb8eaaa4c73795e8ed.png
+  authLevel: public
+  openMethod: window
+
+spec:
+  versionName: "16.16.0"
+  featuredImage: https://cdn.olares.com/images/2026/08/527267d274999a0141907c8d5043bfb7.png
+  promoteImage:
+  - https://cdn.olares.com/images/2026/08/527267d274999a0141907c8d5043bfb7.png
+  - https://cdn.olares.com/images/2026/08/6bbfe5ef8665690b87e9616bd642d6b5.png
+  - https://cdn.olares.com/images/2026/08/a8b5db7603e682ef9e5b22a892887ced.png
+  - https://cdn.olares.com/images/2026/08/4a9600a16c260c47fcec164917b6d8bd.png
+  fullDescription: |
+    Frappe HR is a 100% open source, modern, user-friendly solution to drive
+    excellence within your team. Simplify HR and Payroll operations from one
+    dashboard — from employee records to leave, attendance, and salary.
+
+    Highlights
+    - Employee lifecycle: onboarding through exits, transfers, and promotions
+    - Leave management: holidays, leave policies, and applications
+    - Shifts and attendance: check-ins, roster management, and auto attendance
+    - Payroll: pay structures and accurate salary slips with ERPNext accounting
+
+    Requirements
+    - Olares >= 1.12.6
+    - amd64 node
+    - MariaDB middleware
+  developer: Frappe
+  website: https://frappe.io/hr
+  sourceCode: https://github.com/frappe/hrms
+  submitter: harveyff
+  locale:
+  - en-US
+  license:
+  - text: GPL-3.0
+    url: https://github.com/frappe/hrms/blob/develop/license.txt
+  runAsUser: true
+  requiredCpu: 1
+  limitedCpu: 4
+  requiredMemory: 2Gi
+  limitedMemory: 8Gi
+  requiredDisk: 2Gi
+  limitedDisk: 50Gi
+  supportArch:
+  - amd64
+
+permission:
+  appData: true
+  appCache: true
+
+middleware:
+  mariadb:
+    username: frappehrms
+    databases:
+    - name: frappehrms
+  redis:
+    namespace: db0
+
+options:
+  apiTimeout: 0
+  allowedOutboundPorts:
+  - 465
+  - 587
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
+  - name: mariadb
+    type: middleware
+    version: '>=10.0.0-0'
+    mandatory: true
+
+envs:
+- envName: ADMIN_PASSWORD
+  required: true
+  type: password
+  editable: false
+  regex: '^.{8,}$'
+  description: Frappe Administrator password (min 8 characters)
+- envName: MARIADB_ROOT_PASSWORD
+  required: true
+  type: password
+  editable: false
+  regex: '^.{1,}$'
+  description: MariaDB middleware root password (from cluster middleware)
