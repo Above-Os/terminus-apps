@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.8-27B (GGUF UD-Q4_K_XL) served with llama.cpp."
   appid: llamacppqwen3827bggufv3
   title: Qwen3.8-27B (llama.cpp)
-  version: '1.0.2'
+  version: '1.0.3'
   categories:
     - AI
     - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL'
   upgradeDescription: |
+    v1.0.3: Lower the NVIDIA host-memory reservation so 1.12.6 timeslice nodes can install more easily (engine request 21Gi→6Gi, chart requiredMemory 23Gi→7Gi, covering the measured ~5.3Gi working set). GPU quota stays 23Gi.
+
     v1.0.0: first release. llama.cpp `server-cuda12-b10454`, llm-init v1.3.5. Unsloth Qwen3.8-27B UD-Q4_K_XL + mmproj, 102K context (`-c 104448`), MTP `--spec-draft-n-max 4`, GPU quota `23Gi`.
 
     Serves Unsloth Qwen3.8-27B GGUF (`qwen35` architecture) with vision projector.
@@ -86,9 +88,9 @@ spec:
       requiredCpu: "1100m"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # Engine MEMORY_REQUEST 21Gi + llm-init <= requiredMemory 23Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+      # Engine MEMORY_REQUEST 6Gi + llm-init 256Mi <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
       limitedMemory: "32Gi"
-      requiredMemory: "23Gi"
+      requiredMemory: "7Gi"
       requiredGPUMemory: "23Gi"
       limitedGPUMemory: "23Gi"
     - mode: nvidia-gb10
@@ -200,7 +202,7 @@ envs:
     applyOnChange: false
   - envName: LLAMACPP_MEMORY_REQUEST
     required: true
-    default: "21Gi"
+    default: "6Gi"
     type: string
     editable: false
     applyOnChange: false
