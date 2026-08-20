@@ -1,22 +1,32 @@
 metadata:
   title: Lares
-  description: 带 Web UI 的 pi 编程助手，已接入内置 LLM 网关
+  description: 基于 DeepSeek Harness 的聊天应用，对接 Olares Router
+
 spec:
   fullDescription: |
-    Lares 是将 pi 编程助手打包成的 Olares 应用：单个容器内运行一个 Node 后端，
-    内嵌 pi SDK 与 Quasar Web UI，并已接入 Olares 内置的 LLM 网关，安装后无需任何配置。
+    ## 概述
+    Lares 是运行在 Olares 上的聊天应用，基于 DeepSeek Harness（dsh web）。
+    采用官方 dsh UI 主壳，通过 Olares Router 访问 LLM。
 
-    - 对话：流式输出、可视化工具调用、支持 Mermaid 与 KaTeX 的 Markdown、图片附件、
-      引导与追问队列、随时中断，以及手动或自动的上下文压缩。
-    - 会话：按工作目录分组，提供可回溯的分支树，可在某条消息处或其之前分叉，
-      支持重命名、删除，以及导出为 HTML 或 JSONL。
-    - 文件：惰性加载的文件树并带 git 状态，可预览源码、Markdown、图片、音频、视频、
-      PDF 与 DOCX，查看统一 diff，并支持基于 git 索引的 @ 提及自动补全。
-    - 配置：模型、服务商 API Key 与 OAuth 登录、思考等级、技能、插件，以及每个会话的
-      工具开关。
-    - 工作树（Worktree）：为每个分支创建独立检出，将文件树与新会话切换到其上，
-      工作完成后再移除。
+    ## 能力
+    - 官方 dsh web UI（三栏布局）+ Lares 产品 profile
+    - 通过集群内应用身份（`x-caller-appid`）零配置对接 Router
+    - 安装时可选覆盖 API Key 与默认模型
+    - 构建启用时内置客户端插件（语音输入、网页搜索）
 
-    使用方法：
-    - 打开应用即可直接开始对话，内置 LLM 网关已自动接好。
-    - 也可在应用设置中配置默认模型、自定义网关地址或你自己的网关 API Key。
+    ## 运行要求
+    - Olares >= 1.12.7
+    - 已安装并运行 Router 应用（`router` 依赖）
+    - 架构：amd64
+
+    ## 开始使用
+    1. 从 Market 安装 Lares（测试源：`market.test`）。
+    2. 确认 Router 已安装；除非使用自定义网关，`LLM_GATEWAY_URL` 保持默认。
+    3. 打开 Lares 入口开始对话。
+  upgradeDescription: |
+    ## Lares 0.18.0
+
+    - 用 Lares 多提供方面板（Tavily / 自定义）替换 DeepSeek 原生网络搜索。
+    - Router API Key 改由 chart 管理的 Secret 保存。
+    - 修复通过明文 http 的局域网入口选择工作区目录时报 `crypto.randomUUID is not a function`。
+    - 内置 Lares 插件改为加载权威源码目录，overlay 变更重启即生效。
