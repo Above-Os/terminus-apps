@@ -2,12 +2,6 @@
 {{- $multicaDomain := index $multicaDomainENV "_0" -}}
 {{- $appUrl := printf "https://%s" $multicaDomain -}}
 
-{{- $smtpHost := .Values.olaresEnv.SMTP_HOST | default "" -}}
-{{- $smtpPort := .Values.olaresEnv.SMTP_PORT | default "587" -}}
-{{- $smtpUser := .Values.olaresEnv.SMTP_USER | default "" -}}
-{{- $smtpPassword := .Values.olaresEnv.SMTP_PASSWORD | default "" -}}
-{{- $smtpFrom := .Values.olaresEnv.SMTP_FROM | default .Values.olaresEnv.MAIL_FROM | default "" -}}
-
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,24 +100,25 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: JWT_SECRET
-            {{- if $smtpHost }}
+            {{- if and (eq (toString .Values.olaresEnv.USE_SYSTEM_SMTP_SETTINGS) "true") (eq (toString .Values.olaresEnv.SMTP_ENABLED) "true") }}
             - name: SMTP_HOST
-              value: {{ $smtpHost | quote }}
+              value: {{ .Values.olaresEnv.SMTP_HOST | quote }}
             - name: SMTP_PORT
-              value: {{ $smtpPort | quote }}
-            {{- if $smtpUser }}
+              value: {{ .Values.olaresEnv.SMTP_PORT | default "587" | quote }}
+            {{- if .Values.olaresEnv.SMTP_USER }}
             - name: SMTP_USERNAME
-              value: {{ $smtpUser | quote }}
+              value: {{ .Values.olaresEnv.SMTP_USER | quote }}
             {{- end }}
-            {{- if $smtpPassword }}
             - name: SMTP_PASSWORD
-              value: {{ $smtpPassword | quote }}
-            {{- end }}
-            {{- if $smtpFrom }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: SMTP_PASSWORD
+            {{- if .Values.olaresEnv.SMTP_FROM }}
             - name: SMTP_FROM_EMAIL
-              value: {{ $smtpFrom | quote }}
+              value: {{ .Values.olaresEnv.SMTP_FROM | quote }}
             - name: RESEND_FROM_EMAIL
-              value: {{ $smtpFrom | quote }}
+              value: {{ .Values.olaresEnv.SMTP_FROM | quote }}
             {{- end }}
             {{- end }}
             {{- if .Values.olaresEnv.RESEND_API_KEY }}
