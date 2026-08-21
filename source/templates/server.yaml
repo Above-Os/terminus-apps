@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-server
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-server
+spec:
+  replicas: {{ .Values.workloads.sourceserver.replicaCount }}
+  selector:
+    matchLabels:
+      app: source-server
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-server
+    spec:
+      containers:
+        - name: source-server
+          image: aboveos/appstore-server:v2.0.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GIT_ADDR
+              value: "{{ .Values.olaresEnv.GIT_ADDR }}"
+            - name: GIT_BRANCH
+              value: "{{ .Values.olaresEnv.GIT_BRANCH }}"
+            - name: GITHUB_TOKEN
+              value: "{{ .Values.olaresEnv.GIT_TOKEN }}"
+            - name: LATEST_VERSION
+              value: "1.12.7-999"
+            - name: STORAGE_BACKEND
+              value: postgres
+            - name: PG_DSN
+              value: postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.source }}
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - mountPath: /opt/app/charts
+              name: charts-volume
+            - mountPath: /opt/app/image_manifests_cache
+              name: image-volume
+      volumes:
+        - name: charts-volume
+          hostPath:
+            type: DirectoryOrCreate
+            path: "{{ .Values.userspace.appData }}/chart"
+        - name: image-volume
+          hostPath:
+            type: DirectoryOrCreate
+            path: "{{ .Values.userspace.appData }}/imagecache"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-server-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-server
+spec:
+  type: ClusterIP
+  selector:
+    app: source-server
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
