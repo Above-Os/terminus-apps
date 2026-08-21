@@ -37,6 +37,33 @@ spec:
           done
           printf '%s\n' '{"permission":{"external_directory":{"/app/**":"allow"},"bash":{"*":"allow"},"read":{"*":"allow"},"write":{"*":"allow"}}}' > /app/.od/.config/opencode/opencode.json
           chown 1000:1000 /app/.od/.config/opencode/opencode.json
+          APP_CONFIG=/app/.od/app-config.json
+          if [ ! -f "$APP_CONFIG" ]; then
+            cat > "$APP_CONFIG" <<'EOF'
+          {
+            "onboardingCompleted": true,
+            "agentId": "opencode",
+            "designSystemId": "default",
+            "orbit": {
+              "enabled": false,
+              "time": "08:00",
+              "templateSkillId": "orbit-general"
+            },
+            "projectLocations": [],
+            "defaultProjectLocationId": "default"
+          }
+          EOF
+          elif ! grep -q '"onboardingCompleted"' "$APP_CONFIG"; then
+            tmp="${APP_CONFIG}.tmp"
+            {
+              IFS= read -r first || exit 1
+              printf '%s\n' "$first"
+              printf '%s\n' '  "onboardingCompleted": true,'
+              cat
+            } < "$APP_CONFIG" > "$tmp"
+            mv "$tmp" "$APP_CONFIG"
+          fi
+          chown 1000:1000 "$APP_CONFIG"
         securityContext:
           runAsUser: 0
         volumeMounts:
