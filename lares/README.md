@@ -1,8 +1,8 @@
-# Dina
+# Lares
 
 Chat shell on Olares: DeepSeek Harness (dsh web) UI wired to Olares Router.
 
-Current Chart version: **0.18.0** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.0.10** (product/image 0.21.0).
 
 ## Chart ownership (test / public index)
 
@@ -25,7 +25,6 @@ owners:
 
 1. Install from Market (Chat test source URL: `https://appstore-server-test.bttcdn.com`).
 2. Confirm Router is running.
-3. Open the Dina entrance and chat.
+3. Open the Lares entrance and chat.
 
-Optional install-time envs: `LLM_GATEWAY_URL`, `DINA_ROUTER_API_KEY`, `DINA_DEFAULT_MODEL`.
-Empty API key uses in-cluster app identity.
+Auth is the in-cluster app identity (`x-caller-appid`). The default model, web search, and voice input are chosen in Settings.

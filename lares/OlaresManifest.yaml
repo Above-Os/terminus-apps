@@ -1,28 +1,27 @@
 apiVersion: v3
-olaresManifest.version: "0.15.0"
+olaresManifest.version: '0.15.0'
 olaresManifest.type: app
 metadata:
   name: lares
   appid: lares
-  title: Dina
+  title: Lares
   description: Chat shell on DeepSeek Harness, wired to Olares Router
   icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
-  version: 0.0.9
+  version: 0.0.10
   categories:
     - Utilities_v112
     - AI
 spec:
-  versionName: "0.18.0"
+  versionName: "0.21.0"
   runAsUser: true
   fullDescription: |
     ## Overview
-    Dina is a chat app on Olares built on DeepSeek Harness (dsh web).
+    Lares is a chat app on Olares built on DeepSeek Harness (dsh web).
     It uses the official dsh UI shell and talks to Olares Router for LLM access.
 
     ## Highlights
-    - Official dsh web UI (three-column layout) with Dina product profile
+    - Official dsh web UI (three-column layout) with Lares product profile
     - Zero-config Router auth via in-cluster app identity (`x-caller-appid`)
-    - Optional API key and default model overrides at install time
     - Bundled client plugins (voice input, web search) when enabled in the build
 
     ## Requirements
@@ -31,18 +30,13 @@ spec:
     - Arch: amd64
 
     ## Getting started
-    1. Install Dina from Market (test source: `market.test`).
-    2. Ensure Router is installed; leave `LLM_GATEWAY_URL` at the default unless you use a custom gateway.
-    3. Open the Dina entrance and start a chat.
+    1. Install Lares from Market (test source: `market.test`).
+    2. Ensure Router is installed.
+    3. Open the Lares entrance and start a chat.
   upgradeDescription: |
-    ## Dina 0.18.0
+    ## Lares 0.21.0
 
-    - Replace DeepSeek-native web search with Dina's multi-provider facade (Tavily / custom).
-    - Keep the Router API key in a chart-managed Secret.
-    - Fix "crypto.randomUUID is not a function" when picking a workspace directory
-      through the plain-http LAN entrance.
-    - Load bundled Dina plugins from their authoritative source so overlay changes
-      take effect on restart.
+    - Bump DeepSeek Harness (dsh web) to 0.1.1-rc.2.
   developer: luolong
   submitter: luolong
   locale:
@@ -59,50 +53,28 @@ spec:
 permission:
   appData: true
 entrances:
-  - name: dina
+  - name: lares
     host: lares-svc
     port: 8080
-    title: Dina
+    title: Lares
     icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
     authLevel: private
     openMethod: window
-envs:
-  - envName: LLM_GATEWAY_URL
-    description: OpenAI-compatible Router data plane (/v1).
-    default: http://router-svc.router-shared/v1
-    type: url
-    editable: true
-    applyOnChange: true
-  - envName: OLARES_APP_ID
-    description: App id sent as x-caller-appid for zero-config Router auth.
-    default: dina
-    type: string
-    editable: false
-  - envName: DINA_ROUTER_API_KEY
-    description: Optional sk- key. Empty uses in-cluster app identity.
-    type: password
-    editable: true
-    applyOnChange: true
-  - envName: DINA_DEFAULT_MODEL
-    description: Default model id from Router catalog.
-    type: string
-    editable: true
-    applyOnChange: true
 options:
   apiTimeout: 0
   # Brand mark + PWA manifest public so the browser-tab favicon loads before the
   # private-entrance auth redirect (same pattern Ashia uses for its icon assets).
   policies:
-    - entranceName: dina
+    - entranceName: lares
       description: Brand mark and PWA manifest
-      uriRegex: ^/dina/(mark\.svg|manifest\.webmanifest)$
+      uriRegex: ^/lares/(mark\.svg|manifest\.webmanifest)$
       level: public
   dependencies:
     - name: olares
-      version: ">=1.12.7-0"
+      version: '>=1.12.7-0'
       type: system
     - name: router
-      version: ">=1.0.0"
+      version: '>=1.0.0'
       type: application
 workloadReplicas:
-  dina: 1
+  lares: 1
