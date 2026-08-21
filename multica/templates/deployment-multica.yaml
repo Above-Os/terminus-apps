@@ -1,0 +1,170 @@
+{{- $multicaDomainENV := split "," .Values.domain.multica -}}
+{{- $multicaDomain := index $multicaDomainENV "_0" -}}
+{{- $appUrl := printf "https://%s" $multicaDomain -}}
+
+{{- $smtpHost := .Values.olaresEnv.SMTP_HOST | default "" -}}
+{{- $smtpPort := .Values.olaresEnv.SMTP_PORT | default "587" -}}
+{{- $smtpUser := .Values.olaresEnv.SMTP_USER | default "" -}}
+{{- $smtpPassword := .Values.olaresEnv.SMTP_PASSWORD | default "" -}}
+{{- $smtpFrom := .Values.olaresEnv.SMTP_FROM | default .Values.olaresEnv.MAIL_FROM | default "" -}}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: multica
+spec:
+  replicas: {{ .Values.workloads.multica.replicaCount }}
+  selector:
+    matchLabels:
+      app: multica
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: multica
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: docker.io/beclab/wait-for:0.1.0
+          args:
+            - "-it"
+            - "{{ .Values.postgres.host }}:{{ .Values.postgres.port }}"
+        - name: init-permissions
+          image: docker.io/beclab/init:v1.2.3
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data
+              chown 1000:1000 /data
+          volumeMounts:
+            - name: uploads
+              mountPath: /data
+      containers:
+        - name: multica
+          image: ghcr.io/multica-ai/multica-web:v0.4.29
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            # Same-pod loopback avoids Olares mesh 401 on cross-pod http://backend:8080
+            # and keeps browser traffic same-origin (no CSRF cross-domain failures).
+            - name: REMOTE_API_URL
+              value: "http://127.0.0.1:8080"
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+        - name: backend
+          image: ghcr.io/multica-ai/multica-backend:v0.4.29
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          env:
+            - name: PORT
+              value: "8080"
+            - name: APP_ENV
+              value: "production"
+            - name: ALLOW_SIGNUP
+              value: {{ .Values.olaresEnv.ALLOW_SIGNUP | default "true" | quote }}
+            - name: FRONTEND_ORIGIN
+              value: {{ $appUrl | quote }}
+            - name: MULTICA_APP_URL
+              value: {{ $appUrl | quote }}
+            - name: MULTICA_PUBLIC_URL
+              value: {{ $appUrl | quote }}
+            - name: GOOGLE_REDIRECT_URI
+              value: {{ printf "%s/auth/callback" $appUrl | quote }}
+            - name: MULTICA_VCS_INTEGRATION_ENABLED
+              value: "true"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DATABASE_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: JWT_SECRET
+            {{- if $smtpHost }}
+            - name: SMTP_HOST
+              value: {{ $smtpHost | quote }}
+            - name: SMTP_PORT
+              value: {{ $smtpPort | quote }}
+            {{- if $smtpUser }}
+            - name: SMTP_USERNAME
+              value: {{ $smtpUser | quote }}
+            {{- end }}
+            {{- if $smtpPassword }}
+            - name: SMTP_PASSWORD
+              value: {{ $smtpPassword | quote }}
+            {{- end }}
+            {{- if $smtpFrom }}
+            - name: SMTP_FROM_EMAIL
+              value: {{ $smtpFrom | quote }}
+            - name: RESEND_FROM_EMAIL
+              value: {{ $smtpFrom | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.olaresEnv.RESEND_API_KEY }}
+            - name: RESEND_API_KEY
+              value: {{ .Values.olaresEnv.RESEND_API_KEY | quote }}
+            - name: RESEND_FROM_EMAIL
+              value: {{ .Values.olaresEnv.RESEND_FROM_EMAIL | default "noreply@multica.ai" | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/data/uploads
+      volumes:
+        - name: uploads
+          hostPath:
+            type: DirectoryOrCreate
+            {{- if .Values.sysVersion }}
+              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
+            path: "{{ .Values.userspace.appData }}"
+              {{- else }}
+            path: "{{ .Values.userspace.appData }}/multica"
+              {{- end }}
+            {{- else }}
+            path: "{{ .Values.userspace.appData }}/multica"
+            {{- end }}
+      restartPolicy: Always
