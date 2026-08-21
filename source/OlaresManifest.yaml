@@ -1,0 +1,157 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+metadata:
+  name: source
+  description: Market Source
+  icon: https://app.cdn.olares.com/appstore/sonarr/icon.png
+  appid: source
+  version: "0.0.1"
+  title: Makret Source
+  categories:
+    - developer
+  tags:
+    - marketing
+permission:
+  appData: true
+  appCache: true
+spec:
+  versionName: "1.0.0"
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/sonarr/1.webp
+    - https://app.cdn.olares.com/appstore/sonarr/2.webp
+    - https://app.cdn.olares.com/appstore/sonarr/3.webp
+  fullDescription: |
+    Market Source
+  upgradeDescription: |
+    Market Source
+  developer: Olares
+  website: https://sonarr.tv/
+  sourceCode: https://github.com/Sonarr/Sonarr
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://wiki.servarr.com/sonarr
+  legal:
+    - text: Security policy
+      url: https://github.com/Sonarr/Sonarr/security/policy
+  license:
+    - text: GPL-3.0
+      url: https://github.com/Sonarr/Sonarr/blob/develop/LICENSE.md
+  requiredMemory: 1Gi
+  limitedMemory: 4Gi
+  requiredDisk: 2G
+  limitedDisk: 5G
+  requiredCpu: 1
+  limitedCpu: 4
+  supportArch:
+    - amd64
+    - arm64
+options:
+  dependencies:
+    - name: olares
+      type: system
+      version: ">=1.12.7-0"
+entrances:
+  - name: source-admin
+    host: source-admin-svc
+    port: 80
+    title: Market Source Admin
+    icon: https://app.cdn.olares.com/appstore/sonarr/icon.png
+    openMethod: window
+    authLevel: internal
+  - name: source-api
+    host: source-api-svc
+    port: 8080
+    title: Market Source API
+    icon: https://app.cdn.olares.com/appstore/firecrawl/icon.png
+    openMethod: window
+    authLevel: internal
+    invisible: false
+  - name: source-gitbot
+    host: source-gitbot-svc
+    port: 8085
+    title: Market Source GitBot
+    icon: https://app.cdn.olares.com/appstore/firecrawl/icon.png
+    openMethod: window
+    authLevel: internal
+    invisible: false
+middleware:
+  redis:
+    namespace: source
+  postgres:
+    username: source
+    password: source
+    databases:
+      - name: source
+envs:
+  - envName: ADMIN_EMAIL
+    required: true
+    type: email
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "Admin Email"
+  - envName: GIT_ADDR
+    required: true
+    type: url
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "GitHub Repo, like https://github.com/user/repo.git"
+  - envName: GIT_BRANCH
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "GitHub Branch, master or main"
+  - envName: GIT_TOKEN
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "GitHub Token"
+  - envName: GIT_ACCOUNT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "GitHub Account"
+  - envName: GIT_WEBHOOK_SECRET
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "GitHub Webhook Secret"
+  - envName: LARK_ID
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "Lark Id"
+  - envName: EMAIL_AWS_ACCESS_KEY_ID
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "AWS SES (Simple Email Service) Key Id"
+  - envName: EMAIL_AWS_SECRET_ACCESS_KEY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    description: "AWS SES (Simple Email Service) Secret Access Key"
+workloadReplicas:
+  sourceapi: 1
+  sourceadmin: 1
+  sourceserver: 1
+  sourcegitbot: 1
+  sourceofficial: 1

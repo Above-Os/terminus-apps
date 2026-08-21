@@ -1,0 +1,98 @@
+﻿---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source
+spec:
+  replicas: {{ .Values.workloads.sourceadmin.replicaCount }}
+  selector:
+    matchLabels:
+      app: source-admin
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-admin
+    spec:
+      containers:
+        - name: admin
+          image: aboveos/appstore-adminv2:v2.0.10
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SOURCE_ID
+              value: hello
+            - name: REDIS_HOST
+              value: "{{ .Values.redis.host }}"
+            - name: REDIS_PORT
+              value: "{{ .Values.redis.port }}"
+            - name: REDIS_PASSWORD
+              value: "{{ .Values.redis.password }}"
+            - name: DATABASE_URL
+              value: postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.source }}
+            - name: JWT_SECERT
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: JWT_SECERT
+            - name: AWS_ACCESS_KEY_ID
+              value: "{{ .Values.olaresEnv.EMAIL_AWS_ACCESS_KEY_ID }}"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "{{ .Values.olaresEnv.EMAIL_AWS_SECRET_ACCESS_KEY }}"
+            - name: APP_STORE_SERVER
+              value: http://source-server-svc:8081
+            - name: TRUSTED_PROXIES
+              value: 10.233.0.0/16,loopback
+            - name: BOOTSTRAP_ADMIN_EMAILS
+              value: "{{ .Values.olaresEnv.ADMIN_EMAIL }}"
+          ports:
+            - containerPort: 4003
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+        - name: admin-frontend
+          image: aboveos/appstore-adminv2-frontend:v2.0.10
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ADMINV2_API_UPSTREAM
+              value: http://127.0.0.1:4003
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-admin-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source
+spec:
+  type: ClusterIP
+  selector:
+    app: source-admin
+  ports:
+    - name: http
+      port: 4003
+      targetPort: 4003
+      protocol: TCP
+    - name: web
+      port: 80
+      targetPort: 80
+      protocol: TCP
