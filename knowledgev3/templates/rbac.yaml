@@ -128,3 +128,47 @@ subjects:
   - kind: ServiceAccount
     name: knowledge-cluster-view
     namespace: {{ .Release.Namespace }}
+
+---
+# Wise frontend Pod identity. The provider-inject sidecar (see
+# templates/wise-nginx-configmap.yaml) presents this SA's token to the
+# os-framework files / download provider-proxies. Kept separate from
+# knowledge-cluster-view (which holds broad K8s API access the frontend must
+# not have) — a provider binding grants only proxy access, not cluster API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wise-provider
+  namespace: {{ .Release.Namespace }}
+
+---
+# files: bind the wise SA to the (new) os-framework files system provider.
+# ClusterRole backend:files-provider is created by the Olares files framework
+# (framework/files/.olares/config/cluster/deploy/files_provider.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backend:{{ .Release.Namespace }}:wise-provider:files-provider
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backend:files-provider
+subjects:
+  - kind: ServiceAccount
+    name: wise-provider
+    namespace: {{ .Release.Namespace }}
+
+---
+# download: bind the wise SA to the existing os-framework download provider.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backend:{{ .Release.Namespace }}:wise-provider:download-provider
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backend:download-provider
+subjects:
+  - kind: ServiceAccount
+    name: wise-provider
+    namespace: {{ .Release.Namespace }}

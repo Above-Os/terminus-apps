@@ -1,26 +1,34 @@
 {{- /*
-  knowledge — shared knowledge backend for Wise (v3 shared app, admin-only).
+  Wise (shared, admin-only v3 app) — merged frontend + knowledge backend.
 
-  Four containers in one Pod:
+  Backend Pod (Deployment {{ .Release.Name }} == appid `knowledgev3`; the
+  primary workload MUST be named after the release for the v3 schema), four
+  containers:
     - knowledge      (knowledge-base-api, port 3010)
     - vectorcrawl    (vector indexing worker, port 8080)
     - camoufox       (Cloudflare/CAPTCHA bypass, port 8191, in-pod via localhost)
     - nginx          (openresty reverse-proxy sidecar, port 3009)
+  Frontend Pod (Deployment `wise`): the Wise nginx frontend
+  (see the wise-svc / wiseclient section further down).
 
   Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
   image (TermiPass docker/wise/wise.conf) works unchanged — it hardcodes
-  `rss-svc.knowledge-shared:{3010,3100}` as nginx upstreams.
+  `rss-svc.knowledge-shared:{3010,3100}` as nginx upstreams. NOTE: this app
+  actually installs into `knowledgev3-shared` (`<appid>-shared`), so that
+  hardcoded FQDN does not match; backend connectivity is intentionally left
+  as-is for now.
 
   Cross-app calls to ytdlpv3 / rssubscribev3 / twitterv3 go via their
-  v3 shared entrance Services over Kubernetes DNS. Namespace pattern
-  follows `<appid>-shared` (per platform v3 install convention); adjust if
-  the actual install namespace differs.
+  v3 shared entrance Services over Kubernetes DNS (`<appid>-shared`).
 */ -}}
 {{ $dbbackup_rootpath := printf "%s%s" .Values.rootPath "/rootfs/middleware-backup" }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  # Primary workload MUST be named after the release (== appid knowledgev3);
+  # the appstore upload validator requires a Deployment/StatefulSet named
+  # exactly the appid. Only the secondary (wise) workload may use a free name.
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
@@ -437,3 +445,173 @@ spec:
       protocol: TCP
       port: 80
       targetPort: 3010
+
+{{- /*
+  Wise frontend — merged in from the former standalone `wisev3` app.
+
+  This app is now a single shared app (options.shared + spec.onlyAdmin): the
+  Olares Admin installs it once, the knowledge backend (above) and this Wise
+  frontend both run once in `{{ .Release.Namespace }}`, and the platform
+  registers the `wiseclient` entrance for every user (pointing at the same
+  shared frontend).
+
+  Files / download access: the frontend proxies its files (/api, /upload,
+  /videos) and download (/api/download|user|system|url) requests to the in-Pod
+  `provider-inject` openresty sidecar (see wise-nginx-configmap.yaml). The
+  sidecar attaches this Pod's `wise-provider` ServiceAccount bearer token and
+  forwards to the os-framework system providers:
+      files    -> files-provider-svc.os-framework:28080    (backend:files-provider)
+      download -> download-provider-svc.os-framework:28080  (backend:download-provider)
+  The provider-proxy authorizes by request path (ClusterRole nonResourceURLs).
+  Because the caller is this shared app's SA, the tenant resolves to the shared
+  namespace owner (installing Admin) -- shared-identity, NOT per-user. SA and
+  bindings live in rbac.yaml.
+
+  Backend connectivity: the Wise frontend image (TermiPass
+  docker/wise/wise.conf) hardcodes the knowledge upstream FQDN; that wiring
+  is intentionally left as-is for now.
+*/ -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wise
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: wise
+    applications.app.bytetrade.io/author: bytetrade.io
+spec:
+  replicas: {{ .Values.workloads.wise.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wise
+  template:
+    metadata:
+      labels:
+        app: wise
+      annotations:
+        checksum/wise-nginx-config: {{ include (print $.Template.BasePath "/wise-nginx-configmap.yaml") . | sha256sum }}
+    spec:
+      # `wise-provider` SA is bound to backend:files-provider /
+      # backend:download-provider (rbac.yaml); the provider-inject sidecar
+      # presents its token to the os-framework provider-proxies.
+      serviceAccountName: wise-provider
+      containers:
+        - name: frontend
+          image: "beclab/wise:v1.11.33"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          startupProbe:
+            tcpSocket:
+              port: 80
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 60
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 20Mi
+            limits:
+              cpu: "500m"
+              memory: 200Mi
+
+        # provider-inject: openresty sidecar authorizing the frontend's
+        # files/download calls against the os-framework system providers. It
+        # attaches the Pod's wise-provider SA bearer token and pins Host /
+        # X-Provider-Proxy to each provider's provider-service-ref. wise.conf
+        # proxies /api,/upload,/videos -> 127.0.0.1:18081 (files) and the
+        # download subset -> 127.0.0.1:18082 (download).
+        - name: provider-inject
+          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 18081
+              name: files
+            - containerPort: 18082
+              name: download
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 18081
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 18081
+            initialDelaySeconds: 15
+            timeoutSeconds: 5
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: wise-nginx-config
+              mountPath: /opt/bitnami/openresty/nginx/conf/nginx.conf
+              subPath: nginx.conf
+            # 0644 projected token so the non-root openresty worker can read it.
+            - name: wise-sa-token
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+
+      volumes:
+        - name: wise-nginx-config
+          configMap:
+            name: wise-provider-nginx-config
+            defaultMode: 438
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+        - name: wise-sa-token
+          projected:
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  path: wise-token
+                  expirationSeconds: 3600
+                  audience: https://kubernetes.default.svc.cluster.local
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wise-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: wise
+  ports:
+    - name: "frontend"
+      protocol: TCP
+      port: 80
+      targetPort: 80
