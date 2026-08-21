@@ -98,17 +98,13 @@ spec:
               value: /data/workspace
             - name: DINA_DATA_DIR
               value: /data/dina
+            # mesh-in injects the platform caller JWT only for hosts in this
+            # namespace's generated shared-host allowlist. Router publishes its
+            # per-user entrance there; router.shared.olares.com is not allowed.
             - name: LLM_GATEWAY_URL
-              value: {{ .Values.olaresEnv.LLM_GATEWAY_URL | default "http://router-svc.router-shared/v1" | quote }}
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
             - name: OLARES_APP_ID
-              value: {{ .Values.olaresEnv.OLARES_APP_ID | default "dina" | quote }}
-            - name: DINA_ROUTER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Chart.Name }}-router
-                  key: api-key
-            - name: DINA_DEFAULT_MODEL
-              value: {{ .Values.olaresEnv.DINA_DEFAULT_MODEL | default "" | quote }}
+              value: "dina"
             - name: DINA_CLI_ROOT
               value: /data/cli
             # dsh /api fence trusts only loopback Hosts; the entrance host is
