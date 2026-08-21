@@ -1,12 +1,14 @@
 {{- /*
   Wise (shared, admin-only v3 app) — merged frontend + knowledge backend.
 
-  Backend Pod (Deployment {{ .Release.Name }}), four containers:
+  Backend Pod (Deployment {{ .Release.Name }} == appid `knowledgev3`; the
+  primary workload MUST be named after the release for the v3 schema), four
+  containers:
     - knowledge      (knowledge-base-api, port 3010)
     - vectorcrawl    (vector indexing worker, port 8080)
     - camoufox       (Cloudflare/CAPTCHA bypass, port 8191, in-pod via localhost)
     - nginx          (openresty reverse-proxy sidecar, port 3009)
-  Frontend Pod (Deployment {{ .Release.Name }}-wise): the Wise nginx frontend
+  Frontend Pod (Deployment `wise`): the Wise nginx frontend
   (see the wise-svc / wiseclient section further down).
 
   Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
@@ -24,6 +26,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  # Primary workload MUST be named after the release (== appid knowledgev3);
+  # the appstore upload validator requires a Deployment/StatefulSet named
+  # exactly the appid. Only the secondary (wise) workload may use a free name.
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
@@ -470,13 +475,13 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-wise
+  name: wise
   namespace: {{ .Release.Namespace }}
   labels:
     app: wise
     applications.app.bytetrade.io/author: bytetrade.io
 spec:
-  replicas: {{ (index .Values.workloads "knowledgev3-wise").replicaCount }}
+  replicas: {{ .Values.workloads.wise.replicaCount }}
   strategy:
     type: Recreate
   selector:
