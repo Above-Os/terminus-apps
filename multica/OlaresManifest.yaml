@@ -1,0 +1,217 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+workloadReplicas:
+  multica: 1
+
+metadata:
+  name: multica
+  appid: multica
+  title: Multica
+  version: '0.1.0'
+  description: Assign issues to Claude Code, Codex, Cursor, and 17 more coding agents like teammates.
+  icon: https://cdn.olares.com/images/2026/08/aa1d5609058c84115b83417f7e92e68c.png
+  categories:
+    - Productivity_v112
+    - workspace
+    - agents
+  tags:
+    - workbench
+
+spec:
+  versionName: '0.4.32'
+  featuredImage: https://cdn.olares.com/images/2026/08/543e42d3d94f0addae44647411f7d257.png
+  promoteImage:
+    - https://cdn.olares.com/images/2026/08/543e42d3d94f0addae44647411f7d257.png
+    - https://cdn.olares.com/images/2026/08/87184a3b2699792924c50ac84089283c.png
+    - https://cdn.olares.com/images/2026/08/2a0d0e216c0228c1efcf804a1e33a2d6.png
+    - https://cdn.olares.com/images/2026/08/6ac66ee95ac23164bc335c5fd487a9b6.png
+  fullDescription: |
+    Multica is an open-source platform for managing a human + agent engineering team on Olares.
+    Run the Multica server locally, assign issues to Codex, Claude Code, Cursor, and other coding
+    agents from a shared board, and watch task progress in real time.
+
+    Use cases on Olares
+    - Kanban issue board with humans and agents in the same assignee picker
+    - Long-running agent tasks with live tool-call streaming and lifecycle tracking
+    - Reusable skills shared across agents and runtimes
+    - One panel for local laptops and Olares Codex terminals connected to the same server
+
+    Entrances (Settings → Apps → Multica)
+    - Multica — web UI for login, workspaces, issues, agents, and runtimes
+    - Multica API — REST/WebSocket backend for the CLI and daemon (invisible entrance)
+
+    Connect a local machine
+    1. Install the Multica CLI on the computer that runs your agent (laptop, VPS, etc.).
+    2. Log in: multica login --token <token> (create the token in Web → Settings → API tokens).
+    3. Configure the CLI with your workspace and Olares URLs:
+       server_url: https://<multica-api-entrance>
+       app_url: https://<multica-web-entrance>
+       workspace_id: <workspace uuid from Web → Settings → Workspace>
+    4. Start the daemon and keep it running:
+       multica daemon start --foreground
+       (use tmux if the terminal may close)
+
+    Connect Olares Codex
+    1. Install Codex from Olares Market and open its terminal entrance.
+    2. Install the Multica CLI inside Codex (copy /app/multica from the backend image, or upload
+       the binary via Olares Files if GitHub downloads are blocked).
+    3. Use the Multica API entrance as server_url and the web entrance as app_url — Codex cannot
+       reach in-cluster service names, and the web /health route is not the backend API.
+    4. Log in with multica login --token <token>, then run the daemon in tmux:
+       tmux new -s multica
+       multica daemon start --foreground
+    5. In Multica Web → Settings → Runtimes you should see Codex online alongside other computers.
+
+    Email verification
+    - Enable Olares system SMTP in Settings (default) or provide Resend credentials at install time.
+      One-time codes can also be read from backend logs:
+      olares-cli cluster container logs <multica-pod>/backend
+
+    Requirements
+    - Olares >= 1.12.6
+    - PostgreSQL middleware with the vector extension
+
+  upgradeDescription: |
+    Multica 0.1.0 — initial Olares Market listing.
+
+    - Official Multica icon and English listing images.
+    - Same-pod web + API layout with public web entrance and invisible API entrance for CLI/daemon.
+    - Documented Codex and local runtime pairing flow.
+  developer: Multica AI
+  website: https://multica.ai
+  sourceCode: https://github.com/multica-ai/multica
+  submitter: harveyff
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://github.com/multica-ai/multica/blob/main/LICENSE
+  requiredMemory: 768Mi
+  limitedMemory: 1536Mi
+  requiredDisk: 256Mi
+  limitedDisk: 2Gi
+  requiredCpu: 300m
+  limitedCpu: 1500m
+  supportArch:
+    - amd64
+    - arm64
+
+permission:
+  appData: true
+
+middleware:
+  postgres:
+    username: multica
+    databases:
+      - name: multica
+        distributed: false
+        extensions:
+          - vector
+
+entrances:
+  - name: multica
+    host: multica
+    port: 3000
+    title: Multica
+    icon: https://cdn.olares.com/images/2026/08/aa1d5609058c84115b83417f7e92e68c.png
+    authLevel: public
+    openMethod: window
+  - name: backend
+    host: backend
+    port: 8080
+    title: Multica API
+    icon: https://cdn.olares.com/images/2026/08/aa1d5609058c84115b83417f7e92e68c.png
+    authLevel: public
+    invisible: true
+
+envs:
+  - envName: ALLOW_SIGNUP
+    type: string
+    required: false
+    editable: true
+    applyOnChange: true
+    default: "true"
+    description: Allow new user signups (true or false)
+  - envName: RESEND_API_KEY
+    type: password
+    required: false
+    editable: true
+    applyOnChange: true
+    description: Resend API key for email verification (optional if SMTP is configured)
+  - envName: RESEND_FROM_EMAIL
+    type: string
+    required: false
+    editable: true
+    applyOnChange: true
+    default: "noreply@multica.ai"
+    description: Sender address when using Resend
+  - envName: USE_SYSTEM_SMTP_SETTINGS
+    required: false
+    applyOnChange: true
+    editable: true
+    type: bool
+    default: "true"
+    description: Use system SMTP settings (when enabled, SMTP envs are managed by system envs)
+  - envName: SMTP_ENABLED
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_ENABLED
+  - envName: SMTP_HOST
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_SERVER
+  - envName: SMTP_PORT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_PORT
+  - envName: SMTP_USER
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_USERNAME
+  - envName: SMTP_PASSWORD
+    type: password
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_PASSWORD
+  - envName: SMTP_FROM
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_FROM_ADDRESS
+  - envName: SMTP_TLS
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_USE_TLS
+  - envName: SMTP_SSL
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_USE_SSL
+  - envName: SMTP_SECURITY_PROTOCOLS
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_SMTP_SECURITY_PROTOCOLS
+
+options:
+  apiTimeout: 0
+  allowedOutboundPorts:
+    - 465
+    - 587
+  dependencies:
+    - name: olares
+      type: system
+      version: '>=1.12.6-0'
+    - name: postgres
+      type: middleware
+      version: '>=17.0.0-0'
+      mandatory: true
