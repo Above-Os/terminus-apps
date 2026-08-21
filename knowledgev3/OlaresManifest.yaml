@@ -5,14 +5,15 @@ metadata:
   name: knowledgev3
   appid: knowledgev3
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
-  description: Shared knowledge backend for Wise
-  title: Knowledge Backend V3 for test
+  description: Your Digital Secret Garden
+  title: Wise
   version: '1.2.14'
   categories:
     - Productivity_v112
+    - Fun
 
 # Exposed to other v3 apps (primarily wisev3 frontend) over Service DNS:
-#   http://sharedentrances-knowledge.knowledge-shared.svc.cluster.local:80
+#   http://sharedentrances-knowledge.knowledgev3-shared.svc.cluster.local:80
 #     -> knowledge-base-api (3010)
 # Additional in-pod ports (8080 backend-server, 3100 ws) are also exposed on
 # the same Service for callers that need them.
@@ -25,14 +26,22 @@ sharedEntrances:
     invisible: true
     authLevel: internal
 
-# Admin-only entrance, registered with the Olares gateway for direct API
-# access (debugging, admin tooling). Not shown in the user app launcher.
-# Backed by the `rss-svc` Service (name kept for compatibility with the
-# Wise frontend image, which hardcodes `rss-svc.<knowledge-ns>` as nginx
-# upstreams).
-# Wise frontends (per-user) reach this backend over in-cluster DNS
-# directly, NOT through this entrance.
+# Entrances:
+#   - wiseclient: the Wise UI (merged-in frontend). Registered by the Olares
+#     gateway for every user; all users' entrances point at the single shared
+#     `wise-svc` frontend (admin installs once, everyone gets an entry).
+#   - knowledge: admin-only, invisible API entrance for direct access
+#     (debugging / admin tooling). Backed by the `rss-svc` Service (name kept
+#     for compatibility with the Wise frontend image, which hardcodes
+#     `rss-svc.<knowledge-ns>` as nginx upstreams).
 entrances:
+  - name: wiseclient
+    port: 80
+    host: wise-svc
+    title: Wise
+    icon: https://app.cdn.olares.com/appstore/wise/icon.png
+    authLevel: internal
+    openMethod: window
   - name: knowledge
     port: 3010
     host: rss-svc
@@ -43,15 +52,19 @@ entrances:
 
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   knowledgev3 — knowledge backend Deployment
-#               (== appid / Release.Name; 4 containers in one Pod:
-#                knowledge + vectorcrawl + camoufox + nginx sidecar)
+#   knowledgev3      — knowledge backend Deployment (== appid / Release.Name;
+#                      4 containers in one Pod: knowledge + vectorcrawl +
+#                      camoufox + nginx sidecar)
+#   knowledgev3-wise — Wise frontend nginx Deployment (merged in)
 workloadReplicas:
   knowledgev3: 1
+  knowledgev3-wise: 1
 
 permission:
   appData: true
   appCache: true
+  userData:
+    - Home
 
 middleware:
   redis:
@@ -72,11 +85,19 @@ spec:
     - https://app.cdn.olares.com/appstore/wise/2.webp
   fullDescription: |
     **IMPORTANT NOTE**
-    This is a shared backend. Once installed by the Olares Admin, every Wise
-    user instance on this cluster will route its API calls to this single
-    backend via the shared entrance `sharedentrances-knowledge`.
+    This is a shared version of Wise. Only one service (the Wise frontend plus
+    the knowledge backend) is installed across the entire Olares system by the
+    Admin. Every user still gets a Wise entrance in their launcher, all pointing
+    at the same shared instance.
+
+    Wise is a modern knowledge management tool built for control and insight.
+    Wise empowers you to collect diverse content from across the web and your
+    devices. Crucially, it leverages locally-run AI to unearth valuable
+    insights, freeing you from the filter bubbles and privacy compromises of
+    big-platform algorithms.
 
     **COMPONENTS**
+    - wise (port 80): the Wise frontend (nginx). Backs the `wiseclient` entrance.
     - knowledge-base-api (port 3010): main HTTP API for the knowledge base.
     - vectorcrawl (port 8080): vector indexing and crawl worker.
     - camoufox (port 8191): CAPTCHA / Cloudflare bypass companion (in-pod, localhost).
@@ -89,37 +110,25 @@ spec:
     - Redis (shared via platform middleware, namespace: knowledge).
     - NATS subjects: rssubscribe_status, download_status, knowledge.*.
   upgradeDescription: |
-    v1.2.5: Move `PG_PASSWORD` / `PGPASSWORD` / `REDIS_PASSWORD` into Secret (`secretKeyRef`).
+    **Merged Wise frontend + knowledge backend into a single shared app.**
+    The previously separate per-user `wisev3` frontend and shared `knowledgev3`
+    backend are now one shared, admin-only app (`options.shared` +
+    `spec.onlyAdmin`). The Admin installs it once; the Wise frontend
+    (`wise-svc`) and the knowledge backend both run once in the shared
+    namespace, and the platform registers the `wiseclient` entrance for every
+    user.
 
-    Adds an nginx (openresty) reverse-proxy sidecar (port 3009) in front of
-    the knowledge API. rss-svc now targets the sidecar, which routes
-    /download/* to the os-framework download provider-proxy (injecting the
-    knowledge-cluster-view SA token) and everything else to
-    knowledge-base-api on 127.0.0.1:3010. The sidecar ships a complete
-    nginx.conf (only listens on 3009) to avoid the image's default
-    `listen 8080` server colliding with vectorcrawl in the same Pod.
-    The /download hop also pins Host to the provider-service-ref and clears
-    the gateway's X-Forwarded-Host/X-Provider-Proxy so the provider-proxy
-    resolves the right provider (fixes the 403/400 on /download/*).
+    Note: the Wise frontend's per-user `files-proxy` / `download-proxy` and
+    their ClusterRoleBindings are keyed on the installing Admin; per-user file
+    and download routing relies on the gateway propagating X-BFL-USER to the
+    multi-tenant backend.
 
-    **Previously (v3 split-out)**
-    Split the legacy `wise/knowledge` sub-chart into a standalone v3 shared
-    application.
-
-    **What's Changed**
-    - **Architecture**: extracted from `wise/knowledge` sub-chart, now a
-      first-class v3 shared app installable only by Admin.
-    - **Schema**: apiVersion v3, `options.shared: true`, declared
-      `workloadReplicas: { knowledgev3: 1 }`; Deployment uses
-      `{{ .Release.Name }}` so allowMultipleInstall stays safe.
-    - **Routing**: provider-proxy ClusterRoleBindings for
-      ytdlp / rssubscribe / twitter dropped — those cross-app calls
-      migrated to v3 `sharedentrances-*` Services over Kubernetes DNS.
-      Cookie / download / search3 still route through provider-proxy
-      and keep their `knowledge-cluster-view` ClusterRoleBindings
-      (see templates/rbac.yaml).
-    - **Probes**: startup / liveness / readiness probes added for each
-      container (knowledge: 3010, vectorcrawl: 8080).
+    **Previously**
+    v1.2.5: moved PG/REDIS passwords into a Secret and added the nginx
+    (openresty) reverse-proxy sidecar (port 3009) in front of the knowledge
+    API; rss-svc targets the sidecar, which routes /download/* to the
+    os-framework download provider-proxy and everything else to
+    knowledge-base-api on 127.0.0.1:3010.
   developer: Olares
   website: https://www.olares.com/
   submitter: Olares
@@ -128,17 +137,18 @@ spec:
     - zh-CN
   doc: https://docs.olares.com/manual/olares/wise/
 
-  # Σ across the 4 application containers (initContainers excluded):
+  # Σ across all application containers (initContainers excluded):
   #   knowledge      req 20m  / 50Mi   lim 3500m / 6Gi
   #   vectorcrawl    req 20m  / 50Mi   lim 1000m / 2Gi
   #   camoufox       req 250m / 512Mi  lim 2000m / 1.5Gi
   #   nginx          req 10m  / 32Mi   lim 500m  / 256Mi
+  #   wise (frontend)req 10m  / 20Mi   lim 500m  / 200Mi
   #   -------------------------------------------------
-  #   Σ              req 300m / 644Mi  lim 7000m / 9984Mi (9.75Gi)
-  requiredCpu: 300m
-  limitedCpu: 7
-  requiredMemory: 644Mi
-  limitedMemory: 9984Mi
+  #   Σ              req 310m / 664Mi  lim 7500m / 10184Mi (~9.95Gi)
+  requiredCpu: 310m
+  limitedCpu: 7.5
+  requiredMemory: 664Mi
+  limitedMemory: 10184Mi
   requiredDisk: 50Mi
   limitedDisk: 500Gi
   supportArch:

@@ -1,0 +1,140 @@
+{{- /*
+  nginx.conf for the `provider-inject` openresty sidecar in the Wise frontend
+  Pod (knowledgev3-wise Deployment).
+
+  The Wise frontend nginx (wise.conf, baked into the beclab/wise image) proxies
+  its files and download calls to this sidecar over localhost:
+      /api, /upload, /videos            -> 127.0.0.1:18081  (files)
+      /api/download|user|system|url     -> 127.0.0.1:18082  (download)
+
+  For each request this sidecar:
+    - injects the Pod's `wise-provider` ServiceAccount bearer token (projected
+      at /var/run/secrets/tokens/wise-token, mode 0644 so the non-root worker
+      can read it) so the os-framework provider-proxy's TokenReview passes;
+    - pins Host / X-Forwarded-Host / X-Provider-Proxy to the provider's
+      `provider-service-ref` (the provider-proxy authorizer only evaluates the
+      ClusterRole rules when these match the annotation; a browser Host -> 403);
+    - clears the browser Cookie (identity is the SA bearer token).
+
+  Tenant note: the provider-proxy overwrites X-BFL-USER from the authenticated
+  SA -> shared namespace owner (installing Admin). Shared-identity, not
+  per-user. See deployment.yaml / rbac.yaml.
+
+  We ship a full nginx.conf (not a server snippet) loaded via `openresty -c`,
+  replacing the bitnami image default (which also listens on 8080).
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wise-provider-nginx-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: wise
+data:
+  nginx.conf: |
+    worker_processes  auto;
+    error_log  "/opt/bitnami/openresty/nginx/logs/error.log";
+    pid        "/opt/bitnami/openresty/nginx/tmp/nginx.pid";
+
+    events {
+        worker_connections  1024;
+    }
+
+    http {
+        include       mime.types;
+        default_type  application/octet-stream;
+
+        client_body_temp_path  "/opt/bitnami/openresty/nginx/tmp/client_body" 1 2;
+        proxy_temp_path        "/opt/bitnami/openresty/nginx/tmp/proxy" 1 2;
+        fastcgi_temp_path      "/opt/bitnami/openresty/nginx/tmp/fastcgi" 1 2;
+        scgi_temp_path         "/opt/bitnami/openresty/nginx/tmp/scgi" 1 2;
+        uwsgi_temp_path        "/opt/bitnami/openresty/nginx/tmp/uwsgi" 1 2;
+
+        sendfile           on;
+        keepalive_timeout  65;
+        server_tokens      off;
+
+        map $http_upgrade $connection_upgrade {
+            default upgrade;
+            ''      close;
+        }
+
+        # Match wise.conf's cap so large uploads/downloads are not truncated.
+        client_max_body_size 4000M;
+
+        # files provider: rss/files paths (/api/resources, /upload, /videos, ...)
+        server {
+            listen 18081;
+
+            location = /healthz {
+                access_log off;
+                add_header Content-Type text/plain;
+                return 200 'ok\n';
+            }
+
+            location / {
+                access_by_lua_block {
+                    local f = io.open("/var/run/secrets/tokens/wise-token", "r")
+                    if f then
+                        local tok = f:read("*a")
+                        f:close()
+                        if tok then
+                            tok = tok:gsub("%s+$", "")
+                            ngx.req.set_header("Authorization", "Bearer " .. tok)
+                        end
+                    end
+                    ngx.req.set_header("X-Forwarded-Host", "files-provider-svc.os-framework:28080")
+                    ngx.req.set_header("X-Provider-Proxy", "files-provider-svc.os-framework:28080")
+                    ngx.req.clear_header("Cookie")
+                }
+                proxy_http_version 1.1;
+                proxy_set_header Host              files-provider-svc.os-framework:28080;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Upgrade           $http_upgrade;
+                proxy_set_header Connection        $connection_upgrade;
+                proxy_pass http://files-provider-svc.os-framework:28080;
+                proxy_read_timeout 600s;
+                proxy_send_timeout 600s;
+            }
+        }
+
+        # download provider: /api/download, /api/user, /api/system, /api/url
+        server {
+            listen 18082;
+
+            location = /healthz {
+                access_log off;
+                add_header Content-Type text/plain;
+                return 200 'ok\n';
+            }
+
+            location / {
+                access_by_lua_block {
+                    local f = io.open("/var/run/secrets/tokens/wise-token", "r")
+                    if f then
+                        local tok = f:read("*a")
+                        f:close()
+                        if tok then
+                            tok = tok:gsub("%s+$", "")
+                            ngx.req.set_header("Authorization", "Bearer " .. tok)
+                        end
+                    end
+                    ngx.req.set_header("X-Forwarded-Host", "download-provider-svc.os-framework:28080")
+                    ngx.req.set_header("X-Provider-Proxy", "download-provider-svc.os-framework:28080")
+                    ngx.req.clear_header("Cookie")
+                }
+                proxy_http_version 1.1;
+                proxy_set_header Host              download-provider-svc.os-framework:28080;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Upgrade           $http_upgrade;
+                proxy_set_header Connection        $connection_upgrade;
+                proxy_pass http://download-provider-svc.os-framework:28080;
+                proxy_read_timeout 600s;
+                proxy_send_timeout 600s;
+            }
+        }
+    }
