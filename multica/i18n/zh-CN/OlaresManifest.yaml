@@ -1,0 +1,55 @@
+metadata:
+  title: Multica
+  description: 像给同事分配任务一样，把 Issue 交给 Claude Code、Codex、Cursor 等 20+ 编程 Agent。
+
+spec:
+  fullDescription: |
+    Multica 是开源的人机协作工程管理平台。在 Olares 上自托管服务端后，可以在同一块看板上
+    给 Codex、Claude Code、Cursor 等编程 Agent 分配任务，并实时查看执行进度。
+
+    Olares 使用场景
+    - 看板 Issue：人类和 Agent 共用同一个指派人下拉框
+    - 长任务：实时工具调用流与完整任务生命周期跟踪
+    - 可复用 Skill：在 Agent 与 Runtime 之间共享
+    - 统一 Runtime 面板：本地笔记本与 Olares Codex 终端连到同一台服务器
+
+    入口（设置 → 应用 → Multica）
+    - Multica — Web 界面：登录、工作区、Issue、Agent、Runtime
+    - Multica API — CLI/daemon 用的 REST/WebSocket 后端（隐藏入口）
+
+    连接本地电脑
+    1. 在运行 Agent 的电脑上安装 Multica CLI（笔记本、VPS 等）。
+    2. 登录：multica login --token <token>（在 Web → 设置 → API 令牌 中创建）。
+    3. 配置工作区与 Olares 地址：
+       server_url: https://<multica-api-入口>
+       app_url: https://<multica-web-入口>
+       workspace_id: <Web → 设置 → 工作区 中的 UUID>
+    4. 启动 daemon 并保持运行：
+       multica daemon start --foreground
+       （终端可能关闭时请用 tmux）
+
+    连接 Olares Codex
+    1. 从 Olares Market 安装 Codex，打开终端入口。
+    2. 在 Codex 内安装 Multica CLI（从 backend 镜像复制 /app/multica，或通过 Olares 文件
+       上传二进制，若 GitHub 下载被阻断）。
+    3. server_url 用 Multica API 入口，app_url 用 Web 入口 — Codex 无法访问集群内
+       服务名，且 Web 的 /health 不是后端 API。
+    4. multica login --token <token> 登录后，在 tmux 中运行 daemon：
+       tmux new -s multica
+       multica daemon start --foreground
+    5. 在 Multica Web → 设置 → Runtimes 中应能看到 Codex 与其他电脑同时在线。
+
+    邮箱验证码
+    - 安装时配置 SMTP（Olares 用户邮件设置）或 Resend；也可从 backend 日志读取一次性验证码：
+      olares-cli cluster container logs <multica-pod>/backend
+
+    运行要求
+    - Olares >= 1.12.6
+    - amd64 节点
+    - 带 vector 扩展的 PostgreSQL 中间件
+  upgradeDescription: |
+    Multica 0.1.0 — 首次上架 Olares Market。
+
+    - 官方 Multica 图标与中英文宣传图。
+    - 同 Pod 部署 Web + API，Web 公开入口 + 隐藏 API 入口供 CLI/daemon 使用。
+    - 补充 Codex 与本地 Runtime 配对说明。
