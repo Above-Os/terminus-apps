@@ -15,7 +15,7 @@
 {{- end -}}
 
 {{- /* Needs llm-init with ROLE=extra → extra_model_path (L6+). */ -}}
-{{- define "paddleocrhybrid.llmInitTag" -}}v1.3.6{{- end -}}
+{{- define "paddleocrhybrid.llmInitTag" -}}v1.5.0{{- end -}}
 {{- /* Needs OCRAdapter with paddle-hybrid pipeline (S11+). */ -}}
 {{- define "paddleocrhybrid.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.5{{- end -}}
 {{- define "paddleocrhybrid.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
