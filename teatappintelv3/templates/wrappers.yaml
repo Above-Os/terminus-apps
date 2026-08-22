@@ -1,4 +1,13 @@
 # Engine wrapper: wait for llm-init sentinel, resolve HF snapshot paths, exec embed_server.
+#
+# The helpers this sources are NOT here: llm-init publishes common.sh into the
+# shared run dir and the Deployment points WRAPPER_COMMON at that copy, so
+# supervise_engine -- which is what makes POST /api/engine/restart work -- has
+# one implementation instead of one per chart. The script waits for it, because
+# nothing orders the two Deployments.
+#
+# This therefore requires an llm-init image that publishes the helpers. Bump the
+# llm-init tag in llm-init.yaml in the same change that ships this.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,12 +21,31 @@ data:
     set -eu
 
     ENGINE=embed-server
+    # Source the shared helpers: the sibling copy by default, or the one
+    # llm-init publishes into RUN_DIR when WRAPPER_COMMON says so. That copy
+    # can arrive late — the two containers are separate Deployments with no
+    # ordering between them — so waiting here is the normal path.
+    # Keep this block byte-identical across wrappers (tests/wrappers checks).
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    # shellcheck source=common.sh
+    . "$WRAPPER_COMMON"
+
     SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
     WAIT_INTERVAL=${WAIT_INTERVAL:-5}
     WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
     HF_HUB=${HF_HUB_CACHE:-/cache/hf/hub}
     EMPTY_EMBED_SERVER=${EMPTY_EMBED_SERVER:-/usr/local/bin/empty_embed_server}
 
+    # This app answers /health while the weights are still downloading, so it
+    # keeps its own stderr log() rather than the shared one.
     log() { printf '[wrapper-%s] %s\n' "$ENGINE" "$*" >&2; }
 
     FAKE_PID=""
@@ -90,8 +118,6 @@ data:
     done
     log "sentinel $SENTINEL found after ${elapsed}s"
 
-
-
     stop_fake_embed_server
 
     case "${EMBED_BACKEND:-openvino}" in
@@ -118,5 +144,9 @@ data:
         exit 1
     fi
 
-    log "starting embed_server MODEL_ID=$MODEL_ID EMBED_DEVICE=$EMBED_DEVICE EMBED_MODEL_DIR=$EMBED_MODEL_DIR"
-    exec /usr/local/bin/embed_server
+    run_embed_server() {
+        log "starting embed_server MODEL_ID=$MODEL_ID EMBED_DEVICE=$EMBED_DEVICE EMBED_MODEL_DIR=$EMBED_MODEL_DIR"
+        exec /usr/local/bin/embed_server "$@"
+    }
+
+    supervise_engine run_embed_server "$@"
