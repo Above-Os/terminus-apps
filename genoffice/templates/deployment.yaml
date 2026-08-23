@@ -20,19 +20,24 @@ spec:
       enableServiceLinks: false
       containers:
         - name: genoffice
-          image: docker.io/beclab/harveyff-genoffice:v0.0.2
-          imagePullPolicy: Always
+          image: docker.io/beclab/harveyff-genoffice:v0.0.9
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - bash /scripts/enable-ime.sh; exec /init
           env:
             - name: PUID
               value: "1000"
             - name: PGID
               value: "1000"
             - name: TZ
-              value: Etc/UTC
+              value: Asia/Shanghai
             - name: TITLE
               value: GenOffice
             - name: START_DOCKER
               value: "false"
+            - name: NO_DECOR
+              value: "true"
           ports:
             - name: http
               containerPort: 3000
@@ -41,12 +46,15 @@ spec:
               protocol: TCP
           resources:
             requests:
-              cpu: 250m
+              cpu: 500m
               memory: 1Gi
             limits:
               cpu: "4"
               memory: 8Gi
           volumeMounts:
+            - name: kasm-ime
+              mountPath: /scripts
+              readOnly: true
             - name: config
               mountPath: /config
             - name: documents
@@ -57,6 +65,10 @@ spec:
               mountPath: /dev/shm
       restartPolicy: Always
       volumes:
+        - name: kasm-ime
+          configMap:
+            name: genoffice-kasm-ime
+            defaultMode: 0755
         - name: config
           hostPath:
             type: DirectoryOrCreate

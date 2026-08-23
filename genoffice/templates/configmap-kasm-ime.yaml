@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: genoffice-kasm-ime
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: genoffice
+data:
+  enable-ime.sh: |
+    #!/bin/bash
+    # Turn on Kasm "IME Input Mode" before /init starts Xvnc.
+    # forceSetting overrides a browser localStorage value left from older sessions.
+    set -u
+    BUNDLE=/usr/share/kasmvnc/www/dist/main.bundle.js
+    if [ ! -f "$BUNDLE" ]; then
+      echo "kasm ime: bundle missing, skip"
+      exit 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+      if grep -q "UI.initSetting('enable_ime', false);" "$BUNDLE"; then
+        sed -i "s/UI.initSetting('enable_ime', false);/UI.initSetting('enable_ime', true); UI.forceSetting('enable_ime', true, false);/" "$BUNDLE"
+        echo "kasm ime: enabled by default (sed)"
+      else
+        echo "kasm ime: python3 missing and snippet not found"
+      fi
+      exit 0
+    fi
+    python3 - "$BUNDLE" <<'PY'
+    import sys
+    from pathlib import Path
+    path = Path(sys.argv[1])
+    text = path.read_text(encoding="utf-8")
+    old = "UI.initSetting('enable_ime', false);"
+    new = "UI.initSetting('enable_ime', true); UI.forceSetting('enable_ime', true, false);"
+    if old in text:
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        print("kasm ime: enabled by default")
+    elif "UI.initSetting('enable_ime', true)" in text:
+        print("kasm ime: already enabled")
+    else:
+        print("kasm ime: enable_ime snippet not found")
+    PY
