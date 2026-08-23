@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Harden the linuxserver KasmVNC web client against idle disconnect crashes.
+"""Harden linuxserver KasmVNC for a long-lived office stream.
 
-The bundled UI starts a 5s interval that reads UI.rfb.lastActiveAt with no
-null check. After ~20 minutes idle (or any websocket drop) rfb is gone and
-the page throws Uncaught TypeError ... lastActiveAt. Reconnect is also
-hard-disabled outside Kasm Workspaces.
+1. Guard the idle timer so a dropped websocket cannot throw lastActiveAt.
+2. Stretch idle disconnect; do not auto-reconnect or inject fake keys
+   (both made clicks miss and sessions flap through the Olares entrance).
+3. Raise Xvnc frame rate / JPEG quality — linuxserver starts Xvnc without
+   -FrameRate, so the stream defaults to a conservative encode path.
+4. Turn on IME Input Mode so the client's OS IME (Windows Pinyin, etc.)
+   can type CJK into the remote session. Default is off and localStorage
+   would keep it off, so force it on.
 """
 from pathlib import Path
 
 WWW = Path("/usr/share/kasmvnc/www")
 BUNDLE = WWW / "dist/main.bundle.js"
 ERR = WWW / "dist/error_handler.bundle.js"
-KCLIENT = Path("/kclient/public/index.html")
+XVNC_RUN = Path("/etc/s6-overlay/s6-rc.d/svc-kasmvnc/run")
 
 IDLE_OLD = """      UI._sessionTimeoutInterval = setInterval(function () {
         var timeSinceLastActivityInS = (Date.now() - UI.rfb.lastActiveAt) / 1000;
@@ -46,11 +50,19 @@ IDLE_NEW = """      UI._sessionTimeoutInterval = setInterval(function () {
             action: 'idle_session_timeout',
             value: 'Idle session timeout exceeded'
           }, '*');
-        } else {
-          //send keep-alive
-          UI.rfb.sendKey(1, null, false);
         }
       }, 5000);"""
+
+XVNC_OLD = """    -websocketPort 6901 \\
+    -interface 0.0.0.0 \\
+    -Log *:stdout:10"""
+
+XVNC_NEW = """    -websocketPort 6901 \\
+    -interface 0.0.0.0 \\
+    -FrameRate=60 \\
+    -DynamicQualityMin=7 \\
+    -DynamicQualityMax=9 \\
+    -Log *:stdout:10"""
 
 
 def must_replace(path: Path, old: str, new: str, label: str) -> None:
@@ -67,15 +79,16 @@ def main() -> None:
     must_replace(BUNDLE, IDLE_OLD, IDLE_NEW, "idle interval")
     must_replace(
         BUNDLE,
-        "UI.initSetting('reconnect', false);",
-        "UI.initSetting('reconnect', true);",
-        "reconnect default",
-    )
-    must_replace(
-        BUNDLE,
         "UI.initSetting('idle_disconnect', 20);",
         "UI.initSetting('idle_disconnect', 10080);",
         "idle_disconnect default",
+    )
+    # Leave UI.initSetting('reconnect', false) as shipped.
+    must_replace(
+        BUNDLE,
+        "UI.initSetting('enable_ime', false);",
+        "UI.initSetting('enable_ime', true); UI.forceSetting('enable_ime', true, false);",
+        "enable_ime default",
     )
 
     err = ERR.read_text(encoding="utf-8").replace("\r\n", "\n")
@@ -96,13 +109,7 @@ def main() -> None:
     ERR.write_text(err, encoding="utf-8")
     print(f"patched lastActiveAt reload in {ERR}")
 
-    kclient = KCLIENT.read_text(encoding="utf-8").replace("\r\n", "\n")
-    old_src = "vnc/index.html?autoconnect=1&resize=remote&clipboard_up=true&clipboard_down=true&clipboard_seamless=true&show_control_bar=true"
-    new_src = old_src + "&reconnect=true&idle_disconnect=10080"
-    if old_src not in kclient:
-        raise SystemExit(f"kclient iframe src not found in {KCLIENT}")
-    KCLIENT.write_text(kclient.replace(old_src, new_src, 1), encoding="utf-8")
-    print(f"patched kclient iframe in {KCLIENT}")
+    must_replace(XVNC_RUN, XVNC_OLD, XVNC_NEW, "xvnc encode flags")
 
 
 if __name__ == "__main__":

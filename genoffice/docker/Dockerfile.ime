@@ -1,0 +1,29 @@
+# Runtime-only overlay on v0.0.9: enable Kasm IME + fcitx5.
+# Use when the multi-stage builder cannot reach Docker Hub.
+FROM docker.io/beclab/harveyff-genoffice:v0.0.9
+
+ENV LANG=zh_CN.UTF-8 \
+    LC_ALL=zh_CN.UTF-8 \
+    GTK_IM_MODULE=fcitx \
+    QT_IM_MODULE=fcitx \
+    XMODIFIERS=@im=fcitx
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        locales \
+        dbus-x11 \
+        fcitx5 \
+        fcitx5-chinese-addons \
+        fcitx5-frontend-gtk3 \
+        x11-xkb-utils \
+    && (grep -q '^zh_CN.UTF-8 UTF-8' /etc/locale.gen || echo 'zh_CN.UTF-8 UTF-8' >> /etc/locale.gen) \
+    && locale-gen zh_CN.UTF-8 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY root/ /
+COPY patch_ime.py /tmp/patch_ime.py
+RUN chmod +x /usr/local/bin/genoffice-olares \
+    && sed -i 's/\r$//' /usr/local/bin/genoffice-olares /defaults/autostart \
+    && python3 /tmp/patch_ime.py \
+    && rm -f /tmp/patch_ime.py
