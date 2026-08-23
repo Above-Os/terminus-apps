@@ -7,7 +7,7 @@ metadata:
   description: "Pyannote speaker embedding / voiceprint."
   appid: audiopyannoteembedv3
   title: Pyannote Embedding
-  version: '1.0.9'
+  version: '1.0.10'
   categories:
     - AI
     - models
@@ -46,7 +46,7 @@ spec:
     - Model: `pyannote/embedding`
     - Source: `hf://beclab/embedding`
     - Capabilities: `speaker_embed`
-    - Required GPU memory: `2Gi`
+    - Compute: CPU-only (`0` GPU memory)
     - Engine: Pyannote speaker embedding
 
     **How It Works**
@@ -62,7 +62,7 @@ spec:
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
 
   upgradeDescription: |
-    v1.0.1: Initial release.
+    v1.0.10: Run speaker embedding as CPU-only and align its resource metadata.
 
   developer: beclab
   website: https://github.com/beclab/llm-init
@@ -77,22 +77,13 @@ spec:
 
   accelerator:
     # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
-    - mode: nvidia
+    - mode: cpu
       limitedCpu: "3"
       requiredCpu: "400m"
       requiredDisk: 50Mi
       limitedDisk: 20Gi
-      limitedMemory: "10Gi"
+      limitedMemory: "8Gi"
       requiredMemory: "768Mi"
-      requiredGPUMemory: "2Gi"
-      limitedGPUMemory: "2Gi"
-    - mode: nvidia-gb10
-      limitedCpu: "3"
-      requiredCpu: "400m"
-      requiredDisk: 50Mi
-      limitedDisk: 20Gi
-      limitedMemory: "6Gi"
-      requiredMemory: "2304Mi"
 
   supportArch:
     - amd64
@@ -153,7 +144,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "2Gi"
+    default: "0"
     description: "GPU memory required for this model. `0` means CPU-only."
   - envName: CPU_REQUEST
     required: true
@@ -204,7 +195,7 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    description: "Engine-native flags (llm-init ENGINE_ARGS), e.g. --segmentation-batch-size 16."
+    description: "Engine-container flags (ENGINE_ARGS); speaker embedding currently accepts none."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
