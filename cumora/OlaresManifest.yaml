@@ -11,7 +11,7 @@ metadata:
   title: Cumora
   description: Team chat where AI agents are first-class participants.
   icon: https://cdn.olares.com/images/2026/08/5a5caa33c391353b29a21a4ac9710cfe.png
-  version: 0.0.10
+  version: 0.0.11
   categories:
   - Productivity_v112
   - workspace
@@ -74,10 +74,8 @@ spec:
       needed for LLM/agent features)
     - GitHub and/or Google OAuth app credentials
   upgradeDescription: |
-    OpenAI API key remains optional at install. An empty key is
-    replaced with a placeholder so migrate and the server can
-    boot; set a real key in Settings → Integration for LLM/agent
-    features.
+    Land OAuth on /auth (public) instead of /, and bypass
+    Authelia for /auth, /api, /assets, and the homepage.
   developer: yetone
   website: https://cumora.ai
   sourceCode: https://github.com/yetone/cumora
@@ -118,6 +116,32 @@ options:
   - name: olares
     type: system
     version: '>=1.12.6-0'
+  policies:
+  - uriRegex: ^/$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(auth)(/.*)?(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(api)(/.*)?(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(assets)(/.*)?(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(favicon-32\.png|icon-192\.png|manifest\.webmanifest)(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
 
 envs:
 - envName: OPENAI_API_KEY
