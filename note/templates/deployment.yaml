@@ -42,8 +42,8 @@ spec:
         - name: note
           {{- if eq (default "userStorage" (.Values.binary).source) "image" }}
           image: {{ printf "%s:%s"
-                      (required "binary.source=image 时必须给 appImage.repository" .Values.appImage.repository)
-                      (required "binary.source=image 时必须给 appImage.tag" .Values.appImage.tag) | quote }}
+                      (required "binary.source=image requires appImage.repository" .Values.appImage.repository)
+                      (required "binary.source=image requires appImage.tag" .Values.appImage.tag) | quote }}
           {{- else }}
           image: {{ printf "%s:%s" .Values.runtimeImage.repository .Values.runtimeImage.tag | quote }}
           {{- end }}
@@ -57,22 +57,22 @@ spec:
             - -c
             - |
               set -e
-              SRC=/data/bin/note      # 传上来的地方（用户自己的存储）
-              RUN=/run/app/note       # 真正执行的地方（容器自己的临时卷）
+              SRC=/data/bin/note
+              RUN=/run/app/note
               n=0
               while :; do
                 if [ -s "$SRC" ]; then
                   mkdir -p /run/app
                   cp "$SRC" "$RUN" && chmod 755 "$RUN" || true
                   if [ -x "$RUN" ]; then
-                    echo "取到二进制（$(wc -c < "$RUN") 字节），启动"
+                    echo "got the binary ($(wc -c < "$RUN") bytes), starting"
                     exec "$RUN"
                   fi
                 fi
                 if [ $((n % 12)) -eq 0 ]; then
-                  echo "等 $SRC —— 还没传上来。传法："
-                  echo "  olares-cli files upload <本地的 note 二进制> drive/Data/{{ .Values.dataDirName }}/bin/note"
-                  echo "  （必须 linux/amd64 静态编译：GOOS=linux GOARCH=amd64 CGO_ENABLED=0）"
+                  echo "waiting for $SRC -- not uploaded yet. Upload it with:"
+                  echo "  olares-cli files upload <local note binary> drive/Data/{{ .Values.dataDirName }}/bin/note"
+                  echo "  (must be a static linux/amd64 build: GOOS=linux GOARCH=amd64 CGO_ENABLED=0)"
                 fi
                 n=$((n+1))
                 sleep 5
