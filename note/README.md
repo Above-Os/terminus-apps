@@ -2,9 +2,9 @@
 
 Turn recordings and videos into transcripts you can read, replay and export
 
-- Chart version: **0.1.6**
+- Chart version: **0.1.11**
 - App version: **2.0.45**
-- Image: `docker.io/olareshzy/note:2.0.45-8d5d7acf` (bundles the binary — nothing to upload after install)
+- Image: `docker.io/olareshzy/note:2.0.45-1b5092ee` (bundles the binary — nothing to upload after install)
 - Arch: amd64 · Olares >= 1.12.6
 
 ## Why each permission
