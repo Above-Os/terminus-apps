@@ -1,0 +1,85 @@
+# Engine-container shell: source the helpers llm-init publishes, wait for the
+# download sentinel, then run the baked wrapper under supervise_engine so
+# Model Console can relaunch the engine without restarting the Pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+data:
+  crispasr.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=crispasr
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
+    # arrive late - the two containers are separate Deployments with no ordering
+    # between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    . "$WRAPPER_COMMON"
+    # GGUF fetch is larger than common.sh's 3600s default.
+    WAIT_TIMEOUT=7200
+
+    # MODEL_SOURCE carries llm-init flags after the repo, so cut at the first space.
+    want=""
+    case ${MODEL_SOURCE:-} in
+        hf://*)
+            repo=${MODEL_SOURCE#hf://}
+            repo=${repo%% *}
+            repo=${repo%%,*}
+            want="models--$(printf '%s' "$repo" | sed 's|/|--|g')"
+            ;;
+    esac
+
+    # The sentinel outlives an uninstall, so "it exists" is not "this repo is in the cache".
+    mine() {
+        [ -f "$SENTINEL" ] || return 1
+        [ -n "$want" ] || return 0
+        [ -f "$MODEL_PATH_FILE" ] || return 1
+        grep -q -- "$want" "$MODEL_PATH_FILE" || return 1
+        root=$(tr -d '\r\n' < "$MODEL_PATH_FILE")
+        [ -n "$root" ] || return 1
+        # llm-init writes the GGUF path itself when MODEL_SOURCE names one file; a snapshot dir otherwise.
+        [ -f "$root" ] || ls "$root"/*.gguf >/dev/null 2>&1
+    }
+
+    elapsed=0
+    while ! mine; do
+        if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
+            log "timed out after ${WAIT_TIMEOUT}s waiting for $want with a GGUF"
+            exit 1
+        fi
+        if [ -f "$SENTINEL" ] && [ -n "$want" ]; then
+            root=$(tr -d '\r\n' < "$MODEL_PATH_FILE" 2>/dev/null || echo nothing)
+            log "sentinel names $root; waiting for a .gguf there (elapsed=${elapsed}s)"
+        else
+            log "waiting for $SENTINEL (elapsed=${elapsed}s)"
+        fi
+        sleep "$WAIT_INTERVAL"
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    log "sentinel $SENTINEL names ${want:-any model} after ${elapsed}s; starting engine offline"
+
+    export HF_HUB_OFFLINE=1
+    export PYTHONUNBUFFERED=1
+
+    run_audio() {
+        # ggml needs no driver-version handshake beyond the loader, so a missing GPU fails loudly here.
+        if ! nvidia-smi -L >/dev/null 2>&1; then
+            log "warning: no NVIDIA device visible; libggml-cuda.so.0 needs the driver and load will fail"
+        fi
+        log "starting engine offline (audio-python -m wrapper.app)"
+        exec audio-python -m wrapper.app "$@"
+    }
+
+    supervise_engine run_audio "$@"
