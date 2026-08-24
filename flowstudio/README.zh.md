@@ -3,7 +3,7 @@
 Olares 上的一体化 AI 工作流生产应用：导入 ComfyUI 工作流、解析模型与节点、
 按项目动态分配 GPU，并在 PC / 移动双端完成生成。
 
-当前 Chart 版本：**0.3.30**（须与 `Chart.yaml` / `OlaresManifest.yaml` 一致）。
+当前 Chart 版本：**0.3.33**（须与 `Chart.yaml` / `OlaresManifest.yaml` 一致）。
 
 ## 运行要求
 
@@ -62,7 +62,8 @@ olares-cli chart package deploy/flowstudio
 | 镜像 | `values.yaml` 字段 |
 |------|-------------------|
 | 业务 | `appImage` / `image`（upgrade 粘 values 时优先改 `appImage`） |
-| 引擎 | `engineImage`；可选 `engineImageAmd` |
+| NVIDIA 引擎 | `engineImage`（写入 `options.images` 安装期预拉取） |
+| AMD 引擎 | `engineImageAmd`（运行时选择；首次拉起引擎时由 kubelet 拉取，不进预取列表） |
 
 正式上架包必须 `dev.hotReload: false`。
 
@@ -103,8 +104,8 @@ Router 调用 OpenAI 风格的数据面：
 
 从 Market 升级到本版本后：重新打开应用；若 GPU 绑定丢失，在 Olares 加速器中重新绑定后再启动。
 
-Manifest 中的 `upgradeDescription` 跟随 `spec.versionName`（应用发布版本），目前对应 0.3.30。
-本 Chart 使用镜像 `flowstudio:0.3.30` 与 `engine-1.0.6`。
+Manifest 中的 `upgradeDescription` 跟随 `spec.versionName`（应用发布版本），目前对应 0.3.34。
+本 Chart 使用镜像 `flowstudio:0.3.33` 与 `engine-1.0.6`（Chart 0.3.34 安装期不预取 ROCm）。
 
 ## Chart 结构
 
