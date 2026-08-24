@@ -1,0 +1,1479 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audiovoicestudiov3-olares-overlay
+  namespace: '{{ .Release.Namespace }}'
+data:
+  boot.py: |
+    """Olares overlay: skip OmniVoice download; pin ASR/TTS to the gateway. AGPL-3.0."""
+    from __future__ import annotations
+    
+    import os
+    import sys
+    
+    sys.path.insert(0, "/olares")
+    sys.path.insert(0, "/app/backend")
+    sys.path.insert(0, "/app")
+    
+    os.environ["OMNIVOICE_PRELOAD_CAPTURE_ASR"] = "0"
+    
+    
+    def _clear_required_models() -> None:
+        import api.routers.setup.models as setup_models
+    
+        setup_models.REQUIRED_MODELS.clear()
+        for item in setup_models.KNOWN_MODELS:
+            item["required"] = False
+    
+    
+    def _gateway_label(env_key: str, fallback: str) -> str:
+        return (os.environ.get(env_key) or "").strip() or fallback
+    
+    
+    def _keep_only(registry, keep_id, keep_cls, extra_lazy=None):
+        """Drop every local engine; VoiceStudio's picker lists the whole registry."""
+        if extra_lazy is not None:
+            extra_lazy.clear()
+        lazy = getattr(registry, "_LAZY", None)
+        if isinstance(lazy, dict):
+            lazy.clear()
+        for key in list(dict.keys(registry)):
+            if key != keep_id:
+                del registry[key]
+        registry[keep_id] = keep_cls
+    
+    
+    def _mark_gateway(rows):
+        for row in rows:
+            if str(row.get("id") or "").startswith("openai-compat"):
+                row["effective_device"] = "gateway"
+                row["routing_status"] = "accelerated"
+                row["routing_reason"] = None
+        return rows
+    
+    
+    def _patch_list_backends(mod):
+        orig = mod.list_backends
+    
+        def wrapped():
+            return _mark_gateway(orig())
+    
+        mod.list_backends = wrapped
+    
+    
+    def _pin_dictation_ws(asr_backend) -> None:
+        """Dictation WS defaults to sherpa and rejects non-loopback; Olares is neither."""
+        import api.routers.capture_ws as capture_ws
+    
+        capture_ws._select_sherpa_spec = lambda websocket: None
+        orig_missing = asr_backend.asr_model_missing_error
+    
+        def _no_local_weights(**kwargs):
+            if (os.environ.get("OMNIVOICE_ASR_BACKEND") or "").startswith("openai-compat"):
+                return None
+            return orig_missing(**kwargs)
+    
+        asr_backend.asr_model_missing_error = _no_local_weights
+        asr_backend.get_capture_asr_backend = asr_backend.get_active_asr_backend
+    
+        def _requested_pcm_sample_rate(query_params):
+            raw_pcm = query_params.get("pcm") in ("1", "true", "on")
+            aec = query_params.get("aec") in ("1", "true", "on")
+            has_sr = bool(query_params.get("sr"))
+            if not raw_pcm and not aec and not has_sr:
+                return None
+            try:
+                sample_rate = int(query_params.get("sr", "16000"))
+            except (TypeError, ValueError):
+                return 16000
+            return sample_rate if 8000 <= sample_rate <= 96000 else 16000
+    
+        capture_ws._requested_pcm_sample_rate = _requested_pcm_sample_rate
+    
+    
+    def _disable_qwen_thinking() -> None:
+        """Qwen3 thinking fills the token budget; VoiceStudio only reads message.content."""
+        import openai
+    
+        if getattr(openai.OpenAI, "_olares_no_think", False):
+            return
+        orig_init = openai.OpenAI.__init__
+    
+        def __init__(self, *args, **kwargs):
+            orig_init(self, *args, **kwargs)
+            orig_create = self.chat.completions.create
+    
+            def create(*cargs, **ckw):
+                extra = dict(ckw.get("extra_body") or {})
+                template = dict(extra.get("chat_template_kwargs") or {})
+                template.setdefault("enable_thinking", False)
+                extra["chat_template_kwargs"] = template
+                ckw["extra_body"] = extra
+                try:
+                    from olares_translate import rewrite_hy_mt_messages
+    
+                    ckw["messages"] = rewrite_hy_mt_messages(
+                        ckw.get("model"), ckw.get("messages")
+                    )
+                except Exception:
+                    pass
+                return orig_create(*cargs, **ckw)
+    
+            self.chat.completions.create = create
+    
+        openai.OpenAI.__init__ = __init__
+        openai.OpenAI._olares_no_think = True
+    
+    
+    def _fix_passwd() -> None:
+        """VoiceStudio image has no passwd row for uid 1000; settings_store calls getpwuid."""
+        import pwd
+    
+        try:
+            pwd.getpwuid(os.getuid())
+            return
+        except KeyError:
+            pass
+        os.environ.setdefault("HOME", "/app/omnivoice_data")
+        fake = pwd.struct_passwd(
+            ("omnivoice", "x", os.getuid(), os.getgid(), "", "/app/omnivoice_data", "/bin/sh")
+        )
+        orig = pwd.getpwuid
+    
+        def getpwuid(uid, _orig=orig, _fake=fake):
+            try:
+                return _orig(uid)
+            except KeyError:
+                return _fake
+    
+        pwd.getpwuid = getpwuid  # type: ignore[method-assign]
+    
+    
+    def _seed_llm_keep_translate_env() -> None:
+        """Write Custom Chat from TRANSLATE_*. Keep env so dub translation hits the gateway."""
+        _fix_passwd()
+        _disable_qwen_thinking()
+        url = (
+            os.environ.get("TRANSLATE_BASE_URL")
+            or os.environ.get("TTS_OPENAI_COMPAT_BASE_URL")
+            or os.environ.get("ASR_OPENAI_COMPAT_BASE_URL")
+            or ""
+        ).strip()
+        model = (os.environ.get("TRANSLATE_MODEL") or "").strip()
+        key = (
+            os.environ.get("TRANSLATE_API_KEY")
+            or os.environ.get("TTS_OPENAI_COMPAT_API_KEY")
+            or os.environ.get("ASR_OPENAI_COMPAT_API_KEY")
+            or ""
+        ).strip()
+        try:
+            from services import llm_providers
+    
+            if url:
+                llm_providers.save_overrides("custom", base_url=url, model=model or None)
+            elif model:
+                llm_providers.save_overrides("custom", model=model)
+            if key:
+                llm_providers.save_key("custom", key)
+            if url or key:
+                llm_providers.set_active_provider("custom")
+                print("olares overlay: LLM custom provider mirrored from TRANSLATE_*", flush=True)
+        except Exception as exc:
+            print(f"olares overlay: LLM seed skipped: {exc}", flush=True)
+    
+    
+    def _pin_to_gateway() -> None:
+        import services.asr_backend as asr_backend
+        import services.tts_backend as tts_backend
+        from olares_asr import OpenAICompatASRBackend
+        from olares_tts import OpenAICompatTTSBackend
+    
+        OpenAICompatTTSBackend.display_name = _gateway_label(
+            "TTS_OPENAI_COMPAT_MODEL", "LLM Gateway TTS"
+        )
+        OpenAICompatASRBackend.display_name = _gateway_label(
+            "ASR_OPENAI_COMPAT_MODEL", "LLM Gateway ASR"
+        )
+        _keep_only(
+            tts_backend._REGISTRY,
+            "openai-compat-tts",
+            OpenAICompatTTSBackend,
+            extra_lazy=getattr(tts_backend, "_LAZY_REGISTRY", None),
+        )
+        _keep_only(asr_backend._REGISTRY, "openai-compat-asr", OpenAICompatASRBackend)
+        _patch_list_backends(tts_backend)
+        _patch_list_backends(asr_backend)
+        _pin_dictation_ws(asr_backend)
+    
+    
+    def _silence_crash_sentinel() -> None:
+        """Olares SIGKILLs the pod on every reinstall; VoiceStudio treats that as a crash banner."""
+        try:
+            from core import run_sentinel
+    
+            for path in (run_sentinel.SENTINEL_PATH, run_sentinel.CRASH_RECORD_PATH):
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    print(f"olares overlay: could not remove {path}: {exc}", flush=True)
+            run_sentinel.detect_unclean_shutdown = lambda now=None: None
+            run_sentinel.newest_record = lambda current_version=None: None
+            print("olares overlay: crash sentinel silenced", flush=True)
+        except Exception as exc:
+            print(f"olares overlay: crash sentinel skip: {exc}", flush=True)
+    
+    
+    def main() -> None:
+        os.environ.setdefault("OMNIVOICE_TTS_BACKEND", "openai-compat-tts")
+        os.environ.setdefault("OMNIVOICE_ASR_BACKEND", "openai-compat-asr")
+        os.environ.setdefault(
+            "OMNIVOICE_TRUSTED_NETWORKS",
+            "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+        )
+        os.environ.setdefault("OMNIVOICE_STREAM_INTERVAL", "8.0")
+        os.environ.setdefault("TRANSLATE_PROVIDER", "openai")
+        _clear_required_models()
+        _pin_to_gateway()
+        from olares_diar import patch_diarization
+    
+        patch_diarization()
+        _silence_crash_sentinel()
+        import backend.main as bmain
+        from olares_tts import patch_list_profiles_route, start_voice_sync
+        from olares_translate import patch_translate_fallback
+    
+        patch_list_profiles_route(bmain.app)
+        patch_translate_fallback(bmain.app)
+        start_voice_sync()
+        _seed_llm_keep_translate_env()
+        print(
+            "olares overlay: ASR/TTS/TRANSLATE_* on gateway; "
+            "diar gateway async=1, fail-fast to silence-gap; "
+            "translate falls back to Argos",
+            flush=True,
+        )
+        import uvicorn
+    
+        uvicorn.run(
+            bmain.app,
+            host=os.environ.get("OMNIVOICE_BIND_HOST", "0.0.0.0"),
+            port=int(os.environ.get("OMNIVOICE_PORT", "3900")),
+        )
+    
+    
+    if __name__ == "__main__":
+        main()
+  olares_asr.py: |
+    """OpenAI-compatible remote ASR for VoiceStudio. AGPL-3.0 overlay (Olares)."""
+    from __future__ import annotations
+    
+    import logging
+    import os
+    import tempfile
+    from typing import Optional
+    
+    logger = logging.getLogger("omnivoice.olares_asr")
+    
+    from services.asr_backend import ASRBackend
+    
+    _ASR_URL_KEY = "asr.openai_compat.base_url"
+    _ASR_MODEL_KEY = "asr.openai_compat.model"
+    _ASR_SECRET_NAME = "asr_openai_compat_key"
+    
+    _EBML = b"\x1a\x45\xdf\xa3"
+    
+    
+    def _base_url() -> str:
+        from services import settings_store
+    
+        return (
+            os.environ.get("ASR_OPENAI_COMPAT_BASE_URL")
+            or settings_store.get_text(_ASR_URL_KEY)
+            or ""
+        ).rstrip("/")
+    
+    
+    def _model() -> str:
+        from services import settings_store
+    
+        return (
+            os.environ.get("ASR_OPENAI_COMPAT_MODEL")
+            or settings_store.get_text(_ASR_MODEL_KEY)
+            or ""
+        )
+    
+    
+    def _api_key() -> Optional[str]:
+        from services import settings_store
+    
+        return os.environ.get("ASR_OPENAI_COMPAT_API_KEY") or settings_store.get_secret(
+            _ASR_SECRET_NAME
+        )
+    
+    
+    def _looks_like_container(head: bytes) -> bool:
+        return (
+            head.startswith(_EBML)
+            or head.startswith(b"OggS")
+            or head.startswith(b"RIFF")
+            or head.startswith(b"ID3")
+            or head.startswith(b"fLaC")
+            or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+        )
+    
+    
+    def _pcm16_to_wav(pcm: bytes, sample_rate: int = 16000) -> str:
+        import wave
+    
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        tmp.close()
+        with wave.open(tmp.name, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm)
+        return tmp.name
+    
+    
+    def _ffmpeg_mp3(src: str) -> str:
+        from services.ffmpeg_utils import find_ffmpeg
+        import subprocess
+    
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg not found; cannot convert audio to mp3")
+        out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        out.close()
+        common = [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-fflags", "+genpts+discardcorrupt", "-i", src,
+            "-ar", "16000", "-ac", "1",
+        ]
+        proc = subprocess.run(
+            common + ["-c:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", out.name],
+            capture_output=True, timeout=180,
+        )
+        if proc.returncode != 0 or not os.path.isfile(out.name) or os.path.getsize(out.name) < 64:
+            proc = subprocess.run(
+                common + ["-b:a", "64k", "-f", "mp3", out.name],
+                capture_output=True, timeout=180,
+            )
+        if not os.path.isfile(out.name) or os.path.getsize(out.name) < 64:
+            try:
+                os.unlink(out.name)
+            except OSError:
+                pass
+            err = (proc.stderr or b"").decode("utf-8", "replace")[-400:]
+            raise RuntimeError(f"ffmpeg ->mp3 failed rc={proc.returncode}: {err}")
+        return out.name
+    
+    
+    def _to_mp3(path: str) -> tuple[str, bool]:
+        """Return (mp3_path, is_temp). Gateway STT accepts mp3; 30 min wav is ~58 MiB."""
+        with open(path, "rb") as f:
+            head = f.read(16)
+            rest = f.read()
+        if not _looks_like_container(head):
+            wav = _pcm16_to_wav(head + rest)
+            try:
+                return _ffmpeg_mp3(wav), True
+            finally:
+                try:
+                    os.unlink(wav)
+                except OSError:
+                    pass
+        if os.path.splitext(path)[1].lower() == ".mp3" and (
+            head.startswith(b"ID3") or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+        ):
+            return path, False
+        return _ffmpeg_mp3(path), True
+    
+    
+    def _duration_s(path: str) -> float:
+        """Seconds of audio in `path`. VoiceStudio slices 30s wavs; Qwen returns no timestamps."""
+        try:
+            import soundfile as sf
+    
+            info = sf.info(path)
+            if info.samplerate and info.frames:
+                return float(info.frames) / float(info.samplerate)
+        except Exception:
+            pass
+        try:
+            import wave
+    
+            with wave.open(path, "rb") as wf:
+                rate = wf.getframerate()
+                if rate:
+                    return float(wf.getnframes()) / float(rate)
+        except Exception:
+            pass
+        try:
+            from services.ffmpeg_utils import find_ffmpeg
+            import subprocess
+    
+            ffmpeg = find_ffmpeg()
+            if ffmpeg:
+                probe = ffmpeg.replace("ffmpeg", "ffprobe")
+                proc = subprocess.run(
+                    [
+                        probe, "-v", "error", "-show_entries", "format=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1", path,
+                    ],
+                    capture_output=True, timeout=30, text=True,
+                )
+                if proc.returncode == 0:
+                    return float((proc.stdout or "").strip() or 0.0)
+        except Exception:
+            pass
+        return 0.0
+    
+    
+    def _has_real_timestamps(segments: list) -> bool:
+        for seg in segments:
+            try:
+                start = float(seg.get("start") or 0.0)
+                end = seg.get("end")
+                end = float(end) if end is not None else start
+            except (TypeError, ValueError):
+                continue
+            if end > start + 0.05:
+                return True
+        return False
+    
+    
+    def _span_across(text: str, segments: list, duration_s: float) -> list:
+        pieces = [(s.get("text") or "").strip() for s in (segments or [])]
+        pieces = [p for p in pieces if p]
+        if not pieces and text:
+            pieces = [text.strip()]
+        pieces = [p for p in pieces if p]
+        if not pieces or duration_s <= 0:
+            return segments or []
+        weights = [max(len(p), 1) for p in pieces]
+        total_w = float(sum(weights))
+        out = []
+        t = 0.0
+        for i, (piece, weight) in enumerate(zip(pieces, weights)):
+            end = duration_s if i == len(pieces) - 1 else t + duration_s * (weight / total_w)
+            out.append({"text": piece, "start": t, "end": end, "words": []})
+            t = end
+        return out
+    
+    
+    def _result_shape(text: str, segments: list, language: str, duration_s: float = 0.0) -> dict:
+        if not segments and text:
+            segments = [{"text": text, "start": 0.0, "end": 0.0, "words": []}]
+        if not text:
+            text = " ".join((s.get("text") or "").strip() for s in segments).strip()
+        if duration_s > 0 and text and not _has_real_timestamps(segments):
+            logger.info(
+                "olares overlay: ASR returned no timestamps; spanning %d blob(s) over %.1fs (chars=%d)",
+                max(len(segments), 1),
+                duration_s,
+                len(text),
+            )
+            segments = _span_across(text, segments, duration_s)
+        for seg in segments:
+            seg["start"] = float(seg.get("start") or 0.0)
+            end = seg.get("end")
+            seg["end"] = float(end) if end is not None else seg["start"]
+            seg.setdefault("words", [])
+        return {
+            "text": text,
+            "segments": segments,
+            "chunks": [
+                {"text": s["text"], "timestamp": (s["start"], s["end"])} for s in segments
+            ],
+            "language": language or "en",
+        }
+    
+    
+    class OpenAICompatASRBackend(ASRBackend):
+        id = "openai-compat-asr"
+        display_name = "LLM Gateway ASR"
+        gpu_compat = ("cpu",)
+    
+        def __init__(self):
+            self._url = _base_url()
+            self._model = _model()
+    
+        @classmethod
+        def is_available(cls) -> tuple[bool, str]:
+            if not _base_url():
+                return False, "Set ASR_OPENAI_COMPAT_BASE_URL to the LLM Gateway /v1"
+            if not _model():
+                return False, "Set ASR_OPENAI_COMPAT_MODEL to a gateway ASR model id"
+            return True, "ready"
+    
+        def ensure_loaded(self) -> None:
+            return None
+    
+        def transcribe(self, audio_path: str, *, word_timestamps: bool = True) -> dict:
+            import httpx
+    
+            url = (self._url or _base_url()).rstrip("/") + "/audio/transcriptions"
+            model = self._model or _model()
+            if not url.startswith("http") or not model:
+                raise RuntimeError(
+                    "ASR_OPENAI_COMPAT_BASE_URL and ASR_OPENAI_COMPAT_MODEL must be set"
+                )
+            duration_s = _duration_s(audio_path)
+            mp3, extra = _to_mp3(audio_path)
+            headers = {}
+            key = _api_key()
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+            try:
+                with open(mp3, "rb") as f:
+                    with httpx.Client(timeout=300.0, http2=False) as client:
+                        resp = client.post(
+                            url,
+                            headers=headers,
+                            data={"model": model, "response_format": "json"},
+                            files={"file": (os.path.basename(mp3) or "audio.mp3", f, "audio/mpeg")},
+                        )
+                        resp.raise_for_status()
+                        body = resp.json()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"OpenAI-compatible ASR at {url!r} failed: {type(exc).__name__}: {exc}"
+                ) from exc
+            finally:
+                if extra:
+                    try:
+                        os.unlink(mp3)
+                    except OSError:
+                        pass
+            text = (body.get("text") or "").strip()
+            segments = []
+            for seg in body.get("segments") or []:
+                segments.append({
+                    "text": (seg.get("text") or "").strip(),
+                    "start": seg.get("start", 0.0),
+                    "end": seg.get("end"),
+                    "words": [],
+                })
+            logger.info(
+                "olares overlay: ASR ok duration=%.1fs chars=%d segs=%d",
+                duration_s,
+                len(text),
+                len(segments),
+            )
+            return _result_shape(text, segments, body.get("language") or "en", duration_s)
+  olares_tts.py: |
+    """OpenAI-compatible remote TTS for VoiceStudio. AGPL-3.0 overlay (Olares)."""
+    from __future__ import annotations
+    
+    import io
+    import os
+    import re
+    import threading
+    import time
+    import uuid
+    from typing import Optional
+    
+    import torch
+    from services.tts_backend import TTSBackend
+    
+    _TTS_URL_KEY = "tts.openai_compat.base_url"
+    _TTS_MODEL_KEY = "tts.openai_compat.model"
+    _TTS_SECRET_NAME = "tts_openai_compat_key"
+    
+    # VoiceStudio pickers only list voice_profiles (and the gallery). Engine presets
+    # never appear unless we seed them. ref_text carries the engine id because
+    # generate() is never given the profile id, and CosyVoice instruct-heal would
+    # strip de_female / casual_male as unknown tags.
+    _VOICE_MARK = "__olares_voice__:"
+    _PERSONALITY = "olares-engine-voice"
+    # VoiceStudio ships this clone; overlay must never delete or overwrite it.
+    _BUILTIN_DEMO_NAME = "voicestudio demo voice"
+    _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _SYNC_TTL_S = 20.0
+    _FETCH_TIMEOUT_S = 8.0
+    
+    _sync_lock = threading.Lock()
+    _cache: dict = {"key": "", "ids": set(), "ts": 0.0, "ok": False}
+    
+    
+    def _first_env(*keys: str) -> str:
+        for key in keys:
+            val = (os.environ.get(key) or "").strip()
+            if val:
+                return val
+        return ""
+    
+    
+    def _base_url() -> str:
+        from services import settings_store
+    
+        return (
+            _first_env("TTS_OPENAI_COMPAT_BASE_URL")
+            or settings_store.get_text(_TTS_URL_KEY)
+            or ""
+        ).rstrip("/")
+    
+    
+    def _model() -> str:
+        from services import settings_store
+    
+        return (
+            _first_env("TTS_OPENAI_COMPAT_MODEL")
+            or settings_store.get_text(_TTS_MODEL_KEY)
+            or ""
+        )
+    
+    
+    def _api_key() -> Optional[str]:
+        from services import settings_store
+    
+        return _first_env("TTS_OPENAI_COMPAT_API_KEY") or settings_store.get_secret(
+            _TTS_SECRET_NAME
+        )
+    
+    
+    def _voice_cache_key() -> str:
+        return f"{_base_url()}|{_model()}"
+    
+    
+    def _normalize_voice_list(raw) -> list[dict]:
+        if raw is None:
+            return []
+        if isinstance(raw, dict):
+            raw = raw.get("voices") if raw.get("voices") is not None else raw.get("data")
+        if not isinstance(raw, list):
+            return []
+        out: list[dict] = []
+        seen: set[str] = set()
+        for item in raw:
+            if isinstance(item, str):
+                voice_id, name, language = item.strip(), item.strip(), "Auto"
+            elif isinstance(item, dict):
+                voice_id = str(
+                    item.get("id") or item.get("name") or item.get("voice") or item.get("voice_id") or ""
+                ).strip()
+                name = str(
+                    item.get("label") or item.get("name") or item.get("title") or item.get("description") or voice_id
+                ).strip()
+                language = str(item.get("language") or item.get("lang") or "Auto").strip() or "Auto"
+            else:
+                continue
+            if not voice_id or voice_id in seen:
+                continue
+            seen.add(voice_id)
+            if not name:
+                name = voice_id
+            elif name.lower() != voice_id.lower():
+                name = f"{voice_id} · {name}"
+            out.append({"id": voice_id, "name": name, "language": language})
+        return out
+    
+    
+    def fetch_engine_voices() -> Optional[list[dict]]:
+        """GET gateway /audio/voices for the current TTS model.
+    
+        [] = this model has no preset voices. None = probe failed (do not invent
+        another model's roster).
+        """
+        import httpx
+    
+        base = _base_url().rstrip("/")
+        model = _model()
+        if not base.startswith("http"):
+            # ENV/settings often land after DB init; None keeps retries alive.
+            return None
+        url = base + "/audio/voices"
+        params = {"model": model} if model else None
+        headers = {}
+        key = _api_key()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        try:
+            with httpx.Client(timeout=_FETCH_TIMEOUT_S, http2=False) as client:
+                resp = client.get(url, params=params, headers=headers)
+        except Exception as exc:
+            print(f"olares overlay: GET {url} failed ({type(exc).__name__}: {exc})", flush=True)
+            return None
+        if resp.status_code in (404, 405):
+            return []
+        if resp.status_code >= 400:
+            print(
+                f"olares overlay: GET {url} HTTP {resp.status_code}: {resp.text[:160]}",
+                flush=True,
+            )
+            return None
+        try:
+            payload = resp.json()
+        except Exception:
+            return None
+        return _normalize_voice_list(payload)
+    
+    
+    def _profile_uuid(model: str, voice_id: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"olares-tts-voice:{model}:{voice_id}"))
+    
+    
+    def _engine_rows_to_drop(conn, keep_ids: list[str]) -> list[str]:
+        """Only overlay-seeded engine presets. Never the app Demo Voice or user clones."""
+        keep = set(keep_ids)
+        cols = {c[1] for c in conn.execute("PRAGMA table_info(voice_profiles)")}
+        select = "id, name, personality, ref_text"
+        if "is_demo" in cols:
+            select += ", IFNULL(is_demo, 0) AS is_demo"
+        rows = conn.execute(f"SELECT {select} FROM voice_profiles").fetchall()
+        drop: list[str] = []
+        for row in rows:
+            pid = str(row["id"] or "")
+            name = str(row["name"] or "").strip().lower()
+            personality = str(row["personality"] or "")
+            ref_text = str(row["ref_text"] or "")
+            is_demo = int(row["is_demo"] or 0) if "is_demo" in cols else 0
+            if is_demo or name == _BUILTIN_DEMO_NAME or pid.lower().startswith("demo"):
+                continue
+            if personality != _PERSONALITY and not ref_text.startswith(_VOICE_MARK):
+                continue
+            if pid in keep:
+                continue
+            drop.append(pid)
+        return drop
+    
+    
+    def _null_profile_fks(conn, drop_ids: list[str]) -> None:
+        if not drop_ids:
+            return
+        ph = ",".join("?" * len(drop_ids))
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        for (table,) in tables:
+            if not _IDENT_RE.match(table) or table == "voice_profiles":
+                continue
+            for fk in conn.execute(f"PRAGMA foreign_key_list({table})"):
+                if fk[2] != "voice_profiles":
+                    continue
+                col = fk[3]
+                if not _IDENT_RE.match(col):
+                    continue
+                conn.execute(
+                    f"UPDATE {table} SET {col}=NULL WHERE {col} IN ({ph})",
+                    drop_ids,
+                )
+            col_names = [c[1] for c in conn.execute(f"PRAGMA table_info({table})")]
+            if table == "mcp_client_bindings" and "profile_id" in col_names:
+                conn.execute(
+                    f"UPDATE {table} SET profile_id=NULL WHERE profile_id IN ({ph})",
+                    drop_ids,
+                )
+    
+    
+    def _replace_engine_voice_rows(conn, voices: list[dict], keep_ids: list[str]) -> None:
+        drop_ids = _engine_rows_to_drop(conn, keep_ids)
+        _null_profile_fks(conn, drop_ids)
+        if drop_ids:
+            ph = ",".join("?" * len(drop_ids))
+            conn.execute(f"DELETE FROM voice_profiles WHERE id IN ({ph})", drop_ids)
+        created = time.time()
+        model = _model()
+        for row, profile_id in zip(voices, keep_ids):
+            if profile_id.lower().startswith("demo"):
+                continue
+            conn.execute(
+                "INSERT INTO voice_profiles (id, name, ref_audio_path, ref_text, instruct, "
+                "language, personality, description, kind, is_demo, created_at) "
+                "VALUES (?, ?, '', ?, '', ?, ?, ?, 'clone', 0, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "name=excluded.name, ref_text=excluded.ref_text, "
+                "language=excluded.language, description=excluded.description, "
+                "personality=excluded.personality, kind='clone' "
+                "WHERE IFNULL(is_demo, 0)=0 "
+                "AND lower(name) != ? "
+                "AND id NOT LIKE 'demo%'",
+                (
+                    profile_id,
+                    row["name"],
+                    _VOICE_MARK + row["id"],
+                    row["language"],
+                    _PERSONALITY,
+                    "Gateway TTS preset",
+                    created,
+                    _BUILTIN_DEMO_NAME,
+                ),
+            )
+        n = conn.execute(
+            "SELECT count(*) FROM voice_profiles WHERE personality=?",
+            (_PERSONALITY,),
+        ).fetchone()[0]
+        print(
+            f"olares overlay: TTS {model or '(none)'} → {len(voices)} engine voice(s) "
+            f"(db engine rows={n}; app Demo Voice kept)",
+            flush=True,
+        )
+    
+    
+    def sync_engine_voice_profiles(*, force: bool = False) -> None:
+        """Keep VoiceSelector = current TTS model's /voices. App Demo Voice is never touched."""
+        now = time.time()
+        key = _voice_cache_key()
+        with _sync_lock:
+            if (
+                not force
+                and _cache["ok"]
+                and _cache["key"] == key
+                and now - float(_cache["ts"] or 0) < _SYNC_TTL_S
+            ):
+                return
+            voices = fetch_engine_voices()
+            model_changed = _cache["key"] != key
+            provisional = False
+            if voices is None:
+                if not model_changed and _cache["ok"]:
+                    return
+                # New model / first sync: do not keep the previous model's roster.
+                voices = []
+                provisional = True
+            model = _model()
+            keep_ids = [_profile_uuid(model, row["id"]) for row in voices]
+            try:
+                from core.db import db_conn
+    
+                with db_conn() as conn:
+                    _replace_engine_voice_rows(conn, voices, keep_ids)
+            except Exception as exc:
+                print(f"olares overlay: voice_profiles sync failed: {exc}", flush=True)
+                return
+            _cache.update(
+                {
+                    "key": key,
+                    "ids": {row["id"] for row in voices},
+                    "ts": now,
+                    "ok": not provisional,
+                }
+            )
+            try:
+                from core import event_bus
+    
+                event_bus.emit("profiles", {"action": "synced"})
+            except Exception:
+                pass
+    
+    
+    def start_voice_sync() -> None:
+        def _run():
+            for delay in (1.0, 3.0, 8.0, 20.0, 40.0):
+                time.sleep(delay)
+                try:
+                    sync_engine_voice_profiles(force=True)
+                    if _cache.get("ok"):
+                        return
+                except Exception as exc:
+                    print(f"olares overlay: voice sync retry: {exc}", flush=True)
+    
+        threading.Thread(target=_run, name="olares-voice-sync", daemon=True).start()
+    
+    
+    def patch_list_profiles_route(app) -> None:
+        """Refresh engine voices on GET /profiles without replacing the FastAPI endpoint.
+    
+        Replacing dependant.call with a *args/**kwargs wrapper made GET /profiles
+        return 422, so the picker never received profiles and only showed the gallery.
+        """
+        if getattr(app, "_olares_voice_mw", False):
+            return
+    
+        @app.middleware("http")
+        async def _olares_engine_voices(request, call_next):
+            path = (request.url.path or "").rstrip("/")
+            if request.method == "GET" and path == "/profiles":
+                try:
+                    sync_engine_voice_profiles()
+                except Exception as exc:
+                    print(f"olares overlay: voice sync skipped: {exc}", flush=True)
+            return await call_next(request)
+    
+        app._olares_voice_mw = True  # type: ignore[attr-defined]
+        print("olares overlay: GET /profiles will refresh engine voices", flush=True)
+    
+    
+    def _engine_voice(*, ref_text, instruct, extras) -> tuple[str, object]:
+        extra_voice = str((extras or {}).get("voice") or "").strip()
+        marked = ""
+        if isinstance(ref_text, str) and ref_text.startswith(_VOICE_MARK):
+            marked = ref_text[len(_VOICE_MARK) :].strip()
+        instruct_s = str(instruct or (extras or {}).get("instruct") or "").strip()
+        from_instruct = instruct_s if instruct_s and instruct_s in (_cache.get("ids") or set()) else ""
+        env_voice = (os.environ.get("TTS_OPENAI_COMPAT_VOICE") or "").strip()
+        voice = extra_voice or marked or from_instruct or env_voice
+        send_instruct = instruct
+        if from_instruct and voice == from_instruct:
+            send_instruct = None
+        return voice, send_instruct
+    
+    
+    def _wav_tensor(audio_bytes: bytes, sample_rate: int) -> torch.Tensor:
+        import torchaudio
+    
+        wav, sr = torchaudio.load(io.BytesIO(audio_bytes))
+        if sr != sample_rate:
+            wav = torchaudio.functional.resample(wav, sr, sample_rate)
+        if wav.ndim == 1:
+            wav = wav.unsqueeze(0)
+        elif wav.ndim == 2 and wav.shape[0] > 1:
+            wav = wav.mean(dim=0, keepdim=True)
+        return wav
+    
+    
+    class OpenAICompatTTSBackend(TTSBackend):
+        id = "openai-compat-tts"
+        display_name = "LLM Gateway TTS"
+        gpu_compat = ("cpu",)
+        supports_cloning = True
+        applies_own_mastering = True
+        min_vram_gb = 0.0
+    
+        def __init__(self):
+            self._url = _base_url()
+            self._model = _model()
+    
+        @classmethod
+        def is_available(cls) -> tuple[bool, str]:
+            if not _base_url():
+                return False, "Set TTS_OPENAI_COMPAT_BASE_URL to the LLM Gateway /v1"
+            if not _model():
+                return False, "Set TTS_OPENAI_COMPAT_MODEL to a gateway TTS model id"
+            return True, _model()
+    
+        @property
+        def sample_rate(self) -> int:
+            return 24000
+    
+        @property
+        def supported_languages(self) -> list[str]:
+            return ["multi"]
+    
+        def generate(
+            self,
+            text: str,
+            *,
+            ref_audio: Optional[str] = None,
+            ref_text: Optional[str] = None,
+            instruct: Optional[str] = None,
+            description: Optional[str] = None,
+            **extras,
+        ) -> torch.Tensor:
+            # Same TTS_OPENAI_COMPAT_* as preset. Clone-capable engines (VoxCPM2 / Qwen Base /
+            # MOSS / CosyVoice) answer /speech/clone; Voxtral does not. Fall back so the Clone
+            # UI still produces audio the way it did before a separate clone env existed.
+            # Seeded engine presets stash the id in ref_text; that is not a clone reference.
+            if ref_audio and not (isinstance(ref_text, str) and ref_text.startswith(_VOICE_MARK)):
+                cloned = self._try_clone(text, ref_audio, ref_text)
+                if cloned is not None:
+                    return cloned
+                print(
+                    "olares overlay: clone not served by current TTS model; falling back to preset",
+                    flush=True,
+                )
+            return self._preset(
+                text,
+                instruct=instruct,
+                description=description,
+                extras=extras,
+                ref_text=ref_text,
+            )
+    
+        def _headers(self) -> dict:
+            headers: dict = {}
+            key = _api_key()
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+            return headers
+    
+        def _preset(self, text: str, *, instruct, description, extras, ref_text=None) -> torch.Tensor:
+            import httpx
+    
+            url = (self._url or _base_url()).rstrip("/") + "/audio/speech"
+            model = self._model or _model()
+            if not url.startswith("http") or not model:
+                raise RuntimeError(
+                    "TTS_OPENAI_COMPAT_BASE_URL and TTS_OPENAI_COMPAT_MODEL must be set"
+                )
+            payload: dict = {"model": model, "input": text, "response_format": "wav"}
+            extras = extras or {}
+            voice, instruct = _engine_voice(ref_text=ref_text, instruct=instruct, extras=extras)
+            if voice:
+                payload["voice"] = voice
+            hint = instruct or description
+            if hint:
+                payload["instructions"] = hint
+            headers = {"Content-Type": "application/json", **self._headers()}
+            try:
+                with httpx.Client(timeout=180.0, http2=False) as client:
+                    resp = client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    audio_bytes = resp.content
+            except Exception as exc:
+                raise RuntimeError(
+                    f"OpenAI-compatible TTS at {url!r} failed: {type(exc).__name__}: {exc}"
+                ) from exc
+            return _wav_tensor(audio_bytes, self.sample_rate)
+    
+        def _try_clone(self, text: str, ref_audio: str, ref_text: Optional[str]) -> Optional[torch.Tensor]:
+            import httpx
+    
+            model = self._model or _model()
+            base = (self._url or _base_url()).rstrip("/")
+            if not model or not base.startswith("http"):
+                return None
+            data = {"input": text, "response_format": "wav", "model": model}
+            if (ref_text or "").strip():
+                data["ref_text"] = ref_text.strip()
+            headers = self._headers()
+            try:
+                with httpx.Client(timeout=180.0, http2=False) as client:
+                    for path in ("/audio/speech/clone", "/audio/clone"):
+                        url = base + path
+                        with open(ref_audio, "rb") as fh:
+                            resp = client.post(
+                                url,
+                                data=data,
+                                files={
+                                    "file": (
+                                        os.path.basename(ref_audio) or "ref.wav",
+                                        fh,
+                                        "application/octet-stream",
+                                    )
+                                },
+                                headers=headers,
+                            )
+                        if resp.status_code in (404, 405):
+                            continue
+                        if resp.status_code >= 400:
+                            print(
+                                f"olares overlay: clone {url} HTTP {resp.status_code}: {resp.text[:160]}",
+                                flush=True,
+                            )
+                            return None
+                        return _wav_tensor(resp.content, self.sample_rate)
+            except Exception as exc:
+                print(f"olares overlay: clone failed ({type(exc).__name__}: {exc})", flush=True)
+                return None
+            return None
+  olares_diar.py: |
+    """Gateway async diarization. POST async=1, poll. On failure, silence-gap. AGPL-3.0."""
+    from __future__ import annotations
+    
+    import os
+    import time
+    from typing import Any, Optional
+    
+    _CONNECT_S = 5.0
+    _WRITE_S = 60.0
+    _SUBMIT_READ_S = 30.0
+    _POLL_S = 10.0
+    _POLL_EVERY_S = 2.0
+    _POLL_DEADLINE_S = 180.0
+    
+    
+    def _base_url() -> str:
+        return (
+            os.environ.get("DIAR_BASE_URL")
+            or os.environ.get("ASR_OPENAI_COMPAT_BASE_URL")
+            or os.environ.get("TTS_OPENAI_COMPAT_BASE_URL")
+            or os.environ.get("TRANSLATE_BASE_URL")
+            or ""
+        ).rstrip("/")
+    
+    
+    def _api_key() -> str:
+        return (
+            os.environ.get("DIAR_API_KEY")
+            or os.environ.get("ASR_OPENAI_COMPAT_API_KEY")
+            or os.environ.get("TTS_OPENAI_COMPAT_API_KEY")
+            or os.environ.get("TRANSLATE_API_KEY")
+            or ""
+        ).strip()
+    
+    
+    def _model() -> str:
+        return (os.environ.get("DIAR_MODEL") or "").strip()
+    
+    
+    def configured() -> bool:
+        return bool(_model() and _base_url() and _api_key())
+    
+    
+    def _task_obj(body: Any) -> dict:
+        if isinstance(body, dict) and isinstance(body.get("task"), dict):
+            return body["task"]
+        if isinstance(body, dict):
+            return body
+        return {}
+    
+    
+    def _segments_from(body: Any) -> list:
+        if not isinstance(body, dict):
+            return []
+        task = _task_obj(body)
+        result = task.get("result") if isinstance(task.get("result"), dict) else None
+        if result and result.get("segments"):
+            return result["segments"]
+        return body.get("segments") or []
+    
+    
+    class _Turn:
+        def __init__(self, start: float, end: float) -> None:
+            self.start = start
+            self.end = end
+    
+    
+    def _remap_speakers_by_arrival(segments: list[dict]) -> list[dict]:
+        """Pyannote cluster ids are arbitrary. VoiceStudio maps SPEAKER_00 → Speaker 1."""
+        order: list[str] = []
+        seen: set[str] = set()
+        ranked = sorted(
+            segments,
+            key=lambda s: (float(s.get("start") or 0.0), float(s.get("end") or 0.0)),
+        )
+        for seg in ranked:
+            spk = str(seg.get("speaker") or "SPEAKER_00")
+            if spk not in seen:
+                seen.add(spk)
+                order.append(spk)
+        mapping = {old: f"SPEAKER_{i:02d}" for i, old in enumerate(order)}
+        out = []
+        for seg in ranked:
+            new = dict(seg)
+            old = str(seg.get("speaker") or "SPEAKER_00")
+            new["speaker"] = mapping.get(old, "SPEAKER_00")
+            out.append(new)
+        pretty = ", ".join(f"{k}->{v}" for k, v in mapping.items())
+        print(f"olares overlay: diar speakers by first appearance ({pretty})", flush=True)
+        return out
+    
+    
+    class _Annotation:
+        """Duck-types pyannote Annotation.itertracks for assign_speakers_from_diarization."""
+    
+        def __init__(self, segments: list[dict]) -> None:
+            self._segments = segments
+    
+        def itertracks(self, yield_label: bool = True):
+            for seg in self._segments:
+                turn = _Turn(float(seg["start"]), float(seg["end"]))
+                speaker = str(seg.get("speaker") or "SPEAKER_00")
+                if yield_label:
+                    yield turn, None, speaker
+                else:
+                    yield turn, None
+    
+    
+    class GatewayDiarPipeline:
+        def __call__(self, audio_path: str, num_speakers: Optional[int] = None) -> _Annotation:
+            import httpx
+    
+            headers = {"Authorization": f"Bearer {_api_key()}"}
+            model = _model()
+            data: dict[str, Any] = {"model": model, "async": "1"}
+            if num_speakers:
+                data["num_speakers"] = str(int(num_speakers))
+            submit_timeout = httpx.Timeout(
+                connect=_CONNECT_S, read=_SUBMIT_READ_S, write=_WRITE_S, pool=5.0
+            )
+            poll_timeout = httpx.Timeout(
+                connect=_CONNECT_S, read=_POLL_S, write=10.0, pool=5.0
+            )
+            segs: list = []
+            with httpx.Client(timeout=submit_timeout, http2=False) as client:
+                with open(audio_path, "rb") as fh:
+                    resp = client.post(
+                        _base_url() + "/audio/diarization",
+                        headers=headers,
+                        data=data,
+                        files={"file": (os.path.basename(audio_path) or "audio.wav", fh)},
+                    )
+                if resp.status_code in (502, 503, 504, 530):
+                    raise RuntimeError(f"gateway diar {resp.status_code}")
+                resp.raise_for_status()
+                body = resp.json() if resp.content else {}
+                segs = _segments_from(body)
+                if segs:
+                    print(
+                        "olares overlay: gateway diar returned inline "
+                        f"({len(segs)} turns, HTTP {resp.status_code})",
+                        flush=True,
+                    )
+                elif resp.status_code in (200, 202):
+                    task = _task_obj(body)
+                    task_id = str(task.get("id") or "")
+                    if not task_id:
+                        raise RuntimeError("gateway diar async returned no task id")
+                    print(
+                        f"olares overlay: gateway diar queued {task_id} "
+                        f"(HTTP {resp.status_code})",
+                        flush=True,
+                    )
+                    segs = self._poll(client, headers, model, task_id, poll_timeout)
+                else:
+                    raise RuntimeError(f"gateway diar unexpected HTTP {resp.status_code}")
+            if not segs:
+                raise RuntimeError("gateway diarization returned no segments")
+            segs = _remap_speakers_by_arrival(segs)
+            print(
+                f"olares overlay: gateway diar ok ({len(segs)} turns, model={model})",
+                flush=True,
+            )
+            return _Annotation(segs)
+    
+        def _poll(self, client, headers, model, task_id, poll_timeout) -> list:
+            url = f"{_base_url()}/audio/tasks/{task_id}"
+            deadline = time.monotonic() + _POLL_DEADLINE_S
+            while time.monotonic() < deadline:
+                time.sleep(_POLL_EVERY_S)
+                client.timeout = poll_timeout
+                resp = client.get(url, headers=headers, params={"model": model})
+                if resp.status_code in (502, 503, 504, 530):
+                    raise RuntimeError(f"gateway diar poll {resp.status_code}")
+                resp.raise_for_status()
+                task = _task_obj(resp.json() if resp.content else {})
+                status = str(task.get("status") or "")
+                if status == "succeeded":
+                    segs = _segments_from({"task": task}) or _segments_from(task)
+                    if segs:
+                        return segs
+                    result = task.get("result")
+                    if isinstance(result, dict):
+                        return result.get("segments") or []
+                    raise RuntimeError("gateway diar task succeeded with no segments")
+                if status in ("failed", "canceled"):
+                    err = task.get("error") or status
+                    raise RuntimeError(f"gateway diar task {status}: {err}")
+            try:
+                client.timeout = poll_timeout
+                client.delete(url, headers=headers, params={"model": model})
+            except Exception:
+                pass
+            raise TimeoutError(f"gateway diar task {task_id} exceeded {_POLL_DEADLINE_S:.0f}s")
+    
+    
+    def patch_diarization() -> None:
+        import services.model_manager as model_manager
+    
+        orig = model_manager.get_diarization_pipeline
+        if getattr(orig, "_olares_gateway", False):
+            return
+    
+        def wrapped(return_error: bool = False):
+            if not configured():
+                return orig(return_error=return_error)
+    
+            class GatewayOrHeuristic:
+                def __call__(self, audio_path, num_speakers=None):
+                    try:
+                        return GatewayDiarPipeline()(
+                            audio_path, num_speakers=num_speakers
+                        )
+                    except Exception as exc:
+                        print(
+                            f"olares overlay: gateway diar failed "
+                            f"({type(exc).__name__}: {exc}); "
+                            "leaving VoiceStudio on silence-gap heuristic",
+                            flush=True,
+                        )
+                        raise
+    
+            pipe = GatewayOrHeuristic()
+            return (pipe, None) if return_error else pipe
+    
+        wrapped._olares_gateway = True  # type: ignore[attr-defined]
+        model_manager.get_diarization_pipeline = wrapped
+        print(
+            "olares overlay: diar gateway async=1, fail-fast to silence-gap",
+            flush=True,
+        )
+  olares_translate.py: |
+    """Keep native TRANSLATE_* on the gateway; fall back to the original engine on connect errors."""
+    from __future__ import annotations
+    
+    import os
+    import re
+    from functools import wraps
+    
+    from fastapi.responses import JSONResponse
+    
+    # Hy-MT2 wants a full language name in its own template, not ISO codes.
+    # https://github.com/Tencent-Hunyuan/Hy-MT2
+    _HY_MT_TARGET = {
+        "chinese (simplified)": "中文",
+        "chinese (traditional)": "中文",
+        "chinese": "中文",
+        "mandarin": "中文",
+        "english": "英语",
+        "japanese": "日语",
+        "korean": "韩语",
+        "french": "法语",
+        "german": "德语",
+        "spanish": "西班牙语",
+        "portuguese": "葡萄牙语",
+        "russian": "俄语",
+        "arabic": "阿拉伯语",
+        "thai": "泰语",
+        "vietnamese": "越南语",
+        "indonesian": "印尼语",
+        "italian": "意大利语",
+        "dutch": "荷兰语",
+        "turkish": "土耳其语",
+        "hindi": "印地语",
+        "polish": "波兰语",
+        "swedish": "瑞典语",
+        "ukrainian": "乌克兰语",
+    }
+    _HY_MT_INTO = re.compile(
+        r"into\s+([A-Za-z][A-Za-z ()-]+?)(?:\.| The output| Reply ONLY|$)",
+        re.I,
+    )
+    _hy_mt_logged: set[str] = set()
+    
+    
+    def _failed_connect(result) -> bool:
+        if isinstance(result, JSONResponse) and result.status_code >= 400:
+            return True
+        if not isinstance(result, dict):
+            return False
+        segs = result.get("translated") or []
+        if not segs:
+            return False
+        markers = (
+            "401",
+            "403",
+            "502",
+            "503",
+            "Authentication",
+            "invalid api key",
+            "ConnectError",
+            "Timeout",
+            "FETCH FAILED",
+        )
+        failed = 0
+        nonempty = 0
+        for seg in segs:
+            if not (seg.get("text") or "").strip() and not seg.get("error"):
+                continue
+            nonempty += 1
+            err = str(seg.get("error") or "")
+            if err and any(m.lower() in err.lower() for m in markers):
+                failed += 1
+        return nonempty > 0 and failed == nonempty
+    
+    
+    def _ui_target_name(system: str) -> str:
+        """Language the VoiceStudio UI asked for, from its own system prompt."""
+        match = _HY_MT_INTO.search(system or "")
+        return (match.group(1) if match else "").strip()
+    
+    
+    def _hy_mt_name_for_ui(ui_name: str) -> str:
+        """Map the UI label onto Hy-MT2's full language name. Empty = unknown."""
+        raw = (ui_name or "").strip().lower()
+        if not raw:
+            return ""
+        if raw in _HY_MT_TARGET:
+            return _HY_MT_TARGET[raw]
+        for key, name in sorted(_HY_MT_TARGET.items(), key=lambda kv: -len(kv[0])):
+            if key in raw:
+                return name
+        return ""
+    
+    
+    def rewrite_hy_mt_messages(model, messages):
+        """Wrap Hy-MT2 calls in its official template, target taken from the UI."""
+        if not messages or "Hy-MT2" not in str(model or ""):
+            return messages
+        system = ""
+        user = ""
+        for msg in messages:
+            role = (msg or {}).get("role")
+            content = str((msg or {}).get("content") or "")
+            if role == "system":
+                system = content
+            elif role == "user":
+                user = content
+        if "Translate the user's text" not in system or not user.strip():
+            return messages
+        ui_name = _ui_target_name(system)
+        if not ui_name:
+            return messages
+        hy_name = _hy_mt_name_for_ui(ui_name)
+        if hy_name:
+            prompt = (
+                f"将以下文本翻译为{hy_name}，注意只需要输出翻译后的结果，不要额外解释：\n\n{user}"
+            )
+            log_key = f"{ui_name}->{hy_name}"
+        else:
+            prompt = (
+                f"Translate the following text into {ui_name}. "
+                "Note that you should only output the translated result "
+                f"without any additional explanation:\n\n{user}"
+            )
+            log_key = ui_name
+        if log_key not in _hy_mt_logged:
+            _hy_mt_logged.add(log_key)
+            print(f"olares overlay: Hy-MT2 target from UI: {log_key}", flush=True)
+        return [{"role": "user", "content": prompt}]
+    
+    
+    def _with_provider(req, provider: str):
+        try:
+            req.provider = provider
+            return req
+        except Exception:
+            pass
+        if hasattr(req, "model_copy"):
+            return req.model_copy(update={"provider": provider})
+        return req
+    
+    
+    def patch_translate_fallback(app) -> None:
+        import api.routers.dub_translate as dub_translate
+    
+        cjk = dub_translate.LANG_REQUIRED_SCRIPT.get("zh")
+        if cjk:
+            for code in ("cmn-Hans", "cmn", "zh-Hans", "zh-CN", "yue-Hans"):
+                dub_translate.LANG_REQUIRED_SCRIPT.setdefault(code, cjk)
+    
+        orig = dub_translate.dub_translate
+        if getattr(orig, "_olares_argos_fallback", False):
+            return
+    
+        @wraps(orig)
+        async def wrapped(req):
+            original = (getattr(req, "provider", None) or "argos").lower()
+            if original in ("openai", "llm"):
+                original = "argos"
+            if not (os.environ.get("TRANSLATE_BASE_URL") or "").strip():
+                return await orig(req)
+            if "Hy-MT2" in (os.environ.get("TRANSLATE_MODEL") or ""):
+                # Hy-MT2 is a translation model, not a glossary/theme LLM.
+                try:
+                    req.auto_glossary = False
+                except Exception:
+                    pass
+            result = await orig(_with_provider(req, "openai"))
+            if not _failed_connect(result):
+                return result
+            print(
+                f"olares overlay: LLM translate failed; falling back to {original}",
+                flush=True,
+            )
+            return await orig(_with_provider(req, original))
+    
+        wrapped._olares_argos_fallback = True  # type: ignore[attr-defined]
+        dub_translate.dub_translate = wrapped
+        for route in getattr(app, "routes", []) or []:
+            if getattr(route, "path", None) != "/dub/translate":
+                continue
+            route.endpoint = wrapped
+            dep = getattr(route, "dependant", None)
+            if dep is not None:
+                dep.call = wrapped
+        print("olares overlay: LLM translate falls back to original engine on connect errors", flush=True)
