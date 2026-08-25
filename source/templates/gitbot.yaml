@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-gitbot
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-gitbot
+spec:
+  replicas: {{ .Values.workloads.sourcegitbot.replicaCount }}
+  selector:
+    matchLabels:
+      app: source-gitbot
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-gitbot
+    spec:
+      containers:
+        - name: source-gitbot
+          image: aboveos/appstore-gitbot:v2.0.6
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LARK_ID
+              value: "{{ .Values.olaresEnv.LARK_ID }}"
+            - name: PRICE_FILE_USERS
+              value: "{{ .Values.olaresEnv.GIT_ACCOUNT }}"
+            - name: OLARES_SUBMITTER_USERS
+              value: "{{ .Values.olaresEnv.GIT_ACCOUNT }}"
+            - name: REVIEWERS
+              value: "{{ .Values.olaresEnv.GIT_ACCOUNT }}"
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: INTERNAL_API_TOKEN
+            - name: ADMINV2_BASE_URL
+              value: http://source-admin-svc:4003
+            - name: GITHUB_TOKEN
+              value: "{{ .Values.olaresEnv.GIT_TOKEN }}"
+            - name: GITHUB_WEBHOOK_SECRET
+              value: "{{ .Values.olaresEnv.GIT_WEBHOOK_SECRET }}"
+            - name: PG_DSN
+              value: postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.source }}
+          ports:
+            - containerPort: 8085
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-gitbot-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-gitbot
+spec:
+  type: ClusterIP
+  selector:
+    app: source-gitbot
+  ports:
+    - name: http
+      port: 8085
+      targetPort: 8085
+      protocol: TCP

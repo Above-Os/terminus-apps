@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.30** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.34** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -69,12 +69,32 @@ Release packages must set `dev.hotReload: false`.
 ## Olares Router (Market auto-discovery)
 
 Market lifts `options.LLMGatewaySupported` and `MODEL_MODE=image_generation` into the
-provider catalog. Router's Olares projector always types that row as `model_console` and
-sets `base_url` to `http://<shared-entrance>/v1`. This chart is therefore a **shared**
+provider catalog. Router's Olares projector types this app's row as `flowstudio` rather
+than `model_console` — it is a channel of many workflows, not one model — and sets
+`base_url` to `http://<shared-entrance>/v1`. This chart is therefore a **shared**
 admin install (`options.shared` + `spec.onlyAdmin`) with an internal `sharedEntrances`
 entry on `flowstudio-svc:8080` so the projector gets a real in-cluster address.
 
-The data plane Router actually calls is OpenAI-shaped, not the FlowStudio adapter:
+Router talks to two surfaces here, and neither is the OpenAI one. It reaches
+`flowstudio-svc` directly, so no platform identity is injected; it identifies itself
+with `x-caller-app-id: router` and the boundary is `sharedEntrances.authLevel: internal`.
+
+| Purpose | Endpoint |
+|---------|----------|
+| Workflow catalogue | `GET /api/v1/workflows` |
+| One workflow (exposed params) | `GET /api/v1/workflows/{id}` |
+| Start a generation | `POST /api/v1/generations` |
+| Poll it | `GET /api/v1/generations/{id}` |
+| Fetch the output | `GET /api/v1/generations/{id}/content?outputId=` |
+
+One create endpoint covers all four output families. The request body names a
+`workflowId` and never an output family: the workflow already decides it, and a caller
+that could name it could disagree with the catalogue Router built its model rows from.
+A generation started this way is owned by the chart owner, because Router sends no user
+header; separating one Router user's outputs from another's is Router's job, and it does
+it by sealing the binding on its side and never handing a FlowStudio id to a client.
+
+The OpenAI-shaped surface is a different consumer and is unchanged:
 
 | Purpose | Endpoint |
 |---------|----------|
@@ -90,8 +110,9 @@ video, audio, or 3D and that can run from a prompt (no required reference media)
 `output_type`: `image`, `video`, `audio`, or `model3d`.
 `POST /v1/images/generations` uses `model` to pick that scene and returns the first
 matching output as `b64_json`; omit `model` (or pass the Model Console card name) to
-use the newest eligible scene. Workflows that require uploaded media stay in the
-FlowStudio UI.
+use the newest eligible scene. It runs under the caller's own user identity, so
+workflows that require uploaded media stay in the FlowStudio UI — unlike the Router
+surface above, which accepts them as base64 data URLs.
 
 `MODEL_SUPPORTS` stays empty (Router has no image-generation `supports_*` key). This app
 does not run `llm-init`.
@@ -129,7 +150,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.30. This chart ships `flowstudio:0.3.30` and `engine-1.0.6`.
+covers 0.3.34. This chart ships `flowstudio:0.3.34` and `engine-1.0.6`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout

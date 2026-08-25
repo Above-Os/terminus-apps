@@ -1,0 +1,55 @@
+metadata:
+  description: "Voxtral-4B 语音合成，九种欧洲语言，ggml 上只占 4 GiB。"
+  title: Voxtral-TTS 4B
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    **模型概览**
+    Voxtral-4B-TTS（Mistral AI）用 20 个预置音色说九种语言：英语、法语、德语、西班牙语、
+    意大利语、葡萄牙语、荷兰语、阿拉伯语、印地语。德语效果是这个应用存在的理由。
+    **它不会说中文**，也不能克隆音色。
+
+    **装之前请先看这几条**
+    - **非商用许可。** 权重是 CC BY-NC 4.0（Mistral AI Non-Production License）。
+      演示、评测、研究没问题；不能用于商业服务。
+    - **没有中文。** 九种语言里不含中文。要中英双语得再配一家 TTS。
+    - **不能克隆音色。** 公开的 checkpoint 没有音频编码器，没有东西可以把参考音频嵌进去。
+      传 `ref_audio` 或 `instructions` 会直接 400，而不是悄悄用某个预置音色顶上；
+      `tts_clone` 也不提供。
+    - **只支持 amd64。** 引擎的 CUDA 构建只有 x86_64 一份。
+
+    **配置**
+    - 模型：`mistralai/Voxtral-4B-TTS-2603`
+    - 权重：`voxtral-4b-tts-q8_0.gguf`（4.05 GiB，Q8_0）
+    - 能力：`tts`
+    - GPU 显存：`8Gi`
+    - 引擎：CrispASR 的 ggml 运行时，进程内（不是 vLLM-Omni）
+    - 许可：模型 CC BY-NC 4.0；引擎 MIT
+
+    **三个容易踩的点**
+    - **是 4 GiB，不是 20。** 这个模型的官方推理栈是 vLLM-Omni，它把两个阶段各起一个引擎，
+      各带一份 CUDA context 和 KV 池，官方参考跑法在 24 GB 卡上峰值约 20.5 GiB。
+      ggml 把三个阶段都重写成计算图，于是 Q8_0 只有 4.05 GiB 权重，能和一个 ASR 引擎、
+      一个 LLM、一个 Embedding 共用一张卡——能共卡正是这样打包的全部理由。
+    - **`stream: true` 是按句切，不是模型级流式。** 运行时只能整句合成，所以这里的"流式"
+      是把文本按句边界切开、每句音频出来就发。首包延迟确实降了，但它不是模型在增量解码，
+      因此也没有假装提供 WebSocket 路由。
+    - **输出自带 AI 水印。** 合成会给音频打上"AI 生成"标记（EU AI Act 第 50 条）。
+      无水印那条路径要求显式声明披露责任，本应用刻意不做这个声明。
+
+    **接口**
+    - `POST /v1/audio/speech` —— OpenAI 形状：`input`、`response_format`
+      （wav / flac / mp3 / opus / pcm），可选 `voice`。`stream: true` 按句流 pcm/wav；
+      `?async=1` 返回任务 id。
+    - `POST /v1/audio/speech/batch` —— `items[]` 放 1–32 条请求，返回 base64 音频。
+    - `GET /v1/audio/voices` —— 20 个预置音色。
+
+    没有克隆路由，也没有流式 WebSocket，原因见上。
+
+    **工作方式**
+    Model Console（llm-init）负责下载模型；下载哨兵出现后音频引擎才开始服务。llm-init
+    反向代理 `/v1/*`，并在 `/` 提供控制台。
+
+    **模型存储**
+    共享目录 `appCommon/huggingface`，挂载为 `/cache/hf/hub`。

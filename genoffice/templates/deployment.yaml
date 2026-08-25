@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genoffice
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: genoffice
+spec:
+  replicas: {{ .Values.workloads.genoffice.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      io.kompose.service: genoffice
+  template:
+    metadata:
+      labels:
+        io.kompose.service: genoffice
+    spec:
+      enableServiceLinks: false
+      # The identity is not declared here: the image runs as uid 1000 and
+      # app-service pins the pod to 1000:1000 because the manifest asks for it.
+      containers:
+        - name: genoffice
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: GENOFFICE_PORT
+              value: "3000"
+            - name: GENOFFICE_HOST
+              value: 0.0.0.0
+            # Every filesystem operation the browser can ask for is confined to
+            # these roots, so the mount list and this variable must agree.
+            - name: GENOFFICE_ROOTS
+              value: Documents:/data/Documents
+            - name: GENOFFICE_DATA_DIR
+              value: /data/app
+            # mesh-in injects the platform caller JWT only for hosts in this
+            # namespace's generated shared-host allowlist. Router publishes its
+            # per-user entrance there; router.shared.olares.com is not allowed.
+            - name: LLM_GATEWAY_URL
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+            - name: OLARES_APP_ID
+              value: genoffice
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: documents
+              mountPath: /data/Documents
+            - name: app-data
+              mountPath: /data/app
+      restartPolicy: Always
+      volumes:
+        - name: documents
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.userData }}/Documents'
+        - name: app-data
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}'

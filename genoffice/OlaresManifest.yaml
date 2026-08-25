@@ -1,0 +1,125 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+workloadReplicas:
+  genoffice: 1
+
+metadata:
+  name: genoffice
+  appid: genoffice
+  title: GenOffice
+  description: The world's first full-featured open-source AI Office suite.
+  icon: https://cdn.olares.com/images/2026/08/23af0fafa534e616c1fb1e31aceaabb6.png
+  version: 0.5.5
+  categories:
+  - Productivity_v112
+  - workspace
+  tags:
+  - doc-process
+
+entrances:
+- name: genoffice
+  host: genoffice
+  port: 3000
+  title: GenOffice
+  icon: https://cdn.olares.com/images/2026/08/23af0fafa534e616c1fb1e31aceaabb6.png
+  authLevel: private
+  openMethod: default
+
+spec:
+  versionName: "0.7.512"
+  featuredImage: https://cdn.olares.com/images/2026/08/f573211d59c6e5443d093182b5689420.png
+  promoteImage:
+  - https://cdn.olares.com/images/2026/08/f573211d59c6e5443d093182b5689420.png
+  - https://cdn.olares.com/images/2026/08/3f6493844c3167f78c58f3c8660d5622.png
+  - https://cdn.olares.com/images/2026/08/e69ba3bbaed3b9f10379e23302647d06.png
+  fullDescription: |
+    GenOffice is a free, open-source alternative to Microsoft Office, built
+    around AI editing as a first-class workflow. It opens and saves real
+    Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files, edits Markdown,
+    and marks up PDFs, in the browser.
+
+    This Olares port is a web application, not a streamed desktop: the
+    editors run in the browser and a small Node service reads and writes
+    your Documents folder. AI needs no account and no API key — it goes
+    through Olares Router using this app's in-cluster identity, and the
+    model list is whatever Router has.
+
+    Highlights
+    - Byte-preserving .docx round-trip
+    - Spreadsheets with a live formula engine, charts and pivot tables
+    - Presentations with the ribbon, animations and a presenter view
+    - Markdown editor that stays local
+    - PDF markup, signing, page editing, splitting and merging
+    - Document-aware AI through Router, with nothing to sign in to
+    - Files live in your Documents folder, not inside the app
+
+    Requirements
+    - Olares >= 1.12.6
+    - Router app installed and running
+
+    Not included in this port
+    - Screen capture, and image generation
+    - Genspark accounts, web search and image search
+  upgradeDescription: |
+    0.5.0: Presentations open, are edited and saved back to the drive. The
+    presenter view runs as a second browser window, and slides export to PDF
+    or print through the browser's own dialog.
+
+    0.4.0: Spreadsheets open, recalculate and save back to the drive, with
+    the same engine the desktop build uses. Export to PDF goes through the
+    browser's print dialog, and screen capture is not available here.
+
+    0.3.0: PDFs open, are marked up, signed, split, merged and saved back to
+    the drive, and a blank one can be created from the workbench.
+
+    0.2.1: The model and thinking level are picked from the composer itself,
+    in both the document and the Markdown editor, from the list Router serves.
+
+    0.2.0: The home page is now the workbench, with recent files, starred
+    files and projects. The model and thinking level are chosen in the AI
+    panel itself, from what Router serves. The app also opens over a plain
+    http address on the local network, where it used to stay blank.
+
+    0.1.1: Replaced the streamed Linux desktop with a real web application.
+    The editors now run in the browser, files are read and written directly
+    in Documents, and AI goes through Olares Router with no account and no
+    API key. Spreadsheets, slides and PDF are not part of this port yet.
+  developer: Genspark
+  website: https://genoffice.ai/
+  sourceCode: https://github.com/genspark-ai/genoffice
+  submitter: harveyff
+  locale:
+  - en-US
+  - zh-CN
+  license:
+  - text: Apache-2.0
+    url: https://github.com/genspark-ai/genoffice/blob/main/LICENSE
+  # Both mounts are hostPath + DirectoryOrCreate, so kubelet creates them as
+  # root and fsGroup does not apply. This is what makes app-service inject the
+  # prepare init container that brings them to 1000:1000.
+  runAsUser: true
+  supportArch:
+  - amd64
+  - arm64
+  requiredCpu: "200m"
+  limitedCpu: "2"
+  requiredMemory: 512Mi
+  limitedMemory: 2Gi
+  requiredDisk: 1Gi
+
+permission:
+  appData: true
+  userData:
+  - Documents
+
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
+  - name: router
+    type: application
+    version: '>=1.0.0'

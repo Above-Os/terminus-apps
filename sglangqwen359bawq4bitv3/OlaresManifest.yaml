@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.5-9B (AWQ-4bit) served with SGLang."
   appid: sglangqwen359bawq4bitv3
   title: Qwen3.5-9B (SGLang)
-  version: '1.0.14'
+  version: '1.0.16'
   categories:
   - AI
   - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'cyankiwi/Qwen3.5-9B-AWQ-4bit'
   upgradeDescription: |
+    v1.0.15: Lower the NVIDIA host-memory reservation so 1.12.6 timeslice nodes can install more easily (engine request 21Gi→6Gi, chart requiredMemory 22Gi→7Gi). GPU quota unchanged.
+
     v1.0.11: bump SGLang from v0.5.14-cu130 to v0.5.17-cu130.
 
     **What's Changed** (v0.5.14 → v0.5.17)
@@ -106,9 +108,9 @@ spec:
       requiredCpu: "1400m"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # Engine MEMORY_REQUEST 21Gi + llm-init <= requiredMemory 22Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+      # Engine MEMORY_REQUEST 6Gi + llm-init <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
       limitedMemory: "32Gi"
-      requiredMemory: "22Gi"
+      requiredMemory: "7Gi"
       requiredGPUMemory: "23Gi"
       limitedGPUMemory: "24Gi"
     - mode: nvidia-gb10
@@ -218,9 +220,9 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-  - envName: SGLANG_MEMORY_REQUEST # sum with llm-init <= requiredMemory 22Gi
+  - envName: SGLANG_MEMORY_REQUEST # sum with llm-init <= requiredMemory 7Gi
     required: true
-    default: "21Gi"
+    default: "6Gi"
     type: string
     editable: false
     applyOnChange: false

@@ -1,0 +1,60 @@
+metadata:
+  description: "Voxtral-4B text to speech in nine European languages, on ggml at 4 GiB."
+  title: Voxtral-TTS 4B
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    **Model Overview**
+    Voxtral-4B-TTS (Mistral AI) speaks nine languages — English, French, German, Spanish,
+    Italian, Portuguese, Dutch, Arabic and Hindi — from 20 preset voices. Its German is the
+    reason this app exists. **It does not speak Chinese**, and it cannot clone a voice.
+
+    **Read this before installing**
+    - **Non-commercial license.** The weights are CC BY-NC 4.0 (Mistral AI Non-Production
+      License). Fine for demos, evaluation and research; not for a commercial service.
+    - **No Chinese.** Nine languages, none of them Chinese. Pair it with another TTS if you
+      need both.
+    - **No voice cloning.** The published checkpoint ships no audio encoder, so there is
+      nothing to embed a reference clip with. `ref_audio` and `instructions` are refused with
+      a 400 rather than quietly answered in a preset voice, and `tts_clone` is not served.
+    - **amd64 only.** The engine's CUDA build exists for x86_64 alone.
+
+    **Configuration**
+    - Model: `mistralai/Voxtral-4B-TTS-2603`
+    - Weights: `voxtral-4b-tts-q8_0.gguf` (4.05 GiB, Q8_0)
+    - Capabilities: `tts`
+    - Required GPU memory: `8Gi`
+    - Engine: CrispASR ggml runtime in-process (not vLLM-Omni)
+    - License: model CC BY-NC 4.0; engine MIT
+
+    **Three things that surprise people**
+    - **4 GiB, not 20.** This model's reference stack is vLLM-Omni, which runs each of its two
+      stages as its own engine with its own CUDA context and KV pool; the published reference
+      run peaks at ~20.5 GiB on a 24 GB card. ggml reimplements all three stages as compute
+      graphs, so Q8_0 is 4.05 GiB of weights and the model can share a card with an ASR
+      engine, an LLM and an embedder. That sharing is the entire reason for this packaging.
+    - **`stream: true` is sentence-scoped, not model-level.** The runtime synthesizes whole
+      utterances, so streaming here means the text is cut at sentence boundaries and each
+      one's audio is sent as it lands. It genuinely lowers time-to-first-audio; it is not the
+      model decoding incrementally, and there is no WebSocket route pretending otherwise.
+    - **The audio is watermarked.** Synthesis marks its output as AI-generated (EU AI Act
+      Art. 50). The unmarked path requires an explicit attestation of disclosure
+      responsibility, which this app deliberately does not give.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — OpenAI shape: `input`, `response_format`
+      (wav / flac / mp3 / opus / pcm), optional `voice`. `stream: true` streams pcm/wav a
+      sentence at a time. `?async=1` for a task id.
+    - `POST /v1/audio/speech/batch` — `items[]` of 1–32 requests, base64 audio out.
+    - `GET /v1/audio/voices` — the 20 preset voices.
+
+    There is no clone route and no streaming WebSocket: see the notes above.
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.

@@ -6,7 +6,7 @@
 {{- /* Defaults avoid empty K8s quantities. CPU needs "m" (200m = 0.2 core).
        Sums (llm-init + vllm) must fit the manifest accelerator limits. */ -}}
 {{- $cpuRequest := trim ($oe.VLLM_CPU_REQUEST | default "200m") -}}
-{{- $memRequest := trim ($oe.VLLM_MEMORY_REQUEST | default "21Gi") -}}
+{{- $memRequest := trim ($oe.VLLM_MEMORY_REQUEST | default "6Gi") -}}
 {{- $cpuLimit := trim ($oe.VLLM_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.VLLM_MEMORY_LIMIT | default "30Gi") -}}
 {{- $gpuType := .Values.gpu | default "" -}}
@@ -82,6 +82,8 @@ spec:
           env:
             - name: ENGINE_KIND
               value: vllm
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
             - name: MODEL_NAME
               value: "{{ $modelName }}"
             - name: VLLM_PORT

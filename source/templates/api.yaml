@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-api
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-api
+spec:
+  replicas: {{ .Values.workloads.sourceapi.replicaCount }}
+  selector:
+    matchLabels:
+      app: source-api
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-api
+    spec:
+      containers:
+        - name: api
+          image: aboveos/appstore-api:v2.0.2
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATASOURCES_ADMINV2_ENABLED
+              value: "true"
+            - name: DATASOURCES_ADMINV2_URL
+              value: http://source-admin-svc:4003
+            - name: API_MODE
+              value: v2
+            - name: DATASOURCES_APPSTORE_URL
+              value: http://source-server-svc:8081
+          ports:
+            - containerPort: 8080
+              name: http-0
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-api-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-api
+spec:
+  type: ClusterIP
+  selector:
+    app: source-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

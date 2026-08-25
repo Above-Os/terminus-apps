@@ -1,0 +1,258 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiovoxtralttsv3
+  icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+  description: "Voxtral-4B text to speech in nine European languages, on ggml at 4 GiB."
+  appid: audiovoxtralttsv3
+  title: Voxtral-TTS 4B
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+  - text-to-speech
+  - audio
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiovoxtralttsv3api
+    host: sharedentrances-api
+    port: 0
+    title: Voxtral-TTS 4B API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiovoxtralttsv3
+    port: 8090
+    host: download-svc
+    title: Voxtral-TTS 4B
+    icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiovoxtralttsv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'mistralai/Voxtral-4B-TTS-2603'
+  fullDescription: |
+    **Model Overview**
+    Voxtral-4B-TTS (Mistral AI) speaks nine languages — English, French, German, Spanish,
+    Italian, Portuguese, Dutch, Arabic and Hindi — from 20 preset voices. Its German is the
+    reason this app exists. **It does not speak Chinese**, and it cannot clone a voice.
+
+    **Read this before installing**
+    - **Non-commercial license.** The weights are CC BY-NC 4.0 (Mistral AI Non-Production
+      License). Fine for demos, evaluation and research; not for a commercial service.
+    - **No Chinese.** Nine languages, none of them Chinese. Pair it with another TTS if you
+      need both.
+    - **No voice cloning.** The published checkpoint ships no audio encoder, so there is
+      nothing to embed a reference clip with. `ref_audio` and `instructions` are refused with
+      a 400 rather than quietly answered in a preset voice, and `tts_clone` is not served.
+    - **amd64 only.** The engine's CUDA build exists for x86_64 alone.
+
+    **Configuration**
+    - Model: `mistralai/Voxtral-4B-TTS-2603`
+    - Weights: `voxtral-4b-tts-q8_0.gguf` (4.05 GiB, Q8_0)
+    - Capabilities: `tts`
+    - Required GPU memory: `8Gi`
+    - Engine: CrispASR ggml runtime in-process (not vLLM-Omni)
+    - License: model CC BY-NC 4.0; engine MIT
+
+    **Three things that surprise people**
+    - **4 GiB, not 20.** This model's reference stack is vLLM-Omni, which runs each of its two
+      stages as its own engine with its own CUDA context and KV pool; the published reference
+      run peaks at ~20.5 GiB on a 24 GB card. ggml reimplements all three stages as compute
+      graphs, so Q8_0 is 4.05 GiB of weights and the model can share a card with an ASR
+      engine, an LLM and an embedder. That sharing is the entire reason for this packaging.
+    - **`stream: true` is sentence-scoped, not model-level.** The runtime synthesizes whole
+      utterances, so streaming here means the text is cut at sentence boundaries and each
+      one's audio is sent as it lands. It genuinely lowers time-to-first-audio; it is not the
+      model decoding incrementally, and there is no WebSocket route pretending otherwise.
+    - **The audio is watermarked.** Synthesis marks its output as AI-generated (EU AI Act
+      Art. 50). The unmarked path requires an explicit attestation of disclosure
+      responsibility, which this app deliberately does not give.
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — OpenAI shape: `input`, `response_format`
+      (wav / flac / mp3 / opus / pcm), optional `voice`. `stream: true` streams pcm/wav a
+      sentence at a time. `?async=1` for a task id.
+    - `POST /v1/audio/speech/batch` — `items[]` of 1–32 requests, base64 audio out.
+    - `GET /v1/audio/voices` — the 20 preset voices.
+
+    There is no clone route and no streaming WebSocket: see the notes above.
+
+    **Stack**
+    - **audio engine**: CrispASR ggml in-process (port 8000); self-reports `/v1/models`,
+      `/api/engine-spec` and `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+    - text: CC BY-NC 4.0 (model weights, non-commercial)
+      url: https://huggingface.co/mistralai/Voxtral-4B-TTS-2603
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). Only nvidia here:
+    # the engine's CUDA build is x86_64-only, so nvidia-gb10 (arm64) can never run it.
+    - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "8Gi"
+      limitedGPUMemory: "8Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://cstr/voxtral-4b-tts-GGUF --include voxtral-4b-tts-q8_0.gguf"
+    description: "HuggingFace source llm-init downloads into the shared cache. The repo carries three quantizations (q4_k 2.19 GiB, q8_0 4.05 GiB, f16 7.61 GiB), so `--include` takes only the one this app serves. Change the file here and `--gguf` in ENGINE_ARGS together, or the engine will pick whatever single GGUF landed. No `--subdir`: when `--include` names a single file, llm-init already points the engine at the folder that file landed in."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "mistralai/Voxtral-4B-TTS-2603"
+    description: "Model id advertised to clients; must match the engine /v1/models id. The weights are the GGUF conversion of this checkpoint, so clients see the upstream name."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "audio"
+    options:
+    - title: Audio
+      value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: TTS (text to speech, 20 preset voices)
+      value: tts
+    description: "tts only. tts_clone is absent by necessity, not by choice: the published weights ship no audio encoder, so a reference clip cannot be embedded and cloning is impossible. GET /v1/audio/voices lists the presets."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8Gi"
+    description: "GPU memory for the ggml CUDA backend: 4.05 GiB of Q8_0 weights plus CUDA context, compute buffers and KV. This engine cannot run on CPU — libcrispasr.so links libggml-cuda.so.0, which needs the driver, so `0` would produce a pod that dies in the dynamic loader. Switching MODEL_SOURCE and `--gguf` to q4_k (2.19 GiB) allows about 6Gi instead."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8Gi"
+    description: "Host RAM. There is no Python ML framework in this image at all — ggml links CUDA itself — so this covers reading the GGUF on its way to the card plus the 24 kHz output buffers."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "docker.io/beclab/audio-crispasr:v1.1.1"
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "--backend voxtral-tts --gguf q8_0"
+    description: "Engine-native flags (llm-init ENGINE_ARGS). Filling this replaces the whole
+      string, including --backend. --backend names the ggml backend explicitly so a wrong guess
+      from GGUF metadata fails at startup instead of producing odd audio; --gguf is a filename
+      substring, so it must agree with MODEL_SOURCE's --include. Other flags the wrapper reads:
+      --voice <preset>, --n-threads <n>, --temperature <f>, --seed <n>, --max-new-tokens <n>,
+      --tts-steps <n>. The last four default to the backend's own values when 0 or absent."
+  - envName: HF_ENDPOINT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "https://huggingface.co"
+    description: "This app only. The GGUF conversion lives in a personal repo that mirrors typically do not carry, so the default goes straight to huggingface.co rather than the machine-wide mirror (which other apps still use). Empty this to fall back to the machine setting."
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN

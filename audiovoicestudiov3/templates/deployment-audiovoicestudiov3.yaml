@@ -1,0 +1,187 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $asrUrl := trim ($oe.ASR_OPENAI_COMPAT_BASE_URL | default "") -}}
+{{- $asrModel := trim ($oe.ASR_OPENAI_COMPAT_MODEL | default "") -}}
+{{- $asrKey := trim ($oe.ASR_OPENAI_COMPAT_API_KEY | default "") -}}
+{{- $asrBackend := trim ($oe.OMNIVOICE_ASR_BACKEND | default "openai-compat-asr") -}}
+{{- $ttsUrl := trim ($oe.TTS_OPENAI_COMPAT_BASE_URL | default "") -}}
+{{- $ttsModel := trim ($oe.TTS_OPENAI_COMPAT_MODEL | default "") -}}
+{{- $ttsKey := trim ($oe.TTS_OPENAI_COMPAT_API_KEY | default "") -}}
+{{- $ttsVoice := trim ($oe.TTS_OPENAI_COMPAT_VOICE | default "") -}}
+{{- $ttsBackend := trim ($oe.OMNIVOICE_TTS_BACKEND | default "openai-compat-tts") -}}
+{{- $llmProvider := trim ($oe.LLM_DEFAULT_PROVIDER | default "custom") -}}
+{{- $translateUrl := trim ($oe.TRANSLATE_BASE_URL | default "") -}}
+{{- $translateModel := trim ($oe.TRANSLATE_MODEL | default "") -}}
+{{- $translateKey := trim ($oe.TRANSLATE_API_KEY | default "") -}}
+{{- $translateProvider := trim ($oe.TRANSLATE_PROVIDER | default "openai") -}}
+{{- $diarModel := trim ($oe.DIAR_MODEL | default "") -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $wantGpu := ne $gpuType "cpu" -}}
+{{- $memRequest := "2Gi" -}}
+{{- $memLimit := "4Gi" -}}
+{{- $cpuRequest := "500m" -}}
+{{- $cpuLimit := "2" -}}
+{{- $gpuMiB := 6144 -}}
+{{- if $wantGpu -}}
+{{- $memRequest = "4Gi" -}}
+{{- $memLimit = "8Gi" -}}
+{{- $cpuLimit = "4" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audiovoicestudiov3
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: web
+  annotations:
+    olares.service.type: Entrance
+spec:
+  replicas: {{ .Values.workloads.audiovoicestudiov3.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      io.kompose.service: web
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: web
+      annotations:
+        olares.service.type: Entrance
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: fix-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "chown 1000:1000 /data || true"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: appdata
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: web
+          image: docker.io/beclab/palashdeb-omnivoice-studio:0.5.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: ["python3", "/olares/boot.py"]
+          ports:
+            - containerPort: 3900
+              protocol: TCP
+          env:
+            - name: OMNIVOICE_BIND_HOST
+              value: "0.0.0.0"
+            - name: OMNIVOICE_SERVER_MODE
+              value: "1"
+            - name: OMNIVOICE_TRUSTED_NETWORKS
+              value: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+            - name: OMNIVOICE_DATA_DIR
+              value: /app/omnivoice_data
+            - name: OMNIVOICE_DEVICE
+              value: "{{ if $wantGpu }}cuda{{ else }}cpu{{ end }}"
+            - name: OMNIVOICE_PRELOAD_CAPTURE_ASR
+              value: "0"
+            - name: OMNIVOICE_STREAM_INTERVAL
+              value: "8.0"
+            - name: HF_HOME
+              value: /app/omnivoice_data/huggingface
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONPATH
+              value: "/olares:/app/backend"
+            - name: OMNIVOICE_ASR_BACKEND
+              value: {{ $asrBackend | quote }}
+            - name: OMNIVOICE_TTS_BACKEND
+              value: {{ $ttsBackend | quote }}
+            {{- if $asrUrl }}
+            - name: ASR_OPENAI_COMPAT_BASE_URL
+              value: {{ $asrUrl | quote }}
+            {{- end }}
+            {{- if $asrModel }}
+            - name: ASR_OPENAI_COMPAT_MODEL
+              value: {{ $asrModel | quote }}
+            {{- end }}
+            {{- if $asrKey }}
+            - name: ASR_OPENAI_COMPAT_API_KEY
+              value: {{ $asrKey | quote }}
+            {{- end }}
+            {{- if $ttsUrl }}
+            - name: TTS_OPENAI_COMPAT_BASE_URL
+              value: {{ $ttsUrl | quote }}
+            {{- end }}
+            {{- if $ttsModel }}
+            - name: TTS_OPENAI_COMPAT_MODEL
+              value: {{ $ttsModel | quote }}
+            {{- end }}
+            {{- if $ttsKey }}
+            - name: TTS_OPENAI_COMPAT_API_KEY
+              value: {{ $ttsKey | quote }}
+            {{- end }}
+            {{- if $ttsVoice }}
+            - name: TTS_OPENAI_COMPAT_VOICE
+              value: {{ $ttsVoice | quote }}
+            {{- end }}
+            - name: LLM_DEFAULT_PROVIDER
+              value: {{ $llmProvider | quote }}
+            {{- if $translateUrl }}
+            - name: TRANSLATE_BASE_URL
+              value: {{ $translateUrl | quote }}
+            {{- end }}
+            {{- if $translateModel }}
+            - name: TRANSLATE_MODEL
+              value: {{ $translateModel | quote }}
+            {{- end }}
+            {{- if $translateKey }}
+            - name: TRANSLATE_API_KEY
+              value: {{ $translateKey | quote }}
+            {{- end }}
+            - name: TRANSLATE_PROVIDER
+              value: {{ $translateProvider | quote }}
+            {{- if $diarModel }}
+            - name: DIAR_MODEL
+              value: {{ $diarModel | quote }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ $cpuRequest | quote }}
+              memory: {{ $memRequest | quote }}
+{{- if $wantGpu }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: {{ $cpuLimit | quote }}
+              memory: {{ $memLimit | quote }}
+{{- if $wantGpu }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+          volumeMounts:
+            - name: appdata
+              mountPath: /app/omnivoice_data
+            - name: olares-overlay
+              mountPath: /olares
+              readOnly: true
+      restartPolicy: Always
+      volumes:
+        - name: appdata
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/omnivoice"
+            type: DirectoryOrCreate
+        - name: olares-overlay
+          configMap:
+            name: audiovoicestudiov3-olares-overlay

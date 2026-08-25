@@ -1,76 +1,100 @@
-olaresManifest.version: "0.12.0"
+apiVersion: v3
+olaresManifest.version: '0.15.0'
 olaresManifest.type: app
-apiVersion: "v3"
-
-workloadReplicas:
-  lares: 1
 metadata:
   name: lares
-  icon: https://app.cdn.olares.com/appstore/lares/icon.png
-  description: The pi coding agent with a web UI, wired to the built-in LLM gateway
   appid: lares
   title: Lares
-  version: "0.0.8"
+  description: Chat shell on DeepSeek Harness, wired to Olares Router
+  icon: https://raw.githubusercontent.com/ffkijjkokok/lares/main/icon.png
+  version: 0.0.13
   categories:
-    - Productivity_v112
-permission:
-  appData: true
+    - Utilities_v112
+    - AI
 spec:
-  versionName: "0.3.5"
+  versionName: "0.23.0"
+  runAsUser: true
   fullDescription: |
-    Lares is the pi coding agent packaged as an Olares app: one container with a
-    Node backend that embeds the pi SDK and a Quasar web UI, wired to Olares'
-    built-in LLM gateway so there is nothing to configure after install.
+    ## Overview
+    Lares is a chat app on Olares built on DeepSeek Harness (dsh web).
+    It uses the official dsh UI shell and talks to Olares Router for LLM access.
 
-    - Chat with streaming output, rendered tool calls, Markdown with Mermaid and
-      KaTeX, image attachments, steering and follow-up queues, abort, and manual
-      or automatic compaction.
-    - Sessions grouped by working directory, with a branch tree you can rewind
-      into, forking at or just before a message, renaming, deletion, and HTML or
-      JSONL export.
-    - Files as a lazy tree with git status, previews for source, Markdown,
-      images, audio, video, PDF and DOCX, unified diffs, and @-mention
-      autocomplete backed by a git-aware index.
-    - Configuration for models, provider API keys and OAuth logins, thinking
-      level, skills, plugins, and per-session tool toggles.
-    - Worktrees: create a checkout per branch, switch the file tree and new
-      sessions onto it, and remove it when the work lands.
+    ## Highlights
+    - Official dsh web UI (three-column layout) with Lares product profile
+    - Zero-config Router auth via in-cluster app identity (`x-caller-appid`)
+    - Bundled client plugins (voice input, web search) when enabled in the build
+    - Optional Docker-in-Docker sidecar (`ENABLE_DIND`, default on) so the agent can run `docker` against a pod-local daemon
 
-    Usage:
-    - Open the app and start chatting right away; the built-in LLM gateway is
-      already wired up.
-    - Optionally set a default model, a custom gateway URL, or your own gateway
-      API key in the app settings.
-  developer: badlogic
-  website: https://github.com/badlogic/pi-mono
-  sourceCode: https://github.com/beclab/lares
-  submitter: Olares
+    ## Requirements
+    - Olares >= 1.12.7
+    - Router app installed and running (`router` dependency)
+    - Arch: amd64, arm64
+
+    ## Getting started
+    1. Install Lares from Market (test source: `market.test`).
+    2. Ensure Router is installed.
+    3. Open the Lares entrance and start a chat.
+  upgradeDescription: |
+    ## Lares 0.23.0
+
+    - Preview workspace files in a session overlay, including media the agent
+      just produced, and download them without leaving chat.
+    - Import Drive files or a URL into the workspace; ffmpeg_encode uses the
+      image's Debian ffmpeg (software H.264, no GPU device mounts).
+    - Pods inherit the user's timezone via TIMEZONE / TZ.
+  developer: luolong
+  submitter: luolong
   locale:
     - en-US
     - zh-CN
-  license:
-    - text: MIT
-      url: https://github.com/beclab/Olares/blob/main/LICENSE
-  requiredMemory: 512Mi
-  limitedMemory: 4Gi
+  requiredCpu: 400m
+  limitedCpu: "6"
+  requiredMemory: 768Mi
+  limitedMemory: 12Gi
   requiredDisk: 2Gi
-  limitedDisk: 20Gi
-  requiredCpu: 200m
-  limitedCpu: 2000m
+  limitedDisk: 50Gi
   supportArch:
     - amd64
     - arm64
-options:
-  apiTimeout: 0
-  dependencies:
-    - name: olares
-      type: system
-      version: ">=1.12.6-0"
+permission:
+  appData: true
 entrances:
   - name: lares
-    port: 30141
-    host: lares
+    host: lares-svc
+    port: 8080
     title: Lares
-    icon: https://app.cdn.olares.com/appstore/lares/icon.png
-    openMethod: default
+    icon: https://raw.githubusercontent.com/ffkijjkokok/lares/main/icon.png
     authLevel: private
+    openMethod: window
+options:
+  apiTimeout: 0
+  # Brand mark + PWA manifest public so the browser-tab favicon loads before the
+  # private-entrance auth redirect (same pattern Ashia uses for its icon assets).
+  policies:
+    - entranceName: lares
+      description: Brand mark and PWA manifest
+      uriRegex: ^/lares/(mark\.svg|manifest\.webmanifest)$
+      level: public
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+    - name: router
+      version: '>=1.0.0'
+      type: application
+workloadReplicas:
+  lares: 1
+envs:
+  - envName: TIMEZONE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_TIMEZONE
+    description: "Time zone used by Lares, its agents, and commands (IANA name such as Asia/Shanghai)"
+  - envName: ENABLE_DIND
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "true"
+    description: "Run a privileged Docker-in-Docker sidecar in the pod. Exposes the docker CLI via DOCKER_HOST=tcp://localhost:2375 (uses extra CPU/RAM/disk under app data). Disable if your environment forbids privileged containers"
