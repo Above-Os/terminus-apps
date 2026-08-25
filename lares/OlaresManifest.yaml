@@ -6,13 +6,13 @@ metadata:
   appid: lares
   title: Lares
   description: Chat shell on DeepSeek Harness, wired to Olares Router
-  icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
-  version: 0.0.12
+  icon: https://raw.githubusercontent.com/ffkijjkokok/lares/main/icon.png
+  version: 0.0.13
   categories:
     - Utilities_v112
     - AI
 spec:
-  versionName: "0.22.0"
+  versionName: "0.23.0"
   runAsUser: true
   fullDescription: |
     ## Overview
@@ -23,6 +23,7 @@ spec:
     - Official dsh web UI (three-column layout) with Lares product profile
     - Zero-config Router auth via in-cluster app identity (`x-caller-appid`)
     - Bundled client plugins (voice input, web search) when enabled in the build
+    - Optional Docker-in-Docker sidecar (`ENABLE_DIND`, default on) so the agent can run `docker` against a pod-local daemon
 
     ## Requirements
     - Olares >= 1.12.7
@@ -34,24 +35,24 @@ spec:
     2. Ensure Router is installed.
     3. Open the Lares entrance and start a chat.
   upgradeDescription: |
-    ## Lares 0.22.0
+    ## Lares 0.23.0
 
-    - Published as a multi-architecture image: arm64 nodes are now supported.
-    - The olares-* agent skills now come out of the olares-cli binary in the
-      image, so they always describe the release that is actually installed.
-    - Base image gains a Python 3 development environment and the
-      command-line tools an agent expects (gh, less, unzip, rsync, dig).
+    - Preview workspace files in a session overlay, including media the agent
+      just produced, and download them without leaving chat.
+    - Import Drive files or a URL into the workspace; ffmpeg_encode uses the
+      image's Debian ffmpeg (software H.264, no GPU device mounts).
+    - Pods inherit the user's timezone via TIMEZONE / TZ.
   developer: luolong
   submitter: luolong
   locale:
     - en-US
     - zh-CN
-  requiredCpu: 200m
-  limitedCpu: "2"
-  requiredMemory: 512Mi
-  limitedMemory: 4Gi
+  requiredCpu: 400m
+  limitedCpu: "6"
+  requiredMemory: 768Mi
+  limitedMemory: 12Gi
   requiredDisk: 2Gi
-  limitedDisk: 20Gi
+  limitedDisk: 50Gi
   supportArch:
     - amd64
     - arm64
@@ -62,7 +63,7 @@ entrances:
     host: lares-svc
     port: 8080
     title: Lares
-    icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
+    icon: https://raw.githubusercontent.com/ffkijjkokok/lares/main/icon.png
     authLevel: private
     openMethod: window
 options:
@@ -83,3 +84,17 @@ options:
       type: application
 workloadReplicas:
   lares: 1
+envs:
+  - envName: TIMEZONE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_TIMEZONE
+    description: "Time zone used by Lares, its agents, and commands (IANA name such as Asia/Shanghai)"
+  - envName: ENABLE_DIND
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "true"
+    description: "Run a privileged Docker-in-Docker sidecar in the pod. Exposes the docker CLI via DOCKER_HOST=tcp://localhost:2375 (uses extra CPU/RAM/disk under app data). Disable if your environment forbids privileged containers"
