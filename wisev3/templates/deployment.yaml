@@ -1,14 +1,13 @@
 {{- /*
   Wise (shared, admin-only v3 app) — merged frontend + knowledge backend.
 
-  Backend Pod (Deployment {{ .Release.Name }} == appid `wisev3`; the
-  primary workload MUST be named after the release for the v3 schema), four
-  containers:
+  Backend Pod (Deployment `knowledge`), four containers:
     - knowledge      (knowledge-base-api, port 3010)
     - vectorcrawl    (vector indexing worker, port 8080)
     - camoufox       (Cloudflare/CAPTCHA bypass, port 8191, in-pod via localhost)
     - nginx          (openresty reverse-proxy sidecar, port 3009)
-  Frontend Pod (Deployment `wise`): the Wise nginx frontend
+  Frontend Pod (Deployment {{ .Release.Name }} == appid `wisev3`, the primary
+  workload for the v3 schema): the Wise nginx frontend
   (see the wise-svc / wiseclient section further down).
 
   Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
@@ -25,10 +24,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Primary workload MUST be named after the release (== appid wisev3);
-  # the appstore upload validator requires a Deployment/StatefulSet named
-  # exactly the appid. Only the secondary (wise) workload may use a free name.
-  name: {{ .Release.Name }}
+  # Backend workload; named `knowledge` (free name). The appid-named primary
+  # workload (== `wisev3`) is the frontend Deployment further down, which the
+  # appstore upload validator requires (a Deployment/StatefulSet named appid).
+  name: knowledge
   namespace: {{ .Release.Namespace }}
   labels:
     app: knowledge
@@ -38,7 +37,7 @@ metadata:
     # (appid wisev3 -> entrance knowledge -> https://knowledge.<user>.olares...).
     applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "wisev3","entranceName":"knowledge","thirdLevelDomain":"knowledge"}]'
 spec:
-  replicas: {{ .Values.workloads.wisev3.replicaCount }}
+  replicas: {{ .Values.workloads.knowledge.replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -404,13 +403,16 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wise
+  # Primary workload == appid (`wisev3`); the appstore upload validator requires
+  # a Deployment/StatefulSet named exactly the appid. Pod label stays `app: wise`
+  # (the wise-svc Service selects on it), only the Deployment name is the appid.
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: wise
     applications.app.bytetrade.io/author: bytetrade.io
 spec:
-  replicas: {{ .Values.workloads.wise.replicaCount }}
+  replicas: {{ .Values.workloads.wisev3.replicaCount }}
   strategy:
     type: Recreate
   selector:
