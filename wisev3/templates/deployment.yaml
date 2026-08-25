@@ -1,7 +1,7 @@
 {{- /*
   Wise (shared, admin-only v3 app) — merged frontend + knowledge backend.
 
-  Backend Pod (Deployment {{ .Release.Name }} == appid `knowledgev3`; the
+  Backend Pod (Deployment {{ .Release.Name }} == appid `wisev3`; the
   primary workload MUST be named after the release for the v3 schema), four
   containers:
     - knowledge      (knowledge-base-api, port 3010)
@@ -12,11 +12,10 @@
   (see the wise-svc / wiseclient section further down).
 
   Service `rss-svc` keeps the v2 wise/knowledge name so the Wise frontend
-  image (TermiPass docker/wise/wise.conf) works unchanged — it hardcodes
-  `rss-svc.knowledge-shared:{3010,3100}` as nginx upstreams. NOTE: this app
-  actually installs into `knowledgev3-shared` (`<appid>-shared`), so that
-  hardcoded FQDN does not match; backend connectivity is intentionally left
-  as-is for now.
+  image (TermiPass docker/wise/wise.conf) can reach it. IMPORTANT: this app
+  installs into `wisev3-shared` (`<appid>-shared`), so the wise image's
+  wise.conf upstreams MUST point at `rss-svc.wisev3-shared.svc.cluster.local`
+  (rebuild/push the image after changing the appid/namespace).
 
   Cross-app calls to ytdlpv3 / rssubscribev3 / twitterv3 go via their
   v3 shared entrance Services over Kubernetes DNS (`<appid>-shared`).
@@ -26,7 +25,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Primary workload MUST be named after the release (== appid knowledgev3);
+  # Primary workload MUST be named after the release (== appid wisev3);
   # the appstore upload validator requires a Deployment/StatefulSet named
   # exactly the appid. Only the secondary (wise) workload may use a free name.
   name: {{ .Release.Name }}
@@ -36,10 +35,10 @@ metadata:
     applications.app.bytetrade.io/author: bytetrade.io
   annotations:
     # Default third-level domain routing for the `knowledge` entrance
-    # (appid knowledgev3 -> entrance knowledge -> https://knowledge.<user>.olares...).
-    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "knowledgev3","entranceName":"knowledge","thirdLevelDomain":"knowledge"}]'
+    # (appid wisev3 -> entrance knowledge -> https://knowledge.<user>.olares...).
+    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "wisev3","entranceName":"knowledge","thirdLevelDomain":"knowledge"}]'
 spec:
-  replicas: {{ .Values.workloads.knowledgev3.replicaCount }}
+  replicas: {{ .Values.workloads.wisev3.replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -203,7 +202,7 @@ spec:
             - name: LISTEN_ADDR
               value: 0.0.0.0:8080
             - name: K8S_NAMESPACE
-              value: knowledgev3-shared
+              value: wisev3-shared
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -328,7 +327,8 @@ spec:
 # Backs the (invisible, admin-only) Olares entrance for direct API access.
 # Name kept as `rss-svc` for compatibility with the Wise frontend image
 # (TermiPass `docker/wise/wise.conf` hardcodes
-# `rss-svc.knowledge-shared:{3010,3100}` as nginx upstreams).
+# `rss-svc.wisev3-shared:{3010,3100}` as nginx upstreams — must match the
+# `<appid>-shared` namespace, so the image needs a rebuild after this rename).
 # Ports mirror the v2 wise/knowledge rss-svc layout.
 apiVersion: v1
 kind: Service
@@ -429,7 +429,7 @@ spec:
       serviceAccountName: wise-provider
       containers:
         - name: frontend
-          image: "beclab/wise:v1.11.34"
+          image: "zyh2023/wise-260825-alpha1"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
