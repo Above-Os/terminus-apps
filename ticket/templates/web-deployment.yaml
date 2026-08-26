@@ -1,3 +1,4 @@
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,8 +6,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: ticket
+{{- if and .Values.sysVersion (semverCompare ">=1.12.7-0" (toString .Values.sysVersion)) }}
   annotations:
     applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "ticket","entranceName":"ticket","thirdLevelDomain":"ticket"}]'
+{{- end }}
 spec:
   replicas: {{ .Values.workloads.ticket.replicaCount }}
   selector:
@@ -67,3 +70,5 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+
+    

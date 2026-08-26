@@ -1,14 +1,15 @@
 {{/*
-Nginx reverse proxy config for nextcloudweb (clientproxy).
-Referenced by nginx-configmap.yaml; checksum in Deployment triggers rollout on change.
+Nginx reverse proxy config for komgaweb.
+Referenced by clientproxy.yaml; checksum in Deployment triggers rollout on change.
 */}}
-{{- define "nextcloud.nginx.conf" -}}
+{{- define "komga.nginx.conf" -}}
 server {
     listen 8080;
     access_log /usr/local/openresty/nginx/logs/access.log;
     error_log /usr/local/openresty/nginx/logs/error.log;
 
-    client_max_body_size 512m;
+    # Official OpenResty defaults to 1m; CBZ/CBR/PDF uploads need more.
+    client_max_body_size 500m;
 
     proxy_connect_timeout 30s;
     proxy_send_timeout 60s;
@@ -17,21 +18,9 @@ server {
     proxy_set_header x-forwarded-host $http_host;
 
     proxy_http_version 1.1;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+
     proxy_set_header upgrade $http_upgrade;
     proxy_set_header connection "upgrade";
-
-    location = /healthz {
-        access_log off;
-        return 200 'ok\n';
-        add_header Content-Type text/plain;
-    }
-
-    location ~ ^/(remote\.php|public\.php|ocs|ocm-provider|ocs-provider|dav) {
-        proxy_pass http://nextcloud-svc:80;
-    }
 
     location / {
         proxy_hide_header Access-Control-Allow-Origin;
@@ -46,7 +35,7 @@ server {
             add_header Access-Control-Allow-Headers "deviceType,token, authorization, content-type,x-csrftoken";
             return 204;
         }
-        proxy_pass http://nextcloud-svc:80;
+        proxy_pass http://komga-svc:25600;
     }
 }
 {{- end -}}
