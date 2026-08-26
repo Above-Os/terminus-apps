@@ -1,11 +1,8 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
-{{- /* Speed preset: migrate older long-context ENGINE_ARGS on upgrade. */ -}}
-{{- $speedArgs := "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 1" -}}
-{{- if or (eq (trim $engineArgs) "") (contains "-c 8192" $engineArgs) (contains "-c 131072" $engineArgs) -}}
-{{- $engineArgs = $speedArgs -}}
-{{- end -}}
+{{- /* Speed preset: migrate older ENGINE_ARGS on upgrade. Shared with
+       llm-init.yaml so the engine and the model card cannot disagree. */ -}}
+{{- $engineArgs := include "llamacpphymt218bggufv3.presetArgs" ($oe.ENGINE_ARGS | default "") -}}
 {{- /* MODEL_MODE=embedding -> auto-add llama.cpp's --embedding so it works out
        of the box; skipped if the user already passed it in ENGINE_ARGS. */ -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
