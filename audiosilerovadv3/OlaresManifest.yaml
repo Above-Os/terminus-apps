@@ -7,7 +7,7 @@ metadata:
   description: "Silero VAD v5 for voice activity detection."
   appid: audiosilerovadv3
   title: Silero VAD V5
-  version: '1.0.8'
+  version: '1.0.9'
   categories:
     - AI
     - models
@@ -46,8 +46,10 @@ spec:
     - Model: `onnx-community/silero-vad`
     - Source: `hf://onnx-community/silero-vad`
     - Capabilities: `vad`
-    - Required GPU memory: `0` (CPU-only)
+    - Compute: CPU-only (`0` GPU memory)
     - Engine: Silero VAD (pyannote runtime)
+    - Engine flags: none; this VAD base does not read `ENGINE_ARGS`. Tune `threshold`,
+      `min_silence_ms`, `speech_pad_ms`, `min_speech_ms`, and `max_speech_s` per request.
 
     **How It Works**
     First, Model Console (llm-init) downloads the model and gets it ready, then the
@@ -62,7 +64,8 @@ spec:
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
 
   upgradeDescription: |
-    v1.0.0: Initial release.
+    v1.0.9: Declare the CPU-only runtime, align its resource envelope, and move
+    to audio engine v1.1.2.
 
   developer: beclab
   website: https://github.com/beclab/llm-init
@@ -75,24 +78,13 @@ spec:
     - text: MIT
       url: https://github.com/beclab/llm-init
 
-  accelerator:
-    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
-    - mode: nvidia
-      limitedCpu: "3"
-      requiredCpu: "400m"
-      requiredDisk: 50Mi
-      limitedDisk: 20Gi
-      limitedMemory: "6Gi"
-      requiredMemory: "768Mi"
-      requiredGPUMemory: "0"
-      limitedGPUMemory: "0"
-    - mode: nvidia-gb10
-      limitedCpu: "3"
-      requiredCpu: "400m"
-      requiredDisk: 50Mi
-      limitedDisk: 20Gi
-      limitedMemory: "6Gi"
-      requiredMemory: "768Mi"
+  # Sum rule: envelope >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+  limitedCpu: "3"
+  requiredCpu: "400m"
+  requiredDisk: 50Mi
+  limitedDisk: 20Gi
+  limitedMemory: "6Gi"
+  requiredMemory: "768Mi"
 
   supportArch:
     - amd64
@@ -203,7 +195,7 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    description: "Engine-native flags (llm-init ENGINE_ARGS); unset lets the image decide."
+    description: "This VAD base does not read ENGINE_ARGS; tune threshold, min_silence_ms, speech_pad_ms, min_speech_ms, and max_speech_s per request."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
