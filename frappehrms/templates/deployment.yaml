@@ -108,25 +108,10 @@ spec:
               SITE_NAME="${SITE_NAME:-frontend}"
               wait-for-it -t 180 "${DB_HOST}:${DB_PORT}"
               wait-for-it -t 180 "${REDIS_HOST}:${REDIS_PORT}"
-              if [ ! -f "sites/${SITE_NAME}/.olares-ready-v2" ]; then
-                echo "Creating site ${SITE_NAME}"
-                HELP="$(bench new-site --help 2>&1 || true)"
-                ARGS=(
-                  --verbose
-                  --force
-                  --db-type mariadb
-                  --db-host "${DB_HOST}"
-                  --db-port "${DB_PORT}"
-                  --admin-password "${ADMIN_PASSWORD}"
-                  --set-default
-                  --install-app erpnext
-                  --install-app hrms
-                )
-                ARGS+=(--db-root-username root)
-                ARGS+=(--db-root-password "${MARIADB_ROOT_PASSWORD}")
-                ARGS+=(--mariadb-user-host-login-scope='%')
-                bench new-site "${SITE_NAME}" "${ARGS[@]}"
-                touch "sites/${SITE_NAME}/.olares-ready-v2"
+              if [ ! -f "sites/${SITE_NAME}/.olares-ready-v3" ]; then
+                echo "Creating site ${SITE_NAME} on existing middleware database"
+                /home/frappe/frappe-bench/env/bin/python /olares/create_site.py
+                touch "sites/${SITE_NAME}/.olares-ready-v3"
               else
                 echo "Site ${SITE_NAME} already provisioned"
               fi
@@ -156,11 +141,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: ADMIN_PASSWORD
-            - name: MARIADB_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secrets
-                  key: MARIADB_ROOT_PASSWORD
             - name: REDIS_HOST
               value: "{{ .Values.redis.host }}"
             - name: REDIS_PORT
@@ -177,6 +157,9 @@ spec:
               mountPath: /home/frappe/frappe-bench/sites
             - name: logs
               mountPath: /home/frappe/frappe-bench/logs
+            - name: nginx-bootstrap
+              mountPath: /olares
+              readOnly: true
       containers:
         - name: frappehrms
           image: docker.io/beclab/frappe-hrms:v16.16.0
