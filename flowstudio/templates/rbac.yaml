@@ -1,7 +1,7 @@
 {{- $de := (default dict .Values.dynamicEngine) }}
 {{- $sa := ($de.serviceAccountName | default "flowstudio-engine-orchestrator") }}
 {{- if ne (toString $de.enabled) "false" }}
-# Namespace-scoped engine orchestration only (no cluster-wide Role).
+# Namespace Role for engine objects; ClusterRoles only for GPUBinding + nodes read.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -66,5 +66,29 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: {{ $sa }}-gpubinding-{{ .Release.Namespace }}
+  apiGroup: rbac.authorization.k8s.io
+---
+# ClusterRole for HAMi node-register VRAM (get/list only; no write).
+# compute-resources is blocked for business apps; chart does not inject OLARES_GPU_MEMORY_*.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}-nodes-{{ .Release.Namespace }}
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}-nodes-{{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $sa }}-nodes-{{ .Release.Namespace }}
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
