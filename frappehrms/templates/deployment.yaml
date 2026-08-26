@@ -141,6 +141,8 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: ADMIN_PASSWORD
+            - name: PYTHONPATH
+              value: /olares
             - name: REDIS_HOST
               value: "{{ .Values.redis.host }}"
             - name: REDIS_PORT
@@ -225,6 +227,12 @@ spec:
               value: "4"
             - name: GUNICORN_TIMEOUT
               value: "120"
+            - name: PYTHONPATH
+              value: /olares
+            - name: DB_NAME
+              value: "{{ .Values.mariadb.databases.frappehrms }}"
+            - name: DB_USER
+              value: "{{ .Values.mariadb.username }}"
           ports:
             - name: gunicorn
               containerPort: 8000
@@ -242,6 +250,9 @@ spec:
               mountPath: /home/frappe/frappe-bench/logs
             - name: dshm
               mountPath: /dev/shm
+            - name: nginx-bootstrap
+              mountPath: /olares
+              readOnly: true
         - name: websocket
           image: docker.io/beclab/frappe-hrms:v16.16.0
           imagePullPolicy: IfNotPresent
@@ -271,6 +282,13 @@ spec:
             - worker
             - --queue
             - short,default,long
+          env:
+            - name: PYTHONPATH
+              value: /olares
+            - name: DB_NAME
+              value: "{{ .Values.mariadb.databases.frappehrms }}"
+            - name: DB_USER
+              value: "{{ .Values.mariadb.username }}"
           resources:
             requests:
               cpu: 250m
@@ -283,12 +301,22 @@ spec:
               mountPath: /home/frappe/frappe-bench/sites
             - name: logs
               mountPath: /home/frappe/frappe-bench/logs
+            - name: nginx-bootstrap
+              mountPath: /olares
+              readOnly: true
         - name: scheduler
           image: docker.io/beclab/frappe-hrms:v16.16.0
           imagePullPolicy: IfNotPresent
           command:
             - bench
             - schedule
+          env:
+            - name: PYTHONPATH
+              value: /olares
+            - name: DB_NAME
+              value: "{{ .Values.mariadb.databases.frappehrms }}"
+            - name: DB_USER
+              value: "{{ .Values.mariadb.username }}"
           resources:
             requests:
               cpu: 50m
@@ -301,6 +329,9 @@ spec:
               mountPath: /home/frappe/frappe-bench/sites
             - name: logs
               mountPath: /home/frappe/frappe-bench/logs
+            - name: nginx-bootstrap
+              mountPath: /olares
+              readOnly: true
       volumes:
         - name: app-data
           hostPath:
