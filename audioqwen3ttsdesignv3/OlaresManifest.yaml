@@ -1,0 +1,234 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audioqwen3ttsdesignv3
+  icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+  description: "Qwen3-TTS 1.7B VoiceDesign for instruction-based voice design."
+  appid: audioqwen3ttsdesignv3
+  title: Qwen3-TTS Design 1.7B
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+  - text-to-speech
+  - audio
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audioqwen3ttsdesignv3api
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3-TTS Design 1.7B API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audioqwen3ttsdesignv3
+    port: 8090
+    host: download-svc
+    title: Qwen3-TTS Design 1.7B
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audioqwen3ttsdesignv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign'
+  fullDescription: |
+    **Model Overview**
+    Qwen3-TTS 1.7B VoiceDesign: a written description becomes the voice. No preset
+    speakers and no reference clip.
+
+    **Configuration**
+    - Model: `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign`
+    - Source: `hf://Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign`
+    - Capabilities: `tts`
+    - Required GPU memory: `6Gi`
+    - Engine: faster-qwen3-tts (in-process, CUDA graphs)
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Endpoints**
+    - `POST /v1/audio/speech` — OpenAI shape: `input` is the text, `instructions` is the
+      voice description (required). `"stream": true` returns audio as it is decoded
+      (`pcm` or `wav`). Add `?async=1` for a task id instead of a wait.
+    - `POST /v1/audio/speech/batch` — `items[]` (1–32), one base64 clip per item, in order.
+    - `WS /v1/audio/speech/stream` — for text that is still arriving: each finished sentence is
+      spoken without waiting for the rest. Send `instructions` on `session.config`.
+
+    **Stack**
+    - **audio engine**: faster-qwen3-tts in-process (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    v1.0.0: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+    - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "10Gi"
+      requiredMemory: "6400Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "audio"
+    options:
+    - title: Audio
+      value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: TTS (instruction-based voice design)
+      value: tts
+    description: "VoiceDesign surface: /speech, /speech/batch, WS /speech/stream. Each request
+      must carry instructions (the voice description). These weights have no preset voices and
+      cannot clone — those live on the tts and tts_clone apps."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6Gi"
+    description: "GPU memory required for this model. `0` means CPU-only."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "12Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine-native flags (llm-init ENGINE_ARGS), empty by default because the
+      engine's own defaults already fit this quota. --max-seq-len 2048 caps a single utterance at
+      ~2.8 min and sizes the static KV buffer the CUDA graphs pin, so raising it costs VRAM.
+      --chunk-size 8 is how many 12 Hz codec steps a streamed chunk carries (~667 ms): lower it for
+      faster first audio, at one extra codec decode per chunk. --language Auto lets the model
+      detect. There is no --voice: the voice is the request's instructions field.
+      --attn-implementation sdpa is the portable path — flash_attention_2 only if the image
+      carries it."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
