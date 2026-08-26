@@ -18,70 +18,65 @@ spec:
         io.kompose.service: genoffice
     spec:
       enableServiceLinks: false
+      # The identity is not declared here: the image runs as uid 1000 and
+      # app-service pins the pod to 1000:1000 because the manifest asks for it.
       containers:
         - name: genoffice
-          image: docker.io/beclab/harveyff-genoffice:v0.0.9
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/bash", "-c"]
-          args:
-            - bash /scripts/enable-ime.sh; exec /init
-          env:
-            - name: PUID
-              value: "1000"
-            - name: PGID
-              value: "1000"
-            - name: TZ
-              value: Asia/Shanghai
-            - name: TITLE
-              value: GenOffice
-            - name: START_DOCKER
-              value: "false"
-            - name: NO_DECOR
-              value: "true"
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
               containerPort: 3000
               protocol: TCP
-            - containerPort: 3001
-              protocol: TCP
+          env:
+            - name: GENOFFICE_PORT
+              value: "3000"
+            - name: GENOFFICE_HOST
+              value: 0.0.0.0
+            # Every filesystem operation the browser can ask for is confined to
+            # these roots, so the mount list and this variable must agree.
+            - name: GENOFFICE_ROOTS
+              value: Documents:/data/Documents
+            - name: GENOFFICE_DATA_DIR
+              value: /data/app
+            # mesh-in injects the platform caller JWT only for hosts in this
+            # namespace's generated shared-host allowlist. Router publishes its
+            # per-user entrance there; router.shared.olares.com is not allowed.
+            - name: LLM_GATEWAY_URL
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+            - name: OLARES_APP_ID
+              value: genoffice
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: 200m
+              memory: 512Mi
             limits:
-              cpu: "4"
-              memory: 8Gi
+              cpu: "2"
+              memory: 2Gi
           volumeMounts:
-            - name: kasm-ime
-              mountPath: /scripts
-              readOnly: true
-            - name: config
-              mountPath: /config
             - name: documents
-              mountPath: /config/Documents
-            - name: downloads
-              mountPath: /config/Downloads
-            - name: dshm
-              mountPath: /dev/shm
+              mountPath: /data/Documents
+            - name: app-data
+              mountPath: /data/app
       restartPolicy: Always
       volumes:
-        - name: kasm-ime
-          configMap:
-            name: genoffice-kasm-ime
-            defaultMode: 0755
-        - name: config
-          hostPath:
-            type: DirectoryOrCreate
-            path: '{{ .Values.userspace.appData }}/config'
         - name: documents
           hostPath:
             type: DirectoryOrCreate
             path: '{{ .Values.userspace.userData }}/Documents'
-        - name: downloads
+        - name: app-data
           hostPath:
             type: DirectoryOrCreate
-            path: '{{ .Values.userspace.userData }}/Downloads'
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 1Gi
+            path: '{{ .Values.userspace.appData }}'

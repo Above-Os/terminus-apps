@@ -1,0 +1,188 @@
+apiVersion: v3
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+metadata:
+  name: audiovoicestudiov3
+  appid: audiovoicestudiov3
+  title: Voice Studio V3
+  description: VoiceStudio web UI; ASR/TTS go through the LLM Gateway to the engines already on this Olares.
+  icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+  version: "1.0.0"
+  categories:
+    - AI
+    - Utilities_v112
+    - models
+  tags:
+    - audio
+workloadReplicas:
+  audiovoicestudiov3: 1
+permission:
+  appData: true
+spec:
+  onlyAdmin: true
+  runAsUser: true
+  versionName: "0.5.0"
+  fullDescription: |
+    VoiceStudio (debpalash/VoiceStudio) as an Olares app. This chart is the product
+    UI — cloning, dubbing, dictation, audiobooks. Speech models stay in the
+    engines already on this Olares (Qwen ASR, Voxtral TTS, VoxCPM2, MOSS-TTS, …)
+    and are reached through the LLM Gateway. The first-run OmniVoice download is
+    skipped.
+
+    ASR, TTS and translation are pinned with OmniVoice's native OpenAI-compat env
+    vars (Olares app env; Chart defaults for URL/key/model are empty). Native
+    TRANSLATE_* stay in the process. If that call cannot reach the gateway, dub
+    translation falls back to Argos. Leave DIAR_MODEL empty to keep VoiceStudio's
+    own diarization. Fill it to use POST /v1/audio/diarization async=1 (poll
+    /v1/audio/tasks/{id}); on connect/timeout/5xx it fails fast and the
+    silence-gap heuristic runs.
+
+    Capabilities the gateway does not serve (Demucs vocal split, and in-app
+    pyannote when DIAR_MODEL is empty) can use the GPU this chart requests.
+  upgradeDescription: |
+    v1.0.0: Initial release.
+  developer: Olares
+  website: https://github.com/debpalash/VoiceStudio
+  sourceCode: https://github.com/debpalash/VoiceStudio
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: AGPL-3.0
+      url: https://github.com/debpalash/VoiceStudio/blob/main/LICENSE
+  supportArch:
+    - amd64
+  accelerator:
+    - mode: nvidia
+      requiredCpu: 600m
+      limitedCpu: "5"
+      requiredMemory: 5Gi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 6Gi
+      limitedGPUMemory: 6Gi
+options:
+  dependencies:
+    - name: olares
+      type: system
+      version: ">=1.12.6-0"
+  allowedOutboundPorts:
+    - 80
+    - 443
+  apiTimeout: 0
+entrances:
+  - name: audiovoicestudiov3
+    port: 3900
+    host: web
+    title: Voice Studio V3
+    icon: https://app.cdn.olares.com/appstore/llamacpp/icon.png
+    openMethod: window
+    authLevel: internal
+envs:
+  - envName: ASR_OPENAI_COMPAT_BASE_URL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "OpenAI-compatible ASR base: the LLM Gateway /v1. Empty until set in Olares app env."
+  - envName: ASR_OPENAI_COMPAT_MODEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Model id the gateway reports on GET /v1/models. Empty until the URL is set."
+  - envName: ASR_OPENAI_COMPAT_API_KEY
+    required: false
+    type: password
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Optional. LLM Gateway typically requires the workspace key."
+  - envName: OMNIVOICE_ASR_BACKEND
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "openai-compat-asr"
+    description: "VoiceStudio ASR engine id. Keep openai-compat-asr so dictation/dubbing use the gateway ASR instead of WhisperX inside this pod."
+  - envName: TTS_OPENAI_COMPAT_BASE_URL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "OpenAI-compatible TTS base, e.g. https://<llm-gateway>/v1. Empty until you set it."
+  - envName: TTS_OPENAI_COMPAT_MODEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Gateway TTS model id, e.g. mistralai/Voxtral-4B-TTS-2603. Empty until the URL is set."
+  - envName: TTS_OPENAI_COMPAT_API_KEY
+    required: false
+    type: password
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Optional. LLM Gateway may require the workspace key."
+  - envName: TTS_OPENAI_COMPAT_VOICE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Optional preset voice id. Empty for Qwen Base / VoxCPM2 / MOSS (they reject voice). CustomVoice and Voxtral take a preset (e.g. vivian, de_female)."
+  - envName: OMNIVOICE_TTS_BACKEND
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "openai-compat-tts"
+    description: "VoiceStudio TTS engine id. Keep openai-compat-tts so synthesis goes to the Gateway instead of downloading OmniVoice."
+  - envName: LLM_DEFAULT_PROVIDER
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "custom"
+    description: "VoiceStudio LLM provider id. Keep custom so Chat/dub LLM use the gateway via TRANSLATE_*."
+  - envName: TRANSLATE_BASE_URL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Native OmniVoice TRANSLATE_BASE_URL. Gateway /v1. Stays in the process so dub LLM (provider=openai) hits the gateway; env wins over the Settings store."
+  - envName: TRANSLATE_MODEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Chat / dub model id the gateway reports, e.g. tencent/Hy-MT2-1.8B-GGUF:Q4_K_M. Native OmniVoice name for the Custom LLM."
+  - envName: TRANSLATE_API_KEY
+    required: false
+    type: password
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Workspace key for Chat. Same as ASR/TTS when using the LLM Gateway."
+  - envName: TRANSLATE_PROVIDER
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "openai"
+    description: "Native OmniVoice TRANSLATE_PROVIDER. openai = LLM engine (gateway). On connect/401 errors the overlay falls back to Argos. Filling this field replaces the whole value."
+  - envName: DIAR_MODEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Optional gateway diarization model id. Empty = VoiceStudio's own diarization. Fill to use POST /v1/audio/diarization async=1 (poll /v1/audio/tasks/{id}); on failure silence-gap runs."

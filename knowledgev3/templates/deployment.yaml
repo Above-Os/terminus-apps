@@ -49,9 +49,6 @@ spec:
     metadata:
       labels:
         app: knowledge
-      annotations:
-        # Roll the Pod whenever the sidecar's proxy config changes.
-        checksum/nginx-config: {{ include (print $.Template.BasePath "/nginx-configmap.yaml") . | sha256sum }}
     spec:
       # The knowledge container mints tokens for per-user `user-backend`
       # ServiceAccounts in `user-system-<username>` namespaces; that needs
@@ -108,7 +105,7 @@ spec:
               value: http://integration-provider-svc.os-protected:28080
             # v3 shared-app cross-call over cluster DNS. Namespace pattern: <appid>-shared.
             - name: SUBSCRIBE_URL
-              value: http://sharedentrances-rssubscribe.rssubscribev3-shared
+              value: http://3bfa8113.shared.olares.com
             - name: UPLOAD_SAVE_PATH
               value: '/data/'
             - name: SEARCH_URL
@@ -136,7 +133,7 @@ spec:
             - name: DOWNLOAD_URL
               value: http://download-provider-svc.os-framework:28080
             - name: YTDLP_DOWNLOAD_URL
-              value: http://sharedentrances-ytdlp.ytdlpv3-shared
+              value: http://7b1e87ff.shared.olares.com
             - name: NATS_HOST
               value: nats.os-platform
             - name: NATS_PORT
@@ -228,9 +225,9 @@ spec:
             - name: PG_DATABASE
               value: {{ .Values.postgres.databases.knowledge }}
             - name: YT_DLP_API_URL
-              value: http://sharedentrances-ytdlp.ytdlpv3-shared/api
+              value: http://7b1e87ff.shared.olares.com/api
             - name: TWITTER_API_URL
-              value: http://sharedentrances-twitter.twitterv3-shared/api
+              value: http://f1bce645.shared.olares.com/api
           ports:
             - containerPort: 8080
               name: backend
@@ -304,78 +301,12 @@ spec:
             - name: dshm
               mountPath: /dev/shm
       
-        # Reverse-proxy front door for the knowledge HTTP API. rss-svc:3010
-        # targets this sidecar (3009), which serves /download/* from the
-        # download provider-proxy and everything else from the knowledge
-        # container on 127.0.0.1:3010. See templates/nginx-configmap.yaml.
-        - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 3009
-              name: proxy
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 3009
-            initialDelaySeconds: 5
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 6
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 3009
-            initialDelaySeconds: 15
-            timeoutSeconds: 5
-            periodSeconds: 30
-            successThreshold: 1
-            failureThreshold: 3
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 500m
-              memory: 256Mi
-          volumeMounts:
-            # Replace the image's default main config (which also listens on
-            # 8080, colliding with vectorcrawl in this Pod). run.sh loads this
-            # exact path via `openresty -c`.
-            - name: knowledge-nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/nginx.conf
-              subPath: nginx.conf
-            # Dedicated SA token for the /download provider-proxy call. The
-            # Pod's auto-mounted token is 0600 root-only, unreadable by the
-            # non-root nginx worker; this projected copy is world-readable
-            # (0644) and lets us pin the audience the provider-proxy expects.
-            - name: knowledge-sa-token
-              mountPath: /var/run/secrets/tokens
-              readOnly: true
-
       volumes:
         - name: dshm
           emptyDir:
             medium: Memory
             sizeLimit: 1Gi  
 
-        - name: knowledge-nginx-config
-          configMap:
-            name: knowledge-nginx-config
-            defaultMode: 438
-            items:
-              - key: nginx.conf
-                path: nginx.conf
-        - name: knowledge-sa-token
-          projected:
-            # 0644 so the nginx worker (runs as non-root) can read it.
-            defaultMode: 420
-            sources:
-              - serviceAccountToken:
-                  path: knowledge-token
-                  expirationSeconds: 3600
-                  audience: https://kubernetes.default.svc.cluster.local
         - name: pgbackup
           hostPath:
             path: '{{ $dbbackup_rootpath }}/pg_backup'
@@ -411,14 +342,12 @@ spec:
   selector:
     app: knowledge
   ports:
-    # HTTP API now enters through the nginx sidecar (3009) so /download/*
-    # can be split off to the download provider-proxy; everything else is
-    # forwarded to the knowledge container. Service port stays 3010 so the
-    # Wise frontend upstream (rss-svc.<ns>:3010) is unchanged.
+    # HTTP API goes straight to the knowledge container. Service port stays
+    # 3010 so the Wise frontend upstream (rss-svc.<ns>:3010) is unchanged.
     - name: "knowledge-base-api"
       protocol: TCP
       port: 3010
-      targetPort: 3009
+      targetPort: 3010
     - name: "knowledge-ws-api"
       protocol: TCP
       port: 3100
@@ -500,7 +429,7 @@ spec:
       serviceAccountName: wise-provider
       containers:
         - name: frontend
-          image: "beclab/wise:v1.11.33"
+          image: "beclab/wise:v1.11.34"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
