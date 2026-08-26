@@ -1,0 +1,23 @@
+metadata:
+  title: Voice Studio V3
+  description: VoiceStudio web UI; ASR/TTS go through the LLM Gateway to the engines already on this Olares.
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    VoiceStudio (debpalash/VoiceStudio) as an Olares app. This chart is the product
+    UI — cloning, dubbing, dictation, audiobooks. Speech models stay in the
+    engines already on this Olares (Qwen ASR, Voxtral TTS, VoxCPM2, MOSS-TTS, …)
+    and are reached through the LLM Gateway. The first-run OmniVoice download is
+    skipped.
+
+    ASR, TTS and translation are pinned with OmniVoice's native OpenAI-compat env
+    vars (Olares app env; Chart defaults for URL/key/model are empty). Native
+    TRANSLATE_* stay in the process. If that call cannot reach the gateway, dub
+    translation falls back to Argos. Leave DIAR_MODEL empty to keep VoiceStudio's
+    own diarization. Fill it to use POST /v1/audio/diarization async=1 (poll
+    /v1/audio/tasks/{id}); on connect/timeout/5xx it fails fast and the
+    silence-gap heuristic runs.
+
+    Capabilities the gateway does not serve (Demucs vocal split, and in-app
+    pyannote when DIAR_MODEL is empty) can use the GPU this chart requests.

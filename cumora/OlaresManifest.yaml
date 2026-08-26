@@ -11,7 +11,7 @@ metadata:
   title: Cumora
   description: Team chat where AI agents are first-class participants.
   icon: https://cdn.olares.com/images/2026/08/5a5caa33c391353b29a21a4ac9710cfe.png
-  version: 0.0.5
+  version: 0.0.11
   categories:
   - Productivity_v112
   - workspace
@@ -25,7 +25,7 @@ entrances:
   port: 5181
   title: Cumora
   icon: https://cdn.olares.com/images/2026/08/5a5caa33c391353b29a21a4ac9710cfe.png
-  authLevel: public
+  authLevel: internal
   openMethod: window
 
 spec:
@@ -70,13 +70,12 @@ spec:
     - Olares >= 1.12.6
     - amd64 or arm64 node
     - PostgreSQL and Redis middleware
-    - An OpenAI API key (required to start the server)
+    - An OpenAI API key in Settings → Integration (optional at install;
+      needed for LLM/agent features)
     - GitHub and/or Google OAuth app credentials
   upgradeDescription: |
-    Cumora 0.0.4
-
-    - Official Cumora mark as the Market icon (256x256).
-    - Add English listing images from the live workspace: Bram DM, Everyone check-in, Nova brief, and GitHub sign-in.
+    Land OAuth on /auth (public) instead of /, and bypass
+    Authelia for /auth, /api, /assets, and the homepage.
   developer: yetone
   website: https://cumora.ai
   sourceCode: https://github.com/yetone/cumora
@@ -117,19 +116,40 @@ options:
   - name: olares
     type: system
     version: '>=1.12.6-0'
-  - name: postgres
-    type: middleware
-    version: '>=17.0.0-0'
-    mandatory: true
+  policies:
+  - uriRegex: ^/$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(auth)(/.*)?(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(api)(/.*)?(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(assets)(/.*)?(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
+  - uriRegex: ^/(favicon-32\.png|icon-192\.png|manifest\.webmanifest)(\?.*)?$
+    level: public
+    oneTime: false
+    validDuration: 3600s
+    entranceName: cumora
 
 envs:
 - envName: OPENAI_API_KEY
-  required: true
-  type: password
-  editable: true
+  required: false
   applyOnChange: true
-  regex: '^.{8,}$'
-  description: OpenAI API key (required to start the server)
+  valueFrom:
+    envName: OLARES_USER_OPENAI_APIKEY
+  description: OpenAI API key from Settings → Integration (optional at install)
 - envName: GOOGLE_CLIENT_ID
   required: false
   type: string

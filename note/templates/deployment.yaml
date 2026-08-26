@@ -1,0 +1,188 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: note
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: note
+spec:
+  replicas: {{ .Values.workloads.note.replicaCount }}
+  selector:
+    matchLabels:
+      app: note
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: note
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              for d in /data /data/tmp /data/bin /cache; do
+                mkdir -p "$d" && chown 1000:1000 "$d"
+              done
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+            - name: app-cache
+              mountPath: /cache
+      containers:
+        - name: note
+          {{- if eq (default "userStorage" (.Values.binary).source) "image" }}
+          image: {{ printf "%s:%s"
+                      (required "binary.source=image requires appImage.repository" .Values.appImage.repository)
+                      (required "binary.source=image requires appImage.tag" .Values.appImage.tag) | quote }}
+          {{- else }}
+          image: {{ printf "%s:%s" .Values.runtimeImage.repository .Values.runtimeImage.tag | quote }}
+          {{- end }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          {{- if eq (default "userStorage" (.Values.binary).source) "image" }}
+          command:
+            - {{ (.Values.binary).inImagePath | default "/app/note" | quote }}
+          {{- else }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              SRC=/data/bin/note
+              RUN=/run/app/note
+              n=0
+              while :; do
+                if [ -s "$SRC" ]; then
+                  mkdir -p /run/app
+                  cp "$SRC" "$RUN" && chmod 755 "$RUN" || true
+                  if [ -x "$RUN" ]; then
+                    echo "got the binary ($(wc -c < "$RUN") bytes), starting"
+                    exec "$RUN"
+                  fi
+                fi
+                if [ $((n % 12)) -eq 0 ]; then
+                  echo "waiting for $SRC -- not uploaded yet. Upload it with:"
+                  echo "  olares-cli files upload <local note binary> drive/Data/{{ .Values.dataDirName }}/bin/note"
+                  echo "  (must be a static linux/amd64 build: GOOS=linux GOARCH=amd64 CGO_ENABLED=0)"
+                fi
+                n=$((n+1))
+                sleep 5
+              done
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: NOTE_ADDR
+              value: ":8080"
+            - name: NOTE_DATA_DIR
+              value: /data
+            - name: NOTE_TMP_DIR
+              value: /data/tmp
+            - name: NOTE_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            - name: NOTE_GATEWAY_MODE
+              value: real
+            - name: NOTE_GATEWAY_URL
+              {{- $fromForm := "" }}
+              {{- if .Values.olaresEnv }}{{ $fromForm = index .Values.olaresEnv "GATEWAY_URL" | default "" }}{{ end }}
+              {{- $zone := "" }}
+              {{- with .Values.user }}{{ $zone = .zone | default "" }}{{ end }}
+              {{- if $fromForm }}
+              value: {{ $fromForm | quote }}
+              {{- else if $zone }}
+              value: {{ printf "https://router.%s" $zone | quote }}
+              {{- else }}
+              value: ""
+              {{- end }}
+            - name: NOTE_SEG_STRATEGY
+              value: ""
+            - name: NOTE_AUDIO_DENOISE
+              value: ""
+            - name: NOTE_AUDIO_NORMALIZE
+              value: ""
+            - name: NOTE_TRASH_RETENTION
+              value: "720h"
+            - name: NOTE_GATEWAY_CALLER_JWT_FILE
+              value: /run/olares/caller-jwt/token
+            - name: TZ
+              value: Asia/Shanghai
+            - name: NOTE_IMPORT_ROOT
+              value: /user-home
+            - name: NOTE_GATEWAY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-db
+                  key: NOTE_GATEWAY_API_KEY
+                  optional: true
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-db
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+            - name: app-cache
+              mountPath: /cache
+            - name: user-home
+              mountPath: /user-home
+              readOnly: true
+            - name: run
+              mountPath: /run/app
+            - name: caller-jwt
+              mountPath: /run/olares/caller-jwt
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "4"
+              memory: 2Gi
+      volumes:
+        - name: app-data
+          hostPath:
+            path: {{ .Values.userspace.appData }}
+            type: DirectoryOrCreate
+        - name: app-cache
+          hostPath:
+            path: {{ .Values.userspace.appCache }}
+            type: DirectoryOrCreate
+        - name: user-home
+          hostPath:
+            path: {{ .Values.userspace.userData }}
+            type: DirectoryOrCreate
+        - name: run
+          emptyDir: {}
+        - name: caller-jwt
+          secret:
+            secretName: caller-jwt
+            optional: true

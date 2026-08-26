@@ -1,0 +1,181 @@
+{{- /* Voxtral-4B-TTS on the crispasr base: ggml in-process, one pod. Not vLLM-Omni. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- /* MODEL_SUPPORTS: bare capability names; llm-init and the engine both take supports_* keys. */ -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ($oe.MODEL_SUPPORTS | default "tts") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+    {{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $supportsRaw := join "," $supportsKeys -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-crispasr:v1.1.1" -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.CPU_LIMIT | default "6") -}}
+{{- /* Host RAM: no Python ML framework at all, so this is the GGUF on its way to the card. */ -}}
+{{- $memLimit := trim ($oe.MEMORY_LIMIT | default "8Gi") -}}
+{{- /* 4.05 GiB of Q8_0 weights plus CUDA context, compute buffers and KV. There is no CPU path:
+       libcrispasr.so links libggml-cuda.so.0, which needs the driver, so "0" dies in the loader. */ -}}
+{{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "8Gi") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- /* No nvidia-gb10 branch: that mode is arm64 and this engine's CUDA build is x86_64-only, so
+       unified memory can never apply here. OlaresManifest declares the nvidia mode alone. */ -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- end -}}
+{{- /* Engine-native flags in llm-init's one channel. Filling ENGINE_ARGS in the UI replaces the
+       whole string, including --backend. Keep this in step with OlaresManifest's default. */ -}}
+{{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
+{{- if eq $engineArgs "" -}}
+{{- $engineArgs = "--backend voxtral-tts --gguf q8_0" -}}
+{{- end -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "https://huggingface.co" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audiovoxtralttsv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+            defaultMode: 0555
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/crispasr.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: audio
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: ENGINE_PORT
+              value: "{{ $enginePort }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+{{- if $engineArgs }}
+            - name: ENGINE_ARGS
+              value: {{ $engineArgs | quote }}
+{{- end }}
+{{- if $wantGpu }}
+            - name: REQUIRED_GPU_MEMORY
+              value: "{{ $gpuRaw }}"
+{{- end }}
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # No readinessProbe (like llamacpp): Ready at start so the app runs while the model downloads; llm-init gates /v1/*.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if $wantGpu }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if $wantGpu }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP

@@ -1,0 +1,94 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+
+metadata:
+  name: note
+  appid: note
+  title: Note
+  description: Turn recordings and videos into transcripts you can read, replay and export
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  version: "0.1.11"
+  categories:
+    - workspace
+
+spec:
+  versionName: "2.0.45"
+  fullDescription: |
+    Note turns recordings and videos into transcripts you can read, replay and export.
+    Click any sentence in the transcript and the player jumps to that second.
+
+    - Transcription with word-level alignment, so text and audio stay in sync
+    - Speaker diarization, with speakers you can rename
+    - Meeting digests (decisions, sections, action items) and translation
+    - Import from your own Olares drive, or upload from the browser
+    - Export transcripts and subtitles in several formats at once
+
+    All model calls go through Olares Router — no bundled models, no API key to fill in.
+    The app authenticates with the platform-issued app identity (caller JWT).
+
+    - Olares >= 1.12.6
+    - Router installed and running
+    - Architecture: amd64
+  locale:
+    - en-US
+    - zh-CN
+  submitter: huangzhenyuan-bytetrade
+  developer: huangzhenyuan-bytetrade
+  runAsUser: true
+  supportArch:
+    - amd64
+  requiredCpu: 200m
+  limitedCpu: "4"
+  requiredMemory: 256Mi
+  limitedMemory: 2Gi
+  requiredDisk: 1Gi
+  limitedDisk: 100Gi
+
+permission:
+  appData: true
+  appCache: true
+  userData:
+    - Home/
+
+entrances:
+  - name: note
+    host: note-svc
+    port: 8080
+    title: Note
+    authLevel: private
+    invisible: false
+    openMethod: window
+
+middleware:
+  postgres:
+    username: note
+    databases:
+      - name: note
+
+envs:
+  - envName: GATEWAY_URL
+    required: false
+    type: url
+    editable: true
+    description: "Override the Router address. Normally leave empty — the chart fills in https://router.<your zone>. Do not append /v1; the app adds it."
+  - envName: GATEWAY_API_KEY
+    required: false
+    type: password
+    editable: true
+    description: "Router data-plane key (starts with sk-). Normally leave empty — the app has its own platform-issued identity and needs no key."
+
+options:
+  apiTimeout: 0
+  needsSharedAccess: true
+  dependencies:
+    - name: olares
+      version: ">=1.12.6-0"
+      type: system
+    - name: llmgatewayv3
+      version: ">=1.0.0-0"
+      type: application
+      mandatory: false
+
+workloadReplicas:
+  note: 1

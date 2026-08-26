@@ -1,6 +1,7 @@
 # Engine wrapper mounted into the Intel vLLM container at /llm-init/wrappers.
-# Sources oneAPI setvars (libccl), waits for llm-init sentinel, then starts
-# vLLM OpenAI server with --model "$MODEL_NAME".
+# Sources the helpers llm-init publishes into RUN_DIR, sources oneAPI setvars
+# (libccl), waits for the llm-init sentinel, then starts the vLLM OpenAI server
+# with --model "$MODEL_NAME" under supervise_engine.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,10 +15,19 @@ data:
     set -eu
 
     ENGINE=vllm
-    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
-    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
-    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
-    log() { printf '[wrapper-%s] %s\n' "$ENGINE" "$*"; }
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
+    # arrive late - the two containers are separate Deployments with no ordering
+    # between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    . "$WRAPPER_COMMON"
 
     looks_like_hf_repo_id() {
         s=$1
@@ -36,17 +46,8 @@ data:
         esac
     }
 
-    elapsed=0
-    while [ ! -f "$SENTINEL" ]; do
-        if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
-            log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
-            exit 1
-        fi
-        log "waiting for $SENTINEL (elapsed=${elapsed}s)"
-        sleep "$WAIT_INTERVAL"
-        elapsed=$((elapsed + WAIT_INTERVAL))
-    done
-    log "sentinel $SENTINEL found after ${elapsed}s"
+    wait_for_sentinel
+    wait_for_engine_args_handoff
 
     if ! looks_like_hf_repo_id "${MODEL_NAME:-}"; then
         log "MODEL_NAME must be owner/repo for --model (got ${MODEL_NAME:-<empty>})"
@@ -64,12 +65,6 @@ data:
     else
         log "WARN: /opt/intel/oneapi/setvars.sh missing; continuing without oneAPI env"
     fi
-
-    case "${ENGINE_ARGS:-}" in
-        ENGINE_ARGS=*) ENGINE_ARGS=${ENGINE_ARGS#ENGINE_ARGS=} ;;
-    esac
-
-    log "starting Intel XPU vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
 
     # XE1 / older iGPU: xpu_kernels may JIT bfloat16 SYCL paths the hardware
     # lacks ("bf conversion instruction not supported"). Prefer native RMSNorm.
@@ -91,13 +86,22 @@ data:
         log "perf caps for mode=${OLARES_GPU_MODE:-intel}: $XE1_PERF_ARGS"
     fi
 
-    # shellcheck disable=SC2086
-    exec python3 -m vllm.entrypoints.openai.api_server \
-        --model "$MODEL_NAME" \
-        --served-model-name "$MODEL_NAME" \
-        --host 0.0.0.0 \
-        --port "${VLLM_PORT:-8000}" \
-        ${ENGINE_ARGS:-} \
-        ${XE1_COMPAT_ARGS} \
-        ${XE1_PERF_ARGS} \
-        "$@"
+    run_vllm() {
+        load_engine_args_from_handoff
+        case "${ENGINE_ARGS:-}" in
+            ENGINE_ARGS=*) ENGINE_ARGS=${ENGINE_ARGS#ENGINE_ARGS=} ;;
+        esac
+        log "starting Intel XPU vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
+        # shellcheck disable=SC2086
+        exec python3 -m vllm.entrypoints.openai.api_server \
+            --model "$MODEL_NAME" \
+            --served-model-name "$MODEL_NAME" \
+            --host 0.0.0.0 \
+            --port "${VLLM_PORT:-8000}" \
+            ${ENGINE_ARGS:-} \
+            ${XE1_COMPAT_ARGS} \
+            ${XE1_PERF_ARGS} \
+            "$@"
+    }
+
+    supervise_engine run_vllm "$@"
