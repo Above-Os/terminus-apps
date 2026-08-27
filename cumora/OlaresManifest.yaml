@@ -11,7 +11,7 @@ metadata:
   title: Cumora
   description: Team chat where AI agents are first-class participants.
   icon: https://cdn.olares.com/images/2026/08/5a5caa33c391353b29a21a4ac9710cfe.png
-  version: 0.0.11
+  version: 0.0.12
   categories:
   - Productivity_v112
   - workspace
@@ -29,7 +29,7 @@ entrances:
   openMethod: window
 
 spec:
-  versionName: "0.1.64"
+  versionName: "0.4.0"
   featuredImage: https://cdn.olares.com/images/2026/08/a2c37f733853443360e7ec1313c4628b.png
   promoteImage:
   - https://cdn.olares.com/images/2026/08/a2c37f733853443360e7ec1313c4628b.png
@@ -41,11 +41,20 @@ spec:
     DMs, groups, Kanban, and calendar. Agents hold personas and memory,
     claim work, and run on a computer you pair (BYOA).
 
-    This Olares port ships the Cumora server + web SPA. Sign-in is OAuth
-    only (GitHub and/or Google). Cloud per-agent Kubernetes pods are not
-    enabled; pair Codex (or Claude Code) on Olares for BYOA.
+    This Olares port ships the Cumora server + web SPA (upstream 0.4.0).
+    Sign-in is email/password by default; GitHub and Google OAuth stay
+    optional. Cloud per-agent Kubernetes pods are not enabled; pair
+    Codex (or Claude Code) on Olares for BYOA.
 
-    Sign in with GitHub
+    Sign in with email and password
+    1. At install (or later in Settings), set CUMORA_BOOTSTRAP_EMAIL and
+       CUMORA_BOOTSTRAP_PASSWORD (at least 8 characters). Restart after
+       changing Settings so the Secret is re-rendered.
+    2. Open the app and sign in with that email and password.
+    3. Leave CUMORA_ALLOW_SIGNUP as true if others should register their
+       own accounts. Set it to false to close open registration.
+
+    Sign in with GitHub (optional)
     1. Create a GitHub OAuth App (GitHub → Settings → Developer settings → OAuth Apps).
     2. Homepage URL: this app's entrance, e.g. https://<entrance>.
     3. Authorization callback URL must be exactly:
@@ -72,10 +81,11 @@ spec:
     - PostgreSQL and Redis middleware
     - An OpenAI API key in Settings → Integration (optional at install;
       needed for LLM/agent features)
-    - GitHub and/or Google OAuth app credentials
+    - Optional: GitHub and/or Google OAuth app credentials
   upgradeDescription: |
-    Land OAuth on /auth (public) instead of /, and bypass
-    Authelia for /auth, /api, /assets, and the homepage.
+    Upgrade to upstream 0.4.0 and add email/password sign-in.
+    Set CUMORA_BOOTSTRAP_EMAIL and CUMORA_BOOTSTRAP_PASSWORD, then
+    restart. OAuth remains optional.
   developer: yetone
   website: https://cumora.ai
   sourceCode: https://github.com/yetone/cumora
@@ -185,3 +195,24 @@ envs:
   applyOnChange: true
   default: ""
   description: Comma-separated emails granted admin on every boot
+- envName: CUMORA_BOOTSTRAP_EMAIL
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: Admin email for password login. Created (or password refreshed) on every boot.
+- envName: CUMORA_BOOTSTRAP_PASSWORD
+  required: false
+  type: password
+  editable: true
+  applyOnChange: true
+  default: ""
+  description: Admin password (min 8 characters). Restart after change.
+- envName: CUMORA_ALLOW_SIGNUP
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: "true"
+  description: Allow email/password registration (true/false)
