@@ -1,0 +1,83 @@
+apiVersion: v3
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+metadata:
+  name: mins
+  appid: mins
+  title: Mins
+  description: Meeting transcription with speaker labels, word timings and summaries
+  icon: https://app.cdn.olares.com/appstore/note/icon.png
+  version: 0.3.1
+  categories:
+    - Utilities_v112
+    - AI
+spec:
+  versionName: "0.3.1"
+  runAsUser: true
+  fullDescription: |
+    ## Overview
+    Mins turns a recording into a transcript you can read: who spoke, when
+    each word was said, what it means in another language, and what the
+    meeting decided.
+
+    Every model call goes through Olares Router to the audio model
+    applications installed on this Olares — nothing is sent to a third party
+    and no API key is needed.
+
+    ## Pipeline
+    1. Extract and normalise the audio (ffmpeg), then chunk it
+    2. Diarization — who spoke when
+    3. ASR — speech to text per speaker turn
+    4. Forced alignment — word-level timings
+    5. Translation and summary through a chat model
+
+    ## Requirements
+    - Olares >= 1.12.6
+    - Router installed and running
+    - Audio model applications for diarization, speech recognition and forced
+      alignment, plus a chat model for translation and summary
+    - Arch: amd64, arm64
+  developer: luolong
+  submitter: luolong
+  locale:
+    - en-US
+    - zh-CN
+  requiredCpu: 500m
+  limitedCpu: "4"
+  requiredMemory: 512Mi
+  limitedMemory: 4Gi
+  requiredDisk: 2Gi
+  limitedDisk: 100Gi
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+entrances:
+  - name: mins
+    host: mins-svc
+    port: 8080
+    title: Mins
+    icon: https://app.cdn.olares.com/appstore/note/icon.png
+    authLevel: private
+    openMethod: window
+options:
+  # The entrance proxy cuts every request at 15s by default, which would kill
+  # both the progress event stream and any upload larger than a short clip.
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+    - name: router
+      version: '>=1.0.0'
+      type: application
+middleware:
+  postgres:
+    username: mins
+    password: mins
+    databases:
+      - name: mins
+        distributed: false
+workloadReplicas:
+  mins: 1
