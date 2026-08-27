@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mins
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: mins
+spec:
+  replicas: {{ .Values.workloads.mins.replicaCount }}
+  selector:
+    matchLabels:
+      app: mins
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: mins
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        # Olares grants the appData mount but does not hand over ownership of
+        # it, and kubelet creates a missing subPath as root. Each directory is
+        # chowned on its own: recursing has been observed to fail on
+        # subdirectories the app already created as uid 1000, which leaves the
+        # pod stuck initializing on upgrade.
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for d in /data /data/meetings; do
+                mkdir -p "$d" && chown 1000:1000 "$d"
+              done
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+      containers:
+        - name: mins
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: MINS_PORT
+              value: "8080"
+            - name: MINS_DATA_DIR
+              value: /data
+            - name: TZ
+              value: Etc/UTC
+            # Router is reached through its per-user entrance, which is where
+            # mesh-in injects the platform caller JWT; the app's own identity
+            # rides along as x-caller-appid.
+            - name: LLM_GATEWAY_URL
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+            - name: OLARES_APP_ID
+              value: "mins"
+            # Whose Olares this is. Requests still carry their own identity in
+            # X-BFL-USER; this is for the work with no request behind it, such
+            # as adopting a recording found on the volume with no row.
+            - name: MINS_OWNER
+              value: {{ .Values.bfl.username | quote }}
+            # Files is reached through the user's own entrance for the same
+            # reason: an application pod's cleartext egress is captured by the
+            # mesh, which answers 504 for files-service. Every call made to it
+            # carries the credential of whoever is asking, so this address is
+            # of no use without a user in front of it.
+            - name: MINS_FILES_BASE_URL
+              value: {{ printf "https://files.%s" .Values.user.zone | quote }}
+            - name: MINS_CPU_WORKERS
+              value: {{ .Values.workers.cpu | quote }}
+            - name: MINS_GPU_WORKERS
+              value: {{ .Values.workers.gpu | quote }}
+            - name: POSTGRES_HOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.databases.mins | quote }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+      volumes:
+        - name: app-data
+          hostPath:
+            path: {{ .Values.userspace.appData }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mins-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: mins
+spec:
+  selector:
+    app: mins
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
