@@ -32,6 +32,28 @@ spec:
         volumeMounts:
         - name: app-data
           mountPath: /appdata
+      # MODELS_DIR 在 appCommon。平台只非递归准备 comfyui 保留目录，
+      # 其下 model/ 常被别的应用或 kubelet 建成 root:root，uid 1000 写不进去。
+      # 禁止 chown -R：已有 uid 1000 子目录上会 Operation not permitted，把 Pod 卡在 Initializing。
+      - name: fix-models-perms
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext:
+          runAsUser: 0
+        command:
+        - sh
+        - -c
+        - |
+          root=/data/appCommon/comfyui/model
+          mkdir -p "$root" && chown 1000:1000 "$root"
+          for d in checkpoints loras vae clip clip_vision diffusion_models controlnet \
+                   upscale_models latent_upscale_models style_models gligen embeddings \
+                   hypernetworks photomaker audio_encoders model_patches geometry_estimation \
+                   vae_approx configs manager; do
+            mkdir -p "$root/$d" && chown 1000:1000 "$root/$d"
+          done
+        volumeMounts:
+        - name: app-common
+          mountPath: /data/appCommon
       {{- if (default dict .Values.dev).hotReload }}
       # Do not create via subPath first — kubelet would own it as root.
       - name: fix-dev-perms
