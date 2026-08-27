@@ -234,6 +234,7 @@ data:
         )
         os.environ.setdefault("OMNIVOICE_STREAM_INTERVAL", "8.0")
         os.environ.setdefault("TRANSLATE_PROVIDER", "openai")
+        os.environ.setdefault("OMNIVOICE_GPU_WORKERS", "1")
         _clear_required_models()
         _pin_to_gateway()
         from olares_diar import patch_diarization
@@ -243,21 +244,24 @@ data:
         import backend.main as bmain
         from olares_tts import patch_list_profiles_route, start_voice_sync
         from olares_translate import patch_translate_fallback
+        from olares_hang import patch_dub_hang, wrap_asgi
     
         patch_list_profiles_route(bmain.app)
         patch_translate_fallback(bmain.app)
+        patch_dub_hang(bmain.app)
         start_voice_sync()
         _seed_llm_keep_translate_env()
         print(
             "olares overlay: ASR/TTS/TRANSLATE_* on gateway; "
             "diar gateway async=1, fail-fast to silence-gap; "
-            "translate falls back to Argos",
+            "translate falls back to Argos; "
+            "skip local TTS preload / sysinfo CUDA; chunk /dub/upload",
             flush=True,
         )
         import uvicorn
     
         uvicorn.run(
-            bmain.app,
+            wrap_asgi(bmain.app),
             host=os.environ.get("OMNIVOICE_BIND_HOST", "0.0.0.0"),
             port=int(os.environ.get("OMNIVOICE_PORT", "3900")),
         )
@@ -874,26 +878,8 @@ data:
     
     
     def patch_list_profiles_route(app) -> None:
-        """Refresh engine voices on GET /profiles without replacing the FastAPI endpoint.
-    
-        Replacing dependant.call with a *args/**kwargs wrapper made GET /profiles
-        return 422, so the picker never received profiles and only showed the gallery.
-        """
-        if getattr(app, "_olares_voice_mw", False):
-            return
-    
-        @app.middleware("http")
-        async def _olares_engine_voices(request, call_next):
-            path = (request.url.path or "").rstrip("/")
-            if request.method == "GET" and path == "/profiles":
-                try:
-                    sync_engine_voice_profiles()
-                except Exception as exc:
-                    print(f"olares overlay: voice sync skipped: {exc}", flush=True)
-            return await call_next(request)
-    
-        app._olares_voice_mw = True  # type: ignore[attr-defined]
-        print("olares overlay: GET /profiles will refresh engine voices", flush=True)
+        """Voice refresh is in wrap_asgi. Do not use BaseHTTPMiddleware — it stalls /dub/upload."""
+        print("olares overlay: GET /profiles refresh is ASGI (no BaseHTTPMiddleware)", flush=True)
     
     
     def _engine_voice(*, ref_text, instruct, extras) -> tuple[str, object]:
@@ -1477,3 +1463,406 @@ data:
             if dep is not None:
                 dep.call = wrapped
         print("olares overlay: LLM translate falls back to original engine on connect errors", flush=True)
+  olares_hang.py: |
+    """Chunk /dub/upload so a 5MB POST cannot stall the single worker. AGPL-3.0."""
+    from __future__ import annotations
+
+    import os
+    import uuid
+
+    from fastapi import HTTPException, Request
+    from fastapi.responses import JSONResponse, PlainTextResponse
+
+    CHUNK_JS = r"""(function () {
+      var CHUNK = 256 * 1024;
+      var orig = window.fetch.bind(window);
+      function hdrs(init) {
+        var h = new Headers((init && init.headers) || {});
+        h.delete("content-type");
+        h.delete("Content-Type");
+        return h;
+      }
+      window.fetch = function (input, init) {
+        try {
+          var url = typeof input === "string" ? input : (input && input.url) || "";
+          if (!init || String(init.method || "GET").toUpperCase() !== "POST") {
+            return orig(input, init);
+          }
+          if (url.indexOf("/dub/upload-") !== -1) return orig(input, init);
+          var path = url.split("?")[0];
+          if (!/\/dub\/upload\/?$/.test(path)) return orig(input, init);
+          var body = init.body;
+          if (!(body instanceof FormData)) return orig(input, init);
+          var file = body.get("video") || body.get("file");
+          if (!file || !file.size || file.size <= CHUNK) return orig(input, init);
+          return chunkUpload(url, body, file, init);
+        } catch (e) {
+          return orig(input, init);
+        }
+      };
+      async function chunkUpload(url, fd, file, init) {
+        var base = url.replace(/\/dub\/upload\/?(\?.*)?$/, "");
+        var jobId = fd.get("job_id") || "";
+        var inputType = fd.get("input_type") || "video";
+        var start = new FormData();
+        start.append("filename", file.name || "video.mp4");
+        start.append("job_id", jobId);
+        start.append("input_type", String(inputType));
+        start.append("size", String(file.size));
+        var startRes = await orig(base + "/dub/upload-init", {
+          method: "POST",
+          body: start,
+          credentials: init.credentials,
+          signal: init.signal,
+          headers: hdrs(init),
+        });
+        if (!startRes.ok) return startRes;
+        var meta = await startRes.json();
+        var offset = 0;
+        var idx = 0;
+        while (offset < file.size) {
+          var blob = file.slice(offset, Math.min(offset + CHUNK, file.size));
+          var last = null;
+          var ok = false;
+          for (var attempt = 0; attempt < 8; attempt++) {
+            var part = new FormData();
+            part.append("upload_id", meta.upload_id);
+            part.append("index", String(idx));
+            part.append("chunk", blob, "chunk.bin");
+            try {
+              last = await orig(base + "/dub/upload-part", {
+                method: "POST",
+                body: part,
+                credentials: init.credentials,
+                signal: init.signal,
+                headers: hdrs(init),
+              });
+              if (last.ok) {
+                ok = true;
+                break;
+              }
+              if (last.status < 500 && last.status !== 408 && last.status !== 429 && last.status !== 530) {
+                break;
+              }
+            } catch (e) {
+              last = null;
+            }
+            await new Promise(function (r) {
+              setTimeout(r, 1500 * (attempt + 1));
+            });
+          }
+          if (!ok) {
+            return last || new Response('{"detail":"upload-part retry exhausted"}', {
+              status: 502,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          offset += CHUNK;
+          idx += 1;
+        }
+        var fin = new FormData();
+        fin.append("upload_id", meta.upload_id);
+        return orig(base + "/dub/upload-finish", {
+          method: "POST",
+          body: fin,
+          credentials: init.credentials,
+          signal: init.signal,
+          headers: hdrs(init),
+        });
+      }
+    })();
+    """
+
+    _uploads: dict = {}
+
+
+    def _gateway_tts() -> bool:
+        return bool((os.environ.get("TTS_OPENAI_COMPAT_BASE_URL") or "").strip())
+
+
+    def _skip_local_tts_preload() -> None:
+        if not _gateway_tts():
+            return
+        import backend.main as bmain
+        import services.model_manager as mm
+
+        orig = mm.preload_model
+        if getattr(orig, "_olares_skip_preload", False):
+            return
+
+        async def preload_model():
+            print("olares overlay: skip local TTS preload (gateway TTS set)", flush=True)
+
+        preload_model._olares_skip_preload = True  # type: ignore[attr-defined]
+        mm.preload_model = preload_model
+        bmain.preload_model = preload_model
+        print("olares overlay: VoiceStudio.from_pretrained preload disabled", flush=True)
+
+
+    def _sysinfo_no_cuda(app) -> None:
+        import psutil
+        import api.routers.system as system
+
+        orig = system.get_sys_info
+        if getattr(orig, "_olares_no_cuda", False):
+            return
+
+        def get_sys_info():
+            vm = psutil.virtual_memory()
+            return {
+                "cpu": psutil.cpu_percent(interval=None),
+                "ram": vm.used / (1024**3),
+                "total_ram": vm.total / (1024**3),
+                "vram": 0.0,
+                "gpu_active": False,
+            }
+
+        get_sys_info._olares_no_cuda = True  # type: ignore[attr-defined]
+        system.get_sys_info = get_sys_info
+        for route in getattr(app, "routes", []) or []:
+            if getattr(route, "path", None) != "/sysinfo":
+                continue
+            route.endpoint = get_sys_info
+            dep = getattr(route, "dependant", None)
+            if dep is not None:
+                dep.call = get_sys_info
+        print("olares overlay: GET /sysinfo does not touch torch.cuda", flush=True)
+
+
+    def _chunk_routes(app) -> None:
+        # POSTs are served in wrap_asgi. FastAPI @app.post is appended after the
+        # SPA/StaticFiles mount, so Starlette returns 405 for POST /dub/upload-init.
+        if getattr(app, "_olares_chunk_routes", False):
+            return
+        app._olares_chunk_routes = True  # type: ignore[attr-defined]
+        print("olares overlay: /dub/upload-init|part|finish (256KiB chunks)", flush=True)
+
+
+    async def _upload_init(request: Request):
+        import api.routers.dub_core as dub_core
+
+        form = await request.form()
+        filename = str(form.get("filename") or "video.mp4")
+        job_id = str(form.get("job_id") or "").strip() or str(uuid.uuid4())[:8]
+        input_type = str(form.get("input_type") or "video").lower()
+        if input_type not in ("video", "audio"):
+            raise HTTPException(status_code=400, detail="input_type must be 'video' or 'audio'")
+        job_dir = dub_core._safe_job_dir(job_id)
+        if job_dir is None:
+            raise HTTPException(status_code=400, detail="Invalid job_id")
+        ext = os.path.splitext(filename)[1] or ".mp4"
+        if input_type == "audio" and ext.lower() not in dub_core._AUDIO_EXTS:
+            raise HTTPException(status_code=400, detail="not an audio file")
+        os.makedirs(job_dir, exist_ok=True)
+        upload_id = uuid.uuid4().hex
+        path = os.path.join(job_dir, f"original{ext}.part")
+        open(path, "wb").close()
+        _uploads[upload_id] = {
+            "job_id": job_id,
+            "job_dir": job_dir,
+            "path": path,
+            "ext": ext,
+            "filename": filename,
+            "input_type": input_type,
+            "wrote": 0,
+        }
+        print(f"olares overlay: upload-init {upload_id} job={job_id} name={filename}", flush=True)
+        return JSONResponse({"upload_id": upload_id, "job_id": job_id})
+
+
+    async def _upload_part(request: Request):
+        from starlette.datastructures import UploadFile as StarletteUploadFile
+
+        form = await request.form()
+        upload_id = str(form.get("upload_id") or "")
+        sess = _uploads.get(upload_id)
+        if not sess:
+            raise HTTPException(status_code=404, detail="unknown upload_id")
+        chunk = form.get("chunk")
+        if not isinstance(chunk, StarletteUploadFile):
+            raise HTTPException(status_code=400, detail="missing chunk")
+        data = await chunk.read()
+        with open(sess["path"], "ab") as fh:
+            fh.write(data)
+        sess["wrote"] += len(data)
+        print(
+            f"olares overlay: upload-part {upload_id} +{len(data)} total={sess['wrote']}",
+            flush=True,
+        )
+        return JSONResponse({"ok": True, "wrote": sess["wrote"]})
+
+
+    async def _upload_finish(request: Request):
+        import api.routers.dub_core as dub_core
+        from core.tasks import task_manager
+
+        form = await request.form()
+        upload_id = str(form.get("upload_id") or "")
+        sess = _uploads.pop(upload_id, None)
+        if not sess:
+            raise HTTPException(status_code=404, detail="unknown upload_id")
+        final = os.path.join(sess["job_dir"], f"original{sess['ext']}")
+        os.replace(sess["path"], final)
+        job_id = sess["job_id"]
+        filename = sess["filename"]
+        task_id = f"prep_{job_id}"
+        await task_manager.add_task(
+            task_id,
+            "prep",
+            dub_core._ingest_gen,
+            job_id,
+            sess["job_dir"],
+            {"kind": "file", "path": final, "input_type": sess["input_type"]},
+            filename,
+        )
+        print(
+            f"olares overlay: upload-finish {upload_id} {sess['wrote']} bytes -> {final}",
+            flush=True,
+        )
+        return JSONResponse(
+            status_code=202,
+            content={"job_id": job_id, "task_id": task_id, "filename": filename},
+        )
+
+
+    _CHUNK_POST = {
+        "/dub/upload-init": _upload_init,
+        "/dub/upload-part": _upload_part,
+        "/dub/upload-finish": _upload_finish,
+    }
+
+
+    def wrap_asgi(app):
+        """Pure ASGI: no BaseHTTPMiddleware. Inject chunk script; refresh voices."""
+        inner = app
+        marker = b'<script src="/olares-chunk-upload.js"></script>'
+
+        async def asgi(scope, receive, send):
+            if scope["type"] != "http":
+                await inner(scope, receive, send)
+                return
+            path = scope.get("path") or ""
+            method = scope.get("method") or ""
+            if method == "GET" and path == "/olares-chunk-upload.js":
+                body = CHUNK_JS.encode("utf-8")
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [
+                            (b"content-type", b"application/javascript; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode()),
+                            (b"cache-control", b"no-store"),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+            if method == "POST" and path in _CHUNK_POST:
+                from starlette.requests import Request as StarletteRequest
+
+                request = StarletteRequest(scope, receive)
+                try:
+                    resp = await _CHUNK_POST[path](request)
+                except HTTPException as exc:
+                    resp = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+                except Exception as exc:
+                    print(
+                        f"olares overlay: chunk POST {path} failed: "
+                        f"{type(exc).__name__}: {exc!r}",
+                        flush=True,
+                    )
+                    resp = JSONResponse(
+                        {"detail": type(exc).__name__},
+                        status_code=500,
+                    )
+                try:
+                    await resp(scope, receive, send)
+                except Exception:
+                    pass
+                return
+            if method == "GET" and path.rstrip("/") == "/profiles":
+                try:
+                    from olares_tts import sync_engine_voice_profiles
+
+                    sync_engine_voice_profiles()
+                except Exception as exc:
+                    print(f"olares overlay: voice sync skipped: {exc}", flush=True)
+            inject = method == "GET" and path in ("/", "/index.html")
+            if not inject:
+                await inner(scope, receive, send)
+                return
+            # Cached index (304) keeps the old HTML without the chunk script.
+            scope = dict(scope)
+            scope["headers"] = [
+                (k, v)
+                for k, v in (scope.get("headers") or [])
+                if k.lower() not in (b"if-none-match", b"if-modified-since")
+            ]
+            status = 200
+            headers = []
+            chunks = bytearray()
+            passthrough = False
+
+            async def collect(message):
+                nonlocal status, headers, passthrough
+                if message["type"] == "http.response.start":
+                    headers = list(message.get("headers") or [])
+                    enc = b""
+                    for k, v in headers:
+                        if k.lower() == b"content-encoding":
+                            enc = v
+                            break
+                    if enc:
+                        passthrough = True
+                        await send(message)
+                        return
+                    status = message["status"]
+                    return
+                if passthrough:
+                    await send(message)
+                    return
+                if message["type"] == "http.response.body":
+                    chunks.extend(message.get("body") or b"")
+                    if message.get("more_body"):
+                        return
+                    body = bytes(chunks)
+                    ctype = b""
+                    for k, v in headers:
+                        if k.lower() == b"content-type":
+                            ctype = v.lower()
+                            break
+                    if b"text/html" in ctype and marker not in body:
+                        html = body.decode("utf-8", "replace")
+                        if "</head>" in html:
+                            html = html.replace("</head>", marker.decode() + "</head>", 1)
+                        else:
+                            html = marker.decode() + html
+                        body = html.encode("utf-8")
+                    new_headers = [
+                        (k, v)
+                        for k, v in headers
+                        if k.lower()
+                        not in (
+                            b"content-length",
+                            b"content-encoding",
+                            b"etag",
+                            b"last-modified",
+                        )
+                    ]
+                    new_headers.append((b"content-length", str(len(body)).encode()))
+                    new_headers.append((b"cache-control", b"no-store"))
+                    await send(
+                        {"type": "http.response.start", "status": status, "headers": new_headers}
+                    )
+                    await send({"type": "http.response.body", "body": body})
+
+            await inner(scope, receive, collect)
+
+        return asgi
+
+
+    def patch_dub_hang(app) -> None:
+        _skip_local_tts_preload()
+        _sysinfo_no_cuda(app)
+        _chunk_routes(app)
