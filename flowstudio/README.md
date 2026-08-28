@@ -150,7 +150,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.47. This chart ships `docker.io/beclab/flowstudio:0.3.47` and `engine-1.0.6`.
+covers 0.3.47. This chart ships `docker.io/beclab/flowstudio:0.3.47` and `engine-1.0.7`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
