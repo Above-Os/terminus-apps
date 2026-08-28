@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.40** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.43** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -150,7 +150,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.40. This chart ships `docker.io/beclab/flowstudio:0.3.40` and `engine-1.0.6`.
+covers 0.3.43. This chart ships `docker.io/beclab/flowstudio:0.3.43` and `engine-1.0.6`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
