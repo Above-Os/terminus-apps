@@ -4,7 +4,7 @@ metadata:
   name: flowstudio
   namespace: {{ .Release.Namespace }}
   annotations:
-    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "flowstudio","entranceName":"flowstudio-svc","thirdLevelDomain":"flowstudio"}]'
+    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "flowstudio","entranceName":"flowstudio","thirdLevelDomain":"flowstudio"}]'
 spec:
   replicas: {{ .Values.workloads.flowstudio.replicaCount }}
   # hostPath volumes cannot roll safely.
@@ -20,6 +20,8 @@ spec:
     spec:
       enableServiceLinks: false
       {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+      # preStop + SIGTERM share this budget; default 30s cannot finish engine delete.
+      terminationGracePeriodSeconds: 120
       serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
       {{- end }}
       initContainers:
@@ -195,17 +197,41 @@ spec:
           mountPath: /app
           subPath: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" }}
         {{- end }}
-        # httpGet /healthz is blocked by envoy ext_authz (403 → 421); use TCP.
+        # Mesh intercepts podIP:8080 (Linkerd inbound 100ms). TCP to the
+        # Service port is a false Ready. Probe loopback so Ready = uvicorn.
+        startupProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2)
+          periodSeconds: 2
+          timeoutSeconds: 3
+          failureThreshold: 30
         readinessProbe:
-          tcpSocket:
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          exec:
+            command:
+            - python
+            - -c
+            - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2)
+          periodSeconds: 5
+          timeoutSeconds: 3
         livenessProbe:
-          tcpSocket:
-            port: 8080
-          initialDelaySeconds: 20
+          exec:
+            command:
+            - python
+            - -c
+            - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2)
           periodSeconds: 20
+          timeoutSeconds: 3
+          failureThreshold: 3
+        {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+        # Pod 终止时回收 fs-eng-*；uvicorn --reload 不走这里。
+        lifecycle:
+          preStop:
+            exec:
+              command: ["python", "-m", "app.engine.reap"]
+        {{- end }}
       volumes:
       - name: app-data
         hostPath:
