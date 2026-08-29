@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp engine base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp Engine Base
-  version: '1.2.37'
+  version: '1.2.38'
   categories:
     - AI
     - models
@@ -38,35 +38,42 @@ spec:
   onlyAdmin: true
   versionName: 'b10588'
   upgradeDescription: |
-    Chart 1.2.37 — bump engine to `server-cuda12-b10588`.
+    Chart 1.2.38 — bump llm-init to `v1.6.0`.
 
     **Images**
-    - llama.cpp: `docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10454` → `server-cuda12-b10588` (amd64 + arm64).
-    - llm-init: unchanged at `v1.5.0`.
+    - llm-init: `docker.io/beclab/llm-init:v1.5.0` → `v1.6.0`.
+    - llama.cpp: unchanged at `server-cuda12-b10588`.
 
-    134 upstream commits; core libraries move to llama.cpp 0.2.0 / ggml 0.21.0.
+    **What this changes for a clone of this base**
 
-    **New model architectures** — clone this base and point `MODEL_SOURCE` / `MODEL_NAME` at the GGUF:
-    - BailingMoE3 ([#26608](https://github.com/ggml-org/llama.cpp/pull/26608)), with DSpark speculative decode ([#27508](https://github.com/ggml-org/llama.cpp/pull/27508))
-    - Granite SWA / GraniteMoE SWA ([#25505](https://github.com/ggml-org/llama.cpp/pull/25505))
-    - dots3-note, including vision + audio through `mmproj` ([#27060](https://github.com/ggml-org/llama.cpp/pull/27060), [#27524](https://github.com/ggml-org/llama.cpp/pull/27524))
-    - DSpark drafters for LFM2 ([#27383](https://github.com/ggml-org/llama.cpp/pull/27383)) and speculators-format checkpoints ([#26275](https://github.com/ggml-org/llama.cpp/pull/26275))
-    - Nemotron 3 Ultra conversion fix ([#27101](https://github.com/ggml-org/llama.cpp/pull/27101))
+    An `ENGINE_ARGS` that sets `-c` but never `-np` was being described as a
+    single-slot engine. It is not: llama.cpp's server default for `-np` is 4
+    slots, and they share one KV pool. So the concurrency Router advertised was
+    wrong, and each of the four slots could claim the whole `-c` window — the
+    engine checks a request against its slot, never against the pool, so
+    running out surfaces mid-decode and fails every request generating at that
+    moment, including ones already streaming to somebody else.
 
-    **GPU and performance**
-    - DGX Spark (`nvidia-gb10`): faster batch-size-1 decode for dense models via MMVQ `nwarps=8` ([#26843](https://github.com/ggml-org/llama.cpp/pull/26843))
-    - CUDA MMVQ→MMQ decode crossover is now tuned per GPU and quant type ([#26079](https://github.com/ggml-org/llama.cpp/pull/26079)); cuBLAS handles use a static workspace ([#26574](https://github.com/ggml-org/llama.cpp/pull/26574))
-    - Layer auto-fit accounts for `n_streams` ([#27496](https://github.com/ggml-org/llama.cpp/pull/27496)); V is built as a view of K in iSWA attention ([#27392](https://github.com/ggml-org/llama.cpp/pull/27392))
-    - Fixes: backend split scheduler race ([#26040](https://github.com/ggml-org/llama.cpp/pull/26040)) and a null-pointer deref in speculative decode ([#27404](https://github.com/ggml-org/llama.cpp/pull/27404))
+    Requests now reserve pool room before being forwarded, and wait when it is
+    full rather than being refused, answering `503 kv_budget_exhausted` only if
+    they wait out their budget. The gate applies to a shared pool with more than
+    one slot and no per-slot ceiling; `-np 1`, or a `--kv-unified-per-slot` that
+    gives each slot its own quota, needs none and gets none.
 
-    **Server and API**
-    - `/metrics` and `/slots` stay reachable while the server is sleeping ([#27376](https://github.com/ggml-org/llama.cpp/pull/27376))
-    - Model endpoints become private when `--api-key` authentication is enabled ([#26347](https://github.com/ggml-org/llama.cpp/pull/26347)); this chart runs without an engine API key, so the internal entrance is unaffected
-    - `--mmproj-device` places the vision projector on a chosen device ([#23255](https://github.com/ggml-org/llama.cpp/pull/23255)); WebP inputs are accepted via ffmpeg ([#27520](https://github.com/ggml-org/llama.cpp/pull/27520))
-    - Embedding output combined with draft-MTP is fixed ([#27400](https://github.com/ggml-org/llama.cpp/pull/27400)) — relevant to `MODEL_MODE=embedding`
-    - mtmd fixes for LFM2 image tiling, DeepSeek-OCR and Granite preprocessing; refreshed built-in WebUI
+    **Sizing `ENGINE_ARGS` on this base**
+    - `-c` is the whole KV pool, not a per-request window. With a shared cache
+      one request may occupy all of it.
+    - Leaving `-np` out selects 4 slots. Set `-np 1` for a single long
+      conversation, or raise `-c` to match the width you want.
+    - `--kv-unified-per-slot N` caps what one slot may take, which the engine
+      enforces itself with a `400` naming the limit.
 
-    See https://github.com/ggml-org/llama.cpp/compare/b10454...b10588 for the full upstream diff.
+    **Capacity now comes from the engine, not the flags**
+
+    The window and slot count are read from llama.cpp's own `/props` once the
+    server is up, and republished on every restart. A `-c` above the model's
+    training context is reported as the smaller number the engine actually
+    serves rather than the one that was asked for.
   fullDescription: |
     **IMPORTANT NOTE**  
     This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
@@ -197,7 +204,7 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    description:  "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options, to fully use GPU, add `-ngl all`. You can also use values like `LLAMA_ARG_*=val`."
+    description:  "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options, to fully use GPU, add `-ngl all`. You can also use values like `LLAMA_ARG_*=val`. Note that `-c` sizes the whole KV cache rather than one request, and omitting `-np` selects llama.cpp's default of 4 slots sharing it — set `-np 1` for a single long conversation, or raise `-c` to match the concurrency you want."
   - envName: LOG_LEVEL           # single-select: debug | info | warn | error
     required: false
     type: string
