@@ -4,6 +4,25 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.16: llm-init v1.6.1 — the gate and the capacity reading follow
+      ENGINE_ARGS instead of the copy they read at startup. This preset is
+      unaffected as shipped, but both directions of an edit now take effect:
+      adding -np with -no-kvu gives each slot its own share and the gate
+      steps out rather than going on charging two tokenizer hops for a pool
+      the engine is already policing, and either way the card reports the
+      window and slot count the relaunched engine actually resolved. Before
+      this, only restarting the deployment did that.
+
+    v1.0.15: llm-init v1.6.0 — this preset names no -np, and llama.cpp's own
+      default there is 4 slots sharing one KV pool, not the single slot llm-init
+      used to report. So the width Router advertises was wrong, and four slots
+      could each claim the whole 131072-token pool. Requests now reserve pool
+      room before being forwarded and wait when it is full, answering 503
+      kv_budget_exhausted rather than letting the pool run out mid-decode, which
+      failed every request generating at that moment. The engine's own /props is
+      also read now, so the window and slot count come from what it resolved
+      instead of what the flags implied.
+
     v1.0.13: Lower the NVIDIA host-memory reservation so 1.12.6 timeslice nodes can install more easily (engine request 21Gi→6Gi, chart requiredMemory 22Gi→7Gi). GPU quota unchanged.
 
     v1.0.9: bump llama.cpp to `server-cuda12-b10068`; HF_TOKEN via Secret + OLARES_SYSTEM_HUGGINGFACE_*.
