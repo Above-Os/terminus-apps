@@ -4,25 +4,47 @@ metadata:
 
 spec:
   upgradeDescription: |
-    Chart 1.2.33 — bump engine to `server-cuda12-b10454` and llm-init to `v1.3.8`.
+    Chart 1.2.39 — bump llm-init to `v1.6.1`.
 
     **Images**
-    - llama.cpp: `docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10362` → `server-cuda12-b10454` (latest published beclab CUDA 12 server tag; amd64 + arm64). Upstream GitHub is already at b10456; no beclab b10455/b10456 image yet.
-    - llm-init: `docker.io/beclab/llm-init:v1.3.5` → `v1.3.8`.
+    - llm-init: `docker.io/beclab/llm-init:v1.6.0` → `v1.6.1`.
+    - llama.cpp: unchanged at `server-cuda12-b10588`.
 
-    **Muse Glimmer 30B (Meta)** — requires **b10353+**; **b10454 includes** the `muse-glimmer` architecture ([llama.cpp #26841](https://github.com/ggml-org/llama.cpp/pull/26841)). Older builds (e.g. b10331) fail with `unknown model architecture: 'muse-glimmer'`.
+    **Editing `ENGINE_ARGS` after installation now takes effect**
 
-    Clone this base and point env at [meta-models/Muse-Glimmer-30B-GGUF](https://huggingface.co/meta-models/Muse-Glimmer-30B-GGUF) or community quants (e.g. unsloth). Typical layout:
-    - Main GGUF + `mmproj` in `MODEL_SOURCE` (comma-separated) for vision
-    - DFlash drafter (`dflash-kquant.gguf`) + `--spec-type draft-dflash` or `draft-dspark` in `ENGINE_ARGS` for speculative decode
+    The two things 1.2.38 introduced — a gate that keeps a shared KV pool from
+    being oversold, and a capacity reading taken from the engine rather than
+    inferred from the flags — both settled their answer while llm-init was
+    starting, which is the wrong moment: on this base `ENGINE_ARGS` is editable
+    and starts out empty, so the flags a clone runs under are usually chosen
+    after the first boot, and every later change relaunches the engine in
+    place.
 
-    **Also in b10362 → b10454:**
-    - Chat templates receive OpenAI `reasoning_effort` ([llama.cpp #26941](https://github.com/ggml-org/llama.cpp/pull/26941)); Qwen3.8 uses `xhigh` / `medium` / `low` via `--chat-template-kwargs` or the request body
-    - MTP draft type auto-detect; DFlash / DSpark backend sampling
-    - MiniMax Text01 / M1 conversion support
-    - Server `/metrics` and `/slots` stay available during decode; mtmd and jinja fixes
+    - Whether the pool needs accounting for is now asked per request. A clone
+      that first came up with `-np 1` and was later changed to a shared pool
+      got no gate at all until the deployment was restarted; one that went the
+      other way kept paying two tokenizer round trips for a pool the engine had
+      already taken over policing.
+    - The capacity reading is re-taken when the engine is seen back from a
+      relaunch, or when `ENGINE_ARGS` no longer matches what the standing
+      reading was measured under. Readiness alone could not see either: the
+      engine is relaunched inside the process and the health loop holds its
+      last verdict across it, so the card kept describing an engine that no
+      longer existed — and that is the number Router admits requests against.
 
-    See https://github.com/ggml-org/llama.cpp/releases for full upstream release notes.
+    A fresh install and a chart upgrade were never affected, because both
+    restart the process.
+
+    **Sizing `ENGINE_ARGS` on this base**
+    - `-c` is the whole KV pool, not a per-request window. With a shared cache
+      one request may occupy all of it.
+    - Leaving `-np` out selects 4 slots, sharing that pool. Set `-np 1` for a
+      single long conversation, or raise `-c` to match the width you want.
+    - `--kv-unified-per-slot N` caps what one slot may take, which the engine
+      enforces itself with a `400` naming the limit.
+    - The gate 1.2.38 introduced applies to a shared pool with more than one
+      slot and no per-slot ceiling. `-np 1`, or a per-slot ceiling, needs none
+      and gets none.
   fullDescription: |
     **IMPORTANT NOTE**  
     This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.

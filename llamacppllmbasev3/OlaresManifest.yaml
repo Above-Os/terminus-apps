@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp engine base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp Engine Base
-  version: '1.2.38'
+  version: '1.2.39'
   categories:
     - AI
     - models
@@ -38,42 +38,45 @@ spec:
   onlyAdmin: true
   versionName: 'b10588'
   upgradeDescription: |
-    Chart 1.2.38 — bump llm-init to `v1.6.0`.
+    Chart 1.2.39 — bump llm-init to `v1.6.1`.
 
     **Images**
-    - llm-init: `docker.io/beclab/llm-init:v1.5.0` → `v1.6.0`.
+    - llm-init: `docker.io/beclab/llm-init:v1.6.0` → `v1.6.1`.
     - llama.cpp: unchanged at `server-cuda12-b10588`.
 
-    **What this changes for a clone of this base**
+    **Editing `ENGINE_ARGS` after installation now takes effect**
 
-    An `ENGINE_ARGS` that sets `-c` but never `-np` was being described as a
-    single-slot engine. It is not: llama.cpp's server default for `-np` is 4
-    slots, and they share one KV pool. So the concurrency Router advertised was
-    wrong, and each of the four slots could claim the whole `-c` window — the
-    engine checks a request against its slot, never against the pool, so
-    running out surfaces mid-decode and fails every request generating at that
-    moment, including ones already streaming to somebody else.
+    The two things 1.2.38 introduced both settled their answer while llm-init
+    was starting, which is the wrong moment: on this base `ENGINE_ARGS` is
+    editable and starts out empty, so the flags a clone runs under are usually
+    chosen after the first boot, and every later change relaunches the engine
+    in place.
 
-    Requests now reserve pool room before being forwarded, and wait when it is
-    full rather than being refused, answering `503 kv_budget_exhausted` only if
-    they wait out their budget. The gate applies to a shared pool with more than
-    one slot and no per-slot ceiling; `-np 1`, or a `--kv-unified-per-slot` that
-    gives each slot its own quota, needs none and gets none.
+    - Whether the pool needs accounting for is now asked per request. A clone
+      that first came up with `-np 1` and was later changed to a shared pool
+      got no gate at all until the deployment was restarted; one that went the
+      other way kept paying two tokenizer round trips for a pool the engine had
+      already taken over policing.
+    - The capacity reading is re-taken when the engine is seen back from a
+      relaunch, or when `ENGINE_ARGS` no longer matches what the standing
+      reading was measured under. Readiness alone could not see either: the
+      engine is relaunched inside the process and the health loop holds its
+      last verdict across it, so the card kept describing an engine that no
+      longer existed — and that is the number Router admits requests against.
+
+    A fresh install and a chart upgrade were never affected, because both
+    restart the process.
 
     **Sizing `ENGINE_ARGS` on this base**
     - `-c` is the whole KV pool, not a per-request window. With a shared cache
       one request may occupy all of it.
-    - Leaving `-np` out selects 4 slots. Set `-np 1` for a single long
-      conversation, or raise `-c` to match the width you want.
+    - Leaving `-np` out selects 4 slots, sharing that pool. Set `-np 1` for a
+      single long conversation, or raise `-c` to match the width you want.
     - `--kv-unified-per-slot N` caps what one slot may take, which the engine
       enforces itself with a `400` naming the limit.
-
-    **Capacity now comes from the engine, not the flags**
-
-    The window and slot count are read from llama.cpp's own `/props` once the
-    server is up, and republished on every restart. A `-c` above the model's
-    training context is reported as the smaller number the engine actually
-    serves rather than the one that was asked for.
+    - The gate 1.2.38 introduced applies to a shared pool with more than one
+      slot and no per-slot ceiling. `-np 1`, or a per-slot ceiling, needs none
+      and gets none.
   fullDescription: |
     **IMPORTANT NOTE**  
     This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
