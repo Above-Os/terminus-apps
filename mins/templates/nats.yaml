@@ -1,0 +1,21 @@
+apiVersion: apr.bytetrade.io/v1alpha1
+kind: MiddlewareRequest
+metadata:
+  name: mins-router-catalog-nats
+  namespace: {{ .Release.Namespace }}
+spec:
+  app: mins
+  appNamespace: router
+  middleware: nats
+  nats:
+    user: {{ printf "%s-mins-catalog" .Release.Namespace | quote }}
+    password:
+      valueFrom:
+        secretKeyRef:
+          name: mins-nats
+          key: password
+    subjects:
+      - name: catalog
+        permission:
+          pub: deny
+          sub: allow
