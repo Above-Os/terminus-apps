@@ -38,13 +38,14 @@ spec:
   onlyAdmin: true
   versionName: 'tencent/Hy-MT2-1.8B-GGUF:Q4_K_M'
   upgradeDescription: |
-    v1.0.27: llm-init v1.6.0 — two fixes this preset needs. A single turn's
-      reply is accepted without its list number, which this model often omits
-      and which was reaching callers as `unaligned` even though the turn had
-      been translated. And -np 8 shares one 32768-token KV pool, so eight
-      slots could each claim all of it; requests now reserve room and wait,
-      or get 503 kv_budget_exhausted, instead of the pool running out
-      mid-decode and failing every request generating at that moment.
+    v1.0.27: llm-init v1.6.0 — a single turn's reply is accepted without its
+      list number, which this model often omits and which was reaching callers
+      as `unaligned` even though the turn had been translated. Context width
+      and slot count now come from the engine's own /props instead of being
+      inferred from the flags; -np 8 gives each slot a 4096-token share that
+      llama.cpp enforces itself, so this preset needs no admission gate.
+      Removing -np from ENGINE_ARGS is what would leave the pool shared and
+      unbounded.
     v1.0.26: llm-init v1.5.5 — /translate/transcript carries the read-only
       lead-in apart from the turns, which the model was translating as turn one.
     v1.0.25: llm-init v1.5.4 — POST /translate/transcript translates a dialogue
