@@ -4,25 +4,37 @@ metadata:
 
 spec:
   upgradeDescription: |
-    Chart 1.2.33 — 引擎升级到 `server-cuda12-b10454`，llm-init 升级到 `v1.3.8`。
+    Chart 1.2.39 — llm-init 升级到 `v1.6.1`。
 
     **镜像**
-    - llama.cpp：`docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10362` → `server-cuda12-b10454`（当前已发布的最新 beclab CUDA 12 server 标签；amd64 + arm64）。上游 GitHub 已到 b10456；尚无 beclab 的 b10455/b10456 镜像。
-    - llm-init：`docker.io/beclab/llm-init:v1.3.5` → `v1.3.8`。
+    - llm-init：`docker.io/beclab/llm-init:v1.6.0` → `v1.6.1`。
+    - llama.cpp：不变，仍是 `server-cuda12-b10588`。
 
-    **Muse Glimmer 30B（Meta）** — 需要 **b10353+**；**b10454 已包含** `muse-glimmer` 架构（[llama.cpp #26841](https://github.com/ggml-org/llama.cpp/pull/26841)）。更旧的构建（如 b10331）会报 `unknown model architecture: 'muse-glimmer'`。
+    **安装之后改 `ENGINE_ARGS` 现在才真正生效**
 
-    克隆此基座后，将环境变量指向 [meta-models/Muse-Glimmer-30B-GGUF](https://huggingface.co/meta-models/Muse-Glimmer-30B-GGUF) 或社区量化（如 unsloth）。常见布局：
-    - 主 GGUF + `mmproj` 写入 `MODEL_SOURCE`（逗号分隔）以支持视觉
-    - DFlash 草稿模型（`dflash-kquant.gguf`）并在 `ENGINE_ARGS` 中加 `--spec-type draft-dflash` 或 `draft-dspark` 以开启投机解码
+    1.2.38 引入的两样东西 —— 防止共享 KV 池被超卖的闸门，以及向引擎实测而非从
+    参数推断的容量读数 —— 都在 llm-init 进程启动时就把答案定死了，而这是错的时
+    机：本基座的 `ENGINE_ARGS` 可编辑且初始为空，克隆出来的实例跑什么参数通常是
+    首次启动之后才定的，之后每次改动都会在原地重新拉起引擎。
 
-    **b10362 → b10454 其它变化：**
-    - 聊天模板可接收 OpenAI `reasoning_effort`（[llama.cpp #26941](https://github.com/ggml-org/llama.cpp/pull/26941)）；Qwen3.8 可用 `--chat-template-kwargs` 或请求体设置 `xhigh` / `medium` / `low`
-    - MTP 草稿类型自动检测；DFlash / DSpark 后端采样
-    - 支持 MiniMax Text01 / M1 转换
-    - 解码过程中 `/metrics` 与 `/slots` 仍可用；mtmd 与 jinja 修复
+    - 池子要不要记账，现在每个请求现问一次。以 `-np 1` 起来、之后改成共享池的克
+      隆体，在此之前根本拿不到闸门，除非重启应用；反方向改过去的，则会一直为引
+      擎已经接管的池子白付两跳 tokenize。
+    - 容量读数会在两种情况下重新采集：引擎被观察到从重启中回来，或者
+      `ENGINE_ARGS` 与当前这份读数所依据的不一致。光靠就绪状态两种都察觉不到 ——
+      引擎是在进程内被重新拉起的，健康环在这期间会沿用上一个判定，于是卡上一直
+      描述着一个已经不存在的引擎，而 Router 正是拿这个数字做准入判断的。
 
-    完整上游发布说明见 https://github.com/ggml-org/llama.cpp/releases
+    全新安装与 chart 升级从来不受影响，因为两者都会重启进程。
+
+    **在本基座上设置 `ENGINE_ARGS`**
+    - `-c` 是整个 KV 池，不是单请求窗口。共享缓存下，一个请求可能占满它。
+    - 不写 `-np` 等于选了 4 个槽位共用这个池子。想要单条长对话就写 `-np 1`，或者
+      把 `-c` 提到你想要的窗口大小。
+    - `--kv-unified-per-slot N` 限定单个槽位最多能拿多少，由引擎自己用一个写明限
+      额的 `400` 来执行。
+    - 1.2.38 引入的闸门只作用于「共享池 + 多个槽位 + 没有单槽上限」这一种。`-np 1`
+      或者设了单槽上限的配置都不需要，也不会挂上闸门。
   fullDescription: |
     **重要提示**  
     此应用是一个模板，不能单独使用。请按下方环境变量设置模型后，方可使用本应用提供模型服务。
