@@ -57,18 +57,12 @@ spec:
               value: /data
             - name: TZ
               value: Etc/UTC
-            # Router is reached through its per-user entrance, which is where
-            # mesh-in injects the platform caller JWT; the app's own identity
-            # rides along as x-caller-appid.
+            # Router's shared gateway entrance is stable across users. The
+            # app's own identity rides along as x-caller-appid.
             - name: LLM_GATEWAY_URL
-              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+              value: "http://8a0b4a6e.shared.olares.com/v1"
             - name: OLARES_APP_ID
               value: "mins"
-            # Whose Olares this is. Requests still carry their own identity in
-            # X-BFL-USER; this is for the work with no request behind it, such
-            # as adopting a recording found on the volume with no row.
-            - name: MINS_OWNER
-              value: {{ .Values.bfl.username | quote }}
             - name: MINS_CATALOG_EVENTS_NATS_URL
               value: {{ printf "nats://nats.user-system-%s:4222" .Values.bfl.username | quote }}
             - name: MINS_CATALOG_EVENTS_NATS_USER
@@ -80,13 +74,27 @@ spec:
                   key: password
             - name: MINS_CATALOG_EVENTS_SUBJECT
               value: "router.catalog"
-            # Files is reached through the user's own entrance for the same
-            # reason: an application pod's cleartext egress is captured by the
-            # mesh, which answers 504 for files-service. Every call made to it
-            # carries the credential of whoever is asking, so this address is
-            # of no use without a user in front of it.
+            - name: MINS_LLDAP_READONLY_URL
+              value: "http://lldap-provider-svc.os-framework:28080"
+            - name: MINS_LLDAP_TOKEN_FILE
+              value: "/var/run/secrets/kubernetes.io/serviceaccount/token"
+            - name: MINS_LLDAP_NATS_URL
+              value: "nats://nats.os-platform:4222"
+            - name: MINS_LLDAP_NATS_USER
+              value: {{ printf "%s-mins-users" .Release.Namespace | quote }}
+            - name: MINS_LLDAP_NATS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: mins-nats
+                  key: password
+            - name: MINS_LLDAP_RESYNC_INTERVAL
+              value: "5m"
+            # Browser uploads land on this pod's volume. Files is still used
+            # to browse and import from the caller's Home, and for HLS.
+            # {zone} is replaced from the inbound host so each user reaches
+            # their own Files entrance.
             - name: MINS_FILES_BASE_URL
-              value: {{ printf "https://files.%s" .Values.user.zone | quote }}
+              value: "https://files.{zone}"
             - name: MINS_CPU_WORKERS
               value: {{ .Values.workers.cpu | quote }}
             - name: MINS_GPU_WORKERS
