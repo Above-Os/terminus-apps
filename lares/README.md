@@ -2,7 +2,7 @@
 
 Chat shell on Olares: DeepSeek Harness (dsh web) UI wired to Olares Router.
 
-Current app version: **0.26.0** — `appVersion` in `Chart.yaml` and the image tag in
+Current app version: **0.26.1** — `appVersion` in `Chart.yaml` and the image tag in
 `values.yaml`. In the `terminus-apps` / `apps` index the chart's own `version` follows a
 separate `0.0.N` sequence, bumped once per submission.
 
