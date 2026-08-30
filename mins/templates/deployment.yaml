@@ -57,10 +57,13 @@ spec:
               value: /data
             - name: TZ
               value: Etc/UTC
-            # Router's shared gateway entrance is stable across users. The
-            # app's own identity rides along as x-caller-appid.
+            # Router's shared gateway entrance is stable across users. The host
+            # is two rounds of md5, not one: appid = md5("router")[:8] = f3395cd5,
+            # then md5(appid + "shared")[:8] = 3a77b15d. Hashing "routershared"
+            # in one round yields 8a0b4a6e, which resolves nowhere.
+            # The app's own identity rides along as x-caller-appid.
             - name: LLM_GATEWAY_URL
-              value: "http://8a0b4a6e.shared.olares.com/v1"
+              value: "http://3a77b15d.shared.olares.com/v1"
             - name: OLARES_APP_ID
               value: "mins"
             - name: MINS_CATALOG_EVENTS_NATS_URL
