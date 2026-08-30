@@ -94,10 +94,13 @@ spec:
               value: "5m"
             # Browser uploads land on this pod's volume. Files is still used
             # to browse and import from the caller's Home, and for HLS.
-            # {zone} is replaced from the inbound host so each user reaches
-            # their own Files entrance.
+            # {user} is replaced from the authenticated caller so each user
+            # reaches their own Files entrance. The domain is the platform's,
+            # taken from the installing admin's zone: a caller on the LAN name
+            # arrives from <entrance>.<user>.olares.local, which resolves on
+            # their side of the network and nowhere in this cluster.
             - name: MINS_FILES_BASE_URL
-              value: "https://files.{zone}"
+              value: {{ printf "https://files.{user}.%s" (.Values.user.zone | splitList "." | rest | join ".") | quote }}
             - name: MINS_CPU_WORKERS
               value: {{ .Values.workers.cpu | quote }}
             - name: MINS_GPU_WORKERS
