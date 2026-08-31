@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.50** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.51** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -134,8 +134,9 @@ olares-cli market uninstall flowstudio --watch
 
 Only pass `--delete-data` when you intentionally want appData wiped (projects / userdata).
 **Ask before using it** — models live on the shared Common volume and must not be treated as
-disposable per-app cache. The chart pre-delete hook removes dynamic engines and this app's
-GPUBindings only; it never deletes model weights.
+disposable per-app cache. The chart pre-delete hook drains runtime engines, prepull
+Jobs/Pods, and this app's GPUBindings so the namespace can terminate; it never
+deletes model weights.
 
 ## Upgrade
 
@@ -150,7 +151,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.50. This chart ships `docker.io/beclab/flowstudio:0.3.50` and `engine-1.0.7`.
+covers 0.3.51. This chart ships `docker.io/beclab/flowstudio:0.3.50` and `engine-1.0.7`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
