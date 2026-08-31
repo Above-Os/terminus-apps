@@ -1,9 +1,10 @@
 {{- $de := (default dict .Values.dynamicEngine) }}
 {{- if ne (toString $de.enabled) "false" }}
 {{- $sa := ($de.serviceAccountName | default "flowstudio-engine-orchestrator") }}
-# pre-delete: Helm/Olares only removes chart-owned objects. Purge runtime engine
-# Deployments/Services and this instance's GPUBindings so GPU is released.
-# Never touches appCommon / model weights (shared public library).
+# pre-delete: Helm/Olares only removes chart-owned objects. Drain runtime
+# engines, prepull Jobs/Pods, and this instance's GPUBindings so the
+# namespace can terminate. Never touches appCommon / model weights.
+# Do not set ttlSecondsAfterFinished — Helm must observe hook success.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -15,8 +16,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 1
-  activeDeadlineSeconds: 120
-  ttlSecondsAfterFinished: 60
+  activeDeadlineSeconds: 180
   template:
     metadata:
       labels:
@@ -37,70 +37,10 @@ spec:
         env:
         - name: OLARES_APP_NAME
           value: "flowstudio"
-        - name: ENGINE_LABEL
-          value: "flowstudio.bytetrade.io/engine=true"
+        - name: OLARES_OWNER
+          value: {{ .Values.bfl.username | quote }}
         command: ["python3", "-c"]
         args:
         - |
-          import json, os, ssl, urllib.error, urllib.parse, urllib.request
-
-          sa = "/var/run/secrets/kubernetes.io/serviceaccount"
-          ns = open(f"{sa}/namespace").read().strip()
-          token = open(f"{sa}/token").read().strip()
-          app = (os.environ.get("OLARES_APP_NAME") or "flowstudio").strip()
-          owner = ns[len(app) + 1 :] if ns.startswith(app + "-") else ""
-          label = os.environ.get("ENGINE_LABEL") or "flowstudio.bytetrade.io/engine=true"
-          ctx = ssl.create_default_context(cafile=f"{sa}/ca.crt")
-          base = "https://kubernetes.default.svc"
-
-          def call(method: str, path: str) -> dict:
-              req = urllib.request.Request(
-                  base + path,
-                  method=method,
-                  headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-              )
-              try:
-                  with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-                      body = resp.read().decode() or "{}"
-                      return json.loads(body) if body.strip() else {}
-              except urllib.error.HTTPError as exc:
-                  if exc.code == 404:
-                      return {}
-                  raise
-
-          def delete_collection(api_path: str, kind: str) -> int:
-              q = urllib.parse.urlencode({"labelSelector": label})
-              data = call("GET", f"{api_path}?{q}")
-              n = 0
-              for item in data.get("items") or []:
-                  name = (item.get("metadata") or {}).get("name") or ""
-                  if not name:
-                      continue
-                  call("DELETE", f"{api_path}/{name}")
-                  print(f"deleted {kind}/{name}", flush=True)
-                  n += 1
-              return n
-
-          # Cluster-scoped list: only delete bindings for this ns / appName+owner.
-          def ours(binding: dict) -> bool:
-              spec = binding.get("spec") or {}
-              bns = str(spec.get("namespace") or "").strip()
-              if bns:
-                  return bns == ns
-              if str(spec.get("appName") or "").strip() != app:
-                  return False
-              bowner = str(spec.get("owner") or "").strip()
-              return not owner or not bowner or bowner == owner
-
-          dep_n = delete_collection(f"/apis/apps/v1/namespaces/{ns}/deployments", "deploy")
-          svc_n = delete_collection(f"/api/v1/namespaces/{ns}/services", "svc")
-          gpu_n = 0
-          for item in (call("GET", "/apis/gpu.bytetrade.io/v1alpha1/gpubindings").get("items") or []):
-              name = (item.get("metadata") or {}).get("name") or ""
-              if not name or not ours(item):
-                  continue
-              call("DELETE", f"/apis/gpu.bytetrade.io/v1alpha1/gpubindings/{name}")
-              print(f"deleted gpubinding/{name}", flush=True)
-              gpu_n += 1
-          print(f"predelete done deploys={dep_n} services={svc_n} gpubindings={gpu_n}", flush=True)
+{{ .Files.Get "scripts/runtime_drain.py" | indent 10 }}
 {{- end }}
