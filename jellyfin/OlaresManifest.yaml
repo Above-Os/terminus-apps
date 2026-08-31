@@ -10,7 +10,7 @@ metadata:
   description: The Free Software Media System
   icon: https://app.cdn.olares.com/appstore/jellyfin/icon.png
   appid: jellyfin
-  version: '1.0.29'
+  version: '1.0.30'
   title: Jellyfin
   categories:
   - Fun
@@ -62,6 +62,8 @@ spec:
     The project relies entirely on contributions from volunteers. Want to help out? There's lots of ways to do so, and you don't even have to code!
 
   upgradeDescription: |
+    v1.0.30: Drop legacy `ENABLE_HW_ACCEL` / `VIDEO_GID` / `RENDER_GID` envs and cpu privileged `/dev/dri` hostPath; hw transcoding is only via **intel** or **amd** accelerator install (gpu-inject).
+
     v1.0.29: Add cpu/intel/amd accelerator modes; intel/amd hw transcoding via gpu-inject (no privileged); runAsUser/runAsGroup 1000; supplementalGroups for /dev/dri access.
 
     v1.0.24: Pin pods to control-plane (master) via nodeAffinity; drop legacy `sysVersion >= 1.12.3` appData path branching (Olares minimum is 1.12.6).
@@ -73,7 +75,7 @@ spec:
 
     This minor release brings several bugfixes to improve your Jellyfin experience. As always, please ensure you take a full backup before upgrading!
 
-    Optional hardware transcoding: install with **intel** or **amd** accelerator mode (VA-API/QSV via gpu-inject, no privileged), or on **cpu** mode set `ENABLE_HW_ACCEL=true` for manual legacy paths (mounts /dev/dri, supplementalGroups, privileged).
+    Optional hardware transcoding: install with **intel** or **amd** accelerator mode (VA-API/QSV via gpu-inject). **cpu** mode is software transcoding only.
 
     General Changes (1)
     Add lockhelper for UserManager [PR #16944], by @JPVenson
@@ -132,42 +134,6 @@ options:
   - name: olares
     type: system
     version: '>=1.12.6-0'
-envs:
-  - envName: ENABLE_HW_ACCEL
-    type: bool
-    default: 'false'
-    required: false
-    editable: true
-    applyOnChange: true
-    description: |
-      Enable Intel/AMD GPU hardware transcoding. When true on **cpu** mode: mounts /dev/dri, adds VIDEO_GID/RENDER_GID supplemental groups, and runs the container privileged (legacy AMD/manual path). On **intel** or **amd** accelerator mode, hw transcoding is enabled automatically without privileged. Leave false on cpu unless you need VA-API on a non-accelerator install.
-      Host must expose /dev/dri. After enabling, set VIDEO_GID and RENDER_GID from the host (`getent group video` / `getent group render`) if you are not on Olares One.
-  - envName: VIDEO_GID
-    type: int
-    default: '44'
-    required: false
-    editable: true
-    applyOnChange: true
-    description: |
-      Used when hardware transcoding is active (**intel** / **amd** accelerator mode, or **cpu** mode with `ENABLE_HW_ACCEL=true`). Numeric GID of the host "video" group that owns /dev/dri/card* devices.
-      Default 44 matches Olares One; other hosts often differ — do not assume 44 is correct.
-      On the Olares host (SSH or Terminal), run:
-        getent group video
-      Example output: video:x:44:olares  → set this env to 44 (the number after x:).
-      You can also confirm with: ls -ln /dev/dri  (card* column 4 is the video GID).
-  - envName: RENDER_GID
-    type: int
-    default: '994'
-    required: false
-    editable: true
-    applyOnChange: true
-    description: |
-      Used when hardware transcoding is active (**intel** / **amd** accelerator mode, or **cpu** mode with `ENABLE_HW_ACCEL=true`). Numeric GID of the host "render" group that owns /dev/dri/renderD* devices (required for QSV/VA-API).
-      Default 994 matches Olares One; other hosts often use a different GID (e.g. 109, 110, 993) — always check your host.
-      On the Olares host (SSH or Terminal), run:
-        getent group render
-      Example output: render:x:994:ollama  → set this env to 994 (the number after x:).
-      You can also confirm with: ls -ln /dev/dri  (renderD* column 4 is the render GID).
 entrances:
 - name: jellyfin-svc
   port: 8096
