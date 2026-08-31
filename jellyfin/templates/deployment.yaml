@@ -20,13 +20,7 @@ data:
 ---
 {{- $gpuObj := .Values.GPU | default dict }}
 {{- $gpuType := .Values.gpu | default ($gpuObj.Type) | default "cpu" }}
-{{- $isIntelMode := eq $gpuType "intel" }}
-{{- $isAmdMode := eq $gpuType "amd" }}
-{{- $isIgpuMode := or $isIntelMode $isAmdMode }}
-{{- $envHwAccel := eq (toString (.Values.olaresEnv.ENABLE_HW_ACCEL | default "false")) "true" }}
-{{- $hwAccel := or $isIgpuMode $envHwAccel }}
-{{- $needPrivileged := and $hwAccel (not $isIgpuMode) }}
-{{- $needGpuInject := $isIgpuMode }}
+{{- $isIgpuMode := or (eq $gpuType "intel") (eq $gpuType "amd") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,7 +28,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: jellyfin
-  {{- if $needGpuInject }}
+  {{- if $isIgpuMode }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
   {{- end }}
@@ -54,10 +48,10 @@ spec:
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
-        {{- if $hwAccel }}
+        {{- if $isIgpuMode }}
         supplementalGroups:
-          - {{ .Values.olaresEnv.VIDEO_GID | default "44" | int }}
-          - {{ .Values.olaresEnv.RENDER_GID | default "994" | int }}
+          - 44
+          - 994
         {{- end }}
       affinity:
         nodeAffinity:
@@ -71,12 +65,6 @@ spec:
           hostPath:
             type: Directory
             path: {{ .Values.userspace.userData }}
-        {{- if $hwAccel }}
-        - name: dri
-          hostPath:
-            path: /dev/dri
-            type: Directory
-        {{- end }}
         - hostPath:
             path: '{{ .Values.userspace.appData }}/config'
             type: DirectoryOrCreate
@@ -139,9 +127,6 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
-            {{- if $needPrivileged }}
-            privileged: true
-            {{- end }}
           resources:
             requests:
               cpu: 100m
@@ -164,20 +149,15 @@ spec:
             mountPath: /olares/userdata/external
           - name: external
             mountPath: /external
-          {{- if $hwAccel }}
-          - name: dri
-            mountPath: /dev/dri
-          {{- end }}
           env:
           - name: PGID
-            value: "1000" 
+            value: "1000"
           - name: PUID
-            value: "1000" 
+            value: "1000"
           - name: UMASK
-            value: "002" 
+            value: "002"
           - name: TZ
             value: Etc/UTC
-          
 
 ---
 apiVersion: v1
@@ -193,4 +173,3 @@ spec:
     - protocol: TCP
       port: 8096
       targetPort: 8096
-      
