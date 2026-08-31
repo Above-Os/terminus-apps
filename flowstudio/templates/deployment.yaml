@@ -24,8 +24,10 @@ spec:
       {{- end }}
       initContainers:
       # appData is root-owned; uid 1000 needs chown (OPA allows only beclab busybox as root).
+      # OPA strips only the docker.io/ prefix before matching beclab/, and app-service
+      # rewrites these refs to .Values.appImage's registry — so appImage must stay docker.io/.
       - name: fix-userdata-perms
-        image: beclab/aboveos-busybox:1.37.0
+        image: docker.io/beclab/aboveos-busybox:1.37.0
         securityContext:
           runAsUser: 0
         command: ["sh", "-c", "mkdir -p /appdata/userData && chown 1000:1000 /appdata/userData"]
@@ -36,7 +38,7 @@ spec:
       # 其下 model/ 常被别的应用或 kubelet 建成 root:root，uid 1000 写不进去。
       # 禁止 chown -R：已有 uid 1000 子目录上会 Operation not permitted，把 Pod 卡在 Initializing。
       - name: fix-models-perms
-        image: beclab/aboveos-busybox:1.37.0
+        image: docker.io/beclab/aboveos-busybox:1.37.0
         securityContext:
           runAsUser: 0
         command:
@@ -57,7 +59,7 @@ spec:
       {{- if (default dict .Values.dev).hotReload }}
       # Do not create via subPath first — kubelet would own it as root.
       - name: fix-dev-perms
-        image: beclab/aboveos-busybox:1.37.0
+        image: docker.io/beclab/aboveos-busybox:1.37.0
         securityContext:
           runAsUser: 0
         env:
