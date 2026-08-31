@@ -18,6 +18,15 @@ data:
         echo "Directory $new_dir is not empty, no action needed."
     fi
 ---
+{{- $gpuObj := .Values.GPU | default dict }}
+{{- $gpuType := .Values.gpu | default ($gpuObj.Type) | default "cpu" }}
+{{- $isIntelMode := eq $gpuType "intel" }}
+{{- $isAmdMode := eq $gpuType "amd" }}
+{{- $isIgpuMode := or $isIntelMode $isAmdMode }}
+{{- $envHwAccel := eq (toString (.Values.olaresEnv.ENABLE_HW_ACCEL | default "false")) "true" }}
+{{- $hwAccel := or $isIgpuMode $envHwAccel }}
+{{- $needPrivileged := and $hwAccel (not $isIgpuMode) }}
+{{- $needGpuInject := $isIgpuMode }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,6 +34,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: jellyfin
+  {{- if $needGpuInject }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.jellyfin.replicaCount }}
   selector:
@@ -38,7 +51,14 @@ spec:
         app: jellyfin
         applications.app.bytetrade.io/macvlan-init: "true"
     spec:
-      {{- $hwAccel := eq (toString (.Values.olaresEnv.ENABLE_HW_ACCEL | default "false")) "true" }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        {{- if $hwAccel }}
+        supplementalGroups:
+          - {{ .Values.olaresEnv.VIDEO_GID | default "44" | int }}
+          - {{ .Values.olaresEnv.RENDER_GID | default "994" | int }}
+        {{- end }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -46,12 +66,6 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: Exists
-      {{- if $hwAccel }}
-      securityContext:
-        supplementalGroups:
-          - {{ .Values.olaresEnv.VIDEO_GID | default "44" | int }}
-          - {{ .Values.olaresEnv.RENDER_GID | default "994" | int }}
-      {{- end }}
       volumes:
         - name: home
           hostPath:
@@ -122,12 +136,12 @@ spec:
         - name: jellyfin
           image: "docker.io/beclab/jellyfin-jellyfin:10.11.11"
           imagePullPolicy: IfNotPresent
-          {{- if $hwAccel }}
-          # hostPath makes /dev/dri visible; privileged is required on Olares/k3s
-          # so the device cgroup allows open() on the DRM render node.
           securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            {{- if $needPrivileged }}
             privileged: true
-          {{- end }}
+            {{- end }}
           resources:
             requests:
               cpu: 100m
@@ -174,7 +188,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    app: {{ .Release.Name }}
+    app: jellyfin
   ports:
     - protocol: TCP
       port: 8096
