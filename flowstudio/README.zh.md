@@ -104,8 +104,8 @@ Router 调用 OpenAI 风格的数据面：
 
 从 Market 升级到本版本后：重新打开应用；若 GPU 绑定丢失，在 Olares 加速器中重新绑定后再启动。
 
-Manifest 中的 `upgradeDescription` 跟随 `spec.versionName`（应用发布版本），目前对应 0.3.34。
-本 Chart 使用镜像 `flowstudio:0.3.33` 与 `engine-1.0.6`（Chart 0.3.34 安装期不预取 ROCm）。
+Manifest 中的 `upgradeDescription` 跟随 `spec.versionName`（应用发布版本），目前对应 0.3.48。
+本 Chart 使用镜像 `flowstudio:0.3.48` 与 `engine-1.0.7`（安装期不预取 ROCm）。
 
 ## Chart 结构
 
