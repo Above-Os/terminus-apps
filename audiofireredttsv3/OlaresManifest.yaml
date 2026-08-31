@@ -1,0 +1,242 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiofireredttsv3
+  icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+  description: "FireRedTTS3-Instruct: one model for built-in voices, cloning and design."
+  appid: audiofireredttsv3
+  title: FireRedTTS3 Instruct
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+  - text-to-speech
+  - audio
+
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiofireredttsv3api
+    host: sharedentrances-api
+    port: 0
+    title: FireRedTTS3 Instruct API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiofireredttsv3
+    port: 8090
+    host: download-svc
+    title: FireRedTTS3 Instruct
+    icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiofireredttsv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'FireRedTeam/FireRedTTS3'
+  fullDescription: |
+    **Model Overview**
+    FireRedTTS3-Instruct is one checkpoint that lists voices, clones from a reference,
+    designs a voice from a description, and speaks. CUDA only (amd64 + arm64).
+
+    **Configuration**
+    - Model: `FireRedTeam/FireRedTTS3`
+    - Source: `hf://FireRedTeam/FireRedTTS3` (Instruct + RedAE + tokenizer; Base is excluded)
+    - Capabilities: `tts`, `tts_clone`
+    - Required GPU memory: `16Gi`
+    - Engine: official PyTorch in-process (`FireRedTTS3Instruct`)
+    - License: Apache-2.0
+
+    **Voice ids live on this instance**
+    ElevenLabs shape: `GET /v1/voices`, `POST /v1/voices/add`, `POST /v1/text-to-voice/design`
+    then `POST /v1/text-to-voice`, `POST /v1/text-to-speech/{voice_id}`. Built-in voices are
+    frozen design samples stored under appData the first time they are spoken. Clone needs
+    the exact transcript of the reference (`description` / `ref_text`). OpenAI
+    `/v1/audio/speech` is an alias so existing clients keep working.
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Endpoints**
+    - `GET /v1/voices` — premade + cloned + designed voices on this instance
+    - `POST /v1/voices/add` — multipart `name` + `files[]` + transcript
+    - `POST /v1/text-to-voice/design` then `POST /v1/text-to-voice` — preview, then persist
+    - `POST /v1/text-to-speech/{voice_id}` — ElevenLabs JSON (`text`); `/stream` streams the audio
+    - `POST /v1/audio/speech` — OpenAI alias (`input` + `voice`)
+    - `POST /v1/audio/speech/clone` — one-shot clone+speak, does not persist a voice_id
+
+    **Stack**
+    - **audio engine**: FireRedTTS3-Instruct in-process (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+    Frozen voices are stored at `appData/voices`.
+
+  upgradeDescription: |
+    v1.0.0: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://github.com/FireRedTeam/FireRedTTS3/blob/main/LICENSE
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). On nvidia-gb10 the
+    # engine's memory request AND limit become the GPU quota (unified memory).
+    - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "24Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "16Gi"
+      limitedGPUMemory: "16Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "16640Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://FireRedTeam/FireRedTTS3 --exclude fireredtts3_base/*"
+    description: "HuggingFace source llm-init downloads into the shared cache. Instruct, RedAE and the tokenizer are enough; `--exclude` drops the 8.5 GiB Base checkpoint this image never loads."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "FireRedTeam/FireRedTTS3"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "audio"
+    options:
+    - title: Audio
+      value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts,tts_clone"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: TTS (voices + design + speech)
+      value: tts
+    - title: TTS clone (save a reference as a voice_id)
+      value: tts_clone
+    description: "One Instruct checkpoint covers both. `tts` mounts list/design/speak; `tts_clone` mounts POST /v1/voices/add."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "16Gi"
+    description: "GPU memory required for this model. CUDA only; `0` is not supported."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "20Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "--n-timesteps 10 --inference-cfg 2.0 --design-cfg 1.2"
+    description: "Engine-native flags (llm-init ENGINE_ARGS). Filling this replaces the whole
+      string. --n-timesteps is the flow steps (official 10). --inference-cfg is clone CFG (official
+      2.0). --design-cfg is voice-design CFG (official 1.2). Also read: --seed, --voice-dir,
+      --preview-text, --attn-implementation, --use-wetext (default on), --use-llm-tn (default off)."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
