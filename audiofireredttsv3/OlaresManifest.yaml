@@ -7,7 +7,7 @@ metadata:
   description: "FireRedTTS3-Instruct: one model for built-in voices, cloning and design."
   appid: audiofireredttsv3
   title: FireRedTTS3 Instruct
-  version: '1.0.1'
+  version: '1.0.2'
   categories:
     - AI
     - models
@@ -47,7 +47,7 @@ spec:
     **Configuration**
     - Model: `FireRedTeam/FireRedTTS3`
     - Source: `hf://FireRedTeam/FireRedTTS3` (Instruct + RedAE + tokenizer; Base is excluded)
-    - Capabilities: `tts`, `tts_clone`
+    - Capabilities: `tts`, `tts_clone`, `tts_design`
     - Required GPU memory: `16Gi`
     - Engine: official PyTorch in-process (`FireRedTTS3Instruct`)
     - License: Apache-2.0
@@ -81,6 +81,7 @@ spec:
     Frozen voices are stored at `appData/voices`.
 
   upgradeDescription: |
+    v1.0.2: Advertise `tts_design` on the model card (`MODEL_SUPPORTS`) and pin the engine to v1.1.4.
     v1.0.1: Declare MODEL_MODE=tts and require llm-init v1.7.0.
     v1.0.0: Initial release.
 
@@ -162,15 +163,17 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "tts,tts_clone"
+    default: "tts,tts_clone,tts_design"
     multiSelect: true
     splitter: ","
     options:
-    - title: TTS (voices + design + speech)
+    - title: TTS (voices + speech)
       value: tts
     - title: TTS clone (save a reference as a voice_id)
       value: tts_clone
-    description: "One Instruct checkpoint covers both. `tts` mounts list/design/speak; `tts_clone` mounts POST /v1/voices/add."
+    - title: TTS design (build a voice from a written description)
+      value: tts_design
+    description: "One Instruct checkpoint covers all three. `tts` mounts list/speak; `tts_design` is advertised on the model card for `/v1/text-to-voice/*`; `tts_clone` mounts POST /v1/voices/add."
   - envName: REQUIRED_GPU_MEMORY
     required: true
     type: string
