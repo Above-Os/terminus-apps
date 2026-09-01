@@ -23,7 +23,7 @@
 {{- $in := . -}}
 {{- trim ($in.Args | default "") -}}
 {{- end -}}
-{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 (from .Values.gpu / .Values.GPU.Type). */ -}}
+{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 | amd-gpu (from .Values.gpu / .Values.GPU.Type). */ -}}
 {{- define "llmbase.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
@@ -54,9 +54,12 @@ amd64
 {{- define "vllmllmbasev3.engineImage" -}}
 {{- $gpuType := include "llmbase.gpuType" . -}}
 {{- $isGb10 := or (eq $gpuType "nvidia-gb10") (eq (include "llmbase.isGb10" .) "true") -}}
+{{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
 {{- $arch := include "llmbase.hostArch" . -}}
 {{- $img := .Values.engine.images | default dict -}}
-{{- if $isGb10 -}}
+{{- if $isAmdGpu -}}
+{{- $img.amdGpu | default "docker.io/vllm/vllm-openai-rocm:v0.28.0" -}}
+{{- else if $isGb10 -}}
 {{- $img.nvidiaGb10 | default "docker.io/vllm/vllm-openai:v0.27.1-aarch64" -}}
 {{- else if eq $arch "arm64" -}}
 {{- $img.nvidiaArm64 | default "docker.io/vllm/vllm-openai:v0.27.1-aarch64" -}}

@@ -13,6 +13,10 @@
 {{- $engineImage := include "vllmllmbasev3.engineImage" . -}}
 {{- $gb10FromNodes := eq (include "llmbase.isGb10" .) "true" -}}
 {{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
+{{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
+{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu is discrete but uses
+       gpu-inject + manifest requiredGPUMemory, like intel-gpu. */ -}}
+{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs) -}}
 {{- /* nvidia.com/gpumem: nvidia -> explicit in chart; gb10 -> pod memory quota only,
        gpu-inject sets matching requests/limits (chart gpumem on gb10 breaks K8s
@@ -70,6 +74,30 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+{{- if $isAmdGpu }}
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+            type: CharDevice
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+{{- end }}
+{{- if $isAmdGpu }}
+      securityContext:
+        supplementalGroups:
+          - 44
+          - 992
+{{- end }}
       containers:
         - name: vllm
           image: "{{ $engineImage }}"
@@ -88,6 +116,8 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: OLARES_GPU_MODE
+              value: {{ $gpuType | quote }}
             # Read the model llm-init already downloaded to the shared HF Hub
             # cache (hostPath /cache/hf/hub) instead of re-downloading to the
             # container's default ~/.cache/huggingface (ephemeral, lost on restart). 
@@ -108,6 +138,23 @@ spec:
               value: "true"
             - name: VLLM_SPARK_AUTO_GPU_UTIL
               value: "false"
+{{- end }}
+{{- if $isAmdGpu }}
+            # RDNA4 (R9700 / gfx1201): AITER C++/ASM kernels are unreliable;
+            # Triton FlashAttention is the supported path. Wrapper also maps
+            # gfx1201 in AITER's Triton arch table for FP8 imports.
+            - name: VLLM_ROCM_USE_AITER
+              value: "0"
+            - name: FLASH_ATTENTION_TRITON_AMD_ENABLE
+              value: "TRUE"
+            # gfx1201 GDN/Triton autotune can hang mid-decode (0 tok/s, engine
+            # core stops logging). First-config skips the exploding IR path.
+            - name: VLLM_TRITON_FORCE_FIRST_CONFIG
+              value: "1"
+            # HIP still sees the whole card; same Spark tuner maps ENGINE_ARGS
+            # --gpu-memory-utilization 0.9 onto VLLM_REQUIRED_GPU_MEMORY.
+            - name: VLLM_POD_MEMORY_MIB
+              value: "{{ $gpuMiB }}"
 {{- end }}
           ports:
             - name: vllm
@@ -132,18 +179,29 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+{{- if $isAmdGpu }}
+            - name: kfd
+              mountPath: /dev/kfd
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
-            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory + gpu-inject.
+            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
+            # gpu-inject; amd-gpu via gpu-inject + manifest requiredGPUMemory.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if not $unifiedMem }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if not $unifiedMem }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
