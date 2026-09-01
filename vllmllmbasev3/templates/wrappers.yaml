@@ -41,7 +41,7 @@ data:
     args = f"{args} --gpu-memory-utilization {target:.4f}".strip()
 
     print(
-        f"Spark pod memory {pod_mib}Mi vs CUDA pool {total / (1024 ** 3):.2f}GiB: "
+        f"GPU budget {pod_mib}Mi vs visible pool {total / (1024 ** 3):.2f}GiB: "
         f"--gpu-memory-utilization {old or '<unset>'} -> {target:.4f}",
         file=sys.stderr,
     )
@@ -102,13 +102,15 @@ data:
         fi
     }
 
-    spark_tune_gpu_memory_utilization() {
-        [ "${VLLM_PATCH_SPARK_MEM_UTILS:-}" = "true" ] || return 0
-        [ "${VLLM_SPARK_AUTO_GPU_UTIL:-false}" = "true" ] || return 0
+    # Same tuner Spark uses: ENGINE_ARGS keeps --gpu-memory-utilization 0.9
+    # against the quota; this rewrites it to visible-pool * (quota/card) * 0.9
+    # when HIP/CUDA still sees the whole device (amd-gpu today; Spark when
+    # VLLM_SPARK_AUTO_GPU_UTIL=true).
+    tune_gpu_memory_utilization() {
         [ -n "${VLLM_POD_MEMORY_MIB:-}" ] || return 0
         _tune_script="/llm-init/wrappers/spark_tune_gpu_util.py"
         if [ ! -f "$_tune_script" ]; then
-            log "WARN: $_tune_script missing, Spark gpu util tune skipped"
+            log "WARN: $_tune_script missing, gpu util tune skipped"
             return 0
         fi
         _tune_log=$(mktemp)
@@ -122,6 +124,17 @@ data:
         if [ -n "${_new_args:-}" ]; then
             ENGINE_ARGS="$_new_args"
         fi
+    }
+
+    spark_tune_gpu_memory_utilization() {
+        [ "${VLLM_PATCH_SPARK_MEM_UTILS:-}" = "true" ] || return 0
+        [ "${VLLM_SPARK_AUTO_GPU_UTIL:-false}" = "true" ] || return 0
+        tune_gpu_memory_utilization
+    }
+
+    amd_tune_gpu_memory_utilization() {
+        [ "${OLARES_GPU_MODE:-}" = "amd-gpu" ] || return 0
+        tune_gpu_memory_utilization
     }
 
     looks_like_hf_repo_id() {
@@ -141,6 +154,14 @@ data:
         esac
     }
 
+    # RDNA4 / gfx1201 (R9700): AITER C++/ASM is off (VLLM_ROCM_USE_AITER=0),
+    # but vLLM FP8 still imports AITER Triton kernels that KeyError on gfx1201.
+    # Map the arch so those Triton paths compile; no-op if aiter is absent.
+    patch_rdna4_aiter_arch() {
+        [ "${OLARES_GPU_MODE:-}" = "amd-gpu" ] || return 0
+        python3 -c "import aiter.ops.triton.utils.arch_info as ai; ai._ARCH_TO_DEVICE.setdefault('gfx1201','MI350X'); ai._ARCH_TO_DEVICE.setdefault('gfx1200','MI350X')" >/dev/null 2>&1 || true
+    }
+
     wait_for_sentinel
     wait_for_engine_args_handoff
 
@@ -150,6 +171,7 @@ data:
     fi
 
     patch_spark_mem_utils
+    patch_rdna4_aiter_arch
 
     run_vllm() {
         load_engine_args_from_handoff
@@ -160,6 +182,7 @@ data:
         # Re-tuned on every launch: the card's engine_args may set a different
         # --gpu-memory-utilization than the one this pod can actually afford.
         spark_tune_gpu_memory_utilization
+        amd_tune_gpu_memory_utilization
         log "starting vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
         # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
         exec python3 -m vllm.entrypoints.openai.api_server \
