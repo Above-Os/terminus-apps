@@ -11,7 +11,7 @@
 {{- end -}}
 {{- end -}}
 {{- $supportsRaw := join "," $supportsKeys -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-breeze:v1.1.4" -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-breeze:v1.1.5" -}}
 {{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
 {{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
 {{- $memRequest := trim ($oe.MEMORY_REQUEST | default "4Gi") -}}
@@ -36,7 +36,7 @@
 {{- /* Engine-native flags in llm-init's one channel. Filling ENGINE_ARGS replaces the whole string. */ -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
 {{- if eq $engineArgs "" -}}
-{{- $engineArgs = "--cfg-scale 1 --design-cfg 4" -}}
+{{- $engineArgs = "--cfg-scale 1 --design-cfg 4 --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500 --max-new-tokens 1500 --max-seq-len 2048" -}}
 {{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
