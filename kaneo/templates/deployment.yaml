@@ -1,0 +1,74 @@
+{{- $domainValues := split "," .Values.domain.kaneo -}}
+{{- $domain := index $domainValues "_0" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kaneo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kaneo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.workloads.kaneo.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kaneo
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kaneo
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+      - name: kaneo
+        image: ghcr.io/usekaneo/kaneo:2.16.2
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+        ports:
+        - name: http
+          containerPort: 5173
+          protocol: TCP
+        env:
+        - name: KANEO_CLIENT_URL
+          value: "https://{{ $domain }}"
+        - name: CORS_ORIGINS
+          value: "https://{{ $domain }}"
+        - name: AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kaneo.secretName" . }}
+              key: AUTH_SECRET
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kaneo.secretName" . }}
+              key: DATABASE_URL
+        - name: DISABLE_REGISTRATION
+          value: "false"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
