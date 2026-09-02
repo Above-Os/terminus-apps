@@ -4,23 +4,13 @@ metadata:
 
 spec:
   upgradeDescription: |
-    将 vLLM 从 v0.26.0 升级至 v0.27.1。Chart 1.2.29。
+    新增 AMD 独显（`amd-gpu` / ROCm）支持。Chart 1.2.36：按 Spark 方式按配额切显存。
 
-    **更新内容**（与 Olares 相关）
-
-    v0.27.1
-    - 支持量化 DSpark Markov heads
-
-    v0.27.0
-    - Kimi K3 全栈支持（内核、DeepGEMM、compressed-tensors NVFP4、DSpark AR fusion）
-    - 新增模型：Qwen3.5 dense/MoE、K-EXAONE-2.0、VaultGemma、jina-embeddings-v5；Inkling NVFP4/FP8
-    - PyTorch 2.13.0 升级（破坏性环境变更）
-    - SM100 上 FlashAttention 4：FP8 KV cache 与 headdim-256；JIT warmup 消除首请求编译卡顿
-    - DeepSeek-V4：序列并行、router/topk 优化、紧凑 MXFP4 indexer KV cache
-    - Model Runner V2：encoder-only 注意力、embedding/分类 pooling、CPU 多模态、多层 MTP
-    - KV offloading：分层存储、P2P 二级 tier、可插拔淘汰策略
-    - 大规模 serving：DP+EP 容错框架；混合 MLA+SSM 模型的 NIXL P/D
-    - Rust 前端：gRPC 控制面（健康检查、abort、模型/KV 发现）；CLI 集成 `vllm-bench`
+    **更新内容**
+    - 新增加速器模式 `amd-gpu`，面向 AMD 独显（如 Radeon AI PRO R9700 / gfx1201）
+    - `amd-gpu` 引擎镜像：`vllm/vllm-openai-rocm:v0.28.0`
+    - NVIDIA CUDA 仍为 `vllm/vllm-openai:v0.27.1`；Spark 仍为 aarch64 标签
+    - RDNA4 默认：关闭 AITER C++/ASM，启用 Triton FlashAttention，单卡（`--tensor-parallel-size 1`）
 
     详细发布说明请访问：
     https://github.com/vllm-project/vllm/releases
@@ -33,9 +23,9 @@ spec:
     - `MODEL_NAME`：`owner/repo`。模型名称，取 `MODEL_SOURCE` 中 `hf://` 之后的字符串，例如 `Qwen/Qwen3.5-2B`。此项也作为 OpenAI 别名和 vLLM `--model` 参数。
     - `MODEL_MODE`：`chat` 或 `embedding`。对话模型选 `chat`；向量模型选 embedding 时，图表会自动添加 `--task embed`。
     - `MODEL_SUPPORTS`：模型能力选项（Vision / Tools / Thinking / None）。请选择您的模型支持的功能。
-    - `ENGINE_ARGS`：`--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。vLLM 额外 CLI 参数，多个 `--key value` 之间用空格分隔。详见 https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/。
+    - `ENGINE_ARGS`：`--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。vLLM 额外 CLI 参数，多个 `--key value` 之间用空格分隔。`amd-gpu`（RDNA4 / R9700）请加 `--attention-backend ROCM_ATTN` 并保持 `--tensor-parallel-size 1`，不要默认加 `--kv-cache-dtype fp8`。详见 https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/。
     - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。llm-init 容器的日志等级。
-    - `VLLM_REQUIRED_GPU_MEMORY`：`8Gi`、`8192` 或 `8192Mi`。模型所需显存。`nvidia` 下设置 `nvidia.com/gpumem`；`nvidia-gb10` 下设置 pod 内存供 gpu-inject 切分。
+    - `VLLM_REQUIRED_GPU_MEMORY`：`8Gi`、`8192` 或 `8192Mi`。模型所需显存。`nvidia` 下设置 `nvidia.com/gpumem`；`nvidia-gb10` 下设置 pod 内存供 gpu-inject 切分；`amd-gpu` 下由 gpu-inject 切分独立 ROCm 显存。
 
     **工作流程说明**
     首先，`llm-init` 下载并准备模型，然后 vLLM 在模型准备好后启动服务。两个容器运行在同一 Pod 内，共享模型目录与就绪 sentinel。
@@ -49,6 +39,7 @@ spec:
     |----------------|------------------|--------------------------------------------------------------|
     | `nvidia`       | GPU (CUDA)       | 需设置 `VLLM_REQUIRED_GPU_MEMORY`；可在 ENGINE_ARGS 中调整 `--gpu-memory-utilization` |
     | `nvidia-gb10`  | GPU (Spark)      | 与 `nvidia` 相同；`--gpu-memory-utilization` 由 ENGINE_ARGS 指定（不自动换算） |
+    | `amd-gpu`      | GPU (ROCm)       | AMD 独显（如 Radeon AI PRO R9700 / gfx1201）。镜像 `vllm/vllm-openai-rocm:v0.28.0`。请使用 `--attention-backend ROCM_ATTN` 且 `--tensor-parallel-size 1`。 |
 
     **模型存储**
     所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。

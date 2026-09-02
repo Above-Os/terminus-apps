@@ -7,7 +7,7 @@ metadata:
   description: "Breeze TTS 2: one model for built-in voices, cloning and design."
   appid: audiobreezettsv3
   title: Breeze TTS 2
-  version: '1.0.2'
+  version: '1.0.3'
   categories:
     - AI
     - models
@@ -55,9 +55,9 @@ spec:
 
     **Voice ids live on this instance**
     ElevenLabs shape: `GET /v1/voices`, `POST /v1/voices/add`, `POST /v1/text-to-voice/design`
-    then `POST /v1/text-to-voice`, `POST /v1/text-to-speech/{voice_id}`. Built-in voices are
-    frozen design samples stored under appData the first time they are spoken. Clone needs
-    the exact transcript of the reference. OpenAI `/v1/audio/speech` is an alias.
+    then `POST /v1/text-to-voice`, `POST /v1/text-to-speech/{voice_id}`. Twenty-five built-in
+    Chinese and English voices are listed on boot; each is frozen under appData the first
+    time it is spoken. Clone needs the exact transcript of the reference.
 
     **How It Works**
     First, Model Console (llm-init) downloads the model and gets it ready, then the
@@ -69,8 +69,6 @@ spec:
     - `POST /v1/voices/add` — multipart `name` + `files[]` + transcript
     - `POST /v1/text-to-voice/design` then `POST /v1/text-to-voice` — preview, then persist
     - `POST /v1/text-to-speech/{voice_id}` — ElevenLabs JSON (`text`); `/stream` streams the audio
-    - `POST /v1/audio/speech` — OpenAI alias (`input` + `voice`)
-    - `POST /v1/audio/speech/clone` — one-shot clone+speak, does not persist a voice_id
 
     **Stack**
     - **audio engine**: Breeze TTS 2 in-process (port 8000); self-reports `/v1/models` + `/metrics`
@@ -81,6 +79,7 @@ spec:
     Frozen voices are stored at `appData/voices`.
 
   upgradeDescription: |
+    v1.0.3: Engine v1.1.5 — 25 built-in zh/en voices, clone/design gates, no OpenAI aliases.
     v1.0.2: Advertise `tts_design` on the model card (`MODEL_SUPPORTS`) and pin the engine to v1.1.4.
     v1.0.1: Declare MODEL_MODE=tts and require llm-init v1.7.0.
     v1.0.0: Initial release.
@@ -232,10 +231,13 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: "--cfg-scale 1 --design-cfg 4"
+    default: "--cfg-scale 1 --design-cfg 4 --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500 --max-new-tokens 1500 --max-seq-len 2048"
     description: "Engine-native flags (llm-init ENGINE_ARGS). Filling this replaces the whole
-      string. --cfg-scale is clone CFG (official 1). --design-cfg is voice-design CFG (official 4).
-      Also read: --seed, --voice-dir, --preview-text, --attn-implementation (eager), --fast-all."
+      string. --cfg-scale clone CFG (official 1). --design-cfg design/direction CFG (official 4).
+      --ref-min-seconds / --ref-max-seconds / --ref-max-mb reject at /v1/voices/add (0 = off).
+      --design-min-chars / --design-max-chars reject at design (0 = off). --max-new-tokens and
+      --max-seq-len are official infer.py windows. Also: --seed, --voice-dir, --preview-text,
+      --attn-implementation, --fast-all."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
