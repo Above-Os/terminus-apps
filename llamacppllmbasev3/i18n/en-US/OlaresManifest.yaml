@@ -4,11 +4,16 @@ metadata:
 
 spec:
   upgradeDescription: |
+    Chart 1.2.40 — add AMD discrete GPU (`amd-gpu`) on ROCm, bump llm-init and CUDA.
+    Engine image on `amd-gpu`: `beclab/ggml-org-llama.cpp:server-rocm-b10731`.
+    NVIDIA CUDA and Spark: `server-cuda12-b10588` → `server-cuda12-b10752`.
+    llm-init: `v1.6.1` → `v1.7.1`.
+
     Chart 1.2.39 — bump llm-init to `v1.6.1`.
 
     **Images**
     - llm-init: `docker.io/beclab/llm-init:v1.6.0` → `v1.6.1`.
-    - llama.cpp: unchanged at `server-cuda12-b10588`.
+    - llama.cpp CUDA: unchanged at `server-cuda12-b10588`.
 
     **Editing `ENGINE_ARGS` after installation now takes effect**
 
@@ -56,7 +61,7 @@ spec:
     - `MODEL_SUPPORTS`: Model capability options (Vision / Tools / Thinking / None). Pick what your model supports. This is required.
     - `ENGINE_ARGS`: `-c 8192 -ngl all -fa on`. Extra llama.cpp options, like `-c 8192 -ngl all -fa on`. To fully use GPU, add `-ngl all`. You can also use values like `LLAMA_ARG_*=val`.
     - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`. Log level: choose from `debug`, `info`, `warn`, or `error`.
-    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed. Accepts values like `8Gi`, `8192`, or `8192Mi`. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory.
+    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed. Accepts values like `8Gi`, `8192`, or `8192Mi`. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory; on `amd-gpu`, sizes the ROCm VRAM quota via gpu-inject.
     
     **How It Works**
     First, `llm-init` downloads your model and gets it ready, then `llama.cpp` starts serving the model when it’s ready. These two parts run separately but share files and progress info.
@@ -70,6 +75,7 @@ spec:
     |----------------|-------------------|---------------------------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | Set `LLAMACPP_REQUIRED_GPU_MEMORY`; use `-ngl all` for full GPU use |
     | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod                        |
+    | `amd-gpu`      | GPU (ROCm)        | Discrete AMD (R9700 / gfx1201). Image `server-rocm-b10731`. Do not use `amd`. |
 
     **Model Storage**
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
