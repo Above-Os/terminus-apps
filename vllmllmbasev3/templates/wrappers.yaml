@@ -164,10 +164,7 @@ data:
 
     # Intel XPU image: libccl / Level Zero come from oneAPI setvars.
     source_oneapi() {
-        case "${OLARES_GPU_MODE:-}" in
-            intel|intel-gpu) ;;
-            *) return 0 ;;
-        esac
+        [ "${OLARES_GPU_MODE:-}" = "intel-gpu" ] || return 0
         if [ -f /opt/intel/oneapi/setvars.sh ]; then
             log "sourcing oneAPI env: /opt/intel/oneapi/setvars.sh"
             set +u
@@ -179,13 +176,10 @@ data:
         fi
     }
 
-    # XE1 / older iGPU: xpu_kernels may JIT bf16 SYCL paths the hardware lacks.
-    # Discrete Arc is fine with the same native RMSNorm. Skip if the user set it.
+    # Intel XPU: xpu_kernels may JIT bf16 SYCL paths some Arc SKUs lack.
+    # Native RMSNorm is the proven fallback. Skip if the user already set it.
     append_intel_xe1_compat() {
-        case "${OLARES_GPU_MODE:-}" in
-            intel|intel-gpu) ;;
-            *) return 0 ;;
-        esac
+        [ "${OLARES_GPU_MODE:-}" = "intel-gpu" ] || return 0
         case " ${ENGINE_ARGS:-} " in
             *" --ir-op-priority.rms_norm="*|*" --ir-op-priority.fused_add_rms_norm="*) return 0 ;;
         esac

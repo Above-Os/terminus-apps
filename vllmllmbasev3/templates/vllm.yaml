@@ -13,17 +13,14 @@
 {{- $engineImage := include "vllmllmbasev3.engineImage" . -}}
 {{- $gb10FromNodes := eq (include "llmbase.isGb10" .) "true" -}}
 {{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
-{{- $isIntelIgpu := eq $gpuType "intel" -}}
 {{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
-{{- $isIntelXpu := or $isIntelIgpu $isIntelGpu -}}
-{{- $needDri := or $isAmdGpu $isIntelXpu -}}
-{{- /* intel iGPU is unified memory (same as Spark): size pod memory from quota. */ -}}
-{{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") $isIntelIgpu -}}
+{{- $needDri := or $isAmdGpu $isIntelGpu -}}
+{{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
 {{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu / intel-gpu use
        gpu-inject + manifest requiredGPUMemory. */ -}}
 {{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
 {{- $shmLimit := "16Gi" -}}
-{{- if $isIntelXpu -}}
+{{- if $isIntelGpu -}}
 {{- $shmLimit = "10Gi" -}}
 {{- end -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs) -}}
@@ -113,7 +110,7 @@ spec:
         - name: vllm
           image: "{{ $engineImage }}"
           imagePullPolicy: IfNotPresent
-{{- if $isIntelXpu }}
+{{- if $isIntelGpu }}
           command: ["/bin/bash", "/llm-init/wrappers/vllm.sh"]
 {{- else }}
           command: ["/bin/sh", "/llm-init/wrappers/vllm.sh"]
@@ -142,7 +139,7 @@ spec:
               value: /cache/vllm
             - name: PYTHONUNBUFFERED
               value: "1"
-{{- if $isIntelXpu }}
+{{- if $isIntelGpu }}
             - name: VLLM_WORKER_MULTIPROC_METHOD
               value: spawn
 {{- end }}
@@ -211,8 +208,8 @@ spec:
               mountPath: /dev/shm
 {{- end }}
           resources:
-            # nvidia.com/gpumem: nvidia only in chart; gb10 / intel via pod
-            # memory + gpu-inject; amd-gpu / intel-gpu via gpu-inject.
+            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
+            # gpu-inject; amd-gpu / intel-gpu via gpu-inject.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
