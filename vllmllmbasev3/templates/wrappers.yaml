@@ -162,6 +162,37 @@ data:
         python3 -c "import aiter.ops.triton.utils.arch_info as ai; ai._ARCH_TO_DEVICE.setdefault('gfx1201','MI350X'); ai._ARCH_TO_DEVICE.setdefault('gfx1200','MI350X')" >/dev/null 2>&1 || true
     }
 
+    # Intel XPU image: libccl / Level Zero come from oneAPI setvars.
+    source_oneapi() {
+        case "${OLARES_GPU_MODE:-}" in
+            intel|intel-gpu) ;;
+            *) return 0 ;;
+        esac
+        if [ -f /opt/intel/oneapi/setvars.sh ]; then
+            log "sourcing oneAPI env: /opt/intel/oneapi/setvars.sh"
+            set +u
+            # shellcheck disable=SC1091
+            . /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
+            set -u
+        else
+            log "WARN: /opt/intel/oneapi/setvars.sh missing; continuing without oneAPI env"
+        fi
+    }
+
+    # XE1 / older iGPU: xpu_kernels may JIT bf16 SYCL paths the hardware lacks.
+    # Discrete Arc is fine with the same native RMSNorm. Skip if the user set it.
+    append_intel_xe1_compat() {
+        case "${OLARES_GPU_MODE:-}" in
+            intel|intel-gpu) ;;
+            *) return 0 ;;
+        esac
+        case " ${ENGINE_ARGS:-} " in
+            *" --ir-op-priority.rms_norm="*|*" --ir-op-priority.fused_add_rms_norm="*) return 0 ;;
+        esac
+        ENGINE_ARGS="${ENGINE_ARGS:-} --ir-op-priority.fused_add_rms_norm=native --ir-op-priority.rms_norm=native"
+        ENGINE_ARGS=$(printf '%s' "$ENGINE_ARGS" | sed 's/^[[:space:]]*//')
+    }
+
     wait_for_sentinel
     wait_for_engine_args_handoff
 
@@ -172,6 +203,7 @@ data:
 
     patch_spark_mem_utils
     patch_rdna4_aiter_arch
+    source_oneapi
 
     run_vllm() {
         load_engine_args_from_handoff
@@ -183,6 +215,7 @@ data:
         # --gpu-memory-utilization than the one this pod can actually afford.
         spark_tune_gpu_memory_utilization
         amd_tune_gpu_memory_utilization
+        append_intel_xe1_compat
         log "starting vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
         # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
         exec python3 -m vllm.entrypoints.openai.api_server \

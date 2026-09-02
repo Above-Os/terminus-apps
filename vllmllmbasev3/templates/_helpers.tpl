@@ -23,7 +23,7 @@
 {{- $in := . -}}
 {{- trim ($in.Args | default "") -}}
 {{- end -}}
-{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 | amd-gpu (from .Values.gpu / .Values.GPU.Type). */ -}}
+{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 | amd-gpu | intel | intel-gpu. */ -}}
 {{- define "llmbase.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
@@ -55,10 +55,17 @@ amd64
 {{- $gpuType := include "llmbase.gpuType" . -}}
 {{- $isGb10 := or (eq $gpuType "nvidia-gb10") (eq (include "llmbase.isGb10" .) "true") -}}
 {{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
+{{- $isIntelXpu := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
 {{- $arch := include "llmbase.hostArch" . -}}
 {{- $img := .Values.engine.images | default dict -}}
 {{- if $isAmdGpu -}}
 {{- $img.amdGpu | default "docker.io/vllm/vllm-openai-rocm:v0.28.0" -}}
+{{- else if $isIntelXpu -}}
+{{- if eq $gpuType "intel-gpu" -}}
+{{- $img.intelGpu | default ($img.intel | default "docker.io/intel/vllm:0.21.0-ubuntu24.04-20260805") -}}
+{{- else -}}
+{{- $img.intel | default "docker.io/intel/vllm:0.21.0-ubuntu24.04-20260805" -}}
+{{- end -}}
 {{- else if $isGb10 -}}
 {{- $img.nvidiaGb10 | default "docker.io/vllm/vllm-openai:v0.27.1-aarch64" -}}
 {{- else if eq $arch "arm64" -}}

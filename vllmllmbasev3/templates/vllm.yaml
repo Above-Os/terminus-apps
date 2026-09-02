@@ -12,11 +12,20 @@
 {{- $gpuType := include "llmbase.gpuType" . -}}
 {{- $engineImage := include "vllmllmbasev3.engineImage" . -}}
 {{- $gb10FromNodes := eq (include "llmbase.isGb10" .) "true" -}}
-{{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
 {{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
-{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu is discrete but uses
-       gpu-inject + manifest requiredGPUMemory, like intel-gpu. */ -}}
-{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) -}}
+{{- $isIntelIgpu := eq $gpuType "intel" -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
+{{- $isIntelXpu := or $isIntelIgpu $isIntelGpu -}}
+{{- $needDri := or $isAmdGpu $isIntelXpu -}}
+{{- /* intel iGPU is unified memory (same as Spark): size pod memory from quota. */ -}}
+{{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") $isIntelIgpu -}}
+{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu / intel-gpu use
+       gpu-inject + manifest requiredGPUMemory. */ -}}
+{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
+{{- $shmLimit := "16Gi" -}}
+{{- if $isIntelXpu -}}
+{{- $shmLimit = "10Gi" -}}
+{{- end -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs) -}}
 {{- /* nvidia.com/gpumem: nvidia -> explicit in chart; gb10 -> pod memory quota only,
        gpu-inject sets matching requests/limits (chart gpumem on gb10 breaks K8s
@@ -79,6 +88,8 @@ spec:
           hostPath:
             path: /dev/kfd
             type: CharDevice
+{{- end }}
+{{- if $needDri }}
         - name: dri
           hostPath:
             path: /dev/dri
@@ -90,7 +101,7 @@ spec:
         - name: dshm
           emptyDir:
             medium: Memory
-            sizeLimit: 16Gi
+            sizeLimit: {{ $shmLimit }}
 {{- end }}
 {{- if $isAmdGpu }}
       securityContext:
@@ -102,7 +113,11 @@ spec:
         - name: vllm
           image: "{{ $engineImage }}"
           imagePullPolicy: IfNotPresent
+{{- if $isIntelXpu }}
+          command: ["/bin/bash", "/llm-init/wrappers/vllm.sh"]
+{{- else }}
           command: ["/bin/sh", "/llm-init/wrappers/vllm.sh"]
+{{- end }}
           env:
             - name: ENGINE_KIND
               value: vllm
@@ -127,6 +142,10 @@ spec:
               value: /cache/vllm
             - name: PYTHONUNBUFFERED
               value: "1"
+{{- if $isIntelXpu }}
+            - name: VLLM_WORKER_MULTIPROC_METHOD
+              value: spawn
+{{- end }}
             - name: PGID
               value: "1000"
             - name: PUID
@@ -182,6 +201,8 @@ spec:
 {{- if $isAmdGpu }}
             - name: kfd
               mountPath: /dev/kfd
+{{- end }}
+{{- if $needDri }}
             - name: dri
               mountPath: /dev/dri
             - name: drm
@@ -190,8 +211,8 @@ spec:
               mountPath: /dev/shm
 {{- end }}
           resources:
-            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
-            # gpu-inject; amd-gpu via gpu-inject + manifest requiredGPUMemory.
+            # nvidia.com/gpumem: nvidia only in chart; gb10 / intel via pod
+            # memory + gpu-inject; amd-gpu / intel-gpu via gpu-inject.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
