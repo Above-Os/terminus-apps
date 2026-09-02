@@ -7,7 +7,7 @@ metadata:
   description: "Generic llama.cpp engine base. Pick any GGUF model at install via env."
   appid: llamacppllmbasev3
   title: llama.cpp Engine Base
-  version: '1.2.40'
+  version: '1.2.41'
   categories:
     - AI
     - models
@@ -36,8 +36,16 @@ workloadReplicas:
   llminit: 1
 spec:
   onlyAdmin: true
-  versionName: 'b10752 / b10731-rocm'
+  versionName: 'b10752 / b10731-rocm / b10752-intel'
   upgradeDescription: |
+    Chart 1.2.41 — add Intel discrete GPU (`intel-gpu`) on SYCL.
+
+    **What's Changed**
+    - New accelerator mode `intel-gpu` for discrete Intel Arc (Arc Pro B70 and other XPU cards)
+    - Engine image on `intel-gpu`: `beclab/ggml-org-llama.cpp:server-intel-b10752`
+    - Mount `/dev/dri` and `/sys/class/drm`; skip `nvidia.com/gpumem`
+    - NVIDIA / Spark / `amd-gpu` paths unchanged
+
     Chart 1.2.40 — add AMD discrete GPU (`amd-gpu`) on ROCm, bump llm-init and CUDA.
 
     **What's Changed**
@@ -97,7 +105,7 @@ spec:
     - `MODEL_SUPPORTS`: Model capability options (Vision / Tools / Thinking / None). Pick what your model supports. This is required.
     - `ENGINE_ARGS`: `-c 8192 -ngl all -fa on`. Extra llama.cpp options, like `-c 8192 -ngl all -fa on`. To fully use GPU, add `-ngl all`. You can also use values like `LLAMA_ARG_*=val`.
     - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`. Log level: choose from `debug`, `info`, `warn`, or `error`.
-    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed. Accepts values like `8Gi`, `8192`, or `8192Mi`. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory; on `amd-gpu`, sizes the discrete ROCm VRAM quota via gpu-inject.
+    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192`, or `8192Mi`. Model memory needed. Accepts values like `8Gi`, `8192`, or `8192Mi`. On NVIDIA, this sets `nvidia.com/gpumem` in MiB; on Spark, sets pod memory; on `amd-gpu` and `intel-gpu`, sizes the discrete VRAM quota via gpu-inject.
     
     **How It Works**
     First, `llm-init` downloads your model and gets it ready, then `llama.cpp` starts serving the model when it’s ready. These two parts run separately but share files and progress info.
@@ -112,6 +120,7 @@ spec:
     | `nvidia`       | GPU (CUDA)        | Set `LLAMACPP_REQUIRED_GPU_MEMORY`; use `-ngl all` for full GPU use |
     | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod                        |
     | `amd-gpu`      | GPU (ROCm)        | Discrete AMD (e.g. Radeon AI PRO R9700 / gfx1201). Image `server-rocm-b10731`. Use `-ngl all`. Do not use `amd` (Ryzen iGPU). |
+    | `intel-gpu`    | GPU (SYCL)        | Discrete Intel Arc (e.g. Arc Pro B70). Image `server-intel-b10752`. Use `-ngl all`. |
 
     **Model Storage**
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
@@ -135,6 +144,7 @@ spec:
     #   nvidia       - discrete GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
     #   nvidia-gb10  - DGX Spark unified memory; same env -> pod memory
     #   amd-gpu      - discrete AMD ROCm; LLAMACPP_REQUIRED_GPU_MEMORY -> gpu-inject
+    #   intel-gpu    - discrete Intel Arc SYCL; LLAMACPP_REQUIRED_GPU_MEMORY -> gpu-inject
     - mode: nvidia
       limitedCpu: "-1"
       requiredCpu: "-1"
@@ -152,6 +162,15 @@ spec:
       limitedMemory: "-1"
       requiredMemory: "-1"
     - mode: amd-gpu
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+    - mode: intel-gpu
       limitedCpu: "-1"
       requiredCpu: "-1"
       requiredDisk: 50Mi
@@ -282,5 +301,5 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory. On amd-gpu it sizes the ROCm VRAM quota via gpu-inject."
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory. On amd-gpu and intel-gpu it sizes the discrete VRAM quota via gpu-inject."
     regex: "^[0-9]+(Gi|Mi)?$"
