@@ -27,7 +27,7 @@ spec:
     - **[引导配置](https://docs.openclaw.ai/start/wizard) + [技能体系](https://docs.openclaw.ai/tools/skills)** —— 提供完善的引导流程，内置/可管理/可扩展的技能体系
 
   upgradeDescription: |
-    Chart 1.0.31：OpenClaw v2026.8.2，改用 beclab 镜像；环境变量改为 OPENCLAW_*，并兼容旧的 CLAWDBOT_*。
+    Chart 1.0.32：OpenClaw v2026.8.2，改用 beclab 镜像；环境变量改为 OPENCLAW_*，并兼容旧的 CLAWDBOT_*。升级时只清掉挡住 8.2 启动的 7.x workspace/session 残留，不必再手动跑 `openclaw doctor --fix`。
     https://github.com/openclaw/openclaw/releases/tag/v2026.8.2
 
     镜像：
@@ -42,8 +42,8 @@ spec:
     - 请把 `~/.openclaw/.env` 或进程环境里的自定义 `CLAWDBOT_*` 改名为 `OPENCLAW_*`（例如 `CLAWDBOT_GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN`）。过渡期内两边都能用。
 
     从 2026.7.x 升级的破坏性变更：
-    - OpenProse 插件和 `/prose` 已移除；先停 Gateway，跑 `openclaw doctor --fix`，再按 https://docs.openclaw.ai/prose 迁移
-    - 出厂 `codex/*`、`openai-codex/*` 需经 `openclaw doctor --fix` 迁到 `openai/*`
+    - OpenProse 插件和 `/prose` 已移除；若还在用 `.prose` 文件，按 https://docs.openclaw.ai/prose 迁移
+    - 出厂 `codex/*`、`openai-codex/*` 现已对应 `openai/*`
     - 新默认：空闲/跨日不再自动 reset、dreaming 与 self-learning 默认开、同 agent 会话默认可互访、heartbeat 改打 owner DM
 
     反代 / Control UI：
@@ -60,6 +60,6 @@ spec:
 
     说明：
     - 升级不覆盖已有 `openclaw.json`（init 只在文件不存在时拷默认配置）
-    - 新装一般可直接启动；从 7 月状态升级时请先停 Gateway 再跑 `openclaw doctor --fix`
+    - 新装会跳过迁移 init。从 2026.7.x 升级时，init 只删掉或改名挡住 8.2 的 workspace-state / attestation / `sessions.json`。不会跑 `openclaw doctor --fix`（那条命令会关掉未使用的 skill，包括 Olares 技能包）。
     - 容器内请用 `restart-gateway`，不要用 `openclaw gateway restart`。`restart-gateway` 现已带 token 访问 `/readyz`（v2026.8.2 拒绝未鉴权探测）
     - Gateway 就绪探针改为 exec 访问本机 `/readyz` 并携带配置中的 token

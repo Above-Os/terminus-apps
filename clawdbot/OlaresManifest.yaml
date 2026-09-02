@@ -12,7 +12,7 @@ metadata:
   description: Personal AI Assistant with Multi-channel Inbox Support
   appid: clawdbot
   title: OpenClaw
-  version: 1.0.31
+  version: 1.0.32
   categories:
   - Productivity_v112
   - Developer Tools
@@ -74,7 +74,7 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — onboarding-driven setup with bundled/managed/workspace skills.
 
   upgradeDescription: |
-    Chart 1.0.31 — OpenClaw v2026.8.2 on the beclab image, with OPENCLAW_* env and leftover CLAWDBOT_* compatibility.
+    Chart 1.0.32 — OpenClaw v2026.8.2 on the beclab image, with OPENCLAW_* env and leftover CLAWDBOT_* compatibility. An init clears leftover 7.x workspace/session files before Gateway starts, so a Market upgrade from 2026.7.x can reach running without a manual `openclaw doctor --fix`.
     https://github.com/openclaw/openclaw/releases/tag/v2026.8.2
 
     Images:
@@ -89,8 +89,8 @@ spec:
     - Rename any custom `CLAWDBOT_*` in `~/.openclaw/.env` or process env to `OPENCLAW_*` (example: `CLAWDBOT_GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN`). The shim keeps both working during the transition.
 
     Breaking if you upgrade from 2026.7.x:
-    - OpenProse plugin and `/prose` removed; stop the Gateway, run `openclaw doctor --fix`, then follow https://docs.openclaw.ai/prose
-    - Shipped `codex/*` and `openai-codex/*` model refs migrate to `openai/*` via `openclaw doctor --fix`
+    - OpenProse plugin and `/prose` removed; follow https://docs.openclaw.ai/prose if you still use `.prose` files
+    - Shipped `codex/*` and `openai-codex/*` model refs now live under `openai/*`
     - New defaults: no idle/day session reset, dreaming and self-learning on, same-agent session visibility, heartbeat to owner DM
 
     Reverse-proxy / Control UI:
@@ -107,7 +107,7 @@ spec:
 
     Notes:
     - Existing `openclaw.json` is preserved on upgrade (init copies the default only when the file is missing)
-    - Fresh installs should boot without doctor; upgraded 7.x state may need `openclaw doctor --fix` with Gateway stopped
+    - Fresh installs skip the migrate init. Upgrades from 2026.7.x only remove or rename leftover workspace-state / attestation / `sessions.json` files that block 8.2. The init does not run `openclaw doctor --fix` (that command disables unused skills, including the Olares pack).
     - Use `restart-gateway` in containers, not `openclaw gateway restart`. `restart-gateway` now sends the gateway token to `/readyz` (v2026.8.2 rejects unauthenticated probes)
     - Gateway readiness exec-probes localhost `/readyz` with the configured token
 

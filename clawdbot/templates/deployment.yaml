@@ -162,6 +162,78 @@ spec:
               name: app-data-config
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
+        # 8.2 refuses to boot when leftover 7.x workspace/session files exist.
+        # Do not run `openclaw doctor --fix` here: in a container it cannot
+        # finish service maintenance, and --fix also disables unused skills
+        # (including the Olares skill pack). Clearing the existence-gate
+        # leftovers is enough for Gateway to reach Ready.
+        - name: init-migrate-workspace
+          image: "{{ $openclawImage }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set +e
+              state="${OPENCLAW_STATE_DIR:-/home/node/.openclaw}"
+              need=0
+              for f in \
+                "$state/workspace/openclaw-workspace-state.json" \
+                "$state/workspace/.openclaw-workspace-state.json" \
+                "$state/exec-approvals.json"
+              do
+                if [ -e "$f" ]; then
+                  echo "[init-migrate] leftover: $f"
+                  need=1
+                fi
+              done
+              for f in "$state"/agents/*/sessions/sessions.json; do
+                if [ -f "$f" ]; then
+                  echo "[init-migrate] leftover: $f"
+                  need=1
+                fi
+              done
+              for f in "$state"/workspace-attestations/*.attested; do
+                if [ -f "$f" ]; then
+                  echo "[init-migrate] leftover: $f"
+                  need=1
+                fi
+              done
+              if [ "$need" = "0" ]; then
+                echo "[init-migrate] no leftover 7.x setup files; skip"
+                exit 0
+              fi
+              rm -f "$state/workspace/openclaw-workspace-state.json" \
+                    "$state/workspace/.openclaw-workspace-state.json" \
+                    "$state/exec-approvals.json"
+              rm -f "$state"/workspace-attestations/*.attested 2>/dev/null || true
+              for f in "$state"/agents/*/sessions/sessions.json; do
+                if [ -f "$f" ]; then
+                  mv -f "$f" "${f}.pre-8.2"
+                  echo "[init-migrate] renamed leftover $f -> ${f}.pre-8.2 so Gateway can start"
+                fi
+              done
+              echo "[init-migrate] cleared leftover 7.x setup files (no doctor --fix)"
+              exit 0
+          env:
+            - name: HOME
+              value: /home/node
+            - name: OPENCLAW_HOME
+              value: /home/node
+            - name: OPENCLAW_STATE_DIR
+              value: /home/node/.openclaw
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: /home/node/.openclaw/workspace
+          resources: {}
+          volumeMounts:
+            - mountPath: /home/node/.openclaw
+              name: app-data-config
+            - mountPath: /home/node
+              name: app-data-node
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
         - name: init-docker-cli
           image: "docker.io/beclab/docker:29.3.0-dind"
           command: ["cp", "/usr/local/bin/docker", "/docker-cli/docker"]
