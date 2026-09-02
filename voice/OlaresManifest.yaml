@@ -1,0 +1,76 @@
+apiVersion: v3
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+metadata:
+  name: voice
+  appid: voice
+  title: Voice
+  description: Create voices and generate speech through Olares Router
+  icon: https://raw.githubusercontent.com/beclab/voice/main/deploy/voice/assets/icon.png
+  version: 0.4.1
+  categories:
+    - Utilities_v112
+    - AI
+spec:
+  versionName: "0.4.1"
+  runAsUser: true
+  fullDescription: |
+    ## Overview
+    Voice turns text into speech through Olares Router. Generate a script
+    on the Text to Speech page, then clone or design voices on a TTS model
+    from the Voices page.
+
+    Every inference request goes through Olares Router. Voice does not
+    download models or manage engines. Voices live on the selected TTS
+    model (ElevenLabs-shaped voice_id).
+
+    ## Requirements
+    - Olares >= 1.12.6
+    - Router installed and running
+    - At least one TTS model configured in Router (local model application
+      or a cloud vendor such as ElevenLabs)
+    - Arch: amd64, arm64
+  developer: beclab
+  submitter: beclab
+  locale:
+    - en-US
+  requiredCpu: 250m
+  limitedCpu: "2"
+  requiredMemory: 256Mi
+  limitedMemory: 2Gi
+  requiredDisk: 1Gi
+  limitedDisk: 20Gi
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+entrances:
+  - name: voice
+    host: voice-svc
+    port: 8430
+    title: Voice
+    icon: https://raw.githubusercontent.com/beclab/voice/main/deploy/voice/assets/icon.png
+    authLevel: private
+    openMethod: window
+options:
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+    - name: router
+      version: '>=1.0.0'
+      type: application
+    - name: postgres
+      version: '>=14.0.0-0'
+      type: middleware
+      mandatory: true
+middleware:
+  postgres:
+    username: voice
+    databases:
+      - name: voice
+        distributed: false
+workloadReplicas:
+  voice: 1
