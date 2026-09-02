@@ -31,14 +31,14 @@ spec:
           runAsUser: 1000
         workingDir: /opt/ComfyUI
         # /opt/ComfyUI is root-owned → writable dirs on emptyDir.
-        # --disable-dynamic-vram: aimdo NVML crashes under HAMi.
+        # Keep the static fallback aligned with the dynamic NVIDIA backend.
         command:
         - sh
         - -c
         - >-
           mkdir -p /run/comfyui/output /run/comfyui/input /run/comfyui/temp /run/comfyui/user
           && exec python3 main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch
-          --disable-dynamic-vram
+          --disable-dynamic-vram --disable-cuda-malloc --use-ck-attention --cache-lru 1
           --extra-model-paths-config /opt/ComfyUI/extra_model_paths.yaml
           --output-directory /run/comfyui/output --input-directory /run/comfyui/input
           --temp-directory /run/comfyui/temp --user-directory /run/comfyui/user
