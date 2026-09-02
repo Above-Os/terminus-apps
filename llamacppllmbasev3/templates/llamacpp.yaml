@@ -17,9 +17,15 @@
 {{- $engineImage := include "llamacppllmbasev3.engineImage" . -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
 {{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
-{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu uses gpu-inject +
-       manifest requiredGPUMemory, like intel-gpu. */ -}}
-{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
+{{- $needDri := or $isAmdGpu $isIntelGpu -}}
+{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu / intel-gpu use
+       gpu-inject + manifest requiredGPUMemory. */ -}}
+{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
+{{- $shmLimit := "16Gi" -}}
+{{- if $isIntelGpu -}}
+{{- $shmLimit = "10Gi" -}}
+{{- end -}}
 {{- $engineArgs = include "llamacppllmbasev3.engineArgs" (dict "Args" $engineArgs) -}}
 {{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
        same value as pod memory ("<MiB>Mi"). */ -}}
@@ -33,8 +39,8 @@
 # llama.cpp engine Deployment. wrappers/llamacpp.sh blocks on the sentinel
 # (download ready), then execs llama-server -hf "$MODEL_NAME".
 # llm-init reverse-proxies at http://llamacpp:8081 — Service name MUST be
-# "llamacpp". GPU base: CUDA (nvidia / nvidia-gb10) or ROCm (amd-gpu) +
-# gpu-inject; put `-ngl all` in ENGINE_ARGS to offload all layers to the GPU.
+# "llamacpp". GPU base: CUDA (nvidia / nvidia-gb10), ROCm (amd-gpu), or
+# Intel SYCL (intel-gpu) + gpu-inject; put `-ngl all` in ENGINE_ARGS.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -79,6 +85,8 @@ spec:
           hostPath:
             path: /dev/kfd
             type: CharDevice
+{{- end }}
+{{- if $needDri }}
         - name: dri
           hostPath:
             path: /dev/dri
@@ -90,7 +98,7 @@ spec:
         - name: dshm
           emptyDir:
             medium: Memory
-            sizeLimit: 16Gi
+            sizeLimit: {{ $shmLimit }}
 {{- end }}
 {{- if $isAmdGpu }}
       securityContext:
@@ -157,6 +165,8 @@ spec:
 {{- if $isAmdGpu }}
             - name: kfd
               mountPath: /dev/kfd
+{{- end }}
+{{- if $needDri }}
             - name: dri
               mountPath: /dev/dri
             - name: drm
@@ -166,7 +176,7 @@ spec:
 {{- end }}
           resources:
             # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
-            # gpu-inject; amd-gpu via gpu-inject + manifest requiredGPUMemory.
+            # gpu-inject; amd-gpu / intel-gpu via gpu-inject.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
