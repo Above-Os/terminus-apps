@@ -1,0 +1,60 @@
+metadata:
+  title: vLLM Engine Base
+  description: "Base générique du moteur vLLM. Choisissez n'importe quel modèle HuggingFace Safetensors à l'installation via env."
+spec:
+  upgradeDescription: |
+    Mettre à jour vLLM de v0.26.0 vers v0.27.1. Chart 1.2.29.
+
+    **Changements** (pertinents pour Olares)
+
+    v0.27.1
+    - Prise en charge des têtes Markov DSpark quantifiées
+
+    v0.27.0
+    - Support full-stack Kimi K3 (kernels, DeepGEMM, compressed-tensors NVFP4, fusion DSpark AR)
+    - Nouveaux modèles : Qwen3.5 dense/MoE, K-EXAONE-2.0, VaultGemma, jina-embeddings-v5 ; Inkling NVFP4/FP8
+    - Mise à niveau vers PyTorch 2.13.0 (changement d'environnement incompatible)
+    - FlashAttention 4 sur SM100 : cache KV FP8 et headdim-256 ; le warmup JIT supprime les stalls de première requête
+    - DeepSeek-V4 : parallélisme de séquence, optimisations router/topk, cache KV indexeur MXFP4 compact
+    - Model Runner V2 : attention encoder-only, pooling embedding/classification, multimodal sur CPU, MTP multi-couches
+    - Offloading KV : stockage à niveaux, tier secondaire P2P, politiques d'éviction enfichables
+    - Serving à grande échelle : framework de tolérance aux pannes pour DP+EP ; NIXL P/D pour modèles hybrides MLA+SSM
+    - Frontend Rust : plan de contrôle gRPC (santé, abort, discovery modèle/KV) ; `vllm-bench` dans la CLI
+
+    Notes de version détaillées :
+    https://github.com/vllm-project/vllm/releases
+
+  fullDescription: |
+    **NOTE IMPORTANTE**
+    Cette application est un modèle et ne peut pas être utilisée seule. Pour l'utiliser, définissez les variables d'environnement ci-dessous afin de connecter un modèle spécifique.
+
+    **Guide de configuration des variables d'environnement**
+    - `MODEL_SOURCE` : `hf://<repo>`. La source HuggingFace pour télécharger votre modèle, par exemple `hf://Qwen/Qwen3.5-2B`. Utilisez un dépôt contenant des fichiers de poids `.safetensors`. Ajoutez éventuellement `--include <file>` ou `--revision <sha>`.
+    - `MODEL_NAME` : `owner/repo`. Le nom de votre modèle — utilisez la chaîne après `hf://` dans `MODEL_SOURCE`, par exemple `Qwen/Qwen3.5-2B`. Utilisé aussi comme alias OpenAI et vLLM `--model`.
+    - `MODEL_MODE` : `chat` ou `embedding`. Utilisez `chat` pour les modèles conversationnels ; pour l'embedding, le chart ajoute automatiquement `--task embed`.
+    - `MODEL_SUPPORTS` : Options de capacité du modèle (Vision / Tools / Thinking / None). Choisissez ce que votre modèle prend en charge.
+    - `ENGINE_ARGS` : `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`. Flags CLI vLLM supplémentaires. Séparez plusieurs paires `--key value` par des espaces. Voir https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
+    - `LOG_LEVEL` : `debug`, `info`, `warn` ou `error`. Niveau de journal du conteneur llm-init.
+    - `VLLM_REQUIRED_GPU_MEMORY` : `8Gi`, `8192` ou `8192Mi`. Mémoire modèle nécessaire. Sur `nvidia`, définit `nvidia.com/gpumem` ; sur `nvidia-gb10`, dimensionne la mémoire du pod pour gpu-inject.
+
+    **Fonctionnement**
+    D'abord, `llm-init` télécharge votre modèle et le prépare ; puis vLLM commence à servir le modèle lorsqu'il est prêt. Les deux conteneurs s'exécutent dans le même Pod et partagent le répertoire du modèle et le sentinel de readiness.
+
+    **Stack**
+    - **vLLM** (port 8000) : exécute le modèle et sert les requêtes API
+    - **llm-init** (port 8090) : télécharge le modèle, affiche la progression et fournit l'API OpenAI, avec proxy vers vLLM
+
+    **Modes accélérateur**
+    | Mode           | Device            | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Définir `VLLM_REQUIRED_GPU_MEMORY` ; régler `--gpu-memory-utilization` dans ENGINE_ARGS |
+    | `nvidia-gb10`  | GPU (Spark)       | Comme `nvidia` ; `--gpu-memory-utilization` depuis ENGINE_ARGS (non remappé automatiquement) |
+
+    **Stockage du modèle**
+    Tous les fichiers du modèle sont stockés dans un dossier partagé à `appCommon/huggingface`, monté comme `/cache/hf/hub`. Toutes les apps similaires utilisent cet emplacement pour les modèles.
+
+    **Conseils ressources**
+    - CPU, RAM et GPU se configurent automatiquement selon le chart ; les réglages disque sont fixes.
+    - Le chargement de modèles vLLM peut prendre plusieurs minutes pour les grands modèles. Gardez l'app Running jusqu'à ce qu'elle soit prête.
+    - Pour les charges à haute concurrence, PagedAttention de vLLM offre un fort débit ; réglez `--max-num-batched-tokens` et `--gpu-memory-utilization` dans `ENGINE_ARGS`.
+

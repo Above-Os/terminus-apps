@@ -1,0 +1,50 @@
+metadata:
+  title: FreshRSS
+  description: Un agrégateur de flux gratuit et auto-hébergeable.
+spec:
+  fullDescription: |
+    FreshRSS est un agrégateur de flux RSS et Atom auto-hébergé. Il est léger, facile à utiliser, puissant et personnalisable.
+    
+    **Fonctionnalités**
+    - Contrôle indépendant des données : Prend en charge le déploiement auto-hébergé, permettant aux utilisateurs un contrôle total de leurs données sans dépendance tierce, garantissant confidentialité et sécurité.
+    - Open source et mises à jour stables : Open source sous licence AGPL 3, avec une communauté active. Il a maintenu des itérations et mises à jour continues de 2023 à 2024, assurant une forte stabilité.
+    - Agrégation de contenu multi-sources : Agrège les flux RSS/Atom de sites web, podcasts et chaînes vidéo. Peut aussi scraper des sites sans flux officiels pour générer des sources d'abonnement personnalisées.
+    - Gestion efficace du contenu : Permet de rechercher et d'enregistrer des requêtes, de générer de nouveaux flux basés sur des règles, et de marquer, mettre en favori et catégoriser des articles.
+    - Sync temps réel et migration : Obtient une synchronisation de contenu en temps réel basée sur WebSub, et prend en charge l'import/export de listes d'abonnements au format OPML.
+    - Personnalisation et permissions flexibles : Offre la personnalisation de thèmes et d'extensions, ainsi que la gestion des permissions multi-utilisateurs.
+    - Adaptation multi-appareils et haute efficacité : Design responsive compatible ordinateurs et téléphones, capable de gérer efficacement plus d'1 million d'articles et plus de 50 000 flux.
+    - Support multilingue et intégration : Prend en charge plus de 15 langues et fournit des interfaces API pour des clients tiers ou des systèmes propriétaires.
+    - Déploiement à faible seuil : Seuil de déploiement bas, compatible avec les serveurs web courants et documentation d'installation détaillée, adapté aux débutants.
+  upgradeDescription: |
+    Remplacement de l'image du reverse proxy Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) par l'image officielle OpenResty `openresty/openresty:1.29.2.5-bookworm-fat`.
+    
+    Alignement des montages de configuration nginx et des chemins de journaux sur la disposition de l'image officielle (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`), et suppression du câblage spécifique Bitnami `OPENRESTY_CONF_FILE`.
+    
+    Stockage : le stockage durable a été déplacé de `appCache` vers `appData`. Au premier démarrage après la mise à niveau, un initContainer copie le `appCache` legacy vers `appData` lorsque la destination est vide (marqueur : `.migration_from_appcache_done`). Les anciennes données appCache sont conservées pour le rollback.
+    
+    Suppression du branchement legacy des chemins appCache `sysVersion >= 1.12.3` ; le minimum Olares est désormais 1.12.6.
+    
+    Mise à jour de la version de l'app vers 1.28.1
+    
+    Cette version se concentre sur la correction de bugs, en particulier les régressions de la version 1.28.0.
+    
+    **Nouvelles fonctionnalités sélectionnées :**
+    - Nouveau message personnalisable pour les inscriptions fermées
+    - Ajout du nom d'utilisateur dans les logs d'accès Apache (aussi dans les logs Docker) : pour l'API GReader et HTTP Basic Auth depuis le reverse proxy
+    
+    **Performances améliorées :**
+    - Désactivation du comptage d'articles dans les labels utilisateur pour les requêtes Ajax (non utilisé)
+    
+    **Corrections de bugs :**
+    - Correction de l'expansion indésirable des requêtes utilisateur (recherches enregistrées) appliquées aux filtres
+    - Correction de l'encodage des actions de filtre pour les labels
+    - Correction de la recherche de tags
+    - Correction du rafraîchissement des flux avec token lorsque le rafraîchissement anonyme est désactivé
+    - Correction de l'accès RSS et OPML par token
+    - Correction du fallback transliterator_transliterate MySQL/MariaDB
+    - Correction de la régression avec l'index hint MySQL/MariaDB
+    - Correction du raccourci pour l'article non lu suivant
+    - Correction de session.cookie-lifetime personnalisé
+    - Correction du bouton validateur de flux lors du changement d'URL du flux
+    
+    Notes complètes : https://github.com/FreshRSS/FreshRSS/releases/tag/1.28.1

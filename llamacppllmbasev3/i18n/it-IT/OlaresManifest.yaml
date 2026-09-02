@@ -1,0 +1,58 @@
+metadata:
+  description: "Base generica del motore llama.cpp. Scegli qualsiasi modello GGUF in installazione via env."
+  title: llama.cpp Engine Base
+
+spec:
+  upgradeDescription: |
+    Chart 1.2.39 — aggiornare llm-init a `v1.6.1`.
+
+    **Immagini**
+    - llm-init: `docker.io/beclab/llm-init:v1.6.0` → `v1.6.1`.
+    - llama.cpp: invariato a `server-cuda12-b10588`.
+
+    **Modificare `ENGINE_ARGS` dopo l'installazione ora ha effetto**
+
+    Le due novità di 1.2.38 — un gate che evita di sovravendere un pool KV condiviso, e una lettura di capacità presa dal motore invece che inferita dai flag — rispondevano alla loro domanda mentre llm-init stava avviandosi, cioè al momento sbagliato: su questa base `ENGINE_ARGS` è modificabile e parte vuoto, così i flag con cui gira un clone di solito si scelgono dopo il primo boot, e ogni modifica successiva rilancia il motore sul posto.
+
+    - Se il pool necessita di accounting ora si chiede per richiesta. Un clone partito con `-np 1` e poi passato a un pool condiviso non aveva alcun gate fino al riavvio del deployment; uno che faceva il contrario continuava a pagare due round trip del tokenizer per un pool che il motore già sorvegliava.
+    - La lettura di capacità viene ritirata quando il motore riappare dopo un relaunch, o quando `ENGINE_ARGS` non coincide più con ciò sotto cui era stata misurata la lettura in piedi. La readiness da sola non vedeva né l'uno né l'altro: il motore viene rilanciato dentro il processo e il loop di health mantiene l'ultimo verdetto — la card descriveva un motore che non esisteva più, ed è proprio quel numero rispetto a cui il Router ammette le richieste.
+
+    Una installazione fresca e un upgrade di chart non erano mai coinvolti, perché entrambi riavviano il processo.
+
+    **Dimensionare `ENGINE_ARGS` su questa base**
+    - `-c` è l'intero pool KV, non una finestra per richiesta. Con cache condivisa una richiesta può occuparlo tutto.
+    - Omettere `-np` seleziona 4 slot che condividono quel pool. Imposta `-np 1` per una singola conversazione lunga, oppure alza `-c` alla larghezza desiderata.
+    - `--kv-unified-per-slot N` limita quanto può prendere uno slot; il motore lo impone con un `400` che nomina il limite.
+    - Il gate di 1.2.38 si applica a un pool condiviso con più di uno slot e senza tetto per slot. `-np 1`, o un tetto per slot, non ne hanno bisogno e non lo ricevono.
+  fullDescription: |
+    **NOTA IMPORTANTE**  
+    Questa app è un template e non può essere usata da sola. Per usarla, imposta le variabili d'ambiente sotto per collegare un modello specifico.
+
+    **Guida alla configurazione delle variabili d'ambiente**
+    - `MODEL_SOURCE`: `hf://<repo> --include <file>.gguf`. Sorgente da cui scaricare il modello. Per file suddivisi includi solo la prima parte; per modelli vision-language aggiungi il proiettore con una virgola, es. `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`.
+    - `MODEL_NAME`: `owner/repo:quant`. Nome del modello in formato `owner/repo:quant`, es. `unsloth/Qwen3.5-2B-GGUF:UD-Q4_K_XL`. Usato anche come alias OpenAI.
+    - `MODEL_MODE`: `chat` o `embedding`. Se scegli embedding, il chart aggiunge automaticamente `--embedding`.
+    - `MODEL_SUPPORTS`: Capacità del modello (Vision / Tools / Thinking / None). Scegli ciò che il modello supporta. Obbligatorio.
+    - `ENGINE_ARGS`: `-c 8192 -ngl all -fa on`. Opzioni extra llama.cpp. Per usare appieno la GPU, aggiungi `-ngl all`. Anche valori come `LLAMA_ARG_*=val`.
+    - `LOG_LEVEL`: `debug`, `info`, `warn` o `error`. Livello di log.
+    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192` o `8192Mi`. Memoria modello necessaria. Su NVIDIA imposta `nvidia.com/gpumem` in MiB; su Spark, la memoria del pod.
+
+    **Come funziona**
+    Prima `llm-init` scarica il modello e lo prepara, poi `llama.cpp` inizia a servirlo quando è pronto. Le due parti girano separatemente ma condividono file e info di progresso.
+
+    **Stack**
+    - **llama.cpp**: Esegue il modello e serve le richieste API (porta 8081)
+    - **llm-init**: Scarica il modello, mostra il progresso e fornisce l'API OpenAI sulla porta 8090, facendo proxy verso `llamacpp`.
+
+    **Modalità acceleratore**
+    | Modalità       | Dispositivo       | Dettagli                                                           |
+    |----------------|-------------------|---------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Imposta `LLAMACPP_REQUIRED_GPU_MEMORY`; usa `-ngl all` per GPU piena |
+    | `nvidia-gb10`  | GPU (Spark)       | Come sopra, ma la memoria è gestita dal pod                          |
+
+    **Archiviazione modelli**
+    Tutti i file modello sono nella cartella condivisa `appCommon/huggingface`, montata come `/cache/hf/hub`. App simili usano questa posizione per i modelli.
+
+    **Suggerimenti sulle risorse**
+    - CPU, RAM e GPU si autoconfigurano in base al chart; le impostazioni disco sono fisse.
+    - Per usare la GPU, imposta `-ngl all` in `ENGINE_ARGS`. Usa `-ngl all` per offload GPU completo.

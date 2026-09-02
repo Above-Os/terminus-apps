@@ -1,0 +1,50 @@
+metadata:
+  title: FreshRSS
+  description: Un aggregatore di feed gratuito e self-hostable.
+spec:
+  fullDescription: |
+    FreshRSS è un aggregatore di feed RSS e Atom self-hosted. È leggero, facile da usare, potente e personalizzabile.
+    
+    **Funzioni**
+    - Controllo indipendente dei dati: Supporta il deployment self-hosted, consentendo agli utenti il pieno controllo sui propri dati senza dipendere da terze parti, garantendo privacy e sicurezza.
+    - Open-Source e aggiornamenti stabili: Open-source sotto licenza AGPL 3, con una community attiva. Ha mantenuto iterazioni e aggiornamenti continui dal 2023 al 2024, assicurando solida stabilità.
+    - Aggregazione di contenuti multi-fonte: Aggrega feed RSS/Atom di siti web, podcast e canali video. Può anche fare scraping di siti senza feed ufficiali per generare fonti di sottoscrizione personalizzate.
+    - Gestione efficiente dei contenuti: Consente di cercare e salvare query, generare nuovi feed basati su regole e contrassegnare, mettere nei preferiti e categorizzare gli articoli.
+    - Sync in tempo reale e migrazione: Ottiene sincronizzazione dei contenuti in tempo reale basata su WebSub e supporta import/export di liste di sottoscrizione in formato OPML.
+    - Personalizzazione e permessi flessibili: Offre personalizzazione di temi ed estensioni, nonché gestione dei permessi multiutente.
+    - Adattamento multi-dispositivo e ad alta efficienza: Design responsive compatibile con computer e telefoni, capace di gestire efficientemente oltre 1 milione di articoli e oltre 50.000 feed.
+    - Supporto multilingue e integrazione: Supporta più di 15 lingue e fornisce interfacce API per client di terze parti o sistemi proprietari.
+    - Deployment a bassa soglia: Bassa soglia di deployment, compatibile con i principali web server e documentazione di installazione dettagliata, adatto anche ai principianti.
+  upgradeDescription: |
+    Sostituzione dell'immagine del reverse proxy da Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) all'immagine ufficiale OpenResty `openresty/openresty:1.29.2.5-bookworm-fat`.
+    
+    Allineamento dei mount della configurazione nginx e dei percorsi dei log al layout dell'immagine ufficiale (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`) e rimozione del cablaggio specifico Bitnami `OPENRESTY_CONF_FILE`.
+    
+    Storage: lo storage durevole è stato spostato da `appCache` a `appData`. Al primo avvio dopo l'upgrade, un initContainer copia il legacy `appCache` in `appData` quando la destinazione è vuota (marker: `.migration_from_appcache_done`). I vecchi dati appCache restano intatti per il rollback.
+    
+    Rimossa la ramificazione legacy dei path appCache `sysVersion >= 1.12.3`; il minimo Olares è ora 1.12.6.
+    
+    Aggiornamento della versione app a 1.28.1
+    
+    Questa release si concentra sulla correzione di bug, in particolare regressioni dalla release 1.28.0.
+    
+    **Nuove funzioni selezionate:**
+    - Nuovo messaggio personalizzabile per registrazioni chiuse
+    - Aggiunta username nei log di accesso Apache (anche nei log Docker): per GReader API e HTTP Basic Auth dal reverse proxy
+    
+    **Prestazioni migliorate:**
+    - Disabilitato il conteggio articoli nelle label utente per le richieste Ajax (non usato)
+    
+    **Correzioni di bug:**
+    - Fix espansione indesiderata delle query utente (ricerche salvate) applicate ai filtri
+    - Fix encoding delle azioni filtro per le label
+    - Fix ricerca dei tag
+    - Fix refresh dei feed con token mentre il refresh anonimo è disabilitato
+    - Fix accesso RSS e OPML tramite token
+    - Fix fallback transliterator_transliterate MySQL/MariaDB
+    - Fix regressione con index hint MySQL/MariaDB
+    - Fix scorciatoia per il prossimo articolo non letto
+    - Fix session.cookie-lifetime personalizzato
+    - Fix pulsante validatore feed quando si cambia l'URL del feed
+    
+    Note complete: https://github.com/FreshRSS/FreshRSS/releases/tag/1.28.1

@@ -1,0 +1,64 @@
+metadata:
+  description: "Base generica del motore Ollama. Scegli qualsiasi modello della libreria Ollama in installazione via env."
+  title: Ollama Engine Base
+
+spec:
+  upgradeDescription: |
+    Aggiornare Ollama da v0.32.15 a v0.33.1. Chart 1.3.17.
+
+    **Cosa è cambiato** (rilevante per Olares)
+
+    v0.33.1
+    - MLX: supporto Qwen3.8 Flash Next
+    - Aggiornamenti MLX e llama.cpp
+    - mlxrunner: supporto output strutturato
+    - mlxrunner: evitare timeout GPU Metal caricando modelli da storage lento
+
+    v0.33.0
+    - Corretto un hang quando i client agent annullano prefills lunghi
+    - I punti di ripristino prefill sopravvivono alla cancellazione, così i retry riprendono invece di ripartire da zero
+    - I prefills ripresi non registrano più punti di ripristino incompleti (i modelli a layer ricorrenti non riprocessano più da zero)
+    - Disabilitato il messaggio di sistema «tokens left» di Claude Code, che rompeva la cache KV a ogni richiesta
+    - Corretto il packaging predefinito Linux/Windows rotto da assunzioni specifiche di macOS
+    - Aggiornamento dipendenza MLX
+
+    v0.32.15
+    - Mette in cache i metadati modello risolti tra le richieste, riducendo time-to-first-token di circa la metà
+    - Corregge il blocco di chat/generate dopo un errore del parser a metà stream
+    - I messaggi di sistema Qwen 3.8 sono normalizzati così quelli non iniziali sono gestiti in modo coerente
+    - Aggiornamenti dipendenze MLX e llama.cpp
+
+    Note di rilascio dettagliate:
+    https://github.com/ollama/ollama/releases
+  fullDescription: |
+    **NOTA IMPORTANTE**  
+    Questa app è un template e non può essere usata da sola. Per usarla, imposta le variabili d'ambiente sotto per collegare un modello specifico.
+
+    **Guida alla configurazione delle variabili d'ambiente**
+    - `MODEL_SOURCE`: `ollama://<model>:<tag>`. Sorgente della libreria Ollama da cui scaricare il modello, ad es. `ollama://qwen3.5:2b` o `ollama://gemma3:27b`. Sfoglia i modelli su https://ollama.com/library.
+    - `MODEL_NAME`: `<model>:<tag>`. Nome del modello — la stringa dopo `ollama://` in `MODEL_SOURCE`, ad es. `qwen3.5:2b`. Usato anche come alias OpenAI.
+    - `MODEL_MODE`: `chat` o `embedding`. Usa `chat` per modelli conversazionali; `embedding` per modelli di embedding.
+    - `MODEL_SUPPORTS`: Capacità del modello (Vision / Tools / Thinking / None). Scegli ciò che il modello supporta. Controlla la pagina del modello su ollama.com/library.
+    - `ENGINE_ARGS`: `OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 ...`. Il chart usa di default `-1` sul daemon ollama (sempre in VRAM); non inoltrato da llm-init.
+    - `LOG_LEVEL`: `debug`, `info`, `warn` o `error`. Livello di log del container llm-init.
+    - `OLLAMA_REQUIRED_GPU_MEMORY`: `8Gi`, `8192` o `8192Mi`. Memoria modello necessaria. Su NVIDIA imposta `nvidia.com/gpumem` in MiB; su Spark, la memoria del pod.
+
+    **Come funziona**
+    Prima `llm-init` scarica il modello dalla libreria Ollama e lo prepara, poi il daemon Ollama inizia a servirlo quando è pronto. Le due parti girano separatemente ma condividono file e info di progresso.
+
+    **Stack**
+    - **Daemon Ollama** (porta 11434): scarica e serve il modello
+    - **llm-init** (porta 8090): guida il pull, mostra il progresso e fornisce l'API OpenAI, facendo proxy verso Ollama
+
+    **Modalità acceleratore**
+    | Modalità       | Dispositivo       | Dettagli                                                             |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Imposta `OLLAMA_REQUIRED_GPU_MEMORY`; Ollama usa la GPU di default   |
+    | `nvidia-gb10`  | GPU (Spark)       | Come sopra, ma la memoria è gestita dal pod                          |
+
+    **Archiviazione modelli**
+    Tutti i modelli scaricati sono in una cartella condivisa `appCommon/ollama`. Tutte le app basate su Ollama condividono questa posizione, così i blob si deduplicano per digest tra le installazioni.
+
+    **Suggerimenti sulle risorse**
+    - CPU, RAM e GPU si autoconfigurano in base al chart; le impostazioni disco sono fisse.
+    - Per modelli grandi (es. gemma3:27b), imposta `OLLAMA_CONTEXT_LENGTH` e `OLLAMA_KV_CACHE_TYPE` in `ENGINE_ARGS` per bilanciare lunghezza di contesto e uso VRAM.

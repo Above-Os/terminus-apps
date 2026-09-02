@@ -1,0 +1,41 @@
+metadata:
+  title: Qwopus3.6-27B MTP (llama.cpp)
+  description: "Qwopus3.6-27B-v2 MTP Q4_K_M, bereitgestellt mit llama.cpp."
+spec:
+  upgradeDescription: |
+    v1.0.13: NVIDIA-Hostspeicher-Reservierung senken, damit 1.12.6-Timeslice-Knoten leichter installieren können (Engine-Anforderung 21Gi→6Gi, Chart requiredMemory 22Gi→7Gi). GPU-Kontingent unverändert.
+
+    v1.0.9: `HF_TOKEN` in Secret (`secretKeyRef`) verschieben; HF aus `OLARES_SYSTEM_HUGGINGFACE_*` zuordnen; llama.cpp auf `server-cuda12-b10068` anheben.
+
+    v1.0.8: LLAMACPP_MEMORY_LIMIT 30Gi; llm-init Limit 2Gi; limitedMemory 32Gi (30+2).
+    v1.0.7: nvidia Hostspeicher — requiredMemory 22Gi, LLAMACPP_MEMORY_REQUEST 21Gi, LLAMACPP_MEMORY_LIMIT 26Gi, limitedMemory 30Gi.
+    v1.0.6: nvidia Hostspeicher — requiredMemory 16Gi, LLAMACPP_MEMORY_REQUEST 15Gi, LLAMACPP_MEMORY_LIMIT 19Gi, limitedMemory 26Gi.
+    v1.0.5: llm-init auf v1.3.1 anheben.
+  fullDescription: |
+    **Modellübersicht**
+    Qwopus3.6-27B-v2 mit integrierten Multi-Token-Prediction-(MTP)-Köpfen, `Q4_K_M`-Quantisierung von `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF`, bereitgestellt über llama.cpp Draft-Decoding. Feinjustierte Qwen3.6-27B-Variante für Coding-, Math- und Agent-Workloads. Nur-Text-Preset (kein Vision/mmproj).
+
+    Empfohlen, wenn Sie hohe Token-Generierungsgeschwindigkeit brauchen oder Ihre Workload strikte strukturierte Ausgaben und DevOps-ähnliche Aufgaben erfordert. Dieser Community-Build ist auf kompakte, wohlgeformte Ausgaben in diesen Szenarien abgestimmt.
+
+    **Preset-Konfiguration**
+    - Modell: `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M`
+    - Fähigkeiten: thinking, tools
+    - Engine-Args: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (12
+    - MTP verursacht moderaten zusätzlichen VRAM-Bedarf; bei OOM mit vollem 128K-Kontext `-c` reduzieren (z. B. `-c 65536`).
+    - Erforderlicher GPU-Speicher: `23Gi`
+
+    **So funktioniert es**
+    Zuerst lädt die `Model Console` das Modell herunter und bereitet es vor; dann startet `llama.cpp` die Bereitstellung, sobald es bereit ist. MTP (`--spec-type draft-mtp`) nutzt den integrierten Draft-Kopf des Modells, um mehrere Tokens pro Schritt vorherzusagen und so den Decode-Durchsatz zu erhöhen.
+
+    **Stack**
+    - **llama.cpp**: Führt das Modell aus und bedient API-Anfragen (Port 8081)
+    - **Model Console**: Lädt das Modell herunter, zeigt den Fortschritt und stellt die OpenAI-API auf Port 8090 bereit, mit Proxy zu `llamacpp`.
+
+    **Accelerator-Modi**
+    | Mode           | Device            | Details                                          |
+    |----------------|-------------------|--------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Nutzt `23Gi` GPU-Speicher; `-ngl all` für volle GPU |
+    | `nvidia-gb10`  | GPU (Spark)       | Wie oben, aber der Speicher wird vom Pod verwaltet |
+
+    **Modellspeicher**
+    Alle Modelldateien werden in einem gemeinsamen Ordner unter `appCommon/huggingface` gespeichert, gemountet als `/cache/hf/hub`. Alle ähnlichen Apps nutzen diesen Ort für Modelle.

@@ -1,0 +1,38 @@
+metadata:
+  title: Formbricks
+  description: オープンソースの Qualtrics 代替製品
+spec:
+  fullDescription: |
+    Formbricks は無料でオープンソースのアンケートプラットフォームです。アプリ内、Web サイト、リンク、メールの美しいアンケートで、ユーザージャーニーのあらゆる段階からフィードバックを収集できます。Formbricks 上で開発することも、組み込みのデータ分析機能を利用することもできます。
+
+    **機能**
+    - ノーコードエディターと多様な質問形式で、コンバージョンに最適化したアンケートを作成。
+    - ベストプラクティスに基づくテンプレートから選択。
+    - コードを変更せず、特定のユーザーグループを対象に公開。
+    - 共有可能なリンクアンケートを作成。
+    - 組織メンバーを招待して共同作業。
+    - Slack、Notion、Zapier、n8n などと連携。
+    - 完全なオープンソースで、透明性が高く、セルフホスト可能。
+  upgradeDescription: |
+    ストレージ: 永続ストレージを `appCache` から `appData` へ移動しました。アップグレード後の初回起動時、移行先が空の場合は initContainer が従来の `appCache` を `appData` へコピーします（マーカー: `.migration_from_appcache_done`）。ロールバック用に旧データは残ります。
+
+    Formbricks を 4.4.3 から 5.1.4 へアップグレードします。v5 へのメジャーアップグレードです。
+
+    **リリースノート**
+    - 一括招待は Scale プランに限定し、レート制限を適用
+    - 完全な変更履歴: https://github.com/formbricks/formbricks/compare/5.1.3...5.1.4
+
+    **スタック変更（v5 ベースライン）**
+    - Formbricks Hub と Cube が必須 sidecar に変更（分析/フィードバック記録）
+    - App イメージ: `beclab/formbricks-formbricks:5.1.4`（Hub `beclab/formbricks-hub:0.8.1`、Cube `v1.7.3`）
+    - 起動時に Formbricks DB、続いて Hub のマイグレーションを実行
+
+    **ユーザー向け設定**
+    - 新しいインストール入力はありません。Hub/Cube の Secrets と URL は chart が自動設定します。
+    - 任意のメール設定は変更ありません（SMTP / `MAIL_FROM*`、主に Olares SMTP）。
+
+    **アップグレード前**
+    - PostgreSQL データベースをバックアップ
+    - メモリ使用量の増加を考慮（Hub + Cube。Cube だけで約 500MB の余裕が必要）
+
+    移行ガイド: https://formbricks.com/docs/self-hosting/advanced/migration
