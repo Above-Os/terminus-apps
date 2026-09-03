@@ -1,5 +1,4 @@
-﻿---
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: source
@@ -10,21 +9,21 @@ spec:
   replicas: {{ .Values.workloads.sourceadmin.replicaCount }}
   selector:
     matchLabels:
-      app: source-admin
+      app: source
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        app: source-admin
+        app: source
     spec:
       containers:
         - name: admin
-          image: aboveos/appstore-adminv2:v2.0.10
+          image: aboveos/appstore-adminv2:v2.0.21
           imagePullPolicy: IfNotPresent
           env:
             - name: SOURCE_ID
-              value: hello
+              value: "market.source"
             - name: REDIS_HOST
               value: "{{ .Values.redis.host }}"
             - name: REDIS_PORT
@@ -38,16 +37,22 @@ spec:
                 secretKeyRef:
                   name: "{{ .Release.Name }}-secrets"
                   key: JWT_SECERT
-            - name: AWS_ACCESS_KEY_ID
-              value: "{{ .Values.olaresEnv.EMAIL_AWS_ACCESS_KEY_ID }}"
-            - name: AWS_SECRET_ACCESS_KEY
-              value: "{{ .Values.olaresEnv.EMAIL_AWS_SECRET_ACCESS_KEY }}"
             - name: APP_STORE_SERVER
               value: http://source-server-svc:8081
             - name: TRUSTED_PROXIES
-              value: 10.233.0.0/16,loopback
+              value: "10.0.0.0/8"
+            - name: AUTH_MODE
+              value: local
             - name: BOOTSTRAP_ADMIN_EMAILS
-              value: "{{ .Values.olaresEnv.ADMIN_EMAIL }}"
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: LOGIN_USERNAME
+            - name: ADMIN_LOGIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: LOGIN_PASSWORD
           ports:
             - containerPort: 4003
               protocol: TCP
@@ -59,7 +64,7 @@ spec:
               cpu: "1"
               memory: 1Gi
         - name: admin-frontend
-          image: aboveos/appstore-adminv2-frontend:v2.0.10
+          image: aboveos/appstore-adminv2-frontend:v2.0.21
           imagePullPolicy: IfNotPresent
           env:
             - name: ADMINV2_API_UPSTREAM
@@ -79,14 +84,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: source-admin-svc
+  name: source
   namespace: "{{ .Release.Namespace }}"
   labels:
     app: source
 spec:
   type: ClusterIP
   selector:
-    app: source-admin
+    app: source
   ports:
     - name: http
       port: 4003

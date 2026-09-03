@@ -4,5 +4,49 @@ metadata:
 
 spec:
   fullDescription: |
-    Market Source
+    Market Source 支持将您自己的 GitHub 仓库作为应用源。
+
+    #### 在 Market 中添加自定义源
+
+    安装 Market Source 后，请将它添加到 Olares 的 Market 应用中：
+
+    1. 在 Olares 中打开 **Market**，进入 **My Olares → Settings**。
+    2. 点击 **Add source**。
+    3. 在 Market Source 应用的 **Market Source API** Entrance 中复制 **Endpoint** 的值，并将其填写为 source URL。
+    4. 如果需要从集群外访问该源，请先将 **Market Source API** Entrance 的 **Authentication level** 修改为 **Public**，再添加该源。
+
+    **Market Source API** Entrance 用作自定义源 URL；**Market Source GitBot** Entrance 用于接收 GitHub Webhook 事件，两者用途不同，请勿混淆。
+
+    #### 安装前准备
+
+    请完成以下准备工作：
+
+    1. 创建一个 GitHub 仓库，用于存放应用源文件。仓库可以是公开仓库，也可以是私有仓库。
+    2. 创建一个 GitHub Personal Access Token（推荐使用 Fine-grained Token），并授予其访问该仓库的权限。请至少授予 **Contents：只读** 和 **Pull requests：读写** 权限，以便 GitBot 读取仓库并执行 PR 相关操作，例如发表评论和添加标签。
+    3. 安装时填写仓库地址、分支名称、GitHub 账户名和 Token。
+
+    仓库地址必须使用完整的 HTTPS Git 地址，格式为：
+
+    `https://github.com/<账户名>/<仓库名>.git`
+
+    示例：
+
+    `https://github.com/example-org/app-source.git`
+
+    不要填写不带 `.git` 后缀的仓库网页地址。即使仓库是公开的，由于 GitBot 需要调用 GitHub API 执行认证操作，Token 仍然是必需的。
+
+    请妥善保管 Token，不要将其提交到 GitHub 仓库中。
+
+    #### GitHub Webhook
+
+    如需让 GitHub 将 Pull Request 事件发送给 GitBot，请完成以下配置：
+
+    1. 在 Olares Desktop 中进入 **Settings → Applications**，找到 **Market Source**，打开 **Entrances**，找到 **Market Source GitBot**，将其 **Authentication level** 修改为 **Public**。
+    2. 复制 **Market Source GitBot** 的 Entrance 地址。
+    3. 在 GitHub 仓库中进入 **Settings → Webhooks → Add webhook**，将该 Entrance 地址填写到 **Payload URL**。
+    4. 将 **Content type** 设置为 `application/json`。
+    5. 将安装 Market Source 时填写的 `GITHUB_WEBHOOK_SECRET`，填写到 GitHub Webhook 的 **Secret** 字段中。
+    6. 选择需要接收的事件，包括 **Pull requests**，并启用 **Active**。
+
+    `GITHUB_WEBHOOK_SECRET` 与 `GITHUB_TOKEN` 不同。请妥善保管 Webhook Secret，不要将其提交到 GitHub 仓库中。
   upgradeDescription: |
