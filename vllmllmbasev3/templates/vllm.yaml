@@ -16,17 +16,17 @@
 {{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
 {{- $needDri := or $isAmdGpu $isIntelGpu -}}
 {{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
-{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu / intel-gpu use
-       gpu-inject + manifest requiredGPUMemory. */ -}}
-{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
+{{- /* nvidia.com/gpumem: discrete NVIDIA / AMD / Intel. Spark (gb10)
+       unified memory uses pod memory only — chart gpumem there breaks
+       K8s validation (requests has gpumem, limits stripped). */ -}}
+{{- $needNvidiaGpumem := not $unifiedMem -}}
 {{- $shmLimit := "16Gi" -}}
 {{- if $isIntelGpu -}}
 {{- $shmLimit = "10Gi" -}}
 {{- end -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs) -}}
-{{- /* nvidia.com/gpumem: nvidia -> explicit in chart; gb10 -> pod memory quota only,
-       gpu-inject sets matching requests/limits (chart gpumem on gb10 breaks K8s
-       validation: requests has gpumem but limits stripped by platform). */ -}}
+{{- /* nvidia.com/gpumem: nvidia / amd-gpu / intel-gpu -> explicit in chart;
+       gb10 -> pod memory quota only (gpu-inject). */ -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.VLLM_REQUIRED_GPU_MEMORY | default "4096") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
@@ -208,8 +208,7 @@ spec:
               mountPath: /dev/shm
 {{- end }}
           resources:
-            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
-            # gpu-inject; amd-gpu / intel-gpu via gpu-inject.
+            # nvidia.com/gpumem: nvidia / amd-gpu / intel-gpu; gb10 via pod memory.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
