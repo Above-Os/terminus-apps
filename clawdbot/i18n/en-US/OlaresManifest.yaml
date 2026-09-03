@@ -26,39 +26,25 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — onboarding-driven setup with bundled/managed/workspace skills.
 
   upgradeDescription: |
-    Chart 1.0.32 — OpenClaw v2026.8.2 on the beclab image, with OPENCLAW_* env and leftover CLAWDBOT_* compatibility. An init clears leftover 7.x workspace/session files before Gateway starts, so a Market upgrade from 2026.7.x can reach running without a manual `openclaw doctor --fix`.
-    https://github.com/openclaw/openclaw/releases/tag/v2026.8.2
+    Upstream release: [OpenClaw v2026.8.2](https://github.com/openclaw/openclaw/releases/tag/v2026.8.2)
 
-    Images:
-    - App/Gateway: `beclab/openclaw-openclaw:2026.8.2`
-    - Brew base: `beclab/harveyff-openclaw-brew-base:2026.9.2-cli`
-    - Terminal: `beclab/terminal:v0.0.14`
+    **Breaking change:** Some installed plugins may be incompatible with OpenClaw v2026.8.2 and prevent the Gateway from starting; update installed plugins before upgrading.
 
-    Environment (must-read):
-    - v2026.8.2 only reads `OPENCLAW_*`. Legacy `CLAWDBOT_*` / `MOLTBOT_*` names are ignored by upstream and would log `OPENCLAW_LEGACY_ENV_VARS`.
-    - This chart sets `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, `OPENCLAW_WORKSPACE_DIR`, and `OPENCLAW_SYSTEMD_UNIT`.
-    - A gateway/workspace compat shim copies leftover `CLAWDBOT_*` / `MOLTBOT_*` into `OPENCLAW_*` when the new name is unset. The gateway then unsets the legacy names so the deprecation warning is silent. The workspace container also exports `CLAWDBOT_*` from `OPENCLAW_*` so leftover scripts still work.
-    - Rename any custom `CLAWDBOT_*` in `~/.openclaw/.env` or process env to `OPENCLAW_*` (example: `CLAWDBOT_GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN`). The shim keeps both working during the transition.
+    **What's changed**
+    - Open the Home agent beside the current page, review its work-context snapshot, and attach selected text without switching pages.
+    - Start background sessions from New Session and open them from the completion notification.
+    - Forwarded cross-session messages now show their source session and sending agent. Session actions and transcript export are also easier to access.
+    - Upgrades now preserve newer valid configuration, stop incomplete session migrations, and recover the Gateway more safely after failed updates.
+    - Tool-driven conversations now return a final answer or a visible failure instead of stopping after tool output.
+    - Voice replies no longer speak internal reasoning, and audio delivery and later browser Talk turns are more reliable.
+    - The Control UI adds CRT, Manuscript, Rosé, and Miami themes.
 
-    Breaking if you upgrade from 2026.7.x:
-    - OpenProse plugin and `/prose` removed; follow https://docs.openclaw.ai/prose if you still use `.prose` files
-    - Shipped `codex/*` and `openai-codex/*` model refs now live under `openai/*`
-    - New defaults: no idle/day session reset, dreaming and self-learning on, same-agent session visibility, heartbeat to owner DM
+    **Fixes**
+    - Improved scheduled-job recovery and reporting, conversation continuity, draft recovery, browser reliability, and long-history performance.
+    - Strengthened privacy and security with better log redaction, bounded MCP responses, safer workspace permissions, and updated image-decoding dependencies.
 
-    Reverse-proxy / Control UI:
-    - Fresh `openclaw.json` includes `gateway.trustedProxies` (cluster CNI + loopback) and `auth.trustedProxy.allowLoopback` plus `userHeader: x-forwarded-user`. Without these, Envoy/nginx can trigger `proxy_attribution_required` and the UI looks like it cannot connect.
-    - `auth.trustedProxy` requires `userHeader` or Gateway exits 78.
-    - Control UI login is the `gateway.auth.token` in `openclaw.json`. Fresh installs also set `controlUi.dangerouslyDisableDeviceAuth: true` so pairing is not required behind Olares (1.12.6 cannot exec `openclaw devices approve`). Existing configs keep their current pairing setting.
-    - Ingress overwrites `X-Forwarded-For` so the gateway sees a trusted hop.
-
-    Local / llama.cpp models:
-    - Fresh installs default `agents.defaults.thinkingDefault: off` and `timeoutSeconds: 300`. Qwen thinking can consume the whole token budget (`reasoning-only retries exhausted` / "Agent couldn't generate a response"). Existing configs should set `thinkingDefault: off` (and `compat.thinkingFormat: qwen-chat-template` plus `enable_thinking: false` on the model if needed).
-    - Custom OpenAI-compat llama.cpp providers need `compat.toolSchemaProfile: "llamacpp"` or tool calls fail with `400 failed to parse grammar`. Deny `cron` if that tool's schema is still too large.
-    - Match `contextWindow` / `maxTokens` to the engine (for example 131072). Long tool turns plus another GPU app can OOM the engine (502/503 "Loading model").
-    - Memory / dashboard session titles still call an OpenAI-shaped utility model. Without `OPENAI_API_KEY` (or a local embedding/utility provider) you will see `memory sync failed: No API key for provider "openai"` — chat still works.
-
-    Notes:
-    - Existing `openclaw.json` is preserved on upgrade (init copies the default only when the file is missing)
-    - Fresh installs skip the migrate init. Upgrades from 2026.7.x only remove or rename leftover workspace-state / attestation / `sessions.json` files that block 8.2. The init does not run `openclaw doctor --fix` (that command disables unused skills, including the Olares pack).
-    - Use `restart-gateway` in containers, not `openclaw gateway restart`. `restart-gateway` now sends the gateway token to `/readyz` (v2026.8.2 rejects unauthenticated probes)
-    - Gateway readiness exec-probes localhost `/readyz` with the configured token
+    **Configuration changes when upgrading from 2026.7.x**
+    - Unsandboxed sessions can now access other sessions of the same agent by default. Shared-agent deployments can set `tools.sessions.visibility` to `tree` or `self` for narrower access.
+    - OpenClaw v2026.8.2 reads `OPENCLAW_*` variables instead of legacy `CLAWDBOT_*` or `MOLTBOT_*` names. Rename custom variables in `~/.openclaw/.env`; for example, rename `CLAWDBOT_GATEWAY_TOKEN` to `OPENCLAW_GATEWAY_TOKEN`.
+    - The OpenProse plugin and `/prose` command were removed. Follow the [OpenProse migration guide](https://docs.openclaw.ai/prose) if you still use `.prose` files.
+    - Bundled `codex/*` and `openai-codex/*` model references now use `openai/*`.

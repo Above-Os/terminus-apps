@@ -26,24 +26,25 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — setup guiado por onboarding con skills empaquetados/gestionados/de workspace.
 
   upgradeDescription: |
-    Actualización al chart 1.0.21 (desde 1.0.20).
-    Parche upstream: https://github.com/openclaw/openclaw/releases/tag/v2026.7.1-1
+    Versión upstream: [OpenClaw v2026.8.2](https://github.com/openclaw/openclaw/releases/tag/v2026.8.2)
 
-    Images:
-    - App/Gateway: `beclab/openclaw-openclaw:2026.7.1-1` (era 2026.7.1)
-    - Brew base: `beclab/harveyff-openclaw-brew-base:2026.8.7-2-cli` (rebuild desde `clawdbot/docker/Dockerfile.brew-base-cli` antes de actualizar)
+    **Cambio incompatible:** Algunos plugins instalados pueden no ser compatibles con OpenClaw v2026.8.2 e impedir que se inicie el Gateway; actualiza los plugins antes de la actualización.
 
-    Brew base / certbot:
-    - Añade `certbot` vía Linuxbrew; init siembra defaults no-root en `/home/node/.config/letsencrypt/cli.ini`
-    - Preinstala `unzip`; incluye `brew trust` + `brew tap steipete/tap` para skills de onboarding
-    - Init pre-confía `steipete/tap` al refrescar el volumen brew; PATH prioriza bins de Linuxbrew
+    **Novedades**
+    - Abre el agente Home junto a la página actual, revisa su instantánea del contexto de trabajo y adjunta texto seleccionado sin cambiar de página.
+    - Inicia sesiones en segundo plano desde New Session y ábrelas desde la notificación de finalización.
+    - Los mensajes reenviados entre sesiones muestran ahora la sesión de origen y el agente remitente. También es más fácil acceder a las acciones de sesión y exportar transcripciones.
+    - Las actualizaciones conservan configuraciones válidas más recientes, detienen migraciones de sesiones incompletas y recuperan el Gateway con mayor seguridad tras una actualización fallida.
+    - Las conversaciones que usan herramientas devuelven una respuesta final o un error visible en lugar de detenerse tras la salida de una herramienta.
+    - Las respuestas de voz ya no reproducen razonamiento interno, y la entrega de audio y los turnos posteriores de Talk en el navegador son más fiables.
+    - Control UI incorpora los temas CRT, Manuscript, Rosé y Miami.
 
-    Correcciones upstream v2026.7.1-1:
-    - Reparación de arranque Memory Core, recuperación de migración legacy, recuperación de lock npm de plugins gestionados
+    **Correcciones**
+    - Se han mejorado la recuperación y los informes de tareas programadas, la continuidad de las conversaciones, la recuperación de borradores, la fiabilidad del navegador y el rendimiento con historiales largos.
+    - Se han reforzado la privacidad y la seguridad con una mejor ocultación de datos en registros, límites para respuestas MCP, permisos de espacio de trabajo más seguros y dependencias de decodificación de imágenes actualizadas.
 
-    Nota de onboarding:
-    Las instalaciones Classic Onboarding skill pueden seguir fallando (red, locks de brew). Suele no ser bloqueante; completa el setup core primero y luego ejecuta openclaw doctor.
-
-    Notes:
-    - Se conserva el `openclaw.json` existente en la actualización
-    - En contenedores usa `restart-gateway`, no `openclaw gateway restart`
+    **Cambios de configuración al actualizar desde 2026.7.x**
+    - Las sesiones sin entorno aislado pueden acceder por defecto a otras sesiones del mismo agente. Las instalaciones con agentes compartidos pueden establecer `tools.sessions.visibility` en `tree` o `self` para restringir el acceso.
+    - OpenClaw v2026.8.2 lee variables `OPENCLAW_*` en lugar de los nombres antiguos `CLAWDBOT_*` o `MOLTBOT_*`. Cambia el nombre de las variables personalizadas en `~/.openclaw/.env`; por ejemplo, de `CLAWDBOT_GATEWAY_TOKEN` a `OPENCLAW_GATEWAY_TOKEN`.
+    - Se han eliminado el plugin OpenProse y el comando `/prose`. Sigue la [guía de migración de OpenProse](https://docs.openclaw.ai/prose) si todavía utilizas archivos `.prose`.
+    - Las referencias de modelos incluidas `codex/*` y `openai-codex/*` usan ahora `openai/*`.

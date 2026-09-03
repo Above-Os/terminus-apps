@@ -26,24 +26,25 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — setup guidato dall’onboarding con skill bundled/managed/workspace.
 
   upgradeDescription: |
-    Aggiornamento al chart 1.0.21 (da 1.0.20).
-    Patch upstream: https://github.com/openclaw/openclaw/releases/tag/v2026.7.1-1
+    Versione upstream: [OpenClaw v2026.8.2](https://github.com/openclaw/openclaw/releases/tag/v2026.8.2)
 
-    Images:
-    - App/Gateway: `beclab/openclaw-openclaw:2026.7.1-1` (era 2026.7.1)
-    - Brew base: `beclab/harveyff-openclaw-brew-base:2026.8.7-2-cli` (rebuild da `clawdbot/docker/Dockerfile.brew-base-cli` prima dell’upgrade)
+    **Modifica incompatibile:** Alcuni plugin installati potrebbero non essere compatibili con OpenClaw v2026.8.2 e impedire l’avvio del Gateway; aggiorna i plugin prima dell’upgrade.
 
-    Brew base / certbot:
-    - Aggiunge `certbot` via Linuxbrew; init imposta default non-root in `/home/node/.config/letsencrypt/cli.ini`
-    - Preinstalla `unzip`; include `brew trust` + `brew tap steipete/tap` per gli skill di onboarding
-    - Init pre-affida `steipete/tap` al refresh del volume brew; PATH prioritizza i bin Linuxbrew
+    **Novità**
+    - Apri l’agente Home accanto alla pagina corrente, controlla l’istantanea del contesto di lavoro e allega il testo selezionato senza cambiare pagina.
+    - Avvia sessioni in background da New Session e aprile dalla notifica di completamento.
+    - I messaggi inoltrati tra sessioni mostrano ora la sessione di origine e l’agente mittente. Anche le azioni di sessione e l’esportazione delle trascrizioni sono più accessibili.
+    - Gli upgrade conservano le configurazioni valide più recenti, interrompono le migrazioni di sessione incomplete e ripristinano il Gateway in modo più sicuro dopo un aggiornamento non riuscito.
+    - Le conversazioni basate su strumenti restituiscono ora una risposta finale o un errore visibile invece di fermarsi dopo l’output dello strumento.
+    - Le risposte vocali non pronunciano più il ragionamento interno; la consegna audio e i turni Talk successivi nel browser sono più affidabili.
+    - Control UI aggiunge i temi CRT, Manuscript, Rosé e Miami.
 
-    Fix upstream v2026.7.1-1:
-    - Riparazione avvio Memory Core, recovery migrazione legacy, recovery lock npm plugin gestiti
+    **Correzioni**
+    - Migliorati il ripristino e i report dei processi pianificati, la continuità delle conversazioni, il recupero delle bozze, l’affidabilità del browser e le prestazioni con cronologie lunghe.
+    - Privacy e sicurezza rafforzate tramite una migliore oscurazione dei log, limiti alle risposte MCP, autorizzazioni dello spazio di lavoro più sicure e dipendenze aggiornate per la decodifica delle immagini.
 
-    Nota onboarding:
-    Le installazioni Classic Onboarding skill possono ancora fallire (rete, lock brew). Di solito non bloccanti; completa prima il setup core, poi esegui openclaw doctor.
-
-    Notes:
-    - L’`openclaw.json` esistente è preservato nell’upgrade
-    - Nei container usa `restart-gateway`, non `openclaw gateway restart`
+    **Modifiche alla configurazione durante l’upgrade da 2026.7.x**
+    - Le sessioni non in sandbox possono accedere per impostazione predefinita alle altre sessioni dello stesso agente. Le installazioni con agenti condivisi possono impostare `tools.sessions.visibility` su `tree` o `self` per limitare l’accesso.
+    - OpenClaw v2026.8.2 legge le variabili `OPENCLAW_*` al posto dei nomi precedenti `CLAWDBOT_*` o `MOLTBOT_*`. Rinomina le variabili personalizzate in `~/.openclaw/.env`, ad esempio da `CLAWDBOT_GATEWAY_TOKEN` a `OPENCLAW_GATEWAY_TOKEN`.
+    - Il plugin OpenProse e il comando `/prose` sono stati rimossi. Segui la [guida alla migrazione di OpenProse](https://docs.openclaw.ai/prose) se usi ancora file `.prose`.
+    - I riferimenti ai modelli inclusi `codex/*` e `openai-codex/*` ora usano `openai/*`.

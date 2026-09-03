@@ -26,24 +26,25 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — setup guidé par l’onboarding avec skills bundlés/gérés/workspace.
 
   upgradeDescription: |
-    Mise à niveau vers le chart 1.0.21 (depuis 1.0.20).
-    Patch upstream : https://github.com/openclaw/openclaw/releases/tag/v2026.7.1-1
+    Version upstream : [OpenClaw v2026.8.2](https://github.com/openclaw/openclaw/releases/tag/v2026.8.2)
 
-    Images :
-    - App/Gateway : `beclab/openclaw-openclaw:2026.7.1-1` (était 2026.7.1)
-    - Brew base : `beclab/harveyff-openclaw-brew-base:2026.8.7-2-cli` (rebuild depuis `clawdbot/docker/Dockerfile.brew-base-cli` avant la mise à niveau)
+    **Changement incompatible :** Certains plugins installés peuvent ne pas être compatibles avec OpenClaw v2026.8.2 et empêcher le démarrage du Gateway ; mettez les plugins à jour avant la mise à niveau.
 
-    Brew base / certbot :
-    - Ajoute `certbot` via Linuxbrew ; l’init initialise des defaults non-root dans `/home/node/.config/letsencrypt/cli.ini`
-    - Préinstalle `unzip` ; intègre `brew trust` + `brew tap steipete/tap` pour les skills d’onboarding
-    - L’init pré-fait confiance à `steipete/tap` au refresh du volume brew ; PATH priorise les bins Linuxbrew
+    **Nouveautés**
+    - Ouvrez l’agent Home à côté de la page actuelle, examinez son instantané de contexte de travail et joignez le texte sélectionné sans changer de page.
+    - Lancez des sessions en arrière-plan depuis New Session et ouvrez-les depuis la notification de fin.
+    - Les messages transférés entre sessions indiquent désormais la session source et l’agent expéditeur. Les actions de session et l’export des transcriptions sont aussi plus accessibles.
+    - Les mises à niveau conservent les configurations valides plus récentes, arrêtent les migrations de session incomplètes et récupèrent le Gateway plus sûrement après un échec de mise à jour.
+    - Les conversations utilisant des outils renvoient maintenant une réponse finale ou une erreur visible au lieu de s’arrêter après la sortie de l’outil.
+    - Les réponses vocales ne prononcent plus le raisonnement interne. La livraison audio et les tours Talk ultérieurs dans le navigateur sont plus fiables.
+    - Control UI ajoute les thèmes CRT, Manuscript, Rosé et Miami.
 
-    Correctifs upstream v2026.7.1-1 :
-    - Réparation du démarrage Memory Core, récupération de migration legacy, récupération de lock npm des plugins gérés
+    **Correctifs**
+    - Amélioration de la récupération et des rapports des tâches planifiées, de la continuité des conversations, de la récupération des brouillons, de la fiabilité du navigateur et des performances des historiques longs.
+    - Renforcement de la confidentialité et de la sécurité grâce à une meilleure occultation des journaux, à des réponses MCP limitées, à des autorisations d’espace de travail plus sûres et à des dépendances de décodage d’images mises à jour.
 
-    Note d’onboarding :
-    Les installations Classic Onboarding skill peuvent encore échouer (réseau, locks brew). Généralement non bloquant ; terminez d’abord le setup core, puis lancez openclaw doctor.
-
-    Notes :
-    - Le `openclaw.json` existant est préservé à la mise à niveau
-    - Dans les conteneurs, utilisez `restart-gateway`, pas `openclaw gateway restart`
+    **Modifications de configuration lors d’une mise à niveau depuis 2026.7.x**
+    - Les sessions hors sandbox peuvent désormais accéder par défaut aux autres sessions du même agent. Les déploiements avec agent partagé peuvent définir `tools.sessions.visibility` sur `tree` ou `self` pour restreindre l’accès.
+    - OpenClaw v2026.8.2 lit les variables `OPENCLAW_*` au lieu des anciens noms `CLAWDBOT_*` ou `MOLTBOT_*`. Renommez les variables personnalisées dans `~/.openclaw/.env`, par exemple `CLAWDBOT_GATEWAY_TOKEN` en `OPENCLAW_GATEWAY_TOKEN`.
+    - Le plugin OpenProse et la commande `/prose` ont été supprimés. Suivez le [guide de migration OpenProse](https://docs.openclaw.ai/prose) si vous utilisez encore des fichiers `.prose`.
+    - Les références de modèles fournies `codex/*` et `openai-codex/*` utilisent maintenant `openai/*`.

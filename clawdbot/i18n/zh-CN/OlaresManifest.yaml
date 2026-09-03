@@ -27,39 +27,25 @@ spec:
     - **[引导配置](https://docs.openclaw.ai/start/wizard) + [技能体系](https://docs.openclaw.ai/tools/skills)** —— 提供完善的引导流程，内置/可管理/可扩展的技能体系
 
   upgradeDescription: |
-    Chart 1.0.32：OpenClaw v2026.8.2，改用 beclab 镜像；环境变量改为 OPENCLAW_*，并兼容旧的 CLAWDBOT_*。升级时只清掉挡住 8.2 启动的 7.x workspace/session 残留，不必再手动跑 `openclaw doctor --fix`。
-    https://github.com/openclaw/openclaw/releases/tag/v2026.8.2
+    上游发布：[OpenClaw v2026.8.2](https://github.com/openclaw/openclaw/releases/tag/v2026.8.2)
 
-    镜像：
-    - 应用/网关：`beclab/openclaw-openclaw:2026.8.2`
-    - Brew base：`beclab/harveyff-openclaw-brew-base:2026.9.2-cli`
-    - 终端：`beclab/terminal:v0.0.14`
+    **破坏性变更：**部分已安装插件可能与 OpenClaw v2026.8.2 不兼容并导致 Gateway 无法启动，请在升级前先更新插件。
 
-    环境变量（必读）：
-    - v2026.8.2 只认 `OPENCLAW_*`。旧的 `CLAWDBOT_*` / `MOLTBOT_*` 会被上游忽略，并打 `OPENCLAW_LEGACY_ENV_VARS` 警告。
-    - 本 chart 显式设置 `OPENCLAW_HOME`、`OPENCLAW_STATE_DIR`、`OPENCLAW_WORKSPACE_DIR`、`OPENCLAW_SYSTEMD_UNIT`。
-    - 兼容层会把残留的 `CLAWDBOT_*` / `MOLTBOT_*` 复制到尚未设置的 `OPENCLAW_*`。Gateway 进程随后清掉旧前缀，避免启动警告。工作区容器还会把 `OPENCLAW_*` 回写为 `CLAWDBOT_*`，方便旧脚本继续用。
-    - 请把 `~/.openclaw/.env` 或进程环境里的自定义 `CLAWDBOT_*` 改名为 `OPENCLAW_*`（例如 `CLAWDBOT_GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN`）。过渡期内两边都能用。
+    **主要更新**
+    - 可在当前页面旁打开 Home agent，查看其工作上下文快照，并直接附加选中的文本，无需切换页面。
+    - 可从 New Session 启动后台会话，并通过完成通知打开结果。
+    - 跨会话转发的消息现会显示来源会话和发送 agent，会话操作与记录导出也更易使用。
+    - 升级现会保留较新的有效配置，在会话迁移未完成时停止，并在更新失败后更安全地恢复 Gateway。
+    - 工具执行完毕后，对话会返回最终答复或明确的失败信息，不再停在工具输出。
+    - 语音回复不再读出内部推理，音频传送和后续的浏览器 Talk 轮次也更稳定。
+    - Control UI 新增 CRT、Manuscript、Rosé 和 Miami 主题。
 
-    从 2026.7.x 升级的破坏性变更：
-    - OpenProse 插件和 `/prose` 已移除；若还在用 `.prose` 文件，按 https://docs.openclaw.ai/prose 迁移
-    - 出厂 `codex/*`、`openai-codex/*` 现已对应 `openai/*`
-    - 新默认：空闲/跨日不再自动 reset、dreaming 与 self-learning 默认开、同 agent 会话默认可互访、heartbeat 改打 owner DM
+    **修复**
+    - 改进了定时任务的恢复与结果报告、对话连续性、草稿恢复、浏览器稳定性和长历史记录性能。
+    - 通过更完善的日志脱敏、MCP 响应大小限制、更安全的工作区权限和更新的图像解码依赖，加强了隐私与安全性。
 
-    反代 / Control UI：
-    - 新装 `openclaw.json` 带 `gateway.trustedProxies`（集群 CNI + 回环）以及 `auth.trustedProxy.allowLoopback` 和 `userHeader: x-forwarded-user`。没有这些时，Envoy/nginx 会触发 `proxy_attribution_required`，界面表现为无法连接。
-    - 只要写了 `auth.trustedProxy` 就必须带 `userHeader`，否则 Gateway 会以 78 退出。
-    - Control UI 登录用的是 `openclaw.json` 里的 `gateway.auth.token`。新装默认 `controlUi.dangerouslyDisableDeviceAuth: true`，避免在 Olares 反代后还要配对（1.12.6 无法 exec `openclaw devices approve`）。已有配置不会被覆盖。
-    - Ingress 会改写 `X-Forwarded-For`，让 Gateway 看到可信跳。
-
-    本地 / llama.cpp 模型：
-    - 新装默认 `agents.defaults.thinkingDefault: off`、`timeoutSeconds: 300`。Qwen 思考会吃光 token 预算（`reasoning-only retries exhausted` / “Agent couldn't generate a response”）。已有配置请自行把 thinking 关掉（必要时在模型上设 `compat.thinkingFormat: qwen-chat-template` 和 `enable_thinking: false`）。
-    - 自定义 OpenAI 兼容的 llama.cpp 需要 `compat.toolSchemaProfile: "llamacpp"`，否则工具调用会 `400 failed to parse grammar`。schema 仍然过大时可把 `cron` 加进 deny。
-    - `contextWindow` / `maxTokens` 应对齐引擎（例如 131072）。超长工具轮次再叠另一个 GPU 应用可能把引擎打挂（502/503 Loading model）。
-    - Memory / 仪表盘会话标题仍走 OpenAI 形态的 utility 模型。没有 `OPENAI_API_KEY`（或本地 embedding/utility）会看到 `memory sync failed: No API key for provider "openai"`，聊天本身不受影响。
-
-    说明：
-    - 升级不覆盖已有 `openclaw.json`（init 只在文件不存在时拷默认配置）
-    - 新装会跳过迁移 init。从 2026.7.x 升级时，init 只删掉或改名挡住 8.2 的 workspace-state / attestation / `sessions.json`。不会跑 `openclaw doctor --fix`（那条命令会关掉未使用的 skill，包括 Olares 技能包）。
-    - 容器内请用 `restart-gateway`，不要用 `openclaw gateway restart`。`restart-gateway` 现已带 token 访问 `/readyz`（v2026.8.2 拒绝未鉴权探测）
-    - Gateway 就绪探针改为 exec 访问本机 `/readyz` 并携带配置中的 token
+    **从 2026.7.x 升级时的配置变化**
+    - 非沙箱会话默认可访问同一 agent 的其他会话。共享 agent 的部署可将 `tools.sessions.visibility` 设为 `tree` 或 `self` 以缩小访问范围。
+    - OpenClaw v2026.8.2 改用 `OPENCLAW_*` 变量，不再读取旧的 `CLAWDBOT_*` 或 `MOLTBOT_*` 名称。请重命名 `~/.openclaw/.env` 中的自定义变量；例如将 `CLAWDBOT_GATEWAY_TOKEN` 改为 `OPENCLAW_GATEWAY_TOKEN`。
+    - OpenProse 插件和 `/prose` 命令已移除。如仍使用 `.prose` 文件，请按[OpenProse 迁移指南](https://docs.openclaw.ai/prose)操作。
+    - 内置的 `codex/*` 和 `openai-codex/*` 模型引用现改用 `openai/*`。
