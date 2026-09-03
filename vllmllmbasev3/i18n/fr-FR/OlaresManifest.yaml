@@ -1,25 +1,15 @@
 metadata:
   title: vLLM Engine Base
-  description: "Base générique du moteur vLLM. Choisissez n'importe quel modèle HuggingFace Safetensors à l'installation via env."
+  description: "Base générique du moteur vLLM. Choisissez n'importe quel modèle HuggingFace Safetensors à l'installation via env"
 spec:
   upgradeDescription: |
-    Mettre à jour vLLM de v0.26.0 vers v0.27.1. Chart 1.2.29.
+    Ajout de la prise en charge des GPU AMD discrets (`amd-gpu`) avec ROCm. Chart 1.2.36 : budget de mémoire GPU de type Spark.
 
-    **Changements** (pertinents pour Olares)
-
-    v0.27.1
-    - Prise en charge des têtes Markov DSpark quantifiées
-
-    v0.27.0
-    - Support full-stack Kimi K3 (kernels, DeepGEMM, compressed-tensors NVFP4, fusion DSpark AR)
-    - Nouveaux modèles : Qwen3.5 dense/MoE, K-EXAONE-2.0, VaultGemma, jina-embeddings-v5 ; Inkling NVFP4/FP8
-    - Mise à niveau vers PyTorch 2.13.0 (changement d'environnement incompatible)
-    - FlashAttention 4 sur SM100 : cache KV FP8 et headdim-256 ; le warmup JIT supprime les stalls de première requête
-    - DeepSeek-V4 : parallélisme de séquence, optimisations router/topk, cache KV indexeur MXFP4 compact
-    - Model Runner V2 : attention encoder-only, pooling embedding/classification, multimodal sur CPU, MTP multi-couches
-    - Offloading KV : stockage à niveaux, tier secondaire P2P, politiques d'éviction enfichables
-    - Serving à grande échelle : framework de tolérance aux pannes pour DP+EP ; NIXL P/D pour modèles hybrides MLA+SSM
-    - Frontend Rust : plan de contrôle gRPC (santé, abort, discovery modèle/KV) ; `vllm-bench` dans la CLI
+    **Changements**
+    - Nouveau mode d'accélérateur `amd-gpu` pour les cartes AMD discrètes (Radeon AI PRO R9700 / gfx1201 et autres GPU ROCm)
+    - Image du moteur avec `amd-gpu` : `vllm/vllm-openai-rocm:v0.28.0`
+    - NVIDIA CUDA reste sur `vllm/vllm-openai:v0.27.1` ; Spark conserve le tag aarch64
+    - Valeurs par défaut RDNA4 : AITER C++/ASM désactivé, Triton FlashAttention activé, GPU unique (`--tensor-parallel-size 1`)
 
     Notes de version détaillées :
     https://github.com/vllm-project/vllm/releases
@@ -33,9 +23,9 @@ spec:
     - `MODEL_NAME` : `owner/repo`. Le nom de votre modèle — utilisez la chaîne après `hf://` dans `MODEL_SOURCE`, par exemple `Qwen/Qwen3.5-2B`. Utilisé aussi comme alias OpenAI et vLLM `--model`.
     - `MODEL_MODE` : `chat` ou `embedding`. Utilisez `chat` pour les modèles conversationnels ; pour l'embedding, le chart ajoute automatiquement `--task embed`.
     - `MODEL_SUPPORTS` : Options de capacité du modèle (Vision / Tools / Thinking / None). Choisissez ce que votre modèle prend en charge.
-    - `ENGINE_ARGS` : `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`. Flags CLI vLLM supplémentaires. Séparez plusieurs paires `--key value` par des espaces. Voir https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
+    - `ENGINE_ARGS` : `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`. Indicateurs CLI vLLM supplémentaires. Séparez plusieurs paires `--key value` par des espaces. Sur `amd-gpu` (RDNA4 / R9700), préférez `--attention-backend ROCM_ATTN` et conservez `--tensor-parallel-size 1` ; n'utilisez pas `--kv-cache-dtype fp8` par défaut. Voir https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
     - `LOG_LEVEL` : `debug`, `info`, `warn` ou `error`. Niveau de journal du conteneur llm-init.
-    - `VLLM_REQUIRED_GPU_MEMORY` : `8Gi`, `8192` ou `8192Mi`. Mémoire modèle nécessaire. Sur `nvidia`, définit `nvidia.com/gpumem` ; sur `nvidia-gb10`, dimensionne la mémoire du pod pour gpu-inject.
+    - `VLLM_REQUIRED_GPU_MEMORY` : `8Gi`, `8192` ou `8192Mi`. Mémoire modèle nécessaire. Sur `nvidia`, définit `nvidia.com/gpumem` ; sur `nvidia-gb10`, dimensionne la mémoire du pod pour gpu-inject ; sur `amd-gpu`, dimensionne le quota de VRAM ROCm discrète via gpu-inject.
 
     **Fonctionnement**
     D'abord, `llm-init` télécharge votre modèle et le prépare ; puis vLLM commence à servir le modèle lorsqu'il est prêt. Les deux conteneurs s'exécutent dans le même Pod et partagent le répertoire du modèle et le sentinel de readiness.
@@ -49,6 +39,7 @@ spec:
     |----------------|-------------------|----------------------------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | Définir `VLLM_REQUIRED_GPU_MEMORY` ; régler `--gpu-memory-utilization` dans ENGINE_ARGS |
     | `nvidia-gb10`  | GPU (Spark)       | Comme `nvidia` ; `--gpu-memory-utilization` depuis ENGINE_ARGS (non remappé automatiquement) |
+    | `amd-gpu`      | GPU (ROCm)        | AMD discret (p. ex. Radeon AI PRO R9700 / gfx1201). Image `vllm/vllm-openai-rocm:v0.28.0`. Utilisez `--attention-backend ROCM_ATTN` et `--tensor-parallel-size 1`. |
 
     **Stockage du modèle**
     Tous les fichiers du modèle sont stockés dans un dossier partagé à `appCommon/huggingface`, monté comme `/cache/hf/hub`. Toutes les apps similaires utilisent cet emplacement pour les modèles.
@@ -57,4 +48,3 @@ spec:
     - CPU, RAM et GPU se configurent automatiquement selon le chart ; les réglages disque sont fixes.
     - Le chargement de modèles vLLM peut prendre plusieurs minutes pour les grands modèles. Gardez l'app Running jusqu'à ce qu'elle soit prête.
     - Pour les charges à haute concurrence, PagedAttention de vLLM offre un fort débit ; réglez `--max-num-batched-tokens` et `--gpu-memory-utilization` dans `ENGINE_ARGS`.
-

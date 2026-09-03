@@ -1,25 +1,15 @@
 metadata:
   title: vLLM Engine Base
-  description: 汎用 vLLM エンジンベース。インストール時に env で任意の HuggingFace Safetensors モデルを選択。
+  description: 汎用 vLLM エンジンベース。インストール時に env で任意の HuggingFace Safetensors モデルを選択
 spec:
   upgradeDescription: |
-    vLLM を v0.26.0 から v0.27.1 へアップグレード。Chart 1.2.29。
+    ROCm による AMD ディスクリート GPU（`amd-gpu`）対応を追加。Chart 1.2.36：Spark 方式の GPU メモリバジェット。
 
-    **変更点**（Olares 関連）
-
-    v0.27.1
-    - 量子化 DSpark Markov ヘッドをサポート
-
-    v0.27.0
-    - Kimi K3 フルスタック対応（kernels、DeepGEMM、compressed-tensors NVFP4、DSpark AR fusion）
-    - 新モデル：Qwen3.5 dense/MoE、K-EXAONE-2.0、VaultGemma、jina-embeddings-v5；Inkling NVFP4/FP8
-    - PyTorch 2.13.0 へアップグレード（破壊的な環境変更）
-    - SM100 上の FlashAttention 4：FP8 KV キャッシュと headdim-256；JIT ウォームアップで初回リクエストのストールを解消
-    - DeepSeek-V4：シーケンス並列、router/topk 最適化、コンパクト MXFP4 indexer KV キャッシュ
-    - Model Runner V2：encoder-only attention、embedding/分類プーリング、CPU 上のマルチモーダル、多層 MTP
-    - KV オフロード：階層ストレージ、P2P セカンダリ層、差し替え可能な eviction ポリシー
-    - 大規模サービング：DP+EP 向けフォールトトレランス枠組み；ハイブリッド MLA+SSM モデル向け NIXL P/D
-    - Rust フロントエンド：gRPC コントロールプレーン（health、abort、モデル/KV discovery）；CLI に `vllm-bench`
+    **変更点**
+    - AMD ディスクリートカード向けの新しいアクセラレータモード `amd-gpu`（Radeon AI PRO R9700 / gfx1201 およびその他の ROCm GPU）
+    - `amd-gpu` のエンジンイメージ：`vllm/vllm-openai-rocm:v0.28.0`
+    - NVIDIA CUDA は `vllm/vllm-openai:v0.27.1` を維持し、Spark は aarch64 タグを維持
+    - RDNA4 のデフォルト：AITER C++/ASM は無効、Triton FlashAttention は有効、シングル GPU（`--tensor-parallel-size 1`）
 
     詳細なリリースノート：
     https://github.com/vllm-project/vllm/releases
@@ -33,9 +23,9 @@ spec:
     - `MODEL_NAME`: `owner/repo`。モデル名 — `MODEL_SOURCE` の `hf://` 以降の文字列。例: `Qwen/Qwen3.5-2B`。OpenAI エイリアスおよび vLLM `--model` としても使用。
     - `MODEL_MODE`: `chat` または `embedding`。会話モデルは `chat`；embedding の場合チャートが自動で `--task embed` を追加。
     - `MODEL_SUPPORTS`: モデル能力オプション（Vision / Tools / Thinking / None）。モデルが対応するものを選択。
-    - `ENGINE_ARGS`: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。追加の vLLM CLI フラグ。複数の `--key value` はスペース区切り。参照: https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/。
+    - `ENGINE_ARGS`: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。追加の vLLM CLI フラグ。複数の `--key value` はスペース区切り。`amd-gpu`（RDNA4 / R9700）では `--attention-backend ROCM_ATTN` を優先し、`--tensor-parallel-size 1` を維持します。`--kv-cache-dtype fp8` はデフォルトで使用しないでください。参照： https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
     - `LOG_LEVEL`: `debug`、`info`、`warn`、または `error`。llm-init コンテナのログレベル。
-    - `VLLM_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。`nvidia` では `nvidia.com/gpumem` を設定；`nvidia-gb10` では gpu-inject 用に Pod メモリをサイジング。
+    - `VLLM_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。`nvidia` では `nvidia.com/gpumem` を設定；`nvidia-gb10` では gpu-inject 用に Pod メモリをサイズ調整；`amd-gpu` では gpu-inject 経由でディスクリート ROCm VRAM クォータをサイズ調整。
 
     **動作の仕組み**
     まず `llm-init` がモデルをダウンロードして準備し、準備が整うと vLLM がモデルの提供を開始します。両コンテナは同一 Pod で動作し、モデルディレクトリと readiness センチネルを共有します。
@@ -49,6 +39,7 @@ spec:
     |----------------|-------------------|----------------------------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | `VLLM_REQUIRED_GPU_MEMORY` を設定；ENGINE_ARGS で `--gpu-memory-utilization` を調整 |
     | `nvidia-gb10`  | GPU (Spark)       | `nvidia` と同様；`--gpu-memory-utilization` は ENGINE_ARGS から（自動リマップなし） |
+    | `amd-gpu`      | GPU (ROCm)        | AMD ディスクリート GPU（例：Radeon AI PRO R9700 / gfx1201）。イメージ `vllm/vllm-openai-rocm:v0.28.0`。`--attention-backend ROCM_ATTN` と `--tensor-parallel-size 1` を使用。|
 
     **モデルストレージ**
     すべてのモデルファイルは `appCommon/huggingface` の共有フォルダに保存され、`/cache/hf/hub` としてマウントされます。同様のアプリはすべてこの場所をモデルに使います。
@@ -57,4 +48,3 @@ spec:
     - CPU・RAM・GPU はチャートに基づき自動構成；ディスク設定は固定。
     - 大規模モデルでは vLLM のモデル読み込みに数分かかることがあります。準備完了までアプリを Running のままにしてください。
     - 高並行ワークロードでは vLLM の PagedAttention が高いスループットを発揮；`ENGINE_ARGS` で `--max-num-batched-tokens` と `--gpu-memory-utilization` を調整してください。
-
