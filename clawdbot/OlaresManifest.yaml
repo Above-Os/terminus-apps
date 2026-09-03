@@ -12,7 +12,7 @@ metadata:
   description: Personal AI Assistant with Multi-channel Inbox Support
   appid: clawdbot
   title: OpenClaw
-  version: 1.0.26
+  version: 1.0.33
   categories:
   - Productivity_v112
   - Developer Tools
@@ -43,7 +43,7 @@ entrances:
   invisible: true
   authLevel: internal
 spec:
-  versionName: '2026.7.1-1'
+  versionName: '2026.8.2'
   promoteImage:
   - https://app.cdn.olares.com/appstore/clawdbot/1.webp
   - https://app.cdn.olares.com/appstore/clawdbot/2.webp
@@ -74,27 +74,42 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — onboarding-driven setup with bundled/managed/workspace skills.
 
   upgradeDescription: |
-    Upgrade to chart 1.0.21 (from 1.0.20).
-    Upstream patch: https://github.com/openclaw/openclaw/releases/tag/v2026.7.1-1
+    Chart 1.0.32 — OpenClaw v2026.8.2 on the beclab image, with OPENCLAW_* env and leftover CLAWDBOT_* compatibility. An init clears leftover 7.x workspace/session files before Gateway starts, so a Market upgrade from 2026.7.x can reach running without a manual `openclaw doctor --fix`.
+    https://github.com/openclaw/openclaw/releases/tag/v2026.8.2
 
     Images:
-    - App/Gateway: `beclab/openclaw-openclaw:2026.7.1-1` (was 2026.7.1)
-    - Brew base: `beclab/harveyff-openclaw-brew-base:2026.8.7-2-cli` (rebuild from `clawdbot/docker/Dockerfile.brew-base-cli` before upgrade)
+    - App/Gateway: `beclab/openclaw-openclaw:2026.8.2`
+    - Brew base: `beclab/harveyff-openclaw-brew-base:2026.9.2-cli`
+    - Terminal: `beclab/terminal:v0.0.14`
 
-    Brew base / certbot:
-    - Adds `certbot` via Linuxbrew; init seeds non-root defaults at `/home/node/.config/letsencrypt/cli.ini`
-    - Pre-installs `unzip`; bake `brew trust` + `brew tap steipete/tap` for onboarding skills
-    - Init pre-trusts `steipete/tap` on brew volume refresh; PATH prioritizes Linuxbrew bins
+    Environment (must-read):
+    - v2026.8.2 only reads `OPENCLAW_*`. Legacy `CLAWDBOT_*` / `MOLTBOT_*` names are ignored by upstream and would log `OPENCLAW_LEGACY_ENV_VARS`.
+    - This chart sets `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, `OPENCLAW_WORKSPACE_DIR`, and `OPENCLAW_SYSTEMD_UNIT`.
+    - A gateway/workspace compat shim copies leftover `CLAWDBOT_*` / `MOLTBOT_*` into `OPENCLAW_*` when the new name is unset. The gateway then unsets the legacy names so the deprecation warning is silent. The workspace container also exports `CLAWDBOT_*` from `OPENCLAW_*` so leftover scripts still work.
+    - Rename any custom `CLAWDBOT_*` in `~/.openclaw/.env` or process env to `OPENCLAW_*` (example: `CLAWDBOT_GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN`). The shim keeps both working during the transition.
 
-    Upstream v2026.7.1-1 fixes:
-    - Memory Core startup repair, legacy migration recovery, managed plugin npm lock recovery
+    Breaking if you upgrade from 2026.7.x:
+    - OpenProse plugin and `/prose` removed; follow https://docs.openclaw.ai/prose if you still use `.prose` files
+    - Shipped `codex/*` and `openai-codex/*` model refs now live under `openai/*`
+    - New defaults: no idle/day session reset, dreaming and self-learning on, same-agent session visibility, heartbeat to owner DM
 
-    Onboarding note:
-    Classic Onboarding skill installs may still fail (network, brew locks). Usually non-blocking; complete core setup first, then run openclaw doctor.
+    Reverse-proxy / Control UI:
+    - Fresh `openclaw.json` includes `gateway.trustedProxies` (cluster CNI + loopback) and `auth.trustedProxy.allowLoopback` plus `userHeader: x-forwarded-user`. Without these, Envoy/nginx can trigger `proxy_attribution_required` and the UI looks like it cannot connect.
+    - `auth.trustedProxy` requires `userHeader` or Gateway exits 78.
+    - Control UI login is the `gateway.auth.token` in `openclaw.json`. Fresh installs also set `controlUi.dangerouslyDisableDeviceAuth: true` so pairing is not required behind Olares (1.12.6 cannot exec `openclaw devices approve`). Existing configs keep their current pairing setting.
+    - Ingress overwrites `X-Forwarded-For` so the gateway sees a trusted hop.
+
+    Local / llama.cpp models:
+    - Fresh installs default `agents.defaults.thinkingDefault: off` and `timeoutSeconds: 300`. Qwen thinking can consume the whole token budget (`reasoning-only retries exhausted` / "Agent couldn't generate a response"). Existing configs should set `thinkingDefault: off` (and `compat.thinkingFormat: qwen-chat-template` plus `enable_thinking: false` on the model if needed).
+    - Custom OpenAI-compat llama.cpp providers need `compat.toolSchemaProfile: "llamacpp"` or tool calls fail with `400 failed to parse grammar`. Deny `cron` if that tool's schema is still too large.
+    - Match `contextWindow` / `maxTokens` to the engine (for example 131072). Long tool turns plus another GPU app can OOM the engine (502/503 "Loading model").
+    - Memory / dashboard session titles still call an OpenAI-shaped utility model. Without `OPENAI_API_KEY` (or a local embedding/utility provider) you will see `memory sync failed: No API key for provider "openai"` — chat still works.
 
     Notes:
-    - Existing `openclaw.json` preserved on upgrade
-    - Use `restart-gateway` in containers, not `openclaw gateway restart`
+    - Existing `openclaw.json` is preserved on upgrade (init copies the default only when the file is missing)
+    - Fresh installs skip the migrate init. Upgrades from 2026.7.x only remove or rename leftover workspace-state / attestation / `sessions.json` files that block 8.2. The init does not run `openclaw doctor --fix` (that command disables unused skills, including the Olares pack).
+    - Use `restart-gateway` in containers, not `openclaw gateway restart`. `restart-gateway` now sends the gateway token to `/readyz` (v2026.8.2 rejects unauthenticated probes)
+    - Gateway readiness exec-probes localhost `/readyz` with the configured token
 
   developer: Peter Steinberger
   website: https://openclaw.ai/
