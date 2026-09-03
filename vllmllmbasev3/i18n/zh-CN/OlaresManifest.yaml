@@ -4,6 +4,11 @@ metadata:
 
 spec:
   upgradeDescription: |
+    Chart 1.2.39 — 让 `amd-gpu` / `intel-gpu` 的显存配额可被解析。
+    这两种模式改为下发 `gpu.bytetrade.io/*-gpu-memory` pod annotation，
+    修复其 `requiredGPUMemory: "-1"` 被解析为 0、导致恢复时显卡被移出自身算力绑定的问题。
+    NVIDIA 与 Spark 路径不变。
+
     Chart 1.2.37 — 新增 Intel 独显 XPU（`intel-gpu`），并升级 llm-init。
     Intel 引擎镜像：`intel/vllm:0.21.0-ubuntu24.04-20260805`。
     llm-init：`v1.5.0` → `v1.7.1`。
@@ -30,7 +35,7 @@ spec:
     - `MODEL_SUPPORTS`：模型能力选项（Vision / Tools / Thinking / None）。请选择您的模型支持的功能。
     - `ENGINE_ARGS`：`--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。vLLM 额外 CLI 参数，多个 `--key value` 之间用空格分隔。`amd-gpu`（RDNA4 / R9700）请加 `--attention-backend ROCM_ATTN` 并保持 `--tensor-parallel-size 1`，不要默认加 `--kv-cache-dtype fp8`。`intel-gpu`（Arc / XPU）可先用 `--dtype half --enforce-eager --block-size 64 --gpu-memory-utilization 0.95 --max-model-len 32768 --language-model-only`。详见 https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/。
     - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。llm-init 容器的日志等级。
-    - `VLLM_REQUIRED_GPU_MEMORY`：`8Gi`、`8192` 或 `8192Mi`。模型所需显存。`nvidia` 下设置 `nvidia.com/gpumem`；`nvidia-gb10` 下设置 pod 内存供 gpu-inject 切分；`amd-gpu` 与 `intel-gpu` 下由 gpu-inject 切分独立显存。
+    - `VLLM_REQUIRED_GPU_MEMORY`：`8Gi`、`8192` 或 `8192Mi`。模型所需显存。`nvidia` 下设置 `nvidia.com/gpumem`；`nvidia-gb10` 下设置 pod 内存供 gpu-inject 切分；`amd-gpu` 与 `intel-gpu` 下通过 pod annotation `gpu.bytetrade.io/required-gpu-memory` 声明独立显存配额。
 
     **工作流程说明**
     首先，`llm-init` 下载并准备模型，然后 vLLM 在模型准备好后启动服务。两个容器运行在同一 Pod 内，共享模型目录与就绪 sentinel。

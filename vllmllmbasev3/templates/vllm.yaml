@@ -16,9 +16,17 @@
 {{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
 {{- $needDri := or $isAmdGpu $isIntelGpu -}}
 {{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
-{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu / intel-gpu use
-       gpu-inject + manifest requiredGPUMemory. */ -}}
+{{- /* nvidia.com/gpumem is NVIDIA-HAMi only: HAMi's extender exempts it from
+       the node capacity check, so it can carry a quota the kubelet never
+       advertises. The discrete AMD/Intel plugins advertise a card count and
+       nothing else, so their quota cannot ride on a container resource at all
+       and travels on a pod annotation instead, which is inert to the
+       scheduler. app-service reads it to resolve the requiredGPUMemory /
+       limitedGPUMemory "-1" sentinel this manifest declares for those modes;
+       without it the sentinel resolves to 0 and the card is dropped from its
+       own compute binding on resume. */ -}}
 {{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
+{{- $needGpuMemAnnotation := or $isAmdGpu $isIntelGpu -}}
 {{- $shmLimit := "16Gi" -}}
 {{- if $isIntelGpu -}}
 {{- $shmLimit = "10Gi" -}}
@@ -65,6 +73,13 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: vllm
+{{- if $needGpuMemAnnotation }}
+      # VRAM quota for the modes that cannot express it as a resource. Plain
+      # Kubernetes quantity (unlike nvidia.com/gpumem, which is a bare MiB int).
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -209,7 +224,7 @@ spec:
 {{- end }}
           resources:
             # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
-            # gpu-inject; amd-gpu / intel-gpu via gpu-inject.
+            # gpu-inject; amd-gpu / intel-gpu via the pod annotation above.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
