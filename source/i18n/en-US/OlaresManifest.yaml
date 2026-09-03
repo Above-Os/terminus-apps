@@ -3,5 +3,49 @@ metadata:
   description: Market Source
 spec:
   fullDescription: |
-    Market Source
+    Market Source lets you use your own GitHub repository as an app source.
+
+    #### Add a custom source to Market
+
+    After installing Market Source, add it to the Market application:
+
+    1. Open **Market** in Olares and go to **My Olares → Settings**.
+    2. Click **Add source**.
+    3. In the Market Source application's **Market Source API** Entrance, copy the value of **Endpoint** and enter it as the source URL.
+    4. If the source needs to be accessed from outside the cluster, change the **Authentication level** of the **Market Source API** Entrance to **Public** before adding it.
+
+    The **Market Source API** Entrance is used as the custom source URL. The **Market Source GitBot** Entrance is used separately for receiving GitHub Webhook events.
+
+    #### Before installation
+
+    Please complete the following preparation:
+
+    1. Create a GitHub repository to store your app source files. The repository can be public or private.
+    2. Create a GitHub Personal Access Token. A fine-grained token is recommended. Grant it access to the repository with **Contents: Read-only** and **Pull requests: Read and write** permissions, so GitBot can read the repository and perform PR-related operations such as posting comments and adding labels.
+    3. During installation, provide the repository URL, branch name, GitHub account name, and token.
+
+    The repository URL must be the complete HTTPS Git URL in this format:
+
+    `https://github.com/<account>/<repository>.git`
+
+    Example:
+
+    `https://github.com/example-org/app-source.git`
+
+    Do not enter the repository's web page URL without the `.git` suffix. The token is required even for a public repository because GitBot performs authenticated GitHub API operations.
+
+    Keep the token private and do not commit it to the repository.
+
+    #### GitHub Webhook
+
+    To let GitHub send pull request events to GitBot:
+
+    1. In Olares Desktop, open **Settings → Applications**, find **Market Source**, open **Entrances**, find **Market Source GitBot**, and change its **Authentication level** to **Public**.
+    2. Copy the **Market Source GitBot** Entrance URL.
+    3. In your GitHub repository, open **Settings → Webhooks → Add webhook** and paste the Entrance URL into **Payload URL**.
+    4. Set **Content type** to `application/json`.
+    5. Enter the same value configured during Market Source installation as `GITHUB_WEBHOOK_SECRET` in GitHub's **Secret** field.
+    6. Select the required events, including **Pull requests**, and enable **Active**.
+
+    `GITHUB_WEBHOOK_SECRET` is different from `GITHUB_TOKEN`. Keep it private and do not commit it to the repository.
   upgradeDescription: |

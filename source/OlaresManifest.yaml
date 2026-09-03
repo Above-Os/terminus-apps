@@ -6,7 +6,7 @@ metadata:
   description: Market Source
   icon: https://app.cdn.olares.com/appstore/sonarr/icon.png
   appid: source
-  version: "0.0.1"
+  version: "1.0.0"
   title: Makret Source
   categories:
     - developer
@@ -22,7 +22,51 @@ spec:
     - https://app.cdn.olares.com/appstore/sonarr/2.webp
     - https://app.cdn.olares.com/appstore/sonarr/3.webp
   fullDescription: |
-    Market Source
+    Market Source lets you use your own GitHub repository as an app source.
+
+    #### Add a custom source to Market
+
+    After installing Market Source, add it to the Market application:
+
+    1. Open **Market** in Olares and go to **My Olares → Settings**.
+    2. Click **Add source**.
+    3. In the Market Source application's **Market Source API** Entrance, copy the value of **Endpoint** and enter it as the source URL.
+    4. If the source needs to be accessed from outside the cluster, change the **Authentication level** of the **Market Source API** Entrance to **Public** before adding it.
+
+    The **Market Source API** Entrance is used as the custom source URL. The **Market Source GitBot** Entrance is used separately for receiving GitHub Webhook events.
+
+    #### Before installation
+
+    Please complete the following preparation:
+
+    1. Create a GitHub repository to store your app source files. The repository can be public or private.
+    2. Create a GitHub Personal Access Token. A fine-grained token is recommended. Grant it access to the repository with **Contents: Read-only** and **Pull requests: Read and write** permissions, so GitBot can read the repository and perform PR-related operations such as posting comments and adding labels.
+    3. During installation, provide the repository URL, branch name, GitHub account name, and token.
+
+    The repository URL must be the complete HTTPS Git URL in this format:
+
+    `https://github.com/<account>/<repository>.git`
+
+    Example:
+
+    `https://github.com/example-org/app-source.git`
+
+    Do not enter the repository's web page URL without the `.git` suffix. The token is required even for a public repository because GitBot performs authenticated GitHub API operations.
+
+    Keep the token private and do not commit it to the repository.
+
+    #### GitHub Webhook
+
+    To let GitHub send pull request events to GitBot:
+
+    1. In Olares Desktop, open **Settings → Applications**, find **Market Source**, open **Entrances**, find **Market Source GitBot**, and change its **Authentication level** to **Public**.
+    2. Copy the **Market Source GitBot** Entrance URL.
+    3. In your GitHub repository, open **Settings → Webhooks → Add webhook** and paste the Entrance URL into **Payload URL**.
+    4. Set **Content type** to `application/json`.
+    5. Enter the same value configured during Market Source installation as `GITHUB_WEBHOOK_SECRET` in GitHub's **Secret** field.
+    6. Select the required events, including **Pull requests**, and enable **Active**.
+
+    `GITHUB_WEBHOOK_SECRET` is different from `GITHUB_TOKEN`. Keep it private and do not commit it to the repository.
   upgradeDescription: |
     Market Source
   developer: Olares
@@ -54,8 +98,8 @@ options:
       type: system
       version: ">=1.12.7-0"
 entrances:
-  - name: source-admin
-    host: source-admin-svc
+  - name: source
+    host: source
     port: 80
     title: Market Source Admin
     icon: https://app.cdn.olares.com/appstore/sonarr/icon.png
@@ -68,7 +112,7 @@ entrances:
     icon: https://app.cdn.olares.com/appstore/firecrawl/icon.png
     openMethod: window
     authLevel: internal
-    invisible: false
+    invisible: true
   - name: source-gitbot
     host: source-gitbot-svc
     port: 8085
@@ -76,7 +120,7 @@ entrances:
     icon: https://app.cdn.olares.com/appstore/firecrawl/icon.png
     openMethod: window
     authLevel: internal
-    invisible: false
+    invisible: true
 middleware:
   redis:
     namespace: source
@@ -86,69 +130,46 @@ middleware:
     databases:
       - name: source
 envs:
-  - envName: ADMIN_EMAIL
+  - envName: LOGIN_USERNAME
     required: true
     type: email
     editable: false
-    applyOnChange: false
-    default: ""
-    description: "Admin Email"
-  - envName: GIT_ADDR
+  - envName: LOGIN_PASSWORD
+    required: true
+    type: password
+    editable: false
+    description: "Password must be at least 6 characters"
+    regex: "^[A-Za-z0-9@#.]{6,12}$"
+  - envName: GITHUB_ADDR
     required: true
     type: url
     editable: false
     applyOnChange: false
-    default: ""
-    description: "GitHub Repo, like https://github.com/user/repo.git"
-  - envName: GIT_BRANCH
+    description: "GitHub repository URL. Example: https://github.com/user/repo.git"
+  - envName: GITHUB_BRANCH
     required: true
     type: string
     editable: false
     applyOnChange: false
-    default: ""
-    description: "GitHub Branch, master or main"
-  - envName: GIT_TOKEN
+    description: "Branch name to deploy from. Example: main, master, develop, or release."
+  - envName: GITHUB_TOKEN
     required: true
     type: string
     editable: false
     applyOnChange: false
-    default: ""
-    description: "GitHub Token"
-  - envName: GIT_ACCOUNT
+    description: "A valid GitHub personal access token required for gitbot. For fine-grained tokens, grant read-only Contents permission and read/write Pull requests permission for the target repository."
+  - envName: GITHUB_ACCOUNT
     required: true
     type: string
     editable: false
     applyOnChange: false
-    default: ""
-    description: "GitHub Account"
-  - envName: GIT_WEBHOOK_SECRET
+    description: "GitHub account name that owns the repository. Example: user."
+  - envName: GITHUB_WEBHOOK_SECRET
     required: true
-    type: string
+    type: password
     editable: false
     applyOnChange: false
-    default: ""
-    description: "GitHub Webhook Secret"
-  - envName: LARK_ID
-    required: false
-    type: string
-    editable: false
-    applyOnChange: false
-    default: ""
-    description: "Lark Id"
-  - envName: EMAIL_AWS_ACCESS_KEY_ID
-    required: true
-    type: string
-    editable: false
-    applyOnChange: false
-    default: ""
-    description: "AWS SES (Simple Email Service) Key Id"
-  - envName: EMAIL_AWS_SECRET_ACCESS_KEY
-    required: true
-    type: string
-    editable: false
-    applyOnChange: false
-    default: ""
-    description: "AWS SES (Simple Email Service) Secret Access Key"
+    description: "Shared secret used to authenticate GitHub webhook requests. Set it to the same long, random value configured in the GitHub webhook's Secret field. This is not a GitHub access token."
 workloadReplicas:
   sourceapi: 1
   sourceadmin: 1
