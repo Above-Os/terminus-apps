@@ -1,0 +1,38 @@
+metadata:
+  title: Claude Code
+  description: La CLI de coding agentica oficial de Anthropic que vive en tu terminal
+spec:
+  fullDescription: |
+    **Resumen**
+    Claude Code es la herramienta de coding agentica oficial de Anthropic que vive en tu terminal. Entiende tu código, ejecuta tareas rutinarias mediante lenguaje natural y te ayuda a avanzar rápido sin salir del flujo.
+
+    **Funciones clave**
+    - TUI nativa de terminal con salida de herramientas en streaming, comandos slash, interrupt-and-redirect y revisión rica de diffs.
+    - Ediciones reales de archivos, ejecución de shell, flujos git y ejecución de tests impulsados por lenguaje natural.
+    - Skills, Subagents y llamadas a herramientas compatibles con MCP.
+    - Funciona con suscripción Claude Pro/Max (OAuth) o una clave de API de Console; también admite Amazon Bedrock y Google Vertex AI.
+    - La imagen del workspace incluye runtimes y toolchains habituales (Python, Node.js, Go, Rust, OpenJDK 21, Ruby, PHP, Lua) más clientes de bases de datos (PostgreSQL, MySQL/MariaDB, Redis), git-lfs, compilador protobuf, Gradle, tmux, dig/ss/nc, shellcheck, clang-format/tidy, graphviz y cabeceras -dev adicionales (libpq, cliente MySQL, curl, ICU, LDAP) para que los agentes ejecuten comandos de desarrollo típicos sin root.
+    - DinD opcional (`ENABLE_DIND`, activado por defecto): `docker` / `docker compose` en la terminal (sidecar privilegiado).
+    - `certbot` (Let's Encrypt) preinstalado en la imagen; el init siembra `cli.ini` y un wrapper `~/.local/bin/certbot` para uid 1000 (patrón opencode / clawdbot).
+
+    **Configuración inicial**
+    Abre la entrada `Claude Code CLI` y ejecuta `claude` para iniciar el flujo de inicio de sesión OAuth, o establece `ANTHROPIC_API_KEY` en las variables de entorno de la app y reinicia.
+
+    **Usar un modelo local (Ollama / gateway compatible con Anthropic)**
+    Para dirigir Claude Code a un Ollama local (o cualquier proxy `/v1/messages` compatible con Anthropic) desplegado en tu clúster Olares, configura estas variables de entorno en los ajustes de la app — sin `export`/`unset` manual en cada sesión:
+
+    - `ANTHROPIC_BASE_URL` = `http://<your-shared-domain>` (p. ej. la entrada compartida de una app Ollama de Olares)
+    - `ANTHROPIC_AUTH_TOKEN` = `ollama`
+    - `ANTHROPIC_API_KEY` = (dejar en blanco)
+    - `ANTHROPIC_MODEL` = `qwen3-coder:30b` (o el modelo que exponga ese gateway)
+    - `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` = false
+
+    Estas variables se inyectan condicionalmente: las cadenas en blanco y los conmutadores `false` *no* se colocan en el entorno del contenedor, de modo que Claude Code las ve realmente unset (necesario — trata `CLAUDE_CODE_USE_*` por presencia, no por valor).
+  upgradeDescription: |
+    **v0.1.16**
+
+    **Claude Code CLI**
+    - Versión de instalación fijada de **2.1.226** a **2.1.229** (canal latest; `init-install-claude` usa el `appVersion` del chart).
+
+    **Imagen base (`beclab/harveyff-claudecode-base:0.5.8`, antes 0.5.7)**
+    - `@olares/cli` integrado actualizado a **1.12.7-cli.0** (desde 1.12.6-cli.2).
