@@ -25,7 +25,7 @@ spec:
     - `MODEL_SUPPORTS` : Options de capacité du modèle (Vision / Tools / Thinking / None). Choisissez ce que votre modèle prend en charge.
     - `ENGINE_ARGS` : `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`. Indicateurs CLI vLLM supplémentaires. Séparez plusieurs paires `--key value` par des espaces. Sur `amd-gpu` (RDNA4 / R9700), préférez `--attention-backend ROCM_ATTN` et conservez `--tensor-parallel-size 1` ; n'utilisez pas `--kv-cache-dtype fp8` par défaut. Voir https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
     - `LOG_LEVEL` : `debug`, `info`, `warn` ou `error`. Niveau de journal du conteneur llm-init.
-    - `VLLM_REQUIRED_GPU_MEMORY` : `8Gi`, `8192` ou `8192Mi`. Mémoire modèle nécessaire. Sur `nvidia`, définit `nvidia.com/gpumem` ; sur `nvidia-gb10`, dimensionne la mémoire du pod pour gpu-inject ; sur `amd-gpu`, dimensionne le quota de VRAM ROCm discrète via gpu-inject.
+    - `VLLM_REQUIRED_GPU_MEMORY` : `8Gi`, `8192` ou `8192Mi`. Mémoire modèle nécessaire. Sur `nvidia`, définit `nvidia.com/gpumem` ; sur `nvidia-gb10`, dimensionne la mémoire du pod pour gpu-inject ; sur `amd-gpu` et `intel-gpu`, déclare le quota de VRAM discrète via l'annotation de pod `gpu.bytetrade.io/required-gpu-memory`.
 
     **Fonctionnement**
     D'abord, `llm-init` télécharge votre modèle et le prépare ; puis vLLM commence à servir le modèle lorsqu'il est prêt. Les deux conteneurs s'exécutent dans le même Pod et partagent le répertoire du modèle et le sentinel de readiness.
