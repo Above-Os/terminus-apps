@@ -1,0 +1,29 @@
+metadata:
+  title: EmbeddingGemma
+  description: "IREmbeddingServer（OpenVINO / ONNX）経由の EmbeddingGemma-300M テキスト埋め込み"
+
+spec:
+  fullDescription: |
+    EmbeddingServer による **EmbeddingGemma-300M** テキスト埋め込みサービス。ポート 8080 で OpenAI 互換の `/v1/embeddings` と `/v1/models` を提供します。
+
+    **アクセラレータモード**
+    | Olares モード | Image | Backend | `EMBED_DEVICE` |
+    |-------------|-------|---------|----------------|
+    | `intel` | `embed-server:v0.1.0-ov-intel` | OpenVINO IR | `igpu` |
+    | `cpu` | `embed-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `embed-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
+    | `nvidia-gb10` | `embed-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
+
+    **モデルダウンロード**
+    初回起動時、llm-init が統合 Hugging Face リポジトリから App Common キャッシュへダウンロードします：
+    - [beclab/embeddinggemma-300m](https://huggingface.co/beclab/embeddinggemma-300m)
+    - `intel` モード：`openvino/` サブディレクトリのみ
+    - その他のモード：`onnx/` サブディレクトリのみ
+
+    **デバイスマウント**
+    - `intel`：Intel iGPU スタック用の `/dev/dri`、`/sys/class/drm`
+    - `nvidia` / `nvidia-gb10`：Olares スケジューラ経由の GPU 注入
+
+    **スタック**
+    - **embed-server**（`beclab/embed-server:v0.1.0`、内部ポート 8080）：Rust による埋め込み推論。
+    - **llm-init**（`beclab/llm-init:v1.3.5`、`ENGINE_KIND=embed`、ポート 8090）：ダウンロード、進捗 UI、OpenAI API プロキシ。

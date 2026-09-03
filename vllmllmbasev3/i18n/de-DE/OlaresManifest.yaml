@@ -1,0 +1,50 @@
+metadata:
+  title: vLLM Engine Base
+  description: Generische vLLM-Engine-Basis. Wählen Sie bei der Installation über Env ein beliebiges HuggingFace-Safetensors-Modell
+spec:
+  upgradeDescription: |
+    Unterstützung für diskrete AMD-GPUs (`amd-gpu`) über ROCm hinzugefügt. Chart 1.2.36: GPU-Speicherbudget im Spark-Stil.
+
+    **Änderungen**
+    - Neuer Beschleunigermodus `amd-gpu` für diskrete AMD-Karten (Radeon AI PRO R9700 / gfx1201 und andere ROCm-GPUs)
+    - Engine-Image unter `amd-gpu`: `vllm/vllm-openai-rocm:v0.28.0`
+    - NVIDIA CUDA bleibt auf `vllm/vllm-openai:v0.27.1`; Spark bleibt beim aarch64-Tag
+    - RDNA4-Standards: AITER C++/ASM aus, Triton FlashAttention an, Einzel-GPU (`--tensor-parallel-size 1`)
+
+    Detaillierte Release Notes:
+    https://github.com/vllm-project/vllm/releases
+
+  fullDescription: |
+    **WICHTIGER HINWEIS**
+    Diese App ist eine Vorlage und kann nicht allein verwendet werden. Um sie zu nutzen, setzen Sie die folgenden Umgebungsvariablen, um ein bestimmtes Modell anzubinden.
+
+    **Leitfaden zur Einrichtung der Umgebungsvariablen**
+    - `MODEL_SOURCE`: `hf://<repo>`. Die HuggingFace-Quelle zum Herunterladen Ihres Modells, z. B. `hf://Qwen/Qwen3.5-2B`. Verwenden Sie ein Repo mit `.safetensors`-Gewichtungsdateien. Optional `--include <file>` oder `--revision <sha>` anhängen.
+    - `MODEL_NAME`: `owner/repo`. Der Name Ihres Modells — der String nach `hf://` in `MODEL_SOURCE`, z. B. `Qwen/Qwen3.5-2B`. Wird auch als OpenAI-Alias und vLLM `--model` verwendet.
+    - `MODEL_MODE`: `chat` oder `embedding`. `chat` für Konversationsmodelle; bei Embedding fügt das Chart automatisch `--task embed` hinzu.
+    - `MODEL_SUPPORTS`: Modellfähigkeitsoptionen (Vision / Tools / Thinking / None). Wählen Sie, was Ihr Modell unterstützt.
+    - `ENGINE_ARGS`: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`. Zusätzliche vLLM-CLI-Flags. Mehrere `--key value`-Paare durch Leerzeichen trennen. Unter `amd-gpu` (RDNA4 / R9700) vorzugsweise `--attention-backend ROCM_ATTN` verwenden und `--tensor-parallel-size 1` beibehalten; `--kv-cache-dtype fp8` nicht als Standard setzen. Siehe https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
+    - `LOG_LEVEL`: `debug`, `info`, `warn` oder `error`. Log-Level für den llm-init-Container.
+    - `VLLM_REQUIRED_GPU_MEMORY`: `8Gi`, `8192` oder `8192Mi`. Benötigter Modellspeicher. Auf `nvidia` setzt dies `nvidia.com/gpumem`; auf `nvidia-gb10` dimensioniert es den Pod-Speicher für gpu-inject; auf `amd-gpu` dimensioniert es über gpu-inject das diskrete ROCm-VRAM-Kontingent.
+
+    **So funktioniert es**
+    Zuerst lädt `llm-init` Ihr Modell herunter und bereitet es vor; dann startet vLLM die Bereitstellung, sobald es bereit ist. Beide Container laufen im selben Pod und teilen Modellverzeichnis und Readiness-Sentinel.
+
+    **Stack**
+    - **vLLM** (Port 8000): führt das Modell aus und bedient API-Anfragen
+    - **llm-init** (Port 8090): lädt das Modell herunter, zeigt den Fortschritt und stellt die OpenAI-API bereit, mit Proxy zu vLLM
+
+    **Accelerator-Modi**
+    | Mode           | Device            | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | `VLLM_REQUIRED_GPU_MEMORY` setzen; `--gpu-memory-utilization` in ENGINE_ARGS anpassen |
+    | `nvidia-gb10`  | GPU (Spark)       | Wie `nvidia`; `--gpu-memory-utilization` aus ENGINE_ARGS (nicht auto-umgemappt) |
+    | `amd-gpu`      | GPU (ROCm)        | Diskrete AMD-GPU (z. B. Radeon AI PRO R9700 / gfx1201). Image `vllm/vllm-openai-rocm:v0.28.0`. `--attention-backend ROCM_ATTN` und `--tensor-parallel-size 1` verwenden. |
+
+    **Modellspeicher**
+    Alle Modelldateien werden in einem gemeinsamen Ordner unter `appCommon/huggingface` gespeichert, gemountet als `/cache/hf/hub`. Alle ähnlichen Apps nutzen diesen Ort für Modelle.
+
+    **Ressourcen-Tipps**
+    - CPU, RAM und GPU konfigurieren sich automatisch anhand des Charts; Festplatteneinstellungen sind fest.
+    - Das Laden von vLLM-Modellen kann bei großen Modellen mehrere Minuten dauern. Lassen Sie die App Running, bis sie bereit ist.
+    - Für hohe Parallelität liefert vLLMs PagedAttention starken Durchsatz; passen Sie `--max-num-batched-tokens` und `--gpu-memory-utilization` in `ENGINE_ARGS` an.

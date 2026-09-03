@@ -1,0 +1,29 @@
+metadata:
+  title: EmbeddingGemma
+  description: "Embedding di testo EmbeddingGemma-300M tramite IREmbeddingServer (OpenVINO / ONNX)"
+
+spec:
+  fullDescription: |
+    Servizio di embedding di testo **EmbeddingGemma-300M** basato su EmbeddingServer. Espone `/v1/embeddings` e `/v1/models` compatibili con OpenAI sulla porta 8080.
+
+    **Modalità acceleratore**
+    | Modalità Olares | Image | Backend | `EMBED_DEVICE` |
+    |-----------------|-------|---------|----------------|
+    | `intel` | `embed-server:v0.1.0-ov-intel` | OpenVINO IR | `igpu` |
+    | `cpu` | `embed-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `embed-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
+    | `nvidia-gb10` | `embed-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
+
+    **Download del modello**
+    Al primo avvio, llm-init scarica dal repository Hugging Face unificato nella cache App Common:
+    - [beclab/embeddinggemma-300m](https://huggingface.co/beclab/embeddinggemma-300m)
+    - Modalità `intel`: solo sottodirectory `openvino/`
+    - Tutte le altre modalità: solo sottodirectory `onnx/`
+
+    **Mount dei dispositivi**
+    - `intel`: `/dev/dri`, `/sys/class/drm` per lo stack iGPU Intel
+    - `nvidia` / `nvidia-gb10`: iniezione GPU tramite lo scheduler Olares
+
+    **Stack**
+    - **embed-server** (`beclab/embed-server:v0.1.0`, porta interna 8080): inferenza embedding in Rust.
+    - **llm-init** (`beclab/llm-init:v1.3.5`, `ENGINE_KIND=embed`, porta 8090): download, UI di avanzamento e proxy API OpenAI.

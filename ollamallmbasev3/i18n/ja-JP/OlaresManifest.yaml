@@ -1,0 +1,64 @@
+metadata:
+  description: "汎用 Ollama エンジンベース。インストール時に env で任意の Ollama ライブラリモデルを選択"
+  title: Ollama Engine Base
+
+spec:
+  upgradeDescription: |
+    Ollama を v0.32.15 から v0.33.1 へアップグレード。Chart 1.3.17。
+
+    **変更内容**（Olares 関連）
+
+    v0.33.1
+    - MLX: Qwen3.8 Flash Next サポート
+    - MLX および llama.cpp の更新
+    - mlxrunner: 構造化出力サポート
+    - mlxrunner: 低速ストレージからのモデル読み込み時の Metal GPU タイムアウト回避
+
+    v0.33.0
+    - エージェントクライアントが長い prefill をキャンセルしたときのハングを修正
+    - Prefill 復元ポイントがキャンセル後も残り、リトライが最初からではなく再開する
+    - 再開された prefill が不完全な復元ポイントを記録しなくなった（再帰層モデルがゼロから再処理しない）
+    - 毎リクエストで KV キャッシュを壊していた Claude Code の「tokens left」システムメッセージを無効化
+    - macOS 固有の前提で壊れていた Linux/Windows デフォルトパッケージングを修正
+    - MLX 依存関係の更新
+
+    v0.32.15
+    - 解決済みモデルメタデータをリクエスト間でキャッシュし、time-to-first-token をおよそ半分に短縮
+    - ストリーム途中のパーサーエラー後の chat/generate ハングを修正
+    - Qwen 3.8 のシステムメッセージを正規化し、先頭以外のシステムメッセージも一貫処理
+    - MLX および llama.cpp 依存関係の更新
+
+    詳細なリリースノート:
+    https://github.com/ollama/ollama/releases
+  fullDescription: |
+    **重要なお知らせ**  
+    このアプリはテンプレートであり、単体では使えません。下の環境変数を設定して特定モデルを接続してください。
+
+    **環境変数セットアップガイド**
+    - `MODEL_SOURCE`: `ollama://<model>:<tag>`。モデルを pull する Ollama ライブラリソース。例: `ollama://qwen3.5:2b` または `ollama://gemma3:27b`。モデル一覧： https://ollama.com/library
+    - `MODEL_NAME`: `<model>:<tag>`。モデル名 — `MODEL_SOURCE` の `ollama://` 以降の文字列。例: `qwen3.5:2b`。OpenAI エイリアスとしても使用。
+    - `MODEL_MODE`: `chat` または `embedding`。会話モデルは `chat`、埋め込みモデルは `embedding`。
+    - `MODEL_SUPPORTS`: モデル能力（Vision / Tools / Thinking / None）。モデルが対応するものを選択。ollama.com/library のモデルページで確認。
+    - `ENGINE_ARGS`: `OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 ...`。チャートのデフォルトは ollama デーモンの `-1`（VRAM に常駐）; llm-init からは転送されません。
+    - `LOG_LEVEL`: `debug`、`info`、`warn`、または `error`。llm-init コンテナのログレベル。
+    - `OLLAMA_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。NVIDIA では MiB 単位の `nvidia.com/gpumem` を設定; Spark ではポッドメモリを設定。
+
+    **動作の仕組み**
+    まず `llm-init` が Ollama ライブラリからモデルを pull して準備し、準備ができたら Ollama デーモンがサービングを開始します。両者は別々に動作しますが、ファイルと進捗情報を共有します。
+
+    **スタック**
+    - **Ollama デーモン**（ポート 11434）: モデルの pull とサーブ
+    - **llm-init**（ポート 8090）: モデル pull を駆動し、進捗を表示し、OpenAI API を提供して Ollama へプロキシ
+
+    **アクセラレータモード**
+    | モード         | デバイス          | 詳細                                                                 |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | `OLLAMA_REQUIRED_GPU_MEMORY` を設定; Ollama はデフォルトで GPU 使用  |
+    | `nvidia-gb10`  | GPU (Spark)       | 上記と同様だがメモリはポッドが管理                                   |
+
+    **モデルストレージ**
+    pull したモデルはすべて共有フォルダ `appCommon/ollama` に保存。Ollama ベースのアプリはこの場所を共有し、ダイジェストでブロブがインストール間で重複排除されます。
+
+    **リソースのヒント**
+    - CPU、RAM、GPU はチャートに基づき自動設定; ディスク設定は固定。
+    - 大規模モデル（例: gemma3:27b）では `ENGINE_ARGS` で `OLLAMA_CONTEXT_LENGTH` と `OLLAMA_KV_CACHE_TYPE` を設定し、コンテキスト長と VRAM 使用をバランス。

@@ -1,0 +1,163 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+
+metadata:
+  name: audiospeakrsdiarfastv3
+  appid: audiospeakrsdiarfastv3
+  title: Speakrs Diarization Fast
+  description: Speaker diarization on ONNX Runtime, no torch stack
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  version: "0.0.24"
+  categories:
+    - AI
+    - models
+  tags:
+    - speaker-diarization
+    - audio
+
+spec:
+  versionName: "0.0.23"
+  onlyAdmin: true
+  developer: beclab
+  submitter: huangzhenyuan-bytetrade
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+  upgradeDescription: |
+    0.0.23: Initial release.
+  fullDescription: |
+    **Model**
+
+    speakrs, the pyannote `community-1` diarization pipeline reimplemented in Rust on
+    ONNX Runtime: segmentation, powerset decode, overlap-add aggregation, binarization,
+    embedding, PLDA and VBx clustering.
+
+    **Configuration**
+    - Model name: `speakrs/speakrs-community-1`
+    - Weights: `hf://avencera/speakrs-models`
+    - Capability: `diar`
+    - Execution mode: `cuda`
+    - Engine: speakrs on ONNX Runtime CUDA
+
+    **How it runs**
+
+    llm-init downloads the weights and serves the control plane; the engine waits for them
+    and then serves `/v1/*` behind llm-init's reverse proxy.
+  supportArch:
+    - amd64
+  accelerator:
+    - mode: nvidia
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3Gi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 2Gi
+      limitedGPUMemory: 6Gi
+
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: hf://avencera/speakrs-models --exclude *.mlmodelc/*
+    regex: ^hf://
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: speakrs/speakrs-community-1-fast
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: audio
+    options:
+      - title: Audio
+        value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: diar
+    multiSelect: true
+    splitter: ","
+    options:
+      - title: Diarization (who spoke when)
+        value: diar
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: info
+    options:
+      - title: Debug
+        value: debug
+      - title: Info
+        value: info
+      - title: Warn
+        value: warn
+      - title: Error
+        value: error
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+
+sharedEntrances:
+  - name: audiospeakrsdiarfastv3api
+    host: sharedentrances-api
+    port: 0
+    title: Speakrs Diarization Fast
+    invisible: true
+    authLevel: internal
+
+entrances:
+  - name: audiospeakrsdiarfastv3
+    host: download-svc
+    port: 8090
+    title: Speakrs Diarization Fast
+    authLevel: internal
+    openMethod: window
+
+options:
+  templateOnly: false
+  LLMGatewaySupported: true
+  shared: true
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: ">=1.12.6-0"
+      type: system
+
+workloadReplicas:
+  audiospeakrsdiarfastv3: 1
+  llminit: 1

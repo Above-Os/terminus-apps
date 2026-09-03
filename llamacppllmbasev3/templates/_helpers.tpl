@@ -23,3 +23,26 @@
 {{- $in := . -}}
 {{- trim ($in.Args | default "") -}}
 {{- end -}}
+{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 | amd-gpu | intel-gpu. */ -}}
+{{- define "llmbase.gpuType" -}}
+{{- $gpuObj := .Values.GPU | default dict -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = $gpuObj.Type | default "nvidia" -}}
+{{- end -}}
+{{- $gpuType -}}
+{{- end -}}
+{{- /* llama.cpp engine image by accelerator. NVIDIA/Spark CUDA b10752; amd-gpu ROCm b10731; intel-gpu SYCL b10752. */ -}}
+{{- define "llamacppllmbasev3.engineImage" -}}
+{{- $gpuType := include "llmbase.gpuType" . -}}
+{{- $img := .Values.engine.images | default dict -}}
+{{- if eq $gpuType "amd-gpu" -}}
+{{- $img.amdGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-rocm-b10731" -}}
+{{- else if eq $gpuType "intel-gpu" -}}
+{{- $img.intelGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-intel-b10752" -}}
+{{- else if eq $gpuType "nvidia-gb10" -}}
+{{- $img.nvidiaGb10 | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10752" -}}
+{{- else -}}
+{{- $img.nvidia | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10752" -}}
+{{- end -}}
+{{- end -}}
