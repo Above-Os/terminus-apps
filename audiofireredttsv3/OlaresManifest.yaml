@@ -4,10 +4,10 @@ apiVersion: 'v3'
 metadata:
   name: audiofireredttsv3
   icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
-  description: "FireRedTTS3-Instruct: one model for built-in voices, cloning and design."
+  description: A text-to-speech model with preset, cloned, and designed voices
   appid: audiofireredttsv3
   title: FireRedTTS3 Instruct
-  version: '1.0.4'
+  version: '1.0.5'
   categories:
     - AI
     - models
@@ -40,45 +40,15 @@ spec:
   onlyAdmin: true
   versionName: 'FireRedTeam/FireRedTTS3'
   fullDescription: |
-    **Model Overview**
-    FireRedTTS3-Instruct is one checkpoint that lists voices, clones from a reference,
-    designs a voice from a description, and speaks. CUDA only (amd64 + arm64).
+    FireRedTTS3-Instruct turns written text into spoken audio. It supports preset voices, voice cloning from a reference recording, and voice creation from a written description.
 
-    **Configuration**
-    - Model: `FireRedTeam/FireRedTTS3`
-    - Source: `hf://FireRedTeam/FireRedTTS3` (Instruct + RedAE + tokenizer; Base is excluded)
-    - Capabilities: `tts`, `tts_clone`, `tts_design`
-    - Required GPU memory: `16Gi`
-    - Engine: official PyTorch in-process (`FireRedTTS3Instruct`)
-    - License: Apache-2.0
+    **Key features**
+    - Generate speech with preset voices.
+    - Clone a voice from reference audio and its matching transcript.
+    - Design and save a voice from a natural-language description.
+    - Reuse cloned and designed voices on the same Olares installation.
 
-    **Voice ids live on this instance**
-    ElevenLabs shape: `GET /v1/voices`, `POST /v1/voices/add`, `POST /v1/text-to-voice/design`
-    then `POST /v1/text-to-voice`, `POST /v1/text-to-speech/{voice_id}`. Built-in voices are
-    frozen design samples stored under appData the first time they are spoken. Clone needs
-    the exact transcript of the reference (`description` / `ref_text`). OpenAI
-    `/v1/audio/speech` is an alias so existing clients keep working.
-
-    **How It Works**
-    First, Model Console (llm-init) downloads the model and gets it ready, then the
-    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
-    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
-
-    **Endpoints**
-    - `GET /v1/voices` — premade + cloned + designed voices on this instance
-    - `POST /v1/voices/add` — multipart `name` + `files[]` + transcript
-    - `POST /v1/text-to-voice/design` then `POST /v1/text-to-voice` — preview, then persist
-    - `POST /v1/text-to-speech/{voice_id}` — ElevenLabs JSON (`text`); `/stream` streams the audio
-    - `POST /v1/audio/speech` — OpenAI alias (`input` + `voice`)
-    - `POST /v1/audio/speech/clone` — one-shot clone+speak, does not persist a voice_id
-
-    **Stack**
-    - **audio engine**: FireRedTTS3-Instruct in-process (port 8000); self-reports `/v1/models` + `/metrics`
-    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
-
-    **Model Storage**
-    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
-    Frozen voices are stored at `appData/voices`.
+    A compatible NVIDIA GPU with at least `16Gi` of GPU memory is required.
 
   upgradeDescription: |
     v1.0.2: Advertise `tts_design` on the model card (`MODEL_SUPPORTS`) and pin the engine to v1.1.4.
@@ -92,6 +62,11 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
   license:
     - text: Apache-2.0
       url: https://github.com/FireRedTeam/FireRedTTS3/blob/main/LICENSE
