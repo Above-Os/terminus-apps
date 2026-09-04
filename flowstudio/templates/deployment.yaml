@@ -18,7 +18,7 @@ spec:
     spec:
       enableServiceLinks: false
       {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
-      # preStop + SIGTERM share this budget; default 30s cannot finish engine delete.
+      # 给 lifespan 停表与任务协程拆下留足时间。
       terminationGracePeriodSeconds: 120
       serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
       {{- end }}
@@ -127,23 +127,22 @@ spec:
           value: {{ .Values.GPU.Type | default .Values.gpu | default "" | quote }}
         {{- end }}
         # Absolute gpumem only — never gpumem-percentage.
-        - name: ENGINE_GPU_EXCLUSIVE
-          value: {{ (default dict .Values.dynamicEngine).exclusiveGpu | default true | quote }}
         - name: ENGINE_GPU_MEM_MIB
           value: {{ (default dict .Values.dynamicEngine).gpuMemMiB | default 6144 | quote }}
+        - name: ENGINE_MEM_LIMIT
+          value: {{ (default dict .Values.dynamicEngine).memLimit | default "80Gi" | quote }}
+        - name: ENGINE_MEM_REQUEST_MAX
+          value: {{ (default dict .Values.dynamicEngine).memRequestMax | default "80Gi" | quote }}
         - name: ENGINE_IDLE_TTL
           value: {{ (default dict .Values.dynamicEngine).idleTtlSeconds | default 900 | quote }}
         - name: ENGINE_STARTUP_REAP
           value: {{ (default dict .Values.dynamicEngine).startupReap | default "preserve_active" | quote }}
+        - name: ENGINE_OWNER_DEPLOYMENT_NAME
+          value: flowstudio
         {{- if (default dict .Values.dev).hotReload }}
-        # Keep engines across uvicorn reloads; production stop still cold-reaps.
-        - name: ENGINE_SHUTDOWN_REAP
-          value: "false"
         - name: SHOW_TEST_WORKFLOW_TEMPLATES
           value: "true"
         {{- else }}
-        - name: ENGINE_SHUTDOWN_REAP
-          value: {{ (default dict .Values.dynamicEngine).shutdownReap | default true | quote }}
         - name: SHOW_TEST_WORKFLOW_TEMPLATES
           value: "false"
         {{- end }}
@@ -225,13 +224,6 @@ spec:
           periodSeconds: 20
           timeoutSeconds: 3
           failureThreshold: 3
-        {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
-        # Pod 终止时回收 fs-eng-*；uvicorn --reload 不走这里。
-        lifecycle:
-          preStop:
-            exec:
-              command: ["python", "-m", "app.engine.reap"]
-        {{- end }}
       volumes:
       - name: app-data
         hostPath:
