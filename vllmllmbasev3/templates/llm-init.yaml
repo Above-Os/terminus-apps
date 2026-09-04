@@ -41,9 +41,9 @@
 {{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
-{{- /* Per-release hostPath under App Common so concurrent clones and multi-node
-       engine pods share the same sentinel / model_path. */ -}}
-{{- $runStateHostPath := printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
+{{- /* Per-release hostPath under App Cache so sibling pods share the same
+       sentinel / model_path without persisting run-state across uninstall. */ -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # Split into two Deployments to decouple readiness:
 #   - llm-init (this file, no GPU): downloads the HF model, writes the sentinel,
