@@ -23,6 +23,7 @@ spec:
     spec:
       enableServiceLinks: false
       runtimeClassName: nvidia
+      terminationGracePeriodSeconds: 10
       containers:
       - name: engine
         image: {{ .Values.engineImage }}
@@ -38,7 +39,7 @@ spec:
         - >-
           mkdir -p /run/comfyui/output /run/comfyui/input /run/comfyui/temp /run/comfyui/user
           && exec python3 main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch
-          --disable-dynamic-vram --disable-cuda-malloc --use-ck-attention --cache-lru 1
+          --disable-dynamic-vram --disable-cuda-malloc --use-ck-attention --cache-lru 1 --reserve-vram 1
           --extra-model-paths-config /opt/ComfyUI/extra_model_paths.yaml
           --output-directory /run/comfyui/output --input-directory /run/comfyui/input
           --temp-directory /run/comfyui/temp --user-directory /run/comfyui/user
@@ -55,12 +56,12 @@ spec:
         resources:
           requests:
             cpu: "1"
-            memory: 3Gi
+            memory: 80Gi
           limits:
             cpu: "8"
-            memory: 12Gi
+            memory: 80Gi
             nvidia.com/gpu: "1"
-            nvidia.com/gpumem: "6144"
+            nvidia.com/gpumem: {{ (default dict .Values.dynamicEngine).gpuMemMiB | default 6144 | quote }}
         volumeMounts:
         - name: app-common
           mountPath: /data/appCommon
