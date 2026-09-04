@@ -39,9 +39,11 @@ spec:
               value: Documents:/data/Documents
             - name: GENOFFICE_DATA_DIR
               value: /data/app
-            # mesh-in injects the platform caller JWT only for hosts in this
-            # namespace's generated shared-host allowlist. Router publishes its
-            # per-user entrance there; router.shared.olares.com is not allowed.
+            # Router's per-user entrance, which mesh-in gives both a caller JWT
+            # and a TLS replica, so https terminates. Its shared entrance is
+            # reachable too but arrives as auth only, so that route is http on
+            # the fixed 3a77b15d.shared.olares.com and not this host under a
+            # different scheme.
             - name: LLM_GATEWAY_URL
               value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
             - name: OLARES_APP_ID
