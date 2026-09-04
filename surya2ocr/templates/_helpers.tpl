@@ -14,7 +14,7 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "surya2ocr.llmInitTag" -}}v1.5.0{{- end -}}
+{{- define "surya2ocr.llmInitTag" -}}v1.7.1{{- end -}}
 {{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.7{{- end -}}
 {{- define "surya2ocr.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
 
