@@ -87,7 +87,7 @@ spec:
             # are ROLE=extra automatically and are pre-fetched before main. Full
             # repos (no --include); all must be hf://.
             - name: MODEL_SOURCE
-              value: "hf://ACE-Step/Ace-Step1.5,hf://ACE-Step/acestep-v15-xl-sft,hf://ACE-Step/acestep-5Hz-lm-4B"
+              value: "hf://ACE-Step/Ace-Step1.5,hf://ACE-Step/acestep-v15-xl-turbo,hf://ACE-Step/acestep-5Hz-lm-4B"
             # Always wire the Olares HF mirror (manifest requires HF_ENDPOINT).
             - name: HF_ENDPOINT
               value: "{{ $oe.HF_ENDPOINT }}"
@@ -98,10 +98,13 @@ spec:
                   name: {{ .Release.Name }}-secrets
                   key: HF_TOKEN
 {{- end }}
-            # Large full-repo downloads: keep concurrency low. LFS is the image
-            # default in v1.2.4 (stable memory; opt into xet via HF_ENABLE_XET).
+            # XL checkpoints are heavily sharded. The image includes hf_xet;
+            # enable it and use bounded parallelism so a fresh Olares One install
+            # does not spend hours pulling a single 4B DiT over serial LFS.
+            - name: HF_ENABLE_XET
+              value: "true"
             - name: MAX_CONCURRENT_DOWNLOADS
-              value: "1"
+              value: "4"
             - name: RUN_DIR
               value: /run/llm-init
             - name: PORT
