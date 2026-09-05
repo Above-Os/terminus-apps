@@ -95,7 +95,10 @@ spec:
               echo "[wait] checkpoints ready, starting staged ACE-Step API."
 
               cd /app
-              exec uv run python /opt/olares/staged_api.py --host 0.0.0.0 --port 8001
+              # The image already contains a locked virtualenv. Invoking `uv run`
+              # here can wait indefinitely on uv's project lock, so execute the
+              # environment's interpreter directly.
+              exec /app/.venv/bin/python /opt/olares/staged_api.py --host 0.0.0.0 --port 8001
           env:
             - name: PGID
               value: "1000"
