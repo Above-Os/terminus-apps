@@ -6,6 +6,7 @@ metadata:
 data:
   staged_api.py: |
     """Olares 24 GiB stage barrier for the official ACE-Step API."""
+    import atexit
     import functools
     import gc
 
@@ -18,6 +19,7 @@ data:
     from acestep.llm_inference import LLMHandler
 
     _initialize_vllm = LLMHandler._initialize_5hz_lm_vllm
+    _unload_lm = LLMHandler.unload
 
 
     def _initialize_vllm_eager(self, model_path, enforce_eager=False, has_triton=True):
@@ -34,6 +36,39 @@ data:
 
 
     LLMHandler._initialize_5hz_lm_vllm = _initialize_vllm_eager
+
+
+    def _unload_lm_completely(self):
+        """Destroy nano-vLLM's runner so its atexit hook cannot retain VRAM."""
+        engine = self.llm if self.llm_backend == "vllm" else None
+        if engine is not None:
+            exit_method = getattr(engine, "exit", None)
+            try:
+                if exit_method is not None:
+                    atexit.unregister(exit_method)
+                    exit_method()
+                    print(
+                        "[olares-stage] nano-vLLM runner destroyed",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(
+                    f"[olares-stage] nano-vLLM runner cleanup warning: {exc}",
+                    flush=True,
+                )
+            finally:
+                # Do not let the upstream reset path touch a runner that exit()
+                # has already destroyed. The original unload still clears all
+                # handler state, distributed state, Python objects and caches.
+                self.llm = None
+        _unload_lm(self)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+
+
+    LLMHandler.unload = _unload_lm_completely
 
     import acestep.inference as inference
 
