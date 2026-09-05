@@ -9,6 +9,7 @@ data:
     import atexit
     import functools
     import gc
+    import os
 
     import torch
 
@@ -84,13 +85,17 @@ data:
         if parser is None and args:
             parser = args[0]
         request = _build_generate_music_request(*args, **kwargs)
-        if request.inference_steps < 30:
+        model_name = request.model or os.getenv(
+            "ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft"
+        )
+        is_sft = "sft" in model_name.lower()
+        if is_sft and request.inference_steps < 30:
             print(
                 "[olares-stage] XL-SFT requires 30+ DiT steps; using 50",
                 flush=True,
             )
             request.inference_steps = 50
-        if parser is not None and parser.get("shift") is None:
+        if is_sft and parser is not None and parser.get("shift") is None:
             request.shift = 1.0
         return request
 
