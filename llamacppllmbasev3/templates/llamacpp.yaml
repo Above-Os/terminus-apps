@@ -19,9 +19,9 @@
 {{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
 {{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
 {{- $needDri := or $isAmdGpu $isIntelGpu -}}
-{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. amd-gpu / intel-gpu use
-       gpu-inject + manifest requiredGPUMemory. */ -}}
-{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
+{{- /* nvidia.com/gpumem: discrete NVIDIA / AMD / Intel. Spark (gb10)
+       unified memory uses pod memory only. */ -}}
+{{- $needNvidiaGpumem := not $unifiedMem -}}
 {{- $shmLimit := "16Gi" -}}
 {{- if $isIntelGpu -}}
 {{- $shmLimit = "10Gi" -}}
@@ -175,8 +175,7 @@ spec:
               mountPath: /dev/shm
 {{- end }}
           resources:
-            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
-            # gpu-inject; amd-gpu / intel-gpu via gpu-inject.
+            # nvidia.com/gpumem: nvidia / amd-gpu / intel-gpu; gb10 via pod memory.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
