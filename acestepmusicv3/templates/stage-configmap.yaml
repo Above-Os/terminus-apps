@@ -10,6 +10,30 @@ data:
 
     import torch
 
+    # nano-vLLM's CUDA graph capture is unstable with the RTX 5090 Blackwell
+    # driver behind Olares' time-sliced GPU runtime. Keep the vLLM backend and
+    # KV cache, but force eager execution so initialization cannot corrupt the
+    # CUDA context.
+    from acestep.llm_inference import LLMHandler
+
+    _initialize_vllm = LLMHandler._initialize_5hz_lm_vllm
+
+
+    def _initialize_vllm_eager(self, model_path, enforce_eager=False, has_triton=True):
+        print(
+            "[olares-stage] forcing nano-vLLM eager mode (CUDA graph disabled)",
+            flush=True,
+        )
+        return _initialize_vllm(
+            self,
+            model_path,
+            enforce_eager=True,
+            has_triton=has_triton,
+        )
+
+
+    LLMHandler._initialize_5hz_lm_vllm = _initialize_vllm_eager
+
     import acestep.inference as inference
 
 
