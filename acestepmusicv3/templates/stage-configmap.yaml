@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acestep-stage-launcher
+  namespace: {{ .Release.Namespace }}
+data:
+  staged_api.py: |
+    """Olares 24 GiB stage barrier for the official ACE-Step API."""
+    import gc
+
+    import torch
+
+    import acestep.inference as inference
+
+
+    _generate_music = inference.generate_music
+
+
+    def _staged_generate_music(*args, **kwargs):
+        dit_handler = kwargs.get("dit_handler")
+        llm_handler = kwargs.get("llm_handler")
+        if dit_handler is None or llm_handler is None:
+            return _generate_music(*args, **kwargs)
+
+        original_dit_generate = dit_handler.generate_music
+
+        def _run_dit_after_lm(*dit_args, **dit_kwargs):
+            if getattr(llm_handler, "llm_initialized", False):
+                print(
+                    "[olares-stage] LM phase complete; unloading LM before DiT",
+                    flush=True,
+                )
+                llm_handler.unload()
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+                print("[olares-stage] LM GPU memory released", flush=True)
+            return original_dit_generate(*dit_args, **dit_kwargs)
+
+        dit_handler.generate_music = _run_dit_after_lm
+        try:
+            return _generate_music(*args, **kwargs)
+        finally:
+            dit_handler.generate_music = original_dit_generate
+
+
+    inference.generate_music = _staged_generate_music
+
+    import acestep.api.llm_readiness as llm_readiness
+
+    _ensure_llm_ready = llm_readiness.ensure_llm_ready_for_request
+
+
+    def _ensure_llm_ready_after_stage(*args, **kwargs):
+        app_state = kwargs.get("app_state")
+        if app_state is None and args:
+            app_state = args[0]
+        handler = getattr(app_state, "llm_handler", None)
+        if (
+            getattr(app_state, "_llm_initialized", False)
+            and handler is not None
+            and not getattr(handler, "llm_initialized", False)
+        ):
+            print("[olares-stage] rearming LM for the next queued job", flush=True)
+            app_state._llm_initialized = False
+            app_state._llm_init_error = None
+        return _ensure_llm_ready(*args, **kwargs)
+
+
+    llm_readiness.ensure_llm_ready_for_request = _ensure_llm_ready_after_stage
+
+    # This module imports the readiness function by value; replace that binding
+    # before api_server imports the worker and route modules.
+    import acestep.api.job_llm_preparation as job_llm_preparation
+
+    job_llm_preparation.ensure_llm_ready_for_request = _ensure_llm_ready_after_stage
+
+    from acestep.api_server import main
+
+    if __name__ == "__main__":
+        main()
