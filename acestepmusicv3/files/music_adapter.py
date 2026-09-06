@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import atexit
+import base64
+import binascii
 import hashlib
 import json
 import mimetypes
@@ -15,6 +17,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any
 
 import uvicorn
@@ -28,6 +31,8 @@ MODEL_NAME = os.getenv("MODEL_NAME", "ACE-Step/acestep-v15-xl-sft")
 QUALITY_MODEL = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft")
 TASKS: dict[str, dict[str, Any]] = {}
 TASKS_LOCK = threading.Lock()
+REPAINT_INPUT_DIR = os.getenv("REPAINT_INPUT_DIR", "/app/data/repaint-inputs")
+MAX_REPAINT_AUDIO_BYTES = 64 * 1024 * 1024
 
 app = FastAPI(title="Olares Music Engine", version="1")
 
@@ -90,6 +95,7 @@ def _options(source: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "quality_profile", "bpm", "guidance_scale", "key_scale",
         "time_signature", "vocal_language", "vocal_type", "section_structure",
+        "repaint_start_seconds", "repaint_end_seconds", "repaint_mode", "repaint_strength",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
@@ -112,15 +118,42 @@ def _number(options: dict[str, Any], key: str, minimum: float, maximum: float) -
 def _described_prompt(prompt: str, options: dict[str, Any]) -> str:
     additions = []
     vocal_type = str(options.get("vocal_type", "")).strip()
-    structure = str(options.get("section_structure", "")).strip()
     if vocal_type:
         additions.append(f"Vocal character: {vocal_type}")
-    if structure:
-        additions.append(f"Song structure: {structure}")
     described = ". ".join([prompt, *additions])
-    if len(described) > 4000:
-        raise _error(400, "invalid_prompt", "prompt and advanced descriptions must fit within 4000 characters.")
+    if len(described) > 512:
+        raise _error(400, "invalid_prompt", "prompt and vocal description must fit within 512 characters.")
     return described
+
+
+def _decode_repaint_audio(value: Any) -> str:
+    if not isinstance(value, str) or not value.startswith("data:audio/") or ";base64," not in value[:128]:
+        raise _error(400, "invalid_input_audio", "input_audio must be a base64 audio data URL.")
+    header, encoded = value.split(",", 1)
+    subtype = header[11:].split(";", 1)[0].lower()
+    suffix = {"wav": "wav", "wave": "wav", "x-wav": "wav", "mpeg": "mp3", "mp3": "mp3", "flac": "flac", "ogg": "ogg"}.get(subtype)
+    if suffix is None:
+        raise _error(415, "unsupported_input_audio", "Repaint input must be WAV, MP3, FLAC, or OGG.")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise _error(400, "invalid_input_audio", "input_audio contains invalid base64 data.") from exc
+    if not raw or len(raw) > MAX_REPAINT_AUDIO_BYTES:
+        raise _error(413, "input_audio_too_large", "Repaint input audio must be between 1 byte and 64 MiB.")
+    os.makedirs(REPAINT_INPUT_DIR, mode=0o750, exist_ok=True)
+    path = os.path.join(REPAINT_INPUT_DIR, f"{uuid.uuid4().hex}.{suffix}")
+    with open(path, "xb") as output:
+        output.write(raw)
+    return path
+
+
+def _cleanup_source(task: dict[str, Any]) -> None:
+    path = task.pop("source_path", "")
+    if path:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
 
 
 @app.get("/v1/models")
@@ -141,8 +174,12 @@ def engine_spec() -> dict[str, Any]:
         "workers": 1,
         "extensions": {
             "creative": {
-                "quality_profiles": ["quality"],
-                "default_quality_profile": "quality",
+                "media": "music",
+                "operations": ["generate", "repaint"],
+            },
+            "music": {
+                "quality_profiles": ["quality", "high_quality"],
+                "default_quality_profile": "high_quality",
                 "music_controls": ["bpm", "key_scale", "time_signature", "vocal_language", "vocal_type", "section_structure"],
             }
         },
@@ -167,9 +204,9 @@ async def create_generation(request: Request) -> dict[str, Any]:
     instrumental = bool(source.get("instrumental", False))
     duration = int(source.get("duration_seconds", 240))
     options = _options(source)
-    profile = str(options.get("quality_profile", "quality")).strip().lower()
-    if profile != "quality":
-        raise _error(400, "invalid_quality_profile", "Only the quality profile is enabled for this model application.")
+    profile = str(options.get("quality_profile", "high_quality")).strip().lower()
+    if profile not in {"quality", "high_quality"}:
+        raise _error(400, "invalid_quality_profile", "quality_profile must be quality or high_quality.")
     bpm = _number(options, "bpm", 30, 300)
     guidance = _number(options, "guidance_scale", 7, 9)
     key_scale = str(options.get("key_scale", "")).strip()
@@ -179,15 +216,30 @@ async def create_generation(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_time_signature", "time_signature must be 2, 3, 4, or 6.")
     if len(key_scale) > 40 or len(vocal_language) > 16:
         raise _error(400, "invalid_provider_options", "Music control text is too long.")
-    if not prompt or len(prompt) > 4000:
-        raise _error(400, "invalid_prompt", "prompt must contain 1-4000 characters.")
-    if len(lyrics) > 20000:
-        raise _error(400, "invalid_lyrics", "lyrics must contain at most 20000 characters.")
+    if not prompt or len(prompt) > 512:
+        raise _error(400, "invalid_prompt", "prompt must contain 1-512 characters.")
+    if len(lyrics) > 4096:
+        raise _error(400, "invalid_lyrics", "lyrics must contain at most 4096 characters.")
     if instrumental and lyrics:
         raise _error(400, "lyrics_not_allowed", "lyrics must be empty for instrumental music.")
     if duration < 10 or duration > 600:
         raise _error(400, "invalid_duration", "duration_seconds must be between 10 and 600.")
 
+    operation = str(source.get("operation", "generate")).strip().lower()
+    if operation not in {"generate", "repaint"}:
+        raise _error(400, "invalid_operation", "operation must be generate or repaint.")
+    source_path = ""
+    if operation == "repaint":
+        source_path = _decode_repaint_audio(source.get("input_audio"))
+        start = _number(options, "repaint_start_seconds", 0, duration)
+        end = _number(options, "repaint_end_seconds", 0, duration)
+        repaint_mode = str(options.get("repaint_mode", "balanced")).strip().lower()
+        if start is None or end is None or end <= start:
+            os.remove(source_path)
+            raise _error(400, "invalid_repaint_range", "repaint_end_seconds must be greater than repaint_start_seconds.")
+        if repaint_mode not in {"conservative", "balanced", "aggressive"}:
+            os.remove(source_path)
+            raise _error(400, "invalid_repaint_mode", "repaint_mode must be conservative, balanced, or aggressive.")
     native = {
         "prompt": _described_prompt(prompt, options),
         "lyrics": "" if instrumental else lyrics,
@@ -196,8 +248,9 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "audio_duration": duration,
         "batch_size": 1,
         "model": QUALITY_MODEL,
-        "task_type": "text2music",
-        "inference_steps": 50,
+        "task_type": "repaint" if operation == "repaint" else "text2music",
+        "inference_steps": 64 if profile == "high_quality" else 50,
+        "use_adg": profile == "high_quality",
         "guidance_scale": guidance if guidance is not None else 7.0,
         "shift": 1.0,
         "infer_method": "ode",
@@ -210,12 +263,24 @@ async def create_generation(request: Request) -> dict[str, Any]:
         native["time_signature"] = time_signature
     if vocal_language:
         native["vocal_language"] = vocal_language
+    if operation == "repaint":
+        native["src_audio_path"] = source_path
+        native["repainting_start"] = start
+        native["repainting_end"] = end
+        native["repaint_mode"] = repaint_mode
+        strength = _number(options, "repaint_strength", 0, 1)
+        native["repaint_strength"] = strength if strength is not None else 0.5
     if "seed" in source:
         native["seed"] = int(source["seed"])
         native["use_random_seed"] = False
     else:
         native["use_random_seed"] = True
-    released = _native_json("/release_task", native)
+    try:
+        released = _native_json("/release_task", native)
+    except Exception:
+        if source_path:
+            os.remove(source_path)
+        raise
     data = released.get("data") or {}
     task_id = str(data.get("task_id", ""))
     if not task_id:
@@ -226,6 +291,7 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "created_at": int(time.time()),
         "outputs": [],
         "native_outputs": {},
+        "source_path": source_path,
     }
     with TASKS_LOCK:
         TASKS[task_id] = task
@@ -274,9 +340,11 @@ def get_generation(task_id: str) -> dict[str, Any]:
             task["status"] = "completed"
             task["outputs"] = outputs
             task["native_outputs"] = native_outputs
+            _cleanup_source(task)
         elif native_status == 2:
             task["status"] = "failed"
             task["error"] = {"code": "generation_failed", "message": str(row.get("error") or "ACE-Step generation failed.")}
+            _cleanup_source(task)
         else:
             task["status"] = "running"
         with TASKS_LOCK:

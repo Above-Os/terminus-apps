@@ -1,6 +1,8 @@
 import importlib.util
+import base64
 import io
 import pathlib
+import tempfile
 import unittest
 from email.message import Message
 from unittest import mock
@@ -26,6 +28,11 @@ class MusicAdapterContractTest(unittest.TestCase):
     def setUp(self):
         adapter.TASKS.clear()
         self.client = TestClient(adapter.app)
+        self.temp_directory = tempfile.TemporaryDirectory()
+        self.temp_dir = pathlib.Path(self.temp_directory.name)
+
+    def tearDown(self):
+        self.temp_directory.cleanup()
 
     def test_create_poll_content_and_contract_errors(self):
         def native(path, _payload=None):
@@ -80,8 +87,9 @@ class MusicAdapterContractTest(unittest.TestCase):
         spec = self.client.get("/api/engine-spec").json()
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
+        self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
 
-    def test_quality_is_the_only_enabled_profile(self):
+    def test_quality_profiles_use_xl_sft_without_repeating_structure_in_caption(self):
         payloads = []
 
         def native(path, payload=None):
@@ -96,6 +104,7 @@ class MusicAdapterContractTest(unittest.TestCase):
                     "prompt": "Mandarin pop",
                     "duration_seconds": 180,
                     "provider_options": {
+                        "quality_profile": "quality",
                         "bpm": 92,
                         "key_scale": "D major",
                         "time_signature": "4",
@@ -115,11 +124,50 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(payloads[0]["inference_steps"], 50)
         self.assertEqual(payloads[0]["guidance_scale"], 7.0)
         self.assertEqual(payloads[0]["shift"], 1.0)
+        self.assertFalse(payloads[0]["use_adg"])
         self.assertEqual(payloads[0]["bpm"], 92)
         self.assertIn("Vocal character: warm female lead", payloads[0]["prompt"])
+        self.assertNotIn("Song structure:", payloads[0]["prompt"])
         self.assertEqual(fast.status_code, 400)
         self.assertEqual(fast.json()["error"]["code"], "invalid_quality_profile")
         self.assertEqual(len(payloads), 1)
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            high = self.client.post(
+                "/v1/music/generations",
+                json={"prompt": "Mandarin pop", "provider_options": {"quality_profile": "high_quality"}},
+            )
+        self.assertEqual(high.status_code, 202)
+        self.assertEqual(payloads[1]["model"], "acestep-v15-xl-sft")
+        self.assertEqual(payloads[1]["inference_steps"], 64)
+        self.assertTrue(payloads[1]["use_adg"])
+
+    def test_repaint_decodes_audio_and_maps_native_range(self):
+        payloads = []
+
+        def native(path, payload=None):
+            self.assertEqual(path, "/release_task")
+            payloads.append(payload)
+            return {"code": 200, "data": {"task_id": "repaint-1"}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native), mock.patch.object(
+            adapter, "REPAINT_INPUT_DIR", str(self.temp_dir)
+        ):
+            response = self.client.post(
+                "/v1/music/generations",
+                json={
+                    "operation": "repaint",
+                    "prompt": "Mandarin indie pop with a clean vocal pickup",
+                    "input_audio": "data:audio/wav;base64," + base64.b64encode(b"RIFFaudio").decode(),
+                    "duration_seconds": 240,
+                    "provider_options": {"repaint_start_seconds": 32, "repaint_end_seconds": 48},
+                },
+            )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payloads[0]["task_type"], "repaint")
+        self.assertEqual(payloads[0]["repainting_start"], 32)
+        self.assertEqual(payloads[0]["repainting_end"], 48)
+        self.assertTrue(payloads[0]["src_audio_path"].startswith(str(self.temp_dir)))
 
     def test_rejects_invalid_quality_controls(self):
         profile = self.client.post(
