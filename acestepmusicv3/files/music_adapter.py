@@ -33,6 +33,10 @@ TASKS: dict[str, dict[str, Any]] = {}
 TASKS_LOCK = threading.Lock()
 REPAINT_INPUT_DIR = os.getenv("REPAINT_INPUT_DIR", "/app/data/repaint-inputs")
 MAX_REPAINT_AUDIO_BYTES = 64 * 1024 * 1024
+CLEAN_NEGATIVE_PROMPT = (
+    "background hiss, static, vinyl crackle, tape noise, lo-fi noise, noisy room, "
+    "muddy wash, harsh sibilance, brittle cymbals, distorted vocal"
+)
 
 app = FastAPI(title="Olares Music Engine", version="1")
 
@@ -95,6 +99,7 @@ def _options(source: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "quality_profile", "bpm", "guidance_scale", "key_scale",
         "time_signature", "vocal_language", "vocal_type", "section_structure",
+        "production_profile", "caption_mode",
         "repaint_start_seconds", "repaint_end_seconds", "repaint_mode", "repaint_strength",
     }
     unknown = sorted(set(value) - allowed)
@@ -120,6 +125,11 @@ def _described_prompt(prompt: str, options: dict[str, Any]) -> str:
     vocal_type = str(options.get("vocal_type", "")).strip()
     if vocal_type:
         additions.append(f"Vocal character: {vocal_type}")
+    if options.get("production_profile", "clean") == "clean":
+        additions.append(
+            "Production: clean studio recording, low noise floor, clear lead vocal, "
+            "separated instruments, controlled sibilance, polished master"
+        )
     described = ". ".join([prompt, *additions])
     if len(described) > 512:
         raise _error(400, "invalid_prompt", "prompt and vocal description must fit within 512 characters.")
@@ -183,7 +193,11 @@ def engine_spec() -> dict[str, Any]:
             "music": {
                 "quality_profiles": ["quality", "high_quality"],
                 "default_quality_profile": "high_quality",
-                "music_controls": ["bpm", "key_scale", "time_signature", "vocal_language", "vocal_type", "section_structure"],
+                "production_profiles": ["clean", "textured"],
+                "default_production_profile": "clean",
+                "caption_modes": ["preserve", "enhance"],
+                "default_caption_mode": "preserve",
+                "music_controls": ["bpm", "key_scale", "time_signature", "vocal_language", "vocal_type", "section_structure", "production_profile", "caption_mode"],
             }
         },
         "endpoints": [
@@ -212,6 +226,12 @@ async def create_generation(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_quality_profile", "quality_profile must be quality or high_quality.")
     bpm = _number(options, "bpm", 30, 300)
     guidance = _number(options, "guidance_scale", 7, 9)
+    production_profile = str(options.get("production_profile", "clean")).strip().lower()
+    caption_mode = str(options.get("caption_mode", "preserve")).strip().lower()
+    if production_profile not in {"clean", "textured"}:
+        raise _error(400, "invalid_production_profile", "production_profile must be clean or textured.")
+    if caption_mode not in {"preserve", "enhance"}:
+        raise _error(400, "invalid_caption_mode", "caption_mode must be preserve or enhance.")
     key_scale = str(options.get("key_scale", "")).strip()
     time_signature = str(options.get("time_signature", "")).strip()
     vocal_language = str(options.get("vocal_language", "")).strip()
@@ -247,6 +267,8 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "prompt": _described_prompt(prompt, options),
         "lyrics": "" if instrumental else lyrics,
         "thinking": True,
+        "use_cot_caption": caption_mode == "enhance",
+        "use_cot_lyrics": False,
         "audio_format": "wav",
         "audio_duration": duration,
         "batch_size": 1,
@@ -254,10 +276,12 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "task_type": "repaint" if operation == "repaint" else "text2music",
         "inference_steps": 64 if profile == "high_quality" else 50,
         "use_adg": profile == "high_quality",
-        "guidance_scale": guidance if guidance is not None else 7.0,
-        "shift": 1.0,
+        "guidance_scale": guidance if guidance is not None else (8.0 if profile == "high_quality" else 7.0),
+        "shift": 3.0 if profile == "high_quality" else 1.0,
         "infer_method": "ode",
     }
+    if production_profile == "clean":
+        native["lm_negative_prompt"] = CLEAN_NEGATIVE_PROMPT
     if bpm is not None:
         native["bpm"] = int(bpm)
     if key_scale:

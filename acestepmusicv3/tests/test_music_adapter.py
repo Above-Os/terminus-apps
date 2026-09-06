@@ -89,6 +89,8 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(spec["max_concurrency"], 1)
         self.assertEqual(spec["serves"], ["music.generate", "music.repaint"])
         self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
+        self.assertEqual(spec["extensions"]["music"]["default_production_profile"], "clean")
+        self.assertEqual(spec["extensions"]["music"]["default_caption_mode"], "preserve")
 
     def test_quality_profiles_use_xl_sft_without_repeating_structure_in_caption(self):
         payloads = []
@@ -126,6 +128,9 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(payloads[0]["guidance_scale"], 7.0)
         self.assertEqual(payloads[0]["shift"], 1.0)
         self.assertFalse(payloads[0]["use_adg"])
+        self.assertFalse(payloads[0]["use_cot_caption"])
+        self.assertFalse(payloads[0]["use_cot_lyrics"])
+        self.assertIn("background hiss", payloads[0]["lm_negative_prompt"])
         self.assertEqual(payloads[0]["bpm"], 92)
         self.assertIn("Vocal character: warm female lead", payloads[0]["prompt"])
         self.assertNotIn("Song structure:", payloads[0]["prompt"])
@@ -142,6 +147,35 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(payloads[1]["model"], "acestep-v15-xl-sft")
         self.assertEqual(payloads[1]["inference_steps"], 64)
         self.assertTrue(payloads[1]["use_adg"])
+        self.assertEqual(payloads[1]["guidance_scale"], 8.0)
+        self.assertEqual(payloads[1]["shift"], 3.0)
+
+    def test_clean_and_textured_production_and_caption_modes(self):
+        payloads = []
+
+        def native(path, payload=None):
+            self.assertEqual(path, "/release_task")
+            payloads.append(payload)
+            return {"code": 200, "data": {"task_id": f"task-{len(payloads)}"}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            clean = self.client.post(
+                "/v1/music/generations",
+                json={"prompt": "polished Mandarin pop", "provider_options": {"production_profile": "clean", "caption_mode": "preserve"}},
+            )
+            textured = self.client.post(
+                "/v1/music/generations",
+                json={"prompt": "lo-fi rainy folk", "provider_options": {"production_profile": "textured", "caption_mode": "enhance"}},
+            )
+
+        self.assertEqual(clean.status_code, 202)
+        self.assertFalse(payloads[0]["use_cot_caption"])
+        self.assertIn("clean studio recording", payloads[0]["prompt"])
+        self.assertIn("background hiss", payloads[0]["lm_negative_prompt"])
+        self.assertEqual(textured.status_code, 202)
+        self.assertTrue(payloads[1]["use_cot_caption"])
+        self.assertNotIn("lm_negative_prompt", payloads[1])
+        self.assertNotIn("clean studio recording", payloads[1]["prompt"])
 
     def test_repaint_decodes_audio_and_maps_native_range(self):
         payloads = []
@@ -183,12 +217,22 @@ class MusicAdapterContractTest(unittest.TestCase):
             "/v1/music/generations",
             json={"prompt": "pop", "provider_options": {"magic": True}},
         )
+        production = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"production_profile": "dusty"}},
+        )
+        caption = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"caption_mode": "rewrite"}},
+        )
         self.assertEqual(profile.status_code, 400)
         self.assertEqual(profile.json()["error"]["code"], "invalid_quality_profile")
         self.assertEqual(guidance.status_code, 400)
         self.assertEqual(guidance.json()["error"]["code"], "invalid_guidance_scale")
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(unknown.json()["error"]["code"], "unknown_provider_option")
+        self.assertEqual(production.json()["error"]["code"], "invalid_production_profile")
+        self.assertEqual(caption.json()["error"]["code"], "invalid_caption_mode")
 
 
 if __name__ == "__main__":
