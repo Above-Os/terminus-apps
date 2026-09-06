@@ -38,7 +38,17 @@ spec:
       initContainers:
         - name: init-permissions
           image: docker.io/beclab/aboveos-busybox:1.37.0
-          command: ["sh", "-c", "chown 1000:1000 /cache/hf/hub /run/llm-init"]
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              card=/run/llm-init/model-spec.json
+              if [ -f "$card" ] && grep -Eq '"mode"[[:space:]]*:[[:space:]]*"chat"' "$card"; then
+                echo "[model-card-migration] removing legacy chat-mode ACE-Step card"
+                rm -f "$card"
+              fi
+              chown 1000:1000 /cache/hf/hub /run/llm-init
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
