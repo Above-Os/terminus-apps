@@ -19,6 +19,13 @@ class ChartContractTest(unittest.TestCase):
                 rf"name: {re.escape(name)}\s+value: \"1\"",
             )
 
+    def test_xl_sft_generation_forces_dcw_off(self):
+        launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('params.dcw_enabled = False', launcher)
+        self.assertIn('disabling DCW for XL-SFT', launcher)
+
 
 if __name__ == "__main__":
     unittest.main()

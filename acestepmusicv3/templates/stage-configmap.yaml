@@ -147,6 +147,24 @@ data:
     def _staged_generate_music(*args, **kwargs):
         dit_handler = kwargs.get("dit_handler")
         llm_handler = kwargs.get("llm_handler")
+        params = kwargs.get("params")
+        if params is None and len(args) > 2:
+            params = args[2]
+
+        # ace-step-ace-step-1.5:0.1.8 predates upstream PR #1273 and
+        # incorrectly enables Differential Correction in Wavelet domain for
+        # non-distilled SFT models.  On XL-SFT that produces structured noise
+        # even though the weights and the rest of the sampling parameters are
+        # valid.  Keep this explicit until the runtime image contains the
+        # model-aware upstream default; this application only serves XL-SFT.
+        if params is not None:
+            if getattr(params, "dcw_enabled", False):
+                print(
+                    "[olares-quality] disabling DCW for XL-SFT",
+                    flush=True,
+                )
+            params.dcw_enabled = False
+
         if dit_handler is None or llm_handler is None:
             return _generate_music(*args, **kwargs)
 
