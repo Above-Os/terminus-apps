@@ -7,20 +7,23 @@ metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace | quote }}
   labels:
-    io.kompose.service: music-engine
+    # Keep the selector used by the retired OpenResty deployment. Deployment
+    # selectors are immutable, so retaining it allows an in-place 0.1.11
+    # upgrade while replacing the pod contents with the music engine.
+    io.kompose.service: acestepweb
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
   replicas: {{ .Values.workloads.acestepmusicv3.replicaCount }}
   selector:
     matchLabels:
-      io.kompose.service: music-engine
+      io.kompose.service: acestepweb
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        io.kompose.service: music-engine
+        io.kompose.service: acestepweb
       annotations:
         app.olares.com/chart-version: {{ .Chart.Version | quote }}
     spec:
@@ -213,7 +216,7 @@ metadata:
   namespace: {{ .Release.Namespace | quote }}
 spec:
   selector:
-    io.kompose.service: music-engine
+    io.kompose.service: acestepweb
   ports:
     - name: http
       port: 8001
