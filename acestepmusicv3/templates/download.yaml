@@ -83,11 +83,14 @@ spec:
               value: "ACE-Step/Ace-Step1.5"
             - name: MODEL_MODE
               value: "chat"
-            # Comma multi-source (v1.2.x): first segment is ROLE=main, the rest
-            # are ROLE=extra automatically and are pre-fetched before main. Full
-            # repos (no --include); all must be hf://.
+            # Pin every repository to an immutable commit. The XL repository is
+            # followed by one single-file source per weight shard. These duplicate
+            # sources are intentional: huggingface_hub can occasionally return a
+            # snapshot path after an interrupted multi-file resume while one shard
+            # is still absent. llm-init then gives each explicitly included shard
+            # its own download record and size verification pass.
             - name: MODEL_SOURCE
-              value: "hf://ACE-Step/Ace-Step1.5,hf://ACE-Step/acestep-v15-xl-turbo,hf://ACE-Step/acestep-5Hz-lm-4B"
+              value: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00001-of-00004.safetensors,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00002-of-00004.safetensors,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00003-of-00004.safetensors,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00004-of-00004.safetensors,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
             # Always wire the Olares HF mirror (manifest requires HF_ENDPOINT).
             - name: HF_ENDPOINT
               value: "{{ $oe.HF_ENDPOINT }}"

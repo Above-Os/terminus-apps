@@ -94,6 +94,32 @@ spec:
               # (ACESTEP_CONFIG_PATH / ACESTEP_LM_MODEL_PATH).
               ln -sfn "${XL_TURBO_SNAP%/}" /app/checkpoints/acestep-v15-xl-turbo
               ln -sfn "${LM_SNAP%/}" /app/checkpoints/acestep-5Hz-lm-4B
+
+              # Do not trust repository-directory existence alone. Validate every
+              # safetensors shard referenced by each model index before exposing
+              # the API; this catches incomplete Hub resumes even if the downloader
+              # process mistakenly reports its snapshot as complete.
+              python3 - /app/checkpoints/acestep-v15-xl-turbo /app/checkpoints/acestep-5Hz-lm-4B <<'VERIFY_EOF'
+              import json
+              import pathlib
+              import sys
+
+              for model_dir_text in sys.argv[1:]:
+                  model_dir = pathlib.Path(model_dir_text)
+                  index_path = model_dir / "model.safetensors.index.json"
+                  with index_path.open("r", encoding="utf-8") as handle:
+                      index = json.load(handle)
+                  shards = sorted(set(index.get("weight_map", {}).values()))
+                  if not shards:
+                      raise RuntimeError(f"no weight shards declared by {index_path}")
+                  missing = [
+                      shard for shard in shards
+                      if not (model_dir / shard).is_file() or (model_dir / shard).stat().st_size == 0
+                  ]
+                  if missing:
+                      raise RuntimeError(f"incomplete model snapshot {model_dir}: missing {missing}")
+                  print(f"[wait] verified {len(shards)} weight shard(s) in {model_dir}")
+              VERIFY_EOF
               echo "[wait] checkpoints ready, starting staged ACE-Step API."
 
               cd /app
