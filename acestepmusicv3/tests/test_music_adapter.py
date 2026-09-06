@@ -81,7 +81,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
 
-    def test_quality_is_default_and_fast_is_explicit(self):
+    def test_quality_is_the_only_enabled_profile(self):
         payloads = []
 
         def native(path, payload=None):
@@ -117,9 +117,9 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(payloads[0]["shift"], 1.0)
         self.assertEqual(payloads[0]["bpm"], 92)
         self.assertIn("Vocal character: warm female lead", payloads[0]["prompt"])
-        self.assertEqual(fast.status_code, 202)
-        self.assertEqual(payloads[1]["model"], "acestep-v15-xl-turbo")
-        self.assertEqual(payloads[1]["inference_steps"], 8)
+        self.assertEqual(fast.status_code, 400)
+        self.assertEqual(fast.json()["error"]["code"], "invalid_quality_profile")
+        self.assertEqual(len(payloads), 1)
 
     def test_rejects_invalid_quality_controls(self):
         profile = self.client.post(

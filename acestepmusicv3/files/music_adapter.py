@@ -26,7 +26,6 @@ from fastapi.responses import StreamingResponse
 NATIVE_BASE = "http://127.0.0.1:8002"
 MODEL_NAME = os.getenv("MODEL_NAME", "ACE-Step/acestep-v15-xl-sft")
 QUALITY_MODEL = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft")
-FAST_MODEL = "acestep-v15-xl-turbo"
 TASKS: dict[str, dict[str, Any]] = {}
 TASKS_LOCK = threading.Lock()
 
@@ -142,7 +141,7 @@ def engine_spec() -> dict[str, Any]:
         "workers": 1,
         "extensions": {
             "creative": {
-                "quality_profiles": ["quality", "fast"],
+                "quality_profiles": ["quality"],
                 "default_quality_profile": "quality",
                 "music_controls": ["bpm", "key_scale", "time_signature", "vocal_language", "vocal_type", "section_structure"],
             }
@@ -169,8 +168,8 @@ async def create_generation(request: Request) -> dict[str, Any]:
     duration = int(source.get("duration_seconds", 240))
     options = _options(source)
     profile = str(options.get("quality_profile", "quality")).strip().lower()
-    if profile not in {"quality", "fast"}:
-        raise _error(400, "invalid_quality_profile", "quality_profile must be quality or fast.")
+    if profile != "quality":
+        raise _error(400, "invalid_quality_profile", "Only the quality profile is enabled for this model application.")
     bpm = _number(options, "bpm", 30, 300)
     guidance = _number(options, "guidance_scale", 7, 9)
     key_scale = str(options.get("key_scale", "")).strip()
@@ -196,11 +195,11 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "audio_format": "wav",
         "audio_duration": duration,
         "batch_size": 1,
-        "model": QUALITY_MODEL if profile == "quality" else FAST_MODEL,
+        "model": QUALITY_MODEL,
         "task_type": "text2music",
-        "inference_steps": 50 if profile == "quality" else 8,
+        "inference_steps": 50,
         "guidance_scale": guidance if guidance is not None else 7.0,
-        "shift": 1.0 if profile == "quality" else 3.0,
+        "shift": 1.0,
         "infer_method": "ode",
     }
     if bpm is not None:
