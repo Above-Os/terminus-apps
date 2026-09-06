@@ -1,63 +1,44 @@
-{{- /* llm-init in download-only mode (ENGINE_KIND empty): no engine is started
-       or proxied; llm-init degrades to a pure model downloader that drops the
-       three ACE-Step repos into the shared cross-app HF Hub cache (App Common,
-       fixed /cache/hf/hub). The acestepserver engine mounts the same store and
-       waits on /readyz before materialising the flat /app/checkpoints layout it
-       expects (see server.yaml).
-
-       Three HF repos via the comma form: the first segment is ROLE=main, the
-       rest ROLE=extra automatically (the index form would default every entry
-       to main and fail the "multiple ROLE=main" check). All must be hf://
-       (ollama:// sources are rejected in download-only mode). */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
-{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
-{{- /* Per-release run-state hostPath so concurrent clones on the same node do
-       not collide on the sentinel. */ -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Static name matching workloadReplicas + values.workloads. Label stays
-  # io.kompose.service: llm-init so download-svc resolves here.
-  name: acestepdownloader
-  namespace: '{{ .Release.Namespace }}'
+  name: llminit
+  namespace: {{ .Release.Namespace | quote }}
   labels:
-    io.kompose.service: llm-init
+    io.kompose.service: llminit
 spec:
-  replicas: {{ .Values.workloads.acestepdownloader.replicaCount }}
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
   selector:
     matchLabels:
-      io.kompose.service: llm-init
+      io.kompose.service: llminit
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        io.kompose.network/chrome-default: "true"
-        io.kompose.service: llm-init
+        io.kompose.service: llminit
+      annotations:
+        app.olares.com/chart-version: {{ .Chart.Version | quote }}
     spec:
       restartPolicy: Always
+      securityContext:
+        fsGroup: 1000
       volumes:
-        # Shared cross-app HF Hub cache (App Common); image bakes HF_HUB_CACHE=/cache/hf/hub.
         - name: hf-cache
           hostPath:
-            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            path: {{ printf "%s/huggingface" .Values.userspace.appCommon | quote }}
             type: DirectoryOrCreate
-        # Per-release sentinel / run-state dir (App Cache).
         - name: run-state
           hostPath:
-            path: "{{ $runStateHostPath }}"
+            path: {{ $runStateHostPath | quote }}
             type: DirectoryOrCreate
       initContainers:
-        # hostPath dirs are created root-owned; llm-init runs as UID 1000.
-        - name: init-chown
+        - name: init-permissions
           image: docker.io/beclab/aboveos-busybox:1.37.0
-          command:
-            - sh
-            - -c
-            - "chown 1000:1000 /cache/hf/hub /run/llm-init || true"
+          command: ["sh", "-c", "chown 1000:1000 /cache/hf/hub /run/llm-init"]
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
@@ -67,33 +48,22 @@ spec:
             runAsUser: 0
       containers:
         - name: llm-init
-          # v1.2.4: comma multi-source, nullengine download-only, default LFS
-          # (hf_xet off unless HF_ENABLE_XET=true).
-          image: docker.io/beclab/llm-init:v1.7.1
+          image: docker.io/beclab/llm-init:v1.7.2
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
           env:
-            # Empty ENGINE_KIND selects download-only mode (nullengine).
             - name: ENGINE_KIND
-              value: ""
-            # TEMPORARY (llm-init v1.2.3 image): download-only still requires
-            # MODEL_NAME + MODEL_MODE (the "make-optional" patch is not yet in a
-            # released tag). They are placeholders only — the repos to fetch come
-            # entirely from MODEL_SOURCE. Drop both once the patched image ships.
+              value: music
             - name: MODEL_NAME
-              value: "ACE-Step/Ace-Step1.5"
+              value: {{ $oe.MODEL_NAME | default "ACE-Step/acestep-v15-xl-turbo" | quote }}
             - name: MODEL_MODE
-              value: "chat"
-            # Pin every repository to an immutable commit. The XL repository is
-            # followed by one single-file source per weight shard. These duplicate
-            # sources are intentional: huggingface_hub can occasionally return a
-            # snapshot path after an interrupted multi-file resume while one shard
-            # is still absent. llm-init then gives each explicitly included shard
-            # its own download record and size verification pass.
+              value: {{ $oe.MODEL_MODE | default "music_generation" | quote }}
             - name: MODEL_SOURCE
-              value: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00001-of-00004.safetensors,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00002-of-00004.safetensors,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00003-of-00004.safetensors,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee --include model-00004-of-00004.safetensors,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
-            # Always wire the Olares HF mirror (manifest requires HF_ENDPOINT).
+              value: {{ $oe.MODEL_SOURCE | default "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737" | quote }}
             - name: HF_ENDPOINT
-              value: "{{ $oe.HF_ENDPOINT }}"
+              value: {{ $oe.HF_ENDPOINT | default "https://huggingface.co" | quote }}
 {{- if $hfToken }}
             - name: HF_TOKEN
               valueFrom:
@@ -101,14 +71,8 @@ spec:
                   name: {{ .Release.Name }}-secrets
                   key: HF_TOKEN
 {{- end }}
-            # XL checkpoints are heavily sharded. The image includes hf_xet;
-            # enable it and use bounded parallelism so a fresh Olares One install
-            # does not spend hours pulling a single 4B DiT over serial LFS.
             - name: HF_ENABLE_XET
               value: "true"
-            # Large weight shards can spend minutes on a slow mirror connection.
-            # Raise the Hub client's per-read timeout so a healthy low-throughput
-            # transfer is not discarded close to completion.
             - name: HF_HUB_DOWNLOAD_TIMEOUT
               value: "300"
             - name: HF_HUB_ETAG_TIMEOUT
@@ -130,8 +94,6 @@ spec:
               port: 8090
             periodSeconds: 30
             timeoutSeconds: 5
-          # Readiness on /livez (process up), not /readyz (model ready), so the
-          # downloader stays scheduled and serving progress while downloading.
           readinessProbe:
             httpGet:
               path: /livez
@@ -139,7 +101,6 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 5
             timeoutSeconds: 3
-            failureThreshold: 3
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
@@ -148,29 +109,33 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 256Mi
             limits:
-              cpu: 500m
-              # `hf download` runs a python subprocess in this same cgroup. The
-              # ACE-Step repos are large and sharded; 4Gi gives the huggingface_hub
-              # CLI (--max-workers 1) headroom on multi-GB checkpoint downloads.
+              cpu: "1"
               memory: 4Gi
 ---
-# Internal progress / health surface (no entrance). acestepserver waits on
-# /readyz here before reading the shared cache; the nginx entrance also TCP-probes
-# this Service to decide between the download dashboard and the engine.
 apiVersion: v1
 kind: Service
 metadata:
   name: download-svc
-  namespace: {{ .Release.Namespace }}
-  labels:
-    io.kompose.service: llm-init
+  namespace: {{ .Release.Namespace | quote }}
 spec:
   selector:
-    io.kompose.service: llm-init
+    io.kompose.service: llminit
   ports:
     - name: http
       port: 8090
       targetPort: 8090
-  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  selector:
+    io.kompose.service: llminit
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090

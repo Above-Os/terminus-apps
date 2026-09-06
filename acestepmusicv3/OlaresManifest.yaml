@@ -3,11 +3,11 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: acestepmusicv3
-  description: ACE-Step 1.5 XL and 4B LM API with staged GPU memory release
+  description: ACE-Step 1.5 XL-Turbo and 4B LM behind the standard Olares Music API
   icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
   appid: acestepmusicv3
-  version: '0.1.11'
-  title: ACE-Step Music 4B (Staged)
+  version: '0.1.12'
+  title: ACE-Step Music XL-Turbo
   categories:
   - Creativity
   - AI
@@ -17,29 +17,20 @@ metadata:
 
 entrances:
   - name: modelconsole
-    port: 8080
-    host: acestep-web-svc
-    title: ACE-Step Music API
+    port: 8090
+    host: download-svc
+    title: ACE-Step Model Console
     icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
     authLevel: internal
     openMethod: window
-  - name: musicapi
-    port: 8001
-    host: acestep-svc
-    title: ACE-Step Music API
-    icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
-    authLevel: internal
-    invisible: true
 
 # Declares every workload's replica count (v3 schema). Keys MUST match the
 # rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   acestepmusicv3        — nginx entrance Deployment (must match metadata.name / appid)
-#   acestepserver      — ACE-Step 1.5 staged API engine Deployment
-#   acestepdownloader  — llm-init download-only model fetcher
+#   acestepmusicv3 — ACE-Step 1.5 staged music engine
+#   llminit        — Model Console, downloader, and standard Music API proxy
 workloadReplicas:
   acestepmusicv3: 1
-  acestepserver: 1
-  acestepdownloader: 1
+  llminit: 1
 
 permission:
   appData: true
@@ -49,7 +40,11 @@ permission:
   appCommon: true
 
 spec:
-  versionName: '0.1.11'
+  versionName: 'ACE-Step/acestep-v15-xl-turbo'
+  upgradeDescription: |
+    0.1.12: Replace the download-only and OpenResty topology with Model Console
+    `music_generation`, a canonical `/v1/music/*` adapter, strict readiness,
+    restart handoff, and explicit task-lost/cancellation semantics.
   featuredImage: https://app.cdn.olares.com/appstore/acestep/1.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/acestep/1.webp
@@ -57,16 +52,17 @@ spec:
     - https://app.cdn.olares.com/appstore/acestep/3.webp
 
   fullDescription: |
-    Experimental Olares model application for ACE-Step 1.5 on a single 24 GiB
-    NVIDIA GPU. It serves the official asynchronous API with the XL-Turbo 4B DiT
+    Olares model application for ACE-Step 1.5 on a single 24 GiB NVIDIA GPU.
+    It serves the standard asynchronous Music API with the XL-Turbo 4B DiT
     and 5Hz 4B language model. The runtime serializes jobs and unloads the
     language model before diffusion so four-minute generation has enough GPU
     headroom. Models are downloaded once into Olares App Common storage; audio
     and API temporary files persist in App Data.
 
-    This build is intended for deployment validation. The public contract is the
-    ACE-Step API (`/health`, `/release_task`, `/query_result`, `/v1/audio`).
-    A future Music Studio application can call it through Router `/v1/music`.
+    Model Console is the only public and Router-facing endpoint. It downloads and
+    verifies all three pinned repositories, reports download/loading/ready state,
+    exposes the model card, and proxies `/v1/music/generations`. ACE-Step's native
+    `/release_task`, `/query_result`, and file paths remain internal.
 
   developer: ace-step
   website: https://acemusic.ai/
@@ -97,6 +93,28 @@ spec:
   onlyAdmin: true
 
 envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "ACE-Step/acestep-v15-xl-turbo"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "music_generation"
+    options:
+      - title: Music Generation
+        value: music_generation
   - envName: HF_TOKEN
     required: false
     applyOnChange: true
@@ -110,6 +128,8 @@ envs:
 
 options:
   shared: true
+  LLMGatewaySupported: true
+  templateOnly: false
   apiTimeout: 0
   dependencies:
     - name: olares

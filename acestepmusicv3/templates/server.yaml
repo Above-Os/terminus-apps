@@ -1,161 +1,137 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: acestepserver
-  namespace: {{ .Release.Namespace }}
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace | quote }}
   labels:
-    app: multi-port
+    io.kompose.service: music-engine
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
 spec:
-  replicas: {{ .Values.workloads.acestepserver.replicaCount }}
+  replicas: {{ .Values.workloads.acestepmusicv3.replicaCount }}
   selector:
     matchLabels:
-      app: multi-port
+      io.kompose.service: music-engine
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        app: multi-port
+        io.kompose.service: music-engine
       annotations:
         app.olares.com/chart-version: {{ .Chart.Version | quote }}
     spec:
+      securityContext:
+        fsGroup: 1000
       initContainers:
-        - name: init-chmod-data
-          image: "docker.io/beclab/aboveos-busybox:1.37.0"
-          command:
-            - sh
-            - '-c'
-            - chown -R 1000:1000 /app/checkpoints
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command: ["sh", "-c", "chown 1000:1000 /app/checkpoints /app/data"]
+          securityContext:
+            runAsUser: 0
           volumeMounts:
             - name: checkpoints
               mountPath: /app/checkpoints
+            - name: app-data
+              mountPath: /app/data
+      containers:
+        - name: music-engine
+          image: docker.io/beclab/ace-step-ace-step-1.5:0.1.8
           imagePullPolicy: IfNotPresent
           securityContext:
-            runAsUser: 0
-      containers:
-        - name: acestep
-          image: "docker.io/beclab/ace-step-ace-step-1.5:0.1.8"
+            runAsUser: 1000
+            runAsGroup: 1000
           ports:
-            - containerPort: 8001
+            - name: http
+              containerPort: 8001
           command:
             - /bin/bash
-            - '-c'
+            - -c
             - |
               set -e
               CACHE=/cache/hf/hub
-              READYZ="http://download-svc.{{ .Release.Namespace }}.svc.cluster.local:8090/readyz"
-
-              # Gate on the llm-init downloader (download-only mode) reporting all
-              # repos present. /readyz flips to 200 only once every MODEL_SOURCE
-              # repo is fully on disk, so this replaces the old per-repo .done
-              # sentinel files written by the bespoke downloader.
-              echo "[wait] Waiting for llm-init downloader (/readyz)..."
-              until python3 - "$READYZ" <<'RDY_EOF' 2>/dev/null
-              import sys, urllib.request
-              try:
-                  with urllib.request.urlopen(sys.argv[1], timeout=5) as r:
-                      sys.exit(0 if r.status == 200 else 1)
-              except Exception:
-                  sys.exit(1)
-              RDY_EOF
-              do
-                echo "[wait] downloader not ready yet..."
-                sleep 10
+              WRAPPER_COMMON=/run/llm-init/common.sh
+              elapsed=0
+              until [ -f "$WRAPPER_COMMON" ]; do
+                if [ "$elapsed" -ge 3600 ]; then
+                  echo "[music-wrapper] timed out waiting for $WRAPPER_COMMON" >&2
+                  exit 1
+                fi
+                echo "[music-wrapper] waiting for Model Console handoff"
+                sleep 5
+                elapsed=$((elapsed + 5))
               done
-              echo "[wait] downloader ready; materialising /app/checkpoints from HF cache."
+              ENGINE=music
+              export ENGINE WRAPPER_COMMON
+              . "$WRAPPER_COMMON"
+              wait_for_sentinel
 
-              # llm-init writes the standard HF cache snapshot layout
-              # ($CACHE/models--ACE-Step--<repo>/snapshots/<sha>/...), but ACE-Step
-              # loads flat dirs under /app/checkpoints. Rebuild that flat view as a
-              # symlink farm pointing at the resolved snapshots. The snapshot's
-              # internal blob symlinks are relative to $CACHE (mounted here at the
-              # same path), so they resolve transparently.
-              snap() {  # $1 = models--ACE-Step--<repo> dir name -> prints snapshot dir
-                ref="$CACHE/$1/refs/main"
+              snap() {
+                repo="$1"
+                ref="$CACHE/$repo/refs/main"
                 if [ -f "$ref" ]; then
-                  echo "$CACHE/$1/snapshots/$(cat "$ref")"
+                  printf '%s\n' "$CACHE/$repo/snapshots/$(cat "$ref")"
                 else
-                  ls -d "$CACHE/$1"/snapshots/*/ 2>/dev/null | head -1
+                  find "$CACHE/$repo/snapshots" -mindepth 1 -maxdepth 1 -type d | head -1
                 fi
               }
               MAIN_SNAP="$(snap models--ACE-Step--Ace-Step1.5)"
               XL_TURBO_SNAP="$(snap models--ACE-Step--acestep-v15-xl-turbo)"
               LM_SNAP="$(snap models--ACE-Step--acestep-5Hz-lm-4B)"
-              mkdir -p /app/checkpoints
-              # Ace-Step1.5 base model lands at the checkpoints root: link each
-              # top-level entry (visible + dotfiles) individually.
-              for f in "$MAIN_SNAP"/* "$MAIN_SNAP"/.[!.]*; do
-                [ -e "$f" ] || continue
-                ln -sfn "$f" "/app/checkpoints/$(basename "$f")"
+              [ -d "$MAIN_SNAP" ] && [ -d "$XL_TURBO_SNAP" ] && [ -d "$LM_SNAP" ]
+              for file in "$MAIN_SNAP"/* "$MAIN_SNAP"/.[!.]*; do
+                [ -e "$file" ] || continue
+                ln -sfn "$file" "/app/checkpoints/$(basename "$file")"
               done
-              # The XL-Turbo and LM repos are referenced as their own subdirs
-              # (ACESTEP_CONFIG_PATH / ACESTEP_LM_MODEL_PATH).
               ln -sfn "${XL_TURBO_SNAP%/}" /app/checkpoints/acestep-v15-xl-turbo
               ln -sfn "${LM_SNAP%/}" /app/checkpoints/acestep-5Hz-lm-4B
 
-              # Do not trust repository-directory existence alone. Validate every
-              # safetensors shard referenced by each model index before exposing
-              # the API; this catches incomplete Hub resumes even if the downloader
-              # process mistakenly reports its snapshot as complete.
-              python3 - /app/checkpoints/acestep-v15-xl-turbo /app/checkpoints/acestep-5Hz-lm-4B <<'VERIFY_EOF'
+              python3 - /app/checkpoints/acestep-v15-xl-turbo /app/checkpoints/acestep-5Hz-lm-4B <<'PY'
               import json
               import pathlib
               import sys
-
-              for model_dir_text in sys.argv[1:]:
-                  model_dir = pathlib.Path(model_dir_text)
-                  index_path = model_dir / "model.safetensors.index.json"
+              for text in sys.argv[1:]:
+                  directory = pathlib.Path(text)
+                  index_path = directory / "model.safetensors.index.json"
                   with index_path.open("r", encoding="utf-8") as handle:
-                      index = json.load(handle)
-                  shards = sorted(set(index.get("weight_map", {}).values()))
-                  if not shards:
-                      raise RuntimeError(f"no weight shards declared by {index_path}")
-                  missing = [
-                      shard for shard in shards
-                      if not (model_dir / shard).is_file() or (model_dir / shard).stat().st_size == 0
-                  ]
-                  if missing:
-                      raise RuntimeError(f"incomplete model snapshot {model_dir}: missing {missing}")
-                  print(f"[wait] verified {len(shards)} weight shard(s) in {model_dir}")
-              VERIFY_EOF
-              echo "[wait] checkpoints ready, starting staged ACE-Step API."
+                      shards = sorted(set(json.load(handle).get("weight_map", {}).values()))
+                  missing = [name for name in shards if not (directory / name).is_file() or not (directory / name).stat().st_size]
+                  if not shards or missing:
+                      raise RuntimeError(f"incomplete checkpoint {directory}: {missing}")
+                  print(f"[music-wrapper] verified {len(shards)} shard(s) in {directory}", flush=True)
+              PY
 
-              cd /app
-              # The image already contains a locked virtualenv. Invoking `uv run`
-              # here can wait indefinitely on uv's project lock, so execute the
-              # environment's interpreter directly.
-              exec /app/.venv/bin/python /opt/olares/staged_api.py --host 0.0.0.0 --port 8001
+              run_music() {
+                cd /app
+                exec /app/.venv/bin/python /opt/olares/music_adapter.py
+              }
+              supervise_engine run_music
           env:
-            - name: PGID
-              value: "1000"
-            - name: PUID
-              value: "1000"
-            - name: TZ
-              value: "Etc/UTC"
+            - name: MODEL_NAME
+              value: {{ $oe.MODEL_NAME | default "ACE-Step/acestep-v15-xl-turbo" | quote }}
             - name: HF_ENDPOINT
-              value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
+              value: {{ $oe.HF_ENDPOINT | default "https://huggingface.co" | quote }}
             - name: ACESTEP_CONFIG_PATH
-              value: "acestep-v15-xl-turbo"
+              value: acestep-v15-xl-turbo
             - name: ACESTEP_INIT_SERVICE
               value: "true"
             - name: ACESTEP_INIT_LLM
               value: "true"
             - name: ACESTEP_LM_MODEL_PATH
-              value: "acestep-5Hz-lm-4B"
+              value: acestep-5Hz-lm-4B
             - name: ACESTEP_LM_BACKEND
-              value: "vllm"
+              value: vllm
             - name: ACESTEP_MODE
-              value: "api"
+              value: api
             - name: ACESTEP_API_WORKERS
               value: "1"
             - name: ACESTEP_QUEUE_WORKERS
               value: "1"
             - name: ACESTEP_TMPDIR
-              value: "/app/data/tmp"
-            - name: ACESTEP_DOWNLOAD_SOURCE
-              value: "auto"
+              value: /app/data/tmp
             - name: ACESTEP_USE_FLASH_ATTENTION
               value: "true"
             - name: ACESTEP_OFFLOAD_TO_CPU
@@ -165,16 +141,28 @@ spec:
             - name: ACESTEP_SAVE_MEMORY
               value: "1"
             - name: PYTORCH_CUDA_ALLOC_CONF
-              value: "expandable_segments:True"
-            - name: ACESTEP_DEVICE
-              value: "auto"
+              value: expandable_segments:True
             - name: TOKENIZERS_PARALLELISM
               value: "false"
-            - name: ACESTEP_UI_LANGUAGE
-              value: "en"
           envFrom:
             - configMapRef:
                 name: acestep-config
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 360
           resources:
             requests:
               cpu: "1"
@@ -185,45 +173,48 @@ spec:
           volumeMounts:
             - name: checkpoints
               mountPath: /app/checkpoints
-            # Shared cross-app HF Hub cache (App Common), populated by the
-            # llm-init downloader. Read here to build the checkpoints symlink farm.
             - name: hf-cache
               mountPath: /cache/hf/hub
             - name: app-data
               mountPath: /app/data
+            - name: run-state
+              mountPath: /run/llm-init
             - name: stage-launcher
               mountPath: /opt/olares/staged_api.py
               subPath: staged_api.py
               readOnly: true
-          imagePullPolicy: IfNotPresent
+            - name: stage-launcher
+              mountPath: /opt/olares/music_adapter.py
+              subPath: music_adapter.py
+              readOnly: true
       volumes:
-        # /app/checkpoints is now an ephemeral symlink farm rebuilt on every
-        # start; the real model bytes persist in the shared HF cache below.
         - name: checkpoints
           emptyDir: {}
         - name: hf-cache
           hostPath:
-            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            path: {{ printf "%s/huggingface" .Values.userspace.appCommon | quote }}
             type: DirectoryOrCreate
         - name: app-data
           hostPath:
-            path: "{{ .Values.userspace.appData }}/data"
+            path: {{ printf "%s/data" .Values.userspace.appData | quote }}
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: {{ $runStateHostPath | quote }}
             type: DirectoryOrCreate
         - name: stage-launcher
           configMap:
             name: acestep-stage-launcher
-
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: acestep-svc
-  namespace: {{ .Release.Namespace }}
+  name: music-engine
+  namespace: {{ .Release.Namespace | quote }}
 spec:
   selector:
-    app: multi-port
+    io.kompose.service: music-engine
   ports:
-    - name: main-api
+    - name: http
       port: 8001
       targetPort: 8001
-  type: ClusterIP
