@@ -1,0 +1,188 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: bgererankerv2m3
+  icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
+  description: "BGE-Reranker-v2-m3 cross-encoder rerank via rerank-server (OpenVINO / ONNX)"
+  appid: bgererankerv2m3
+  title: BGE-Reranker-v2-m3
+  version: '1.0.0'
+  categories:
+  - AI
+  - models
+  tags:
+  - rerank
+sharedEntrances:
+  - name: bgererankerv2m3
+    host: sharedentrances-api
+    port: 0
+    title: BGE-Reranker-v2-m3 API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
+entrances:
+  - name: rerankclient
+    port: 8090
+    host: download-svc
+    title: BGE-Reranker-v2-m3
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
+    openMethod: window
+    authLevel: internal
+  - name: rerankapi
+    port: 8090
+    host: download-svc
+    title: BGE-Reranker-v2-m3 API
+    icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
+    invisible: true
+    openMethod: window
+    authLevel: internal
+#   bgererankerv2m3 — rerank-server engine Deployment (== appid / Release.Name)
+#   llminit            — llm-init (ENGINE_KIND=rerank): download + API proxy
+workloadReplicas:
+  bgererankerv2m3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: '0.1.0'
+  fullDescription: |
+    **BGE-Reranker-v2-m3** cross-encoder reranking service powered by rerank-server. Serves OpenAI-compatible `POST /v1/rerank` and `GET /v1/models` on port 8080 (via llm-init proxy on 8090).
+
+    **Accelerator modes**
+    | Olares mode | Image | Backend | `ACCELERATOR` |
+    |-------------|-------|---------|---------------|
+    | `intel` | `rerank-server:v0.1.0-ov-intel-amd64` | OpenVINO IR | `intel-gpu` |
+    | `cpu` | `rerank-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `rerank-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `nvidia` |
+    | `nvidia-gb10` | `rerank-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `nvidia-gb10` |
+
+    **Naming contract**
+    - llm-init: `MODEL_NAME` = `MODEL_ID` = `bge-reranker-v2-m3` (proxy rewrite + Ready probe).
+    - rerank-server: `MODEL_ID` only (no `MODEL_NAME` env).
+
+    **Model download**
+    On first start, llm-init downloads from the unified Hugging Face repo into App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
+    - [beclab/bge-reranker-v2-m3](https://huggingface.co/beclab/bge-reranker-v2-m3)
+    - `intel` mode: `openvino/` subdirectory only (~4.3 GiB)
+    - All other modes: `onnx/` subdirectory only (~2.2 GiB)
+
+    **Resource sizing (measured 2026-09-07)**
+    | Mode | Engine RAM (steady) | GPU VRAM | Notes |
+    |------|---------------------|----------|-------|
+    | cpu | ~1.4 GiB | — | ~1 core at inference |
+    | nvidia | ~0.7 GiB | ~3.2 GiB | ~10 ms / rerank |
+    | intel | ~0.75 GiB inference; ~3.2 GiB compile peak | iGPU shared RAM | ~3 min first compile |
+
+    **Device mounts**
+    - `intel`: `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
+    - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
+
+    **Stack**
+    - **rerank-server** (`beclab/rerank-server:v0.1.0`, port 8080): Rust cross-encoder inference (internal; reached as `http://rerank:8080`).
+    - **llm-init** (`beclab/llm-init:v1.7.1`, `ENGINE_KIND=rerank`, `MODEL_MODE=rerank`, port 8090): model download, progress UI, and OpenAI API proxy (`/v1/rerank`, `/v1/models`).
+      Use **rerankclient** for download UI; **rerankapi** / shared entrance hit llm-init proxy on port 8090.
+
+  developer: beclab
+  website: https://huggingface.co/BAAI/bge-reranker-v2-m3
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/BAAI/bge-reranker-v2-m3
+
+  accelerator:
+    - mode: cpu
+      requiredCpu: 1350m
+      limitedCpu: "4"
+      requiredMemory: 3Gi
+      limitedMemory: 5Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+    - mode: nvidia
+      requiredCpu: 600m
+      limitedCpu: "4"
+      requiredMemory: 2Gi
+      limitedMemory: 4Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+      requiredGPUMemory: 4096Mi
+      limitedGPUMemory: 6144Mi
+    - mode: nvidia-gb10
+      requiredCpu: 600m
+      limitedCpu: "4"
+      requiredMemory: 3Gi
+      limitedMemory: 6Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+    - mode: intel
+      requiredCpu: 3500m
+      limitedCpu: "8"
+      requiredMemory: 5Gi
+      limitedMemory: 8Gi
+      requiredDisk: 5Gi
+      limitedDisk: 50Gi
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  allowMultipleInstall: true
+  LLMGatewaySupported: true
+  shared: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "bge-reranker-v2-m3"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "rerank"
+    options:
+    - title: Rerank
+      value: rerank
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error

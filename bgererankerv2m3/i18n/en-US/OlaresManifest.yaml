@@ -1,0 +1,25 @@
+metadata:
+  title: BGE-Reranker-v2-m3
+  description: "BGE-Reranker-v2-m3 cross-encoder rerank via rerank-server (OpenVINO / ONNX)"
+
+spec:
+  fullDescription: |
+    **BGE-Reranker-v2-m3** cross-encoder reranking service powered by rerank-server. Serves OpenAI-compatible `POST /v1/rerank` and `GET /v1/models` (via llm-init proxy on port 8090).
+
+    **Accelerator modes**
+    | Olares mode | Image | Backend | `ACCELERATOR` |
+    |-------------|-------|---------|---------------|
+    | `intel` | `rerank-server:v0.1.0-ov-intel-amd64` | OpenVINO IR | `intel-gpu` |
+    | `cpu` | `rerank-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `rerank-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `nvidia` |
+    | `nvidia-gb10` | `rerank-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `nvidia-gb10` |
+
+    **Model download**
+    On first start, llm-init downloads from the unified Hugging Face repo into App Common cache:
+    - [beclab/bge-reranker-v2-m3](https://huggingface.co/beclab/bge-reranker-v2-m3)
+    - `intel` mode: `openvino/` subdirectory only
+    - All other modes: `onnx/` subdirectory only
+
+    **Stack**
+    - **rerank-server** (internal port 8080): Rust cross-encoder inference.
+    - **llm-init** (`ENGINE_KIND=rerank`, port 8090): download, progress UI, and OpenAI API proxy.
