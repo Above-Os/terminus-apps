@@ -32,7 +32,7 @@ spec:
       initContainers:
         - name: init-permissions
           image: docker.io/beclab/aboveos-busybox:1.37.0
-          command: ["sh", "-c", "chown 1000:1000 /app/checkpoints /app/data"]
+          command: ["sh", "-c", "chown 1000:1000 /app/checkpoints /app/data /app/.cache"]
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -40,6 +40,8 @@ spec:
               mountPath: /app/checkpoints
             - name: app-data
               mountPath: /app/data
+            - name: runtime-cache
+              mountPath: /app/.cache
       containers:
         - name: music-engine
           image: docker.io/beclab/ace-step-ace-step-1.5:0.1.8
@@ -194,6 +196,8 @@ spec:
               mountPath: /cache/hf/hub
             - name: app-data
               mountPath: /app/data
+            - name: runtime-cache
+              mountPath: /app/.cache
             - name: run-state
               mountPath: /run/llm-init
             - name: stage-launcher
@@ -215,6 +219,8 @@ spec:
           hostPath:
             path: {{ printf "%s/data" .Values.userspace.appData | quote }}
             type: DirectoryOrCreate
+        - name: runtime-cache
+          emptyDir: {}
         - name: run-state
           hostPath:
             path: {{ $runStateHostPath | quote }}
