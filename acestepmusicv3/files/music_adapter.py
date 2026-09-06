@@ -170,6 +170,9 @@ def engine_spec() -> dict[str, Any]:
         "schema_version": 1,
         "model": MODEL_NAME,
         "mode": "music_generation",
+        "implements": ["music.generate", "music.repaint"],
+        "declares": ["music.generate", "music.repaint"],
+        "serves": ["music.generate", "music.repaint"],
         "max_concurrency": 1,
         "workers": 1,
         "extensions": {

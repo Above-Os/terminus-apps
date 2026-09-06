@@ -87,6 +87,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         spec = self.client.get("/api/engine-spec").json()
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
+        self.assertEqual(spec["serves"], ["music.generate", "music.repaint"])
         self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
 
     def test_quality_profiles_use_xl_sft_without_repeating_structure_in_caption(self):
