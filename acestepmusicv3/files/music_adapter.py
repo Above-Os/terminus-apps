@@ -24,8 +24,9 @@ from fastapi.responses import StreamingResponse
 
 
 NATIVE_BASE = "http://127.0.0.1:8002"
-MODEL_NAME = os.getenv("MODEL_NAME", "ACE-Step/acestep-v15-xl-turbo")
-DIT_MODEL = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-xl-turbo")
+MODEL_NAME = os.getenv("MODEL_NAME", "ACE-Step/acestep-v15-xl-sft")
+QUALITY_MODEL = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft")
+FAST_MODEL = "acestep-v15-xl-turbo"
 TASKS: dict[str, dict[str, Any]] = {}
 TASKS_LOCK = threading.Lock()
 
@@ -83,6 +84,46 @@ def _public(task: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _options(source: dict[str, Any]) -> dict[str, Any]:
+    value = source.get("provider_options") or {}
+    if not isinstance(value, dict):
+        raise _error(400, "invalid_provider_options", "provider_options must be an object.")
+    allowed = {
+        "quality_profile", "bpm", "guidance_scale", "key_scale",
+        "time_signature", "vocal_language", "vocal_type", "section_structure",
+    }
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise _error(400, "unknown_provider_option", f"Unsupported provider option: {unknown[0]}.")
+    return value
+
+
+def _number(options: dict[str, Any], key: str, minimum: float, maximum: float) -> float | None:
+    if key not in options or options[key] in (None, ""):
+        return None
+    try:
+        value = float(options[key])
+    except (TypeError, ValueError) as exc:
+        raise _error(400, f"invalid_{key}", f"{key} must be a number.") from exc
+    if value < minimum or value > maximum:
+        raise _error(400, f"invalid_{key}", f"{key} must be between {minimum:g} and {maximum:g}.")
+    return value
+
+
+def _described_prompt(prompt: str, options: dict[str, Any]) -> str:
+    additions = []
+    vocal_type = str(options.get("vocal_type", "")).strip()
+    structure = str(options.get("section_structure", "")).strip()
+    if vocal_type:
+        additions.append(f"Vocal character: {vocal_type}")
+    if structure:
+        additions.append(f"Song structure: {structure}")
+    described = ". ".join([prompt, *additions])
+    if len(described) > 4000:
+        raise _error(400, "invalid_prompt", "prompt and advanced descriptions must fit within 4000 characters.")
+    return described
+
+
 @app.get("/v1/models")
 def models() -> dict[str, Any]:
     return {
@@ -99,6 +140,13 @@ def engine_spec() -> dict[str, Any]:
         "mode": "music_generation",
         "max_concurrency": 1,
         "workers": 1,
+        "extensions": {
+            "creative": {
+                "quality_profiles": ["quality", "fast"],
+                "default_quality_profile": "quality",
+                "music_controls": ["bpm", "key_scale", "time_signature", "vocal_language", "vocal_type", "section_structure"],
+            }
+        },
         "endpoints": [
             {"method": "GET", "path": "/v1/models", "available": True},
             {"method": "POST", "path": "/v1/music/generations", "available": True, "async_supported": True},
@@ -119,6 +167,19 @@ async def create_generation(request: Request) -> dict[str, Any]:
     lyrics = str(source.get("lyrics", "")).strip()
     instrumental = bool(source.get("instrumental", False))
     duration = int(source.get("duration_seconds", 240))
+    options = _options(source)
+    profile = str(options.get("quality_profile", "quality")).strip().lower()
+    if profile not in {"quality", "fast"}:
+        raise _error(400, "invalid_quality_profile", "quality_profile must be quality or fast.")
+    bpm = _number(options, "bpm", 30, 300)
+    guidance = _number(options, "guidance_scale", 7, 9)
+    key_scale = str(options.get("key_scale", "")).strip()
+    time_signature = str(options.get("time_signature", "")).strip()
+    vocal_language = str(options.get("vocal_language", "")).strip()
+    if time_signature and time_signature not in {"2", "3", "4", "6"}:
+        raise _error(400, "invalid_time_signature", "time_signature must be 2, 3, 4, or 6.")
+    if len(key_scale) > 40 or len(vocal_language) > 16:
+        raise _error(400, "invalid_provider_options", "Music control text is too long.")
     if not prompt or len(prompt) > 4000:
         raise _error(400, "invalid_prompt", "prompt must contain 1-4000 characters.")
     if len(lyrics) > 20000:
@@ -129,15 +190,27 @@ async def create_generation(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_duration", "duration_seconds must be between 10 and 600.")
 
     native = {
-        "prompt": prompt,
+        "prompt": _described_prompt(prompt, options),
         "lyrics": "" if instrumental else lyrics,
         "thinking": True,
         "audio_format": "wav",
         "audio_duration": duration,
         "batch_size": 1,
-        "model": DIT_MODEL,
+        "model": QUALITY_MODEL if profile == "quality" else FAST_MODEL,
         "task_type": "text2music",
+        "inference_steps": 50 if profile == "quality" else 8,
+        "guidance_scale": guidance if guidance is not None else 7.0,
+        "shift": 1.0 if profile == "quality" else 3.0,
+        "infer_method": "ode",
     }
+    if bpm is not None:
+        native["bpm"] = int(bpm)
+    if key_scale:
+        native["key_scale"] = key_scale
+    if time_signature:
+        native["time_signature"] = time_signature
+    if vocal_language:
+        native["vocal_language"] = vocal_language
     if "seed" in source:
         native["seed"] = int(source["seed"])
         native["use_random_seed"] = False

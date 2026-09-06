@@ -84,17 +84,19 @@ spec:
                 fi
               }
               MAIN_SNAP="$(snap models--ACE-Step--Ace-Step1.5)"
+              XL_SFT_SNAP="$(snap models--ACE-Step--acestep-v15-xl-sft)"
               XL_TURBO_SNAP="$(snap models--ACE-Step--acestep-v15-xl-turbo)"
               LM_SNAP="$(snap models--ACE-Step--acestep-5Hz-lm-4B)"
-              [ -d "$MAIN_SNAP" ] && [ -d "$XL_TURBO_SNAP" ] && [ -d "$LM_SNAP" ]
+              [ -d "$MAIN_SNAP" ] && [ -d "$XL_SFT_SNAP" ] && [ -d "$XL_TURBO_SNAP" ] && [ -d "$LM_SNAP" ]
               for file in "$MAIN_SNAP"/* "$MAIN_SNAP"/.[!.]*; do
                 [ -e "$file" ] || continue
                 ln -sfn "$file" "/app/checkpoints/$(basename "$file")"
               done
+              ln -sfn "${XL_SFT_SNAP%/}" /app/checkpoints/acestep-v15-xl-sft
               ln -sfn "${XL_TURBO_SNAP%/}" /app/checkpoints/acestep-v15-xl-turbo
               ln -sfn "${LM_SNAP%/}" /app/checkpoints/acestep-5Hz-lm-4B
 
-              python3 - /app/checkpoints/acestep-v15-xl-turbo /app/checkpoints/acestep-5Hz-lm-4B <<'PY'
+              python3 - /app/checkpoints/acestep-v15-xl-sft /app/checkpoints/acestep-v15-xl-turbo /app/checkpoints/acestep-5Hz-lm-4B <<'PY'
               import json
               import pathlib
               import sys
@@ -130,11 +132,13 @@ spec:
             - name: MPLCONFIGDIR
               value: /app/data/runtime/.config/matplotlib
             - name: MODEL_NAME
-              value: {{ $oe.MODEL_NAME | default "ACE-Step/acestep-v15-xl-turbo" | quote }}
+              value: "ACE-Step/acestep-v15-xl-sft"
             - name: HF_ENDPOINT
               value: {{ $oe.HF_ENDPOINT | default "https://huggingface.co" | quote }}
             - name: ACESTEP_CONFIG_PATH
-              value: acestep-v15-xl-turbo
+              value: acestep-v15-xl-sft
+            - name: LM_CODE_MAX_ATTEMPTS
+              value: "2"
             - name: ACESTEP_INIT_SERVICE
               value: "true"
             - name: ACESTEP_INIT_LLM
@@ -207,6 +211,10 @@ spec:
             - name: stage-launcher
               mountPath: /opt/olares/music_adapter.py
               subPath: music_adapter.py
+              readOnly: true
+            - name: stage-launcher
+              mountPath: /opt/olares/lm_quality.py
+              subPath: lm_quality.py
               readOnly: true
       volumes:
         - name: checkpoints

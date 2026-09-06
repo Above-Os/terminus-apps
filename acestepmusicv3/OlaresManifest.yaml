@@ -3,11 +3,11 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: acestepmusicv3
-  description: ACE-Step 1.5 XL-Turbo and 4B LM behind the standard Olares Music API
+  description: ACE-Step 1.5 XL-SFT, XL-Turbo and 4B LM behind the standard Olares Music API
   icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
   appid: acestepmusicv3
-  version: '0.1.18'
-  title: ACE-Step Music XL-Turbo
+  version: '0.1.19'
+  title: ACE-Step Music XL-SFT
   categories:
   - Creativity
   - AI
@@ -51,14 +51,12 @@ permission:
   appCommon: true
 
 spec:
-  versionName: 'ACE-Step/acestep-v15-xl-turbo'
+  versionName: 'ACE-Step/acestep-v15-xl-sft'
   upgradeDescription: |
-    0.1.18: Replace the download-only and OpenResty topology with Model Console
-    `music_generation`, a canonical `/v1/music/*` adapter, strict readiness,
-    restart handoff, explicit task-lost/cancellation semantics, and an
-    in-place migration from the legacy chat-mode model card. Provide a stable
-    writable cache volumes for the numeric UID 1000 runtime, and a declared
-    internal shared API entrance for Router discovery.
+    0.1.19: Make XL-SFT the default quality profile with 50 DiT steps, CFG 7
+    and shift 1 while retaining XL-Turbo as an explicit fast profile. Add an
+    LM audio-code quality gate with deterministic re-sampling, and accept the
+    advanced music controls forwarded by Router provider_options.
   featuredImage: https://app.cdn.olares.com/appstore/acestep/1.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/acestep/1.webp
@@ -67,8 +65,8 @@ spec:
 
   fullDescription: |
     Olares model application for ACE-Step 1.5 on a single 24 GiB NVIDIA GPU.
-    It serves the standard asynchronous Music API with the XL-Turbo 4B DiT
-    and 5Hz 4B language model. The runtime serializes jobs and unloads the
+    It serves the standard asynchronous Music API with XL-SFT as the default,
+    XL-Turbo as an optional fast profile, and the 5Hz 4B language model. The runtime serializes jobs and unloads the
     language model before diffusion so four-minute generation has enough GPU
     headroom. Models are downloaded once into Olares App Common storage; audio
     and API temporary files persist in App Data.
@@ -102,7 +100,7 @@ spec:
     limitedCpu: "12"
     requiredMemory: 32Gi
     limitedMemory: 72Gi
-    requiredDisk: 36Gi
+    requiredDisk: 56Gi
     limitedDisk: 100Gi
     requiredGPUMemory: 20Gi
     limitedGPUMemory: 24Gi
@@ -117,14 +115,14 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
+    default: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-sft --revision d06de46b4622f781cf07f4a013a67d591ca52819,hf://ACE-Step/acestep-v15-xl-turbo --revision d4a0b288b83ebb7e25a8c0b32c573c22e134e8ee,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
     regex: "^hf://"
   - envName: MODEL_NAME
     required: true
     type: string
     editable: false
     applyOnChange: false
-    default: "ACE-Step/acestep-v15-xl-turbo"
+    default: "ACE-Step/acestep-v15-xl-sft"
   - envName: MODEL_MODE
     required: true
     type: string
