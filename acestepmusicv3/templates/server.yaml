@@ -113,6 +113,15 @@ spec:
               }
               supervise_engine run_music
           env:
+            # The upstream image runs as a numeric UID without an /etc/passwd
+            # entry. PyTorch 3.x asks getpass for a cache-directory username,
+            # so provide the standard identity variables explicitly.
+            - name: USER
+              value: app
+            - name: LOGNAME
+              value: app
+            - name: HOME
+              value: /app
             - name: MODEL_NAME
               value: {{ $oe.MODEL_NAME | default "ACE-Step/acestep-v15-xl-turbo" | quote }}
             - name: HF_ENDPOINT
