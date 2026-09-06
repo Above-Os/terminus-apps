@@ -81,6 +81,66 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
 
+    def test_quality_is_default_and_fast_is_explicit(self):
+        payloads = []
+
+        def native(path, payload=None):
+            self.assertEqual(path, "/release_task")
+            payloads.append(payload)
+            return {"code": 200, "data": {"task_id": f"task-{len(payloads)}"}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            quality = self.client.post(
+                "/v1/music/generations",
+                json={
+                    "prompt": "Mandarin pop",
+                    "duration_seconds": 180,
+                    "provider_options": {
+                        "bpm": 92,
+                        "key_scale": "D major",
+                        "time_signature": "4",
+                        "vocal_language": "zh",
+                        "vocal_type": "warm female lead",
+                        "section_structure": "intro, verse, chorus, bridge, chorus, outro",
+                    },
+                },
+            )
+            fast = self.client.post(
+                "/v1/music/generations",
+                json={"prompt": "pop", "provider_options": {"quality_profile": "fast"}},
+            )
+
+        self.assertEqual(quality.status_code, 202)
+        self.assertEqual(payloads[0]["model"], "acestep-v15-xl-sft")
+        self.assertEqual(payloads[0]["inference_steps"], 50)
+        self.assertEqual(payloads[0]["guidance_scale"], 7.0)
+        self.assertEqual(payloads[0]["shift"], 1.0)
+        self.assertEqual(payloads[0]["bpm"], 92)
+        self.assertIn("Vocal character: warm female lead", payloads[0]["prompt"])
+        self.assertEqual(fast.status_code, 202)
+        self.assertEqual(payloads[1]["model"], "acestep-v15-xl-turbo")
+        self.assertEqual(payloads[1]["inference_steps"], 8)
+
+    def test_rejects_invalid_quality_controls(self):
+        profile = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"quality_profile": "ultra"}},
+        )
+        guidance = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"guidance_scale": 12}},
+        )
+        unknown = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"magic": True}},
+        )
+        self.assertEqual(profile.status_code, 400)
+        self.assertEqual(profile.json()["error"]["code"], "invalid_quality_profile")
+        self.assertEqual(guidance.status_code, 400)
+        self.assertEqual(guidance.json()["error"]["code"], "invalid_guidance_scale")
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(unknown.json()["error"]["code"], "unknown_provider_option")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,12 +6,15 @@ metadata:
 data:
   music_adapter.py: |
 {{ .Files.Get "files/music_adapter.py" | indent 4 }}
+  lm_quality.py: |
+{{ .Files.Get "files/lm_quality.py" | indent 4 }}
   staged_api.py: |
     """Olares 24 GiB stage barrier for the official ACE-Step API."""
     import atexit
     import functools
     import gc
     import os
+    from lm_quality import assess_audio_codes, retry_seeds
 
     import torch
 
@@ -73,9 +76,41 @@ data:
 
     LLMHandler.unload = _unload_lm_completely
 
+    _generate_with_stop_condition = LLMHandler.generate_with_stop_condition
+
+
+    def _generate_with_audio_code_gate(self, *args, **kwargs):
+        """Reject truncated or collapsed 5 Hz plans before expensive DiT."""
+        max_attempts = max(1, int(os.getenv("LM_CODE_MAX_ATTEMPTS", "2")))
+        current = dict(kwargs)
+        for attempt in range(max_attempts):
+            result = _generate_with_stop_condition(self, *args, **current)
+            assessment = assess_audio_codes(
+                result,
+                current.get("target_duration"),
+            )
+            print(
+                f"[olares-quality] LM audio codes attempt={attempt + 1} "
+                f"accepted={assessment.accepted} {assessment.summary}",
+                flush=True,
+            )
+            if assessment.accepted or not result.get("success", False):
+                return result
+            current["seeds"] = retry_seeds(current.get("seeds"), attempt + 1)
+            current["temperature"] = min(
+                1.0,
+                max(0.85, float(current.get("temperature") or 0.85) + 0.05),
+            )
+        result["success"] = False
+        result["error"] = "LM audio-code quality gate rejected all samples"
+        return result
+
+
+    LLMHandler.generate_with_stop_condition = _generate_with_audio_code_gate
+
     # The upstream legacy API still defaults every DiT variant to 8 steps and
-    # shift 3.0. Those are correct for the XL-Turbo model hosted by this chart,
-    # while requests selecting an available SFT model need safer defaults.
+    # shift 3.0. Those are correct for XL-Turbo, while XL-SFT is the default
+    # quality profile and requires full base-model sampling.
     import acestep.api.http.release_task_request_builder as request_builder
 
     _build_generate_music_request = request_builder.build_generate_music_request
@@ -87,7 +122,7 @@ data:
             parser = args[0]
         request = _build_generate_music_request(*args, **kwargs)
         model_name = request.model or os.getenv(
-            "ACESTEP_CONFIG_PATH", "acestep-v15-xl-turbo"
+            "ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft"
         )
         is_sft = "sft" in model_name.lower()
         if is_sft and request.inference_steps < 30:
