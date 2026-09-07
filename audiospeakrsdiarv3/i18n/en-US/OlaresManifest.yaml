@@ -21,8 +21,25 @@ spec:
     - Model name: `speakrs/speakrs-community-1`
     - Weights: `hf://avencera/speakrs-models`
     - Capability: `diar`
-    - Execution mode: `cuda`
+    - Required GPU memory: `3Gi`
     - Engine: speakrs on ONNX Runtime CUDA
+
+    **Accuracy against speed**
+
+    The `EXECUTION_MODE` setting picks one, and changing it restarts the engine. `cuda`
+    matches pyannote's accuracy and runs about 1.8x faster than it. `cuda-fast` runs about
+    3.6x faster and costs 0.3-1.0 DER points, the cost growing with how densely speakers
+    overlap. Both modes load the same weights -- the mode changes how the pipeline is run,
+    not what it runs -- so switching re-downloads nothing and the model name is the same
+    either way. This setting is where a run's mode is read.
+
+    **Tuning**
+
+    A caller may set `exclusive`, `min_duration_off`, `min_duration_on` and
+    `clustering_threshold` per request on `POST /v1/audio/diarization`; `ENGINE_ARGS` sets
+    the same four as this deployment's defaults. This engine derives the speaker count from
+    its clustering and cannot be constrained to one, so `num_speakers`, `min_speakers` and
+    `max_speakers` are refused rather than accepted and ignored.
 
     **How it runs**
 
