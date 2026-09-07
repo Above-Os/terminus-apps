@@ -20,8 +20,23 @@ spec:
     - 模型名：`speakrs/speakrs-community-1`
     - 权重：`hf://avencera/speakrs-models`
     - 能力：`diar`
-    - 执行模式：`cuda`
+    - 所需显存：`3Gi`
     - 引擎：speakrs on ONNX Runtime CUDA
+
+    **精度与速度**
+
+    由 `EXECUTION_MODE` 这一项选择，改动后引擎会重启。`cuda` 的精度与 pyannote 持平，
+    速度约为它的 1.8 倍；`cuda-fast` 速度约为 3.6 倍，代价是 0.3 到 1.0 个 DER 点，
+    说话人重叠越密代价越大。两种模式加载的是同一份权重——模式改变的是流水线怎么跑，
+    不是跑的什么——所以切换模式不会重新下载，模型名也两边相同。某次运行用了哪种模式，
+    要从这一项设置里读。
+
+    **可调参数**
+
+    调用方可在 `POST /v1/audio/diarization` 上按次设置 `exclusive`、`min_duration_off`、
+    `min_duration_on` 和 `clustering_threshold`；`ENGINE_ARGS` 把这四项设为本次部署的默认值。
+    本引擎从聚类中自行推断说话人数，无法被指定，因此 `num_speakers`、`min_speakers` 和
+    `max_speakers` 会被明确拒绝，而不是接受后忽略。
 
     **工作方式**
 
