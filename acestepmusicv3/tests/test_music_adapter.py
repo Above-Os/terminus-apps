@@ -91,6 +91,8 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
         self.assertEqual(spec["extensions"]["music"]["default_production_profile"], "clean")
         self.assertEqual(spec["extensions"]["music"]["default_caption_mode"], "preserve")
+        self.assertEqual(spec["extensions"]["music"]["vocal_languages"], list(adapter.VOCAL_LANGUAGES))
+        self.assertNotIn("unknown", spec["extensions"]["music"]["vocal_languages"])
 
     def test_quality_profiles_use_xl_sft_without_repeating_structure_in_caption(self):
         payloads = []
@@ -209,6 +211,39 @@ class MusicAdapterContractTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "invalid_provider_options")
+
+    def test_accepts_all_official_vocal_languages_and_rejects_unknown_codes(self):
+        payloads = []
+
+        def native(path, payload=None):
+            payloads.append(payload)
+            return {"code": 200, "data": {"task_id": f"language-{len(payloads)}"}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            for language in adapter.VOCAL_LANGUAGES:
+                response = self.client.post(
+                    "/v1/music/generations",
+                    json={"prompt": "clean studio song", "provider_options": {"vocal_language": language}},
+                )
+                self.assertEqual(response.status_code, 202, language)
+                self.assertEqual(payloads[-1]["vocal_language"], language)
+
+        invalid = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"vocal_language": "xx"}},
+        )
+        vocal_unknown = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"vocal_language": "unknown"}},
+        )
+        self.assertEqual(invalid.json()["error"]["code"], "invalid_vocal_language")
+        self.assertEqual(vocal_unknown.json()["error"]["code"], "invalid_vocal_language")
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            instrumental_unknown = self.client.post(
+                "/v1/music/generations",
+                json={"prompt": "instrumental score", "instrumental": True, "provider_options": {"vocal_language": "unknown"}},
+            )
+        self.assertEqual(instrumental_unknown.status_code, 202)
 
     def test_repaint_decodes_audio_and_maps_native_range(self):
         payloads = []
