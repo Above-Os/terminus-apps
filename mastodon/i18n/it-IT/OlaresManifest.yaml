@@ -23,8 +23,28 @@ spec:
     OAuth2 e una REST API semplice
     - Mastodon funge da provider OAuth2, consentendo alle app di terze parti di utilizzare le API REST e Streaming. Ne risulta un ricco ecosistema di app con moltissime possibilità.
   upgradeDescription: |
-    Archiviazione: i volumi persistenti sono stati spostati da `appCache` a `appData`. Al primo avvio dopo l'aggiornamento, gli initContainers copiano i contenuti precedenti di appCache in appData se la destinazione è vuota (marcatore: `.migration_from_appcache_done`). I vecchi dati appCache vengono lasciati intatti per consentire il rollback.
+    Rilascio upstream: [Mastodon 4.7.1](https://github.com/mastodon/mastodon/releases/tag/v4.7.1)
 
-    Rimossa la precedente diramazione dei percorsi appCache per `sysVersion >= 1.12.3`; la versione minima di Olares è ora 1.12.6.
+    **Modifica incompatibile**
 
-    I dati persistenti di Redis ed Elasticsearch sono stati migrati da appCache ad appData.
+    - Gli utenti che non hanno effettuato l'accesso da Mastodon 4.3 verranno disconnessi.
+    - Le migrazioni del database da 4.5 possono richiedere molto tempo sulle istanze grandi. Conserva un backup prima dell'aggiornamento.
+    - Se aggiorni da 4.5, consulta anche le note di [4.6.0](https://github.com/mastodon/mastodon/releases/tag/v4.6.0) e [4.7.0](https://github.com/mastodon/mastodon/releases/tag/v4.7.0).
+
+    **Novità**
+
+    - Gli account remoti che cambiano handle vengono rinominati invece di essere duplicati.
+    - I post in uscita con preview card includono un allegato Link.
+    - L'admin include log di audit degli hashtag e un campo di ricerca sui blocchi IP.
+
+    **Correzioni**
+
+    - Bypass dell'autenticazione con password nella 2FA per account LDAP, PAM e SSO.
+    - Denial of service nell'elaborazione di attività JSON-LD patologiche.
+    - Gli account dello staff disattivati potevano ancora usare l'API di amministrazione.
+
+    **Modifiche di distribuzione Olares**
+
+    - Aprire la home dell'app dall'ingresso Olares non restituisce più 500.
+    - Lo streaming in tempo reale è abilitato. In precedenza era disattivato.
+    - L'URL di health dello streaming non reindirizza più a un indirizzo `https:/…` rotto.

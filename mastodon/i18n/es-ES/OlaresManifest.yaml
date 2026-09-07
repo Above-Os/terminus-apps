@@ -23,8 +23,28 @@ spec:
     OAuth2 y una REST API sencilla
     - Mastodon actúa como proveedor de OAuth2, por lo que las aplicaciones de terceros pueden usar las API REST y Streaming. Esto genera un amplio ecosistema de aplicaciones con muchas opciones.
   upgradeDescription: |
-    Almacenamiento: los volúmenes persistentes se trasladaron de `appCache` a `appData`. En el primer inicio tras la actualización, los initContainers copian el contenido antiguo de appCache a appData si el destino está vacío (marcador: `.migration_from_appcache_done`). Los datos antiguos de appCache se conservan intactos para permitir una reversión.
+    Versión upstream: [Mastodon 4.7.1](https://github.com/mastodon/mastodon/releases/tag/v4.7.1)
 
-    Se elimina la bifurcación antigua de rutas de appCache para `sysVersion >= 1.12.3`; la versión mínima de Olares ahora es 1.12.6.
+    **Cambio incompatible**
 
-    Los datos persistentes de Redis y Elasticsearch se migraron de appCache a appData.
+    - Los usuarios que no hayan iniciado sesión desde Mastodon 4.3 se desconectarán.
+    - Las migraciones de base de datos desde 4.5 pueden tardar en instancias grandes. Conserve una copia de la base antes de actualizar.
+    - Si actualiza desde 4.5, revise también las notas de [4.6.0](https://github.com/mastodon/mastodon/releases/tag/v4.6.0) y [4.7.0](https://github.com/mastodon/mastodon/releases/tag/v4.7.0).
+
+    **Novedades**
+
+    - Las cuentas remotas que cambian de handle se renombran en lugar de duplicarse.
+    - Las publicaciones salientes con tarjeta de vista previa incluyen un adjunto Link.
+    - La administración incluye registros de auditoría de hashtags y un campo de búsqueda en los bloqueos de IP.
+
+    **Correcciones**
+
+    - Omisión de la autenticación por contraseña en 2FA para cuentas LDAP, PAM y SSO.
+    - Denegación de servicio al procesar actividades JSON-LD patológicas.
+    - Las cuentas de personal desactivadas aún podían usar la API de administración.
+
+    **Cambios de despliegue en Olares**
+
+    - Abrir la página de inicio de la app por la entrada de Olares ya no devuelve 500.
+    - El streaming en tiempo real está activado. Antes estaba desactivado.
+    - La URL de salud de streaming ya no redirige a una dirección `https:/…` rota.
