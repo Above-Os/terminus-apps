@@ -223,6 +223,54 @@ data:
 
     job_llm_preparation.ensure_llm_ready_for_request = _ensure_llm_ready_after_stage
 
+    # Only the generation path is routed through ensure_llm_ready_for_request.
+    # /format_input and /v1/create_sample reach the handler directly, so once a
+    # job has crossed the stage barrier they answer "LLM not initialized" for
+    # the rest of the process lifetime.
+    import acestep.api.route_setup as route_setup
+
+    _register_sample_format_routes = route_setup.register_sample_format_routes
+
+
+    class _TextRouteRequest:
+        """The LM overrides the readiness helper reads off a job request.
+
+        A text-only route has no job, so both are absent and the helper falls
+        back to ACESTEP_LM_MODEL_PATH and ACESTEP_LM_BACKEND.
+        """
+
+        lm_model_path = None
+        lm_backend = None
+
+
+    def _register_sample_format_routes_with_rearm(**kwargs):
+        app = kwargs["app"]
+
+        def _with_rearm(call):
+            @functools.wraps(call)
+            def _wrapped(*call_args, **call_kwargs):
+                handler = getattr(app.state, "llm_handler", None)
+                if handler is not None:
+                    _ensure_llm_ready_after_stage(
+                        app_state=app.state,
+                        llm_handler=handler,
+                        req=_TextRouteRequest(),
+                        get_project_root=kwargs["get_project_root"],
+                        get_model_name=kwargs["get_model_name"],
+                        ensure_model_downloaded=kwargs["ensure_model_downloaded"],
+                        env_bool=kwargs["env_bool"],
+                    )
+                return call(*call_args, **call_kwargs)
+
+            return _wrapped
+
+        kwargs["format_sample"] = _with_rearm(kwargs["format_sample"])
+        kwargs["create_sample_fn"] = _with_rearm(kwargs["create_sample_fn"])
+        return _register_sample_format_routes(**kwargs)
+
+
+    route_setup.register_sample_format_routes = _register_sample_format_routes_with_rearm
+
     from acestep.api_server import main
 
     if __name__ == "__main__":
