@@ -23,8 +23,28 @@ spec:
     OAuth2 et une REST API simple
     - Mastodon agit comme fournisseur OAuth2, ce qui permet aux applications tierces d'utiliser les API REST et Streaming. Il en résulte un riche écosystème d'applications offrant de nombreux choix !
   upgradeDescription: |
-    Stockage : les volumes durables ont été déplacés de `appCache` vers `appData`. Au premier démarrage après la mise à niveau, les initContainers copient l'ancien contenu de appCache vers appData si la destination est vide (marqueur : `.migration_from_appcache_done`). Les anciennes données appCache restent intactes pour permettre un retour en arrière.
+    Version amont : [Mastodon 4.7.1](https://github.com/mastodon/mastodon/releases/tag/v4.7.1)
 
-    Suppression de l'ancien branchement des chemins appCache pour `sysVersion >= 1.12.3` ; la version minimale d'Olares est désormais 1.12.6.
+    **Changement cassant**
 
-    Les données durables de Redis et Elasticsearch ont été migrées de appCache vers appData.
+    - Les utilisateurs qui ne se sont pas connectés depuis Mastodon 4.3 seront déconnectés.
+    - Les migrations de base depuis 4.5 peuvent être longues sur les grandes instances. Conservez une sauvegarde avant la mise à jour.
+    - Si vous mettez à jour depuis 4.5, consultez aussi les notes [4.6.0](https://github.com/mastodon/mastodon/releases/tag/v4.6.0) et [4.7.0](https://github.com/mastodon/mastodon/releases/tag/v4.7.0).
+
+    **Nouveautés**
+
+    - Les comptes distants qui changent de handle sont renommés au lieu d'être dupliqués.
+    - Les publications sortantes avec une carte d'aperçu incluent une pièce jointe Link.
+    - L'admin ajoute des journaux d'audit des hashtags et un champ de recherche sur les blocages IP.
+
+    **Corrections**
+
+    - Contournement de l'authentification par mot de passe dans la 2FA pour les comptes LDAP, PAM et SSO.
+    - Déni de service lors du traitement d'activités JSON-LD pathologiques.
+    - Les comptes du personnel désactivés pouvaient encore utiliser l'API d'administration.
+
+    **Changements de déploiement Olares**
+
+    - L'ouverture de la page d'accueil via l'entrée Olares ne renvoie plus une erreur 500.
+    - Le streaming en temps réel est activé. Il était auparavant désactivé.
+    - L'URL de santé du streaming ne redirige plus vers une adresse `https:/…` cassée.
