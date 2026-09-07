@@ -4,10 +4,10 @@ apiVersion: 'v3'
 metadata:
   name: audiobreezettsv3
   icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
-  description: "Breeze TTS 2: one model for built-in voices, cloning and design."
+  description: "A text-to-speech model with built-in, cloned, and description-based voices"
   appid: audiobreezettsv3
   title: Breeze TTS 2
-  version: '1.0.5'
+  version: '1.0.9'
   categories:
     - AI
     - models
@@ -40,45 +40,26 @@ spec:
   onlyAdmin: true
   versionName: 'BreezeBlue/Breeze-TTS-2'
   fullDescription: |
-    **Model Overview**
-    Breeze TTS 2 is one 3B checkpoint that lists voices, clones from a reference plus its
-    exact transcript, designs a voice from a description, and speaks. Chinese and English.
-    CUDA only (amd64 + arm64).
+    Breeze TTS 2 turns written Chinese or English text into spoken audio. You can use a built-in voice, copy a voice from a reference recording, or create a new voice by describing how it should sound.
 
-    **Configuration**
-    - Model: `BreezeBlue/Breeze-TTS-2`
-    - Source: `hf://BreezeBlue/Breeze-TTS-2`
-    - Capabilities: `tts`, `tts_clone`, `tts_design`
-    - Required GPU memory: `12Gi`
-    - Engine: official PyTorch in-process (`breeze_infer`)
-    - License: code Apache-2.0; weights non-commercial
+    **Key features**
 
-    **Voice ids live on this instance**
-    ElevenLabs shape: `GET /v1/voices`, `POST /v1/voices/add`, `POST /v1/text-to-voice/design`
-    then `POST /v1/text-to-voice`, `POST /v1/text-to-speech/{voice_id}`. Twenty-five built-in
-    Chinese and English voices are listed on boot; each is frozen under appData the first
-    time it is spoken. Clone needs the exact transcript of the reference.
+    - Generate speech in Chinese and English.
+    - Choose from the built-in voices available in this app.
+    - Clone a voice from clean reference audio and its matching transcript.
+    - Create a voice from a natural-language description without reference audio.
+    - Save and reuse cloned or created voices on the same Olares installation.
 
-    **How It Works**
-    First, Model Console (llm-init) downloads the model and gets it ready, then the
-    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
-    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+    **Usage notes**
 
-    **Endpoints**
-    - `GET /v1/voices` — premade + cloned + designed voices on this instance
-    - `POST /v1/voices/add` — multipart `name` + `files[]` + transcript
-    - `POST /v1/text-to-voice/design` then `POST /v1/text-to-voice` — preview, then persist
-    - `POST /v1/text-to-speech/{voice_id}` — ElevenLabs JSON (`text`); `/stream` streams the audio
+    Breeze TTS 2 model weights, derivative models, and self-hosted outputs are licensed for research and non-commercial use only. Users must have the necessary rights and consent for reference recordings, cloned voices, and generated audio.
 
-    **Stack**
-    - **audio engine**: Breeze TTS 2 in-process (port 8000); self-reports `/v1/models` + `/metrics`
-    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
-
-    **Model Storage**
-    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
-    Frozen voices are stored at `appData/voices`.
+    See the [Breeze TTS 2 model card](https://huggingface.co/BreezeBlue/Breeze-TTS-2) for license details and responsible-use requirements.
 
   upgradeDescription: |
+    v1.0.9: Engine v1.1.8 publishes exact completed stream duration in history metadata; Model Console v1.7.6 documents and transparently proxies the field.
+    v1.0.8: Publish the supported TTS speed range (0.25–4.0, default 1.0) in the model card.
+    v1.0.7: Engine v1.1.7 — ElevenLabs voice settings, resumable reads, and use_speaker_boost now carries voice context across slices.
     v1.0.4: Engine v1.1.6 — language-aware pause between slices; last slice kept intact. llm-init v1.7.1.
     v1.0.3: Engine v1.1.5 — 25 built-in zh/en voices, clone/design gates, no OpenAI aliases.
     v1.0.2: Advertise `tts_design` on the model card (`MODEL_SUPPORTS`) and pin the engine to v1.1.4.
@@ -176,6 +157,27 @@ envs:
     - title: TTS design (build a voice from a written description)
       value: tts_design
     description: "One 3B checkpoint covers all three. `tts` mounts list/speak; `tts_design` is advertised on the model card for `/v1/text-to-voice/*`; `tts_clone` mounts POST /v1/voices/add."
+  - envName: TTS_SPEED_MIN
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "0.25"
+    description: "Minimum synthesis speed published in the model card."
+  - envName: TTS_SPEED_DEFAULT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "1.0"
+    description: "Normal synthesis speed published in the model card."
+  - envName: TTS_SPEED_MAX
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4.0"
+    description: "Maximum synthesis speed published in the model card."
   - envName: REQUIRED_GPU_MEMORY
     required: true
     type: string
@@ -237,8 +239,10 @@ envs:
       string. --cfg-scale clone CFG (official 1). --design-cfg design/direction CFG (official 4).
       --ref-min-seconds / --ref-max-seconds / --ref-max-mb reject at /v1/voices/add (0 = off).
       --design-min-chars / --design-max-chars reject at design (0 = off). --max-new-tokens and
-      --max-seq-len are official infer.py windows. Also: --seed, --voice-dir, --preview-text,
-      --attn-implementation, --fast-all."
+      --max-seq-len are official infer.py windows, and they also set how much text one slice
+      can hold, so lowering them makes the slices shorter. Also: --seed, --voice-dir,
+      --preview-text, --attn-implementation. Do not pass --fast-all: the CUDA Graph path needs
+      a C compiler this image does not carry, so the engine fails to load."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true

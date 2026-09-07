@@ -1,0 +1,151 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llminit
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    io.kompose.service: llminit
+spec:
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: llminit
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: llminit
+      annotations:
+        app.olares.com/chart-version: {{ .Chart.Version | quote }}
+    spec:
+      restartPolicy: Always
+      securityContext:
+        fsGroup: 1000
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: {{ printf "%s/huggingface" .Values.userspace.appCommon | quote }}
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: {{ $runStateHostPath | quote }}
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              card=/run/llm-init/model-spec.json
+              if [ -f "$card" ] && grep -Eq '"mode"[[:space:]]*:[[:space:]]*"chat"|acestep-v15-xl-turbo' "$card"; then
+                echo "[model-card-migration] replacing legacy/Turbo ACE-Step card with XL-SFT"
+                rm -f "$card"
+              fi
+              chown 1000:1000 /cache/hf/hub /run/llm-init
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: llm-init
+          image: docker.io/beclab/llm-init:v1.7.3
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          env:
+            - name: ENGINE_KIND
+              value: music
+            - name: MODEL_NAME
+              value: "ACE-Step/acestep-v15-xl-sft"
+            - name: MODEL_MODE
+              value: {{ $oe.MODEL_MODE | default "music_generation" | quote }}
+            - name: MODEL_SOURCE
+              value: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-sft --revision d06de46b4622f781cf07f4a013a67d591ca52819,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
+            - name: HF_ENDPOINT
+              value: {{ $oe.HF_ENDPOINT | default "https://huggingface.co" | quote }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+{{- end }}
+            - name: HF_ENABLE_XET
+              value: "true"
+            - name: HF_HUB_DOWNLOAD_TIMEOUT
+              value: "300"
+            - name: HF_HUB_ETAG_TIMEOUT
+              value: "30"
+            - name: MAX_CONCURRENT_DOWNLOADS
+              value: "1"
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_FORMAT
+              value: json
+          ports:
+            - name: http
+              containerPort: 8090
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  selector:
+    io.kompose.service: llminit
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  selector:
+    io.kompose.service: llminit
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090

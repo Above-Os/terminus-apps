@@ -1,0 +1,177 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: acestepmusicv3
+  description: ACE-Step 1.5 XL-SFT and 4B LM behind the standard Olares Music API
+  icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
+  appid: acestepmusicv3
+  version: '0.1.28'
+  title: ACE-Step Music XL-SFT
+  categories:
+  - Creativity
+  - AI
+  - models
+  tags:
+  - text-to-audio
+
+entrances:
+  - name: modelconsole
+    port: 8090
+    host: download-svc
+    title: ACE-Step Model Console
+    icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
+    authLevel: internal
+    openMethod: window
+
+sharedEntrances:
+  - name: api
+    # Model applications declare 0 here; in-cluster resolution uses the
+    # sharedentrances-api Service's HTTP port 80.
+    port: 0
+    host: sharedentrances-api
+    title: ACE-Step Music API
+    icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
+    authLevel: internal
+    invisible: true
+
+# Declares every workload's replica count (v3 schema). Keys MUST match the
+# rendered Deployment metadata.name and values.yaml workloads.<name>:
+#   acestepmusicv3 — ACE-Step 1.5 staged music engine
+#   llminit        — Model Console, downloader, and standard Music API proxy
+workloadReplicas:
+  acestepmusicv3: 1
+  llminit: 1
+
+permission:
+  appData: true
+  appCache: true   # llm-init sentinel/run-state under appCache/llm-init-run/<release>
+  # ACE-Step HF models live in the shared cross-app App Common store
+  # (appCommon/huggingface, mounted at the fixed /cache/hf/hub container path).
+  appCommon: true
+
+spec:
+  versionName: 'ACE-Step/acestep-v15-xl-sft'
+  upgradeDescription: |
+    0.1.28 declares and validates the complete ACE-Step vocal language catalog.
+    0.1.27 preserves valid full-length ACE Captions: optional vocal and clean
+    production hints are appended only when they fit the 512-character model
+    limit. Vocal type input is now validated consistently at 120 characters.
+    0.1.26 adds clean and textured production profiles, preserves complete
+    Studio captions without 4B LM rewriting, applies a clean-production LM
+    negative prompt, and aligns high-quality XL-SFT inference with the official
+    64-step, CFG 8, shift 3, ADG recommendation. Turbo remains disabled.
+    0.1.25: Upgrade Model Console to llm-init 1.7.3 so authoritative music
+    engine capabilities, including repaint, are projected to Router.
+    0.1.24: Complete the v1 engine-spec capability contract so Model Console
+    can publish generate and repaint operations to Router.
+    0.1.23: Add an XL-SFT high-quality profile with 64 diffusion steps and
+    ADG, enforce ACE-Step's 512-character Caption and 4096-character Lyrics
+    limits, and expose real source-audio interval repainting. Song structure
+    remains in Lyrics instead of being duplicated into Caption.
+    0.1.22: Disable DCW for XL-SFT. The bundled pre-#1273 ACE-Step runtime
+    otherwise produces structured noise for every SFT generation.
+    0.1.21: Keep the 24 GiB runtime on XL-SFT only. Remove the Turbo profile,
+    download and runtime-switch path so every accepted request uses the full
+    50-step quality model.
+    0.1.20: Enable ACE-Step's serialized on-demand DiT model swap so the fast
+    profile really loads XL-Turbo instead of silently falling back to XL-SFT.
+    0.1.19: Make XL-SFT the default quality profile with 50 DiT steps, CFG 7
+    and shift 1 while retaining XL-Turbo as an explicit fast profile. Add an
+    LM audio-code quality gate with deterministic re-sampling, and accept the
+    advanced music controls forwarded by Router provider_options.
+  featuredImage: https://app.cdn.olares.com/appstore/acestep/1.webp
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/acestep/1.webp
+    - https://app.cdn.olares.com/appstore/acestep/2.webp
+    - https://app.cdn.olares.com/appstore/acestep/3.webp
+
+  fullDescription: |
+    Olares model application for ACE-Step 1.5 on a single 24 GiB NVIDIA GPU.
+    It serves the standard asynchronous Music API with XL-SFT and the 5Hz 4B
+    language model. The runtime serializes jobs and unloads the
+    language model before diffusion so four-minute generation has enough GPU
+    headroom. Models are downloaded once into Olares App Common storage; audio
+    and API temporary files persist in App Data.
+
+    Model Console is the only public and Router-facing endpoint. It downloads and
+    verifies all three pinned repositories, reports download/loading/ready state,
+    exposes the model card, and proxies `/v1/music/generations`. ACE-Step's native
+    `/release_task`, `/query_result`, and file paths remain internal.
+
+  developer: ace-step
+  website: https://acemusic.ai/
+  sourceCode: https://github.com/ace-step/ACE-Step-1.5
+  submitter: Olares
+  locale:
+    - de-DE
+    - en-US
+    - es-ES
+    - fr-FR
+    - it-IT
+    - ja-JP
+    - zh-CN
+  doc: https://github.com/ace-step/ACE-Step-1.5
+  license:
+    - text: MIT License
+      url: https://github.com/ace-step/ACE-Step-1.5?tab=MIT-1-ov-file
+
+  accelerator:
+  # nvidia — discrete GPU; GPU memory via nvidia.com/gpumem. amd64 only.
+  - mode: nvidia
+    requiredCpu: "2"
+    limitedCpu: "12"
+    requiredMemory: 32Gi
+    limitedMemory: 72Gi
+    requiredDisk: 40Gi
+    limitedDisk: 100Gi
+    requiredGPUMemory: 20Gi
+    limitedGPUMemory: 24Gi
+
+  supportArch:
+    - amd64
+  onlyAdmin: true
+
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-sft --revision d06de46b4622f781cf07f4a013a67d591ca52819,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "ACE-Step/acestep-v15-xl-sft"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "music_generation"
+    options:
+      - title: Music Generation
+        value: music_generation
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: HF_ENDPOINT
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+
+options:
+  shared: true
+  LLMGatewaySupported: true
+  templateOnly: false
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      type: system
+      version: '>=1.12.6-0'

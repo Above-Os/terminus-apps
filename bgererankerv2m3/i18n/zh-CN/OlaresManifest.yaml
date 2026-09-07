@@ -1,0 +1,36 @@
+metadata:
+  title: BGE-Reranker-v2-m3
+  description: "基于 rerank-server 的 BGE-Reranker-v2-m3 交叉编码重排序服务（OpenVINO / ONNX）"
+
+spec:
+  fullDescription: |
+    **BGE-Reranker-v2-m3** 交叉编码重排序服务，由 rerank-server 提供推理。通过 llm-init 在 8090 端口代理 OpenAI 兼容的 `POST /v1/rerank` 与 `GET /v1/models`。
+
+    **加速器模式**
+    | Olares 模式 | 镜像 | 后端 | `ACCELERATOR` |
+    |-------------|------|------|---------------|
+    | `intel` | `rerank-server:v0.1.0-ov-intel-amd64` | OpenVINO IR | `intel-gpu` |
+    | `cpu` | `rerank-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `rerank-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `nvidia` |
+    | `nvidia-gb10` | `rerank-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `nvidia-gb10` |
+
+    **命名约定**
+    - llm-init：`MODEL_NAME` = `MODEL_ID` = `bge-reranker-v2-m3`
+    - rerank-server：仅 `MODEL_ID`
+
+    **模型下载**
+    首次启动时，llm-init 从统一 Hugging Face 仓库下载到 App Common 缓存：
+    - [beclab/bge-reranker-v2-m3](https://huggingface.co/beclab/bge-reranker-v2-m3)
+    - `intel` 模式：仅 `openvino/` 子目录（约 4.3 GiB）
+    - 其他模式：仅 `onnx/` 子目录（约 2.2 GiB）
+
+    **资源画像（2026-09-07 实测）**
+    | 模式 | 引擎内存（稳态） | 显存 | 说明 |
+    |------|------------------|------|------|
+    | cpu | ~1.4 GiB | — | 推理约 1 核 |
+    | nvidia | ~0.7 GiB | ~3.2 GiB | 延迟 ~10 ms |
+    | intel | 推理 ~0.75 GiB；编译峰值 ~3.2 GiB | iGPU 共享内存 | 首次 compile ~3 min |
+
+    **技术栈**
+    - **rerank-server**（内部 8080）：Rust 重排序推理。
+    - **llm-init**（`ENGINE_KIND=rerank`，8090）：模型下载、进度 UI 与 API 代理。
