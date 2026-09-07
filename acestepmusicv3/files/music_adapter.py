@@ -37,6 +37,13 @@ CLEAN_NEGATIVE_PROMPT = (
     "background hiss, static, vinyl crackle, tape noise, lo-fi noise, noisy room, "
     "muddy wash, harsh sibilance, brittle cymbals, distorted vocal"
 )
+VOCAL_LANGUAGES = (
+    "ar", "az", "bg", "bn", "ca", "cs", "da", "de", "el", "en", "es", "fa", "fi", "fr", "he", "hi",
+    "hr", "ht", "hu", "id", "is", "it", "ja", "ko", "la", "lt", "ms", "ne", "nl", "no", "pa", "pl",
+    "pt", "ro", "ru", "sa", "sk", "sr", "sv", "sw", "ta", "te", "th", "tl", "tr", "uk", "ur", "vi",
+    "yue", "zh",
+)
+VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 
 app = FastAPI(title="Olares Music Engine", version="1")
 
@@ -199,6 +206,7 @@ def engine_spec() -> dict[str, Any]:
                 "default_production_profile": "clean",
                 "caption_modes": ["preserve", "enhance"],
                 "default_caption_mode": "preserve",
+                "vocal_languages": list(VOCAL_LANGUAGES),
                 "music_controls": ["bpm", "key_scale", "time_signature", "vocal_language", "vocal_type", "section_structure", "production_profile", "caption_mode"],
             }
         },
@@ -236,12 +244,14 @@ async def create_generation(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_caption_mode", "caption_mode must be preserve or enhance.")
     key_scale = str(options.get("key_scale", "")).strip()
     time_signature = str(options.get("time_signature", "")).strip()
-    vocal_language = str(options.get("vocal_language", "")).strip()
+    vocal_language = str(options.get("vocal_language", "")).strip().lower()
     if time_signature and time_signature not in {"2", "3", "4", "6"}:
         raise _error(400, "invalid_time_signature", "time_signature must be 2, 3, 4, or 6.")
     vocal_type = str(options.get("vocal_type", "")).strip()
     if len(key_scale) > 40 or len(vocal_language) > 16 or len(vocal_type) > 120:
         raise _error(400, "invalid_provider_options", "Music control text is too long.")
+    if vocal_language and vocal_language not in VOCAL_LANGUAGE_SET and not (instrumental and vocal_language == "unknown"):
+        raise _error(400, "invalid_vocal_language", "vocal_language must be a supported ACE-Step language code.")
     if not prompt or len(prompt) > 512:
         raise _error(400, "invalid_prompt", "prompt must contain 1-512 characters.")
     if len(lyrics) > 4096:
