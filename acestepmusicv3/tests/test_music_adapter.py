@@ -88,7 +88,9 @@ class MusicAdapterContractTest(unittest.TestCase):
         spec = self.client.get("/api/engine-spec").json()
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
-        self.assertEqual(spec["serves"], ["music.generate", "music.repaint", "music.format"])
+        self.assertEqual(
+            spec["serves"], ["music.generate", "music.repaint", "music.format", "music.draft"]
+        )
         self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
         self.assertEqual(spec["extensions"]["music"]["default_production_profile"], "clean")
         self.assertEqual(spec["extensions"]["music"]["default_caption_mode"], "preserve")
@@ -134,6 +136,132 @@ class MusicAdapterContractTest(unittest.TestCase):
         lost = self.client.get("/v1/music/formats/fmt_from_old_process")
         self.assertEqual(lost.status_code, 410)
         self.assertEqual(lost.json()["error"]["code"], "task_lost")
+
+    def test_draft_asks_the_lm_for_a_whole_song_and_carries_its_style_plan(self):
+        calls = []
+
+        def native(path, payload=None, timeout=30):
+            self.assertEqual(path, "/v1/create_sample")
+            self.assertEqual(timeout, 600)
+            calls.append(payload)
+            return {
+                "code": 200,
+                "data": {
+                    "caption": "Quiet Mandarin city folk",
+                    "lyrics": "[Verse 1]\n夜色落在肩上\n路灯把影子拉长\n\n[Chorus]\n再走一段\n就到家了",
+                    "bpm": 77,
+                    "keyscale": "E minor",
+                    "timesignature": "4",
+                    "duration": 296.0,
+                    "vocal_language": "zh",
+                },
+            }
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            created = self.client.post(
+                "/v1/music/drafts",
+                json={"model": "ace", "brief": "深夜加班后独自走回家", "vocal_language": "zh"},
+            )
+            self.assertEqual(created.status_code, 202)
+            task_id = created.json()["id"]
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/drafts/{task_id}").json()
+                if result["status"] == "completed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["object"], "music.draft")
+        self.assertEqual(result["prompt"], "Quiet Mandarin city folk")
+        self.assertIn("路灯把影子拉长", result["lyrics"])
+        self.assertEqual(result["duration_seconds"], 296)
+        self.assertEqual(
+            result["style_plan"], {"bpm": 77, "key_scale": "E minor", "time_signature": "4"}
+        )
+        self.assertEqual(calls[0]["query"], "深夜加班后独自走回家")
+        self.assertFalse(calls[0]["instrumental"])
+
+        self.assertEqual(
+            self.client.get(f"/v1/music/formats/{task_id}").json()["error"]["code"],
+            "format_not_found",
+        )
+
+    def test_draft_rejects_a_vocal_language_on_an_instrumental_brief(self):
+        rejected = self.client.post(
+            "/v1/music/drafts",
+            json={"model": "ace", "brief": "late night drive", "instrumental": True, "vocal_language": "zh"},
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(rejected.json()["error"]["code"], "invalid_vocal_language")
+
+        missing = self.client.post("/v1/music/drafts", json={"model": "ace", "brief": ""})
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.json()["error"]["code"], "invalid_brief")
+
+    def test_draft_retries_once_when_the_lm_answers_in_its_phonetic_encoding(self):
+        answers = [
+            "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2",
+            "[Verse 1]\n夜色落在肩上\n路灯把影子拉长",
+        ]
+
+        def native(path, payload=None, timeout=30):
+            return {"code": 200, "data": {"caption": "Quiet Mandarin city folk", "lyrics": answers.pop(0)}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            created = self.client.post(
+                "/v1/music/drafts",
+                json={"model": "ace", "brief": "walking home late", "vocal_language": "zh"},
+            )
+            task_id = created.json()["id"]
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/drafts/{task_id}").json()
+                if result["status"] == "completed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(result["lyrics"], "[Verse 1]\n夜色落在肩上\n路灯把影子拉长")
+        self.assertNotIn("lyrics_romanized", result["warnings"])
+        self.assertEqual(answers, [])
+
+    def test_draft_flags_lyrics_that_stay_phonetic_across_every_attempt(self):
+        romanized = "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2"
+
+        def native(path, payload=None, timeout=30):
+            return {"code": 200, "data": {"caption": "Quiet Mandarin city folk", "lyrics": romanized}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native) as call:
+            created = self.client.post(
+                "/v1/music/drafts",
+                json={"model": "ace", "brief": "walking home late", "vocal_language": "zh"},
+            )
+            task_id = created.json()["id"]
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/drafts/{task_id}").json()
+                if result["status"] == "completed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
+        self.assertIn("lyrics_romanized", result["warnings"])
+
+    def test_draft_fails_when_the_lm_returns_no_lyrics_for_a_vocal_brief(self):
+        def native(path, payload=None, timeout=30):
+            return {"code": 200, "data": {"caption": "Quiet Mandarin city folk", "lyrics": "   "}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            created = self.client.post(
+                "/v1/music/drafts",
+                json={"model": "ace", "brief": "深夜加班后独自走回家", "vocal_language": "zh"},
+            )
+            task_id = created.json()["id"]
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/drafts/{task_id}").json()
+                if result["status"] == "failed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["code"], "draft_failed")
 
     def test_format_input_trims_native_caption_to_contract_limit(self):
         long_caption = (

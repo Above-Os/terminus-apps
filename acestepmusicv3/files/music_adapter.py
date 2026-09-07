@@ -45,6 +45,8 @@ VOCAL_LANGUAGES = (
     "yue", "zh",
 )
 VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
+ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
+DRAFT_ATTEMPTS = 2
 
 app = FastAPI(title="Olares Music Engine", version="1")
 
@@ -103,6 +105,27 @@ def _public(task: dict[str, Any]) -> dict[str, Any]:
         result["effective_lyrics"] = task["effective_lyrics"]
     if task.get("metas"):
         result["metas"] = task["metas"]
+    return result
+
+
+def _public_draft(task: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "id": task["id"],
+        "object": "music.draft",
+        "status": task["status"],
+        "created_at": task["created_at"],
+        "model": MODEL_NAME,
+        "brief": task["brief"],
+        "instrumental": task["instrumental"],
+        "vocal_language": task["vocal_language"],
+        "warnings": task.get("warnings", []),
+        "metrics": task.get("metrics", {}),
+    }
+    for field in ("prompt", "lyrics", "duration_seconds", "style_plan"):
+        if task.get(field) is not None:
+            result[field] = task[field]
+    if task.get("error"):
+        result["error"] = task["error"]
     return result
 
 
@@ -258,6 +281,92 @@ def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
         TASKS[task_id] = task
 
 
+def _run_draft_task(task_id: str, temperature: float) -> None:
+    with TASKS_LOCK:
+        task = dict(TASKS[task_id])
+        task["status"] = "running"
+        TASKS[task_id] = task
+    try:
+        for attempt in range(DRAFT_ATTEMPTS):
+            native = _native_json(
+                "/v1/create_sample",
+                {
+                    "query": task["brief"],
+                    "instrumental": task["instrumental"],
+                    "vocal_language": task["vocal_language"],
+                    "temperature": temperature,
+                },
+                timeout=600,
+            )
+            data = native.get("data") or {}
+            lyrics = "" if task["instrumental"] else str(data.get("lyrics") or "").strip()
+            if not _romanized(lyrics):
+                break
+        prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
+        if not prompt:
+            raise ValueError("ACE-Step returned an empty caption")
+        if not lyrics and not task["instrumental"]:
+            raise ValueError("ACE-Step returned no lyrics for a vocal draft")
+        if len(lyrics) > 4096:
+            raise ValueError("ACE-Step returned lyrics that exceed 4096 characters")
+        warnings, metrics = _line_metrics(lyrics, task["vocal_language"])
+        if _romanized(lyrics):
+            warnings.insert(0, "lyrics_romanized")
+        if caption_truncated:
+            warnings.insert(0, "caption_trimmed_to_512_characters")
+        task.update({
+            "status": "completed",
+            "prompt": prompt,
+            "lyrics": lyrics,
+            "duration_seconds": _draft_duration(data.get("duration")),
+            "style_plan": _draft_style_plan(data),
+            "warnings": warnings,
+            "metrics": metrics,
+        })
+    except Exception as exc:
+        task.update({
+            "status": "failed",
+            "error": {"code": "draft_failed", "message": str(exc)},
+        })
+    with TASKS_LOCK:
+        TASKS[task_id] = task
+
+
+def _romanized(lyrics: str) -> bool:
+    """Report ACE's phonetic lyric encoding, `[zh] ye4 se4 luo4 ...`.
+
+    It is valid input for generation but not something a listener can read or
+    edit, and it lands in the field an application shows as the lyrics. Which
+    of the two forms the LM picks for the same request varies between calls.
+    """
+    return any(ROMANIZED_LINE.match(line.strip()) for line in lyrics.splitlines())
+
+
+def _draft_duration(value: Any) -> int | None:
+    try:
+        seconds = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return min(600, max(10, seconds))
+
+
+def _draft_style_plan(data: dict[str, Any]) -> dict[str, Any]:
+    """Carry the LM's own metadata in the shape the generation call accepts.
+
+    create_sample spells the key signature `keyscale`; every other surface in
+    this API spells it `key_scale`.
+    """
+    plan: dict[str, Any] = {}
+    bpm = data.get("bpm")
+    if isinstance(bpm, (int, float)) and 30 <= bpm <= 300:
+        plan["bpm"] = int(bpm)
+    for source, target in (("keyscale", "key_scale"), ("timesignature", "time_signature")):
+        value = str(data.get(source) or "").strip()
+        if value:
+            plan[target] = value
+    return plan
+
+
 def _options(source: dict[str, Any]) -> dict[str, Any]:
     value = source.get("provider_options") or {}
     if not isinstance(value, dict):
@@ -348,15 +457,15 @@ def engine_spec() -> dict[str, Any]:
         "schema_version": 1,
         "model": MODEL_NAME,
         "mode": "music_generation",
-        "implements": ["music.generate", "music.repaint", "music.format"],
-        "declares": ["music.generate", "music.repaint", "music.format"],
-        "serves": ["music.generate", "music.repaint", "music.format"],
+        "implements": ["music.generate", "music.repaint", "music.format", "music.draft"],
+        "declares": ["music.generate", "music.repaint", "music.format", "music.draft"],
+        "serves": ["music.generate", "music.repaint", "music.format", "music.draft"],
         "max_concurrency": 1,
         "workers": 1,
         "extensions": {
             "creative": {
                 "media": "music",
-                "operations": ["generate", "repaint", "format"],
+                "operations": ["generate", "repaint", "format", "draft"],
             },
             "music": {
                 "quality_profiles": ["quality", "high_quality"],
@@ -377,8 +486,65 @@ def engine_spec() -> dict[str, Any]:
             {"method": "DELETE", "path": "/v1/music/generations/{id}", "available": True},
             {"method": "POST", "path": "/v1/music/formats", "available": True, "async_supported": True},
             {"method": "GET", "path": "/v1/music/formats/{id}", "available": True, "async_supported": True},
+            {"method": "POST", "path": "/v1/music/drafts", "available": True, "async_supported": True},
+            {"method": "GET", "path": "/v1/music/drafts/{id}", "available": True, "async_supported": True},
         ],
     }
+
+
+@app.post("/v1/music/drafts", status_code=202)
+async def create_draft(request: Request) -> dict[str, Any]:
+    try:
+        source = await request.json()
+    except json.JSONDecodeError as exc:
+        raise _error(400, "invalid_json", "Request body must be JSON.") from exc
+    allowed = {"model", "brief", "vocal_language", "instrumental", "temperature"}
+    unknown = sorted(set(source) - allowed)
+    if unknown:
+        raise _error(400, "unknown_field", f"Unsupported draft field: {unknown[0]}.")
+    brief = str(source.get("brief", "")).strip()
+    instrumental = bool(source.get("instrumental", False))
+    language = str(source.get("vocal_language", "")).strip().lower()
+    try:
+        temperature = float(source.get("temperature", 0.85))
+    except (TypeError, ValueError) as exc:
+        raise _error(400, "invalid_draft_request", "temperature must be a number.") from exc
+    if not brief or len(brief) > 512:
+        raise _error(400, "invalid_brief", "brief must contain 1-512 characters.")
+    if instrumental:
+        if language and language != "unknown":
+            raise _error(400, "invalid_vocal_language", "vocal_language must be unknown for instrumental music.")
+        language = "unknown"
+    elif language not in VOCAL_LANGUAGE_SET:
+        raise _error(400, "invalid_vocal_language", "vocal_language must be a supported ACE-Step language code.")
+    if temperature < 0 or temperature > 2:
+        raise _error(400, "invalid_temperature", "temperature must be between 0 and 2.")
+    if _active_task("draft"):
+        raise _error(409, "draft_in_progress", "Another ACE-Step draft task is already running.")
+    task_id = "dft_" + uuid.uuid4().hex
+    task = {
+        "id": task_id,
+        "kind": "draft",
+        "status": "queued",
+        "created_at": int(time.time()),
+        "brief": brief,
+        "instrumental": instrumental,
+        "vocal_language": language,
+        "warnings": [],
+        "metrics": {},
+    }
+    with TASKS_LOCK:
+        TASKS[task_id] = task
+    threading.Thread(target=_run_draft_task, args=(task_id, temperature), daemon=True).start()
+    return _public_draft(task)
+
+
+@app.get("/v1/music/drafts/{task_id}")
+def get_draft(task_id: str) -> dict[str, Any]:
+    task = _task(task_id)
+    if task.get("kind") != "draft":
+        raise _error(404, "draft_not_found", "The requested draft task does not exist.")
+    return _public_draft(task)
 
 
 @app.post("/v1/music/formats", status_code=202)
