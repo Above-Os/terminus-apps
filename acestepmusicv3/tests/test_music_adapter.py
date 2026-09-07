@@ -3,6 +3,7 @@ import base64
 import io
 import pathlib
 import tempfile
+import time
 import unittest
 from email.message import Message
 from unittest import mock
@@ -87,12 +88,60 @@ class MusicAdapterContractTest(unittest.TestCase):
         spec = self.client.get("/api/engine-spec").json()
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
-        self.assertEqual(spec["serves"], ["music.generate", "music.repaint"])
+        self.assertEqual(spec["serves"], ["music.generate", "music.repaint", "music.format"])
         self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
         self.assertEqual(spec["extensions"]["music"]["default_production_profile"], "clean")
         self.assertEqual(spec["extensions"]["music"]["default_caption_mode"], "preserve")
         self.assertEqual(spec["extensions"]["music"]["vocal_languages"], list(adapter.VOCAL_LANGUAGES))
         self.assertNotIn("unknown", spec["extensions"]["music"]["vocal_languages"])
+
+    def test_format_input_is_async_and_exposes_draft_and_effective_versions(self):
+        calls = []
+
+        def native(path, payload=None, timeout=30):
+            self.assertEqual(path, "/format_input")
+            self.assertEqual(timeout, 300)
+            calls.append(payload)
+            return {"code": 200, "data": {"caption": "Polished Mandarin pop", "lyrics": "[Verse 1]\n风来了\n我穿过很长的街\n\n[Chorus]\n回家\n回家"}}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            created = self.client.post(
+                "/v1/music/formats",
+                json={
+                    "model": "ace",
+                    "prompt": "Mandarin pop",
+                    "lyrics": "[Verse 1]\n风吹过街边\n\n[Chorus]\n回家",
+                    "vocal_language": "zh",
+                    "duration_seconds": 240,
+                },
+            )
+            self.assertEqual(created.status_code, 202)
+            task_id = created.json()["id"]
+            result = created.json()
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/formats/{task_id}").json()
+                if result["status"] == "completed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["draft_prompt"], "Mandarin pop")
+        self.assertEqual(result["effective_prompt"], "Polished Mandarin pop")
+        self.assertIn("我穿过很长的街", result["effective_lyrics"])
+        self.assertEqual(result["metrics"]["uniformity_risk"], "low")
+        self.assertEqual(calls[0]["param_obj"], '{"duration": 240, "language": "zh"}')
+
+        lost = self.client.get("/v1/music/formats/fmt_from_old_process")
+        self.assertEqual(lost.status_code, 410)
+        self.assertEqual(lost.json()["error"]["code"], "task_lost")
+
+    def test_chinese_format_metrics_flag_repeated_sentence_openings(self):
+        warnings, metrics = adapter._line_metrics(
+            "[Verse 1]\n我走过旧街\n我记得那场雨\n我想起你的话\n我看见天亮了",
+            "zh",
+        )
+        self.assertEqual(metrics["syntactic_pattern_risk"], "high")
+        self.assertIn("repetitive_chinese_line_openings", warnings)
 
     def test_quality_profiles_use_xl_sft_without_repeating_structure_in_caption(self):
         payloads = []
@@ -132,6 +181,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertFalse(payloads[0]["use_adg"])
         self.assertFalse(payloads[0]["use_cot_caption"])
         self.assertFalse(payloads[0]["use_cot_lyrics"])
+        self.assertFalse(payloads[0]["use_format"])
         self.assertIn("background hiss", payloads[0]["lm_negative_prompt"])
         self.assertEqual(payloads[0]["bpm"], 92)
         self.assertIn("Vocal character: warm female lead", payloads[0]["prompt"])
