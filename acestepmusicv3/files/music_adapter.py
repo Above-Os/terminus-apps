@@ -9,6 +9,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -192,6 +193,24 @@ def _repeated_chinese_opening(lyrics: str) -> bool:
     return False
 
 
+def _fit_caption(caption: str, limit: int = 512) -> tuple[str, bool]:
+    """Fit ACE's unconstrained /format_input caption into our API contract."""
+    caption = " ".join(caption.split()).strip()
+    if len(caption) <= limit:
+        return caption, False
+
+    prefix = caption[:limit]
+    # Prefer a complete sentence near the end of the available budget. ACE
+    # commonly emits 550-700 character prose despite receiving a <=512 input.
+    boundaries = [match.end() for match in re.finditer(r"[.!?;](?:\s|$)", prefix)]
+    cutoff = max((value for value in boundaries if value >= limit // 2), default=0)
+    if not cutoff:
+        cutoff = prefix.rfind(" ")
+    if cutoff <= 0:
+        cutoff = limit
+    return prefix[:cutoff].strip(), True
+
+
 def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
     with TASKS_LOCK:
         task = dict(TASKS[task_id])
@@ -212,13 +231,17 @@ def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
             timeout=300,
         )
         data = native.get("data") or {}
-        effective_prompt = str(data.get("caption") or task["draft_prompt"]).strip()
+        effective_prompt, caption_truncated = _fit_caption(
+            str(data.get("caption") or task["draft_prompt"])
+        )
         effective_lyrics = str(data.get("lyrics") or task["draft_lyrics"]).strip()
-        if not effective_prompt or len(effective_prompt) > 512:
+        if not effective_prompt:
             raise ValueError("ACE-Step returned an invalid formatted caption")
         if len(effective_lyrics) > 4096:
             raise ValueError("ACE-Step returned formatted lyrics that exceed 4096 characters")
         warnings, metrics = _line_metrics(effective_lyrics, task["vocal_language"])
+        if caption_truncated:
+            warnings.insert(0, "formatted_caption_trimmed_to_512_characters")
         task.update({
             "status": "completed",
             "effective_prompt": effective_prompt,
