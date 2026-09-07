@@ -8,7 +8,7 @@ metadata:
   title: Speakrs Diarization
   description: Speaker diarization on ONNX Runtime, no torch stack
   icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  version: "0.0.25"
+  version: "0.0.26"
   categories:
     - AI
     - models
@@ -17,9 +17,11 @@ metadata:
     - audio
 
 spec:
-  versionName: "0.0.23"
+  versionName: "0.0.26"
   onlyAdmin: true
   developer: beclab
+  website: https://github.com/avencera/speakrs
+  sourceCode: https://github.com/beclab/audio-engines
   submitter: huangzhenyuan-bytetrade
   locale:
     - en-US
@@ -28,6 +30,14 @@ spec:
     - text: MIT
       url: https://github.com/beclab/llm-init
   upgradeDescription: |
+    0.0.26: Carries forward the llm-init bump and the run-state move that platform maintainers
+    made to this app in the index, which a publish from our own source would otherwise have
+    reverted.
+    0.0.25: Declares itself to the GPU scheduler, which it never did before, and reserves the
+    3Gi that measurement says it needs instead of the 2Gi that was half of a neighbour's number.
+    0.0.24: One application serves both execution modes. EXECUTION_MODE chooses accuracy
+    or speed and can be changed after install; it used to be a second application, chosen
+    at install time and unchangeable afterwards. Every setting now says what it takes.
     0.0.23: Initial release.
   fullDescription: |
     **Model**
@@ -40,8 +50,25 @@ spec:
     - Model name: `speakrs/speakrs-community-1`
     - Weights: `hf://avencera/speakrs-models`
     - Capability: `diar`
-    - Execution mode: `cuda`
+    - Required GPU memory: `3Gi`
     - Engine: speakrs on ONNX Runtime CUDA
+
+    **Accuracy against speed**
+
+    The `EXECUTION_MODE` setting picks one, and changing it restarts the engine. `cuda`
+    matches pyannote's accuracy and runs about 1.8x faster than it. `cuda-fast` runs about
+    3.6x faster and costs 0.3-1.0 DER points, the cost growing with how densely speakers
+    overlap. Both modes load the same weights -- the mode changes how the pipeline is run,
+    not what it runs -- so switching re-downloads nothing and the model name is the same
+    either way. This setting is where a run's mode is read.
+
+    **Tuning**
+
+    A caller may set `exclusive`, `min_duration_off`, `min_duration_on` and
+    `clustering_threshold` per request on `POST /v1/audio/diarization`; `ENGINE_ARGS` sets
+    the same four as this deployment's defaults. This engine derives the speaker count from
+    its clustering and cannot be constrained to one, so `num_speakers`, `min_speakers` and
+    `max_speakers` are refused rather than accepted and ignored.
 
     **How it runs**
 
@@ -59,8 +86,8 @@ spec:
       limitedMemory: 12Gi
       requiredDisk: 2Gi
       limitedDisk: 20Gi
-      requiredGPUMemory: 2Gi
-      limitedGPUMemory: 6Gi
+      requiredGPUMemory: 3Gi
+      limitedGPUMemory: 3Gi
 
 envs:
   - envName: MODEL_SOURCE
@@ -70,12 +97,18 @@ envs:
     applyOnChange: false
     default: hf://avencera/speakrs-models --exclude *.mlmodelc/*
     regex: ^hf://
+    description: "HuggingFace source llm-init downloads into the shared cache. Public
+      repository: no access form and no connected HuggingFace account are needed. The
+      --exclude drops the Apple-only CoreML trees, which are useless on a CUDA box."
   - envName: MODEL_NAME
     required: true
     type: string
     editable: false
     applyOnChange: false
     default: speakrs/speakrs-community-1
+    description: "Model id advertised to clients; must match the engine /v1/models id.
+      It does not encode EXECUTION_MODE -- one application serves whichever mode is set,
+      so read that setting to know what a run used."
   - envName: MODEL_MODE
     required: true
     type: string
@@ -85,6 +118,7 @@ envs:
     options:
       - title: Audio
         value: audio
+    description: "Model family this application belongs to."
   - envName: MODEL_SUPPORTS
     required: true
     type: string
@@ -96,6 +130,45 @@ envs:
     options:
       - title: Diarization (who spoke when)
         value: diar
+    description: "Capabilities this app exposes."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "1Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6Gi"
+    description: "Engine container memory ceiling. It bounds how long a clip this engine can
+      accept: see ENGINE_ARGS --max-audio-seconds."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "3Gi"
+    description: "GPU memory this app reserves on a shared card. Measured, not derived: the
+      engine holds 1474 MiB and does not grow during inference -- the batch sizes are fixed by
+      the exported ONNX graphs, so the arena is allocated when the sessions are built and a
+      40-minute recording costs the same as a 40-second one. 3Gi is roughly twice that, which
+      covers the part that varies by card and driver, and is still less than the 4Gi the
+      pyannote engine reserves."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
@@ -106,6 +179,26 @@ envs:
     applyOnChange: true
     valueFrom:
       envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: EXECUTION_MODE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: cuda
+    options:
+      - title: Accurate (cuda)
+        value: cuda
+      - title: Fast (cuda-fast)
+        value: cuda-fast
+    description: "Accuracy against speed. `cuda` matches pyannote's accuracy and runs about
+      1.8x faster than it. `cuda-fast` runs about 3.6x faster by stepping the segmentation
+      window 2s instead of 1s, and costs 0.3-1.0 DER points -- the cost is speaker confusion
+      and grows with how densely speakers overlap, so it is small on clean single-speaker-at-
+      a-time audio and around a point on far-field meetings. Changing this restarts the engine
+      and reloads the model. The first request after any restart costs about 50
+      seconds whatever the clip, reproduced across two restarts on the machine this was measured
+      on; later requests take a second. The cause was not established and no other GPU was
+      tested. Send a warm-up request after switching, or the next real caller pays it."
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -121,11 +214,22 @@ envs:
         value: warn
       - title: Error
         value: error
+    description: "Log verbosity of the engine and llm-init."
   - envName: ENGINE_ARGS
     required: false
     type: string
     editable: true
     applyOnChange: true
+    description: "Engine-native flags (llm-init ENGINE_ARGS), space separated, e.g.
+      --clustering-threshold 0.65 --exclusive. Diarization tuning: --clustering-threshold
+      (default 0.6) raises or lowers how readily two voices are called one person;
+      --min-duration-off SECONDS fills pauses shorter than it; --min-duration-on SECONDS
+      drops speech bursts shorter than it; --exclusive returns non-overlapping turns by
+      default. A caller may override those four per request. --max-audio-seconds (default
+      14400, four hours) caps clip length; this engine holds the whole clip in memory, so
+      raising it past what MEMORY_LIMIT covers turns a long upload into an OOM kill. The
+      execution mode is NOT set here -- it has its own setting above. A flag this engine does
+      not take is ignored with a warning in the log, not an error."
 
 permission:
   appData: true

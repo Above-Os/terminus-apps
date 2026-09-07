@@ -8,9 +8,15 @@
 {{- $modelSupports := (get $manifestEnvs "MODEL_SUPPORTS") | default $olaresEnv.MODEL_SUPPORTS }}
 {{- $modelSource := (get $manifestEnvs "MODEL_SOURCE") | default $olaresEnv.MODEL_SOURCE }}
 {{- $logLevel := $olaresEnv.LOG_LEVEL | default (get $manifestEnvs "LOG_LEVEL") | default .Values.logLevel }}
-{{- $engineArgs := $olaresEnv.ENGINE_ARGS | default (get $manifestEnvs "ENGINE_ARGS") | default .Values.model.engineArgs }}
+{{- $engineArgs := $olaresEnv.ENGINE_ARGS | default (get $manifestEnvs "ENGINE_ARGS") | default .Values.model.engineArgs | trim }}
+{{- $executionMode := $olaresEnv.EXECUTION_MODE | default (get $manifestEnvs "EXECUTION_MODE") | default .Values.model.executionMode }}
+{{- $engineArgs = printf "%s --execution-mode %s" $engineArgs $executionMode | trim }}
 {{- $hfEndpoint := $olaresEnv.HF_ENDPOINT | default .Values.hf.endpoint }}
 {{- $hfToken := $olaresEnv.HF_TOKEN | default "" }}
+{{- $cpuRequest := $olaresEnv.CPU_REQUEST | default (get $manifestEnvs "CPU_REQUEST") | trim }}
+{{- $memRequest := $olaresEnv.MEMORY_REQUEST | default (get $manifestEnvs "MEMORY_REQUEST") | trim }}
+{{- $cpuLimit := $olaresEnv.CPU_LIMIT | default (get $manifestEnvs "CPU_LIMIT") | trim }}
+{{- $memLimit := $olaresEnv.MEMORY_LIMIT | default (get $manifestEnvs "MEMORY_LIMIT") | trim }}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name }}
 {{- if not $modelName }}
 {{-   fail "MODEL_NAME resolves to nothing: the manifest's envs block is the source and it has no default" }}
@@ -25,6 +31,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: audiospeakrsdiarv3
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "audio-speakrs-speaker-diarization-community-1"
 spec:
   replicas: {{ .Values.workloads.audiospeakrsdiarv3.replicaCount }}
   strategy:
@@ -54,10 +62,8 @@ spec:
               value: {{ $modelSource | quote }}
             - name: MODEL_SUPPORTS
               value: {{ printf "supports_%s" $modelSupports | quote }}
-            {{- if $engineArgs }}
             - name: ENGINE_ARGS
               value: {{ $engineArgs | quote }}
-            {{- end }}
             - name: ENGINE_PORT
               value: "8000"
             - name: LOG_LEVEL
@@ -97,11 +103,11 @@ spec:
               mountPath: /tmp
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: {{ $cpuRequest | quote }}
+              memory: {{ $memRequest | quote }}
             limits:
-              cpu: "4"
-              memory: 6Gi
+              cpu: {{ $cpuLimit | quote }}
+              memory: {{ $memLimit | quote }}
       volumes:
         - name: hf-cache
           hostPath:
