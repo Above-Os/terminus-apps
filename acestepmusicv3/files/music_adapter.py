@@ -9,6 +9,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -58,7 +59,7 @@ def _error(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
-def _native_json(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _native_json(path: str, payload: dict[str, Any] | None = None, timeout: int = 30) -> dict[str, Any]:
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         NATIVE_BASE + path,
@@ -67,7 +68,7 @@ def _native_json(path: str, payload: dict[str, Any] | None = None) -> dict[str, 
         method="POST" if body is not None else "GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             parsed = json.load(response)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise _error(502, "upstream_unavailable", f"ACE-Step native API unavailable: {exc}") from exc
@@ -96,7 +97,165 @@ def _public(task: dict[str, Any]) -> dict[str, Any]:
     }
     if task.get("error"):
         result["error"] = task["error"]
+    if task.get("effective_prompt"):
+        result["effective_prompt"] = task["effective_prompt"]
+    if task.get("effective_lyrics"):
+        result["effective_lyrics"] = task["effective_lyrics"]
+    if task.get("metas"):
+        result["metas"] = task["metas"]
     return result
+
+
+def _public_format(task: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "id": task["id"],
+        "object": "music.format",
+        "status": task["status"],
+        "created_at": task["created_at"],
+        "model": MODEL_NAME,
+        "draft_prompt": task["draft_prompt"],
+        "draft_lyrics": task["draft_lyrics"],
+        "vocal_language": task["vocal_language"],
+        "warnings": task.get("warnings", []),
+        "metrics": task.get("metrics", {}),
+    }
+    if task.get("effective_prompt") is not None:
+        result["effective_prompt"] = task["effective_prompt"]
+    if task.get("effective_lyrics") is not None:
+        result["effective_lyrics"] = task["effective_lyrics"]
+    if task.get("error"):
+        result["error"] = task["error"]
+    return result
+
+
+def _active_task(kind: str) -> bool:
+    with TASKS_LOCK:
+        return any(
+            task.get("kind") == kind and task.get("status") not in {"completed", "failed"}
+            for task in TASKS.values()
+        )
+
+
+def _line_metrics(lyrics: str, language: str) -> tuple[list[str], dict[str, Any]]:
+    lines = [
+        line.strip() for line in lyrics.splitlines()
+        if line.strip() and not (line.strip().startswith("[") and line.strip().endswith("]"))
+    ]
+    if not lines:
+        return [], {"line_count": 0, "line_length_variation": 0.0, "uniformity_risk": "low", "syntactic_pattern_risk": "low"}
+    if language in {"zh", "yue"}:
+        counts = [sum(1 for char in line if "\u3400" <= char <= "\u9fff") for line in lines]
+    else:
+        counts = [len(line.split()) if " " in line else len(line) for line in lines]
+    mean = sum(counts) / len(counts)
+    variation = 0.0 if mean == 0 else (sum(abs(value - mean) for value in counts) / len(counts)) / mean
+    most_common = max(counts.count(value) for value in set(counts)) / len(counts)
+    longest_run = 1
+    current_run = 1
+    for previous, current in zip(counts, counts[1:]):
+        if previous == current:
+            current_run += 1
+            longest_run = max(longest_run, current_run)
+        else:
+            current_run = 1
+    risk = "high" if most_common >= 0.7 or longest_run >= 4 else "low"
+    warnings = []
+    if language in {"zh", "yue"} and risk == "high":
+        warnings.append("uniform_chinese_line_lengths")
+    if language == "yue":
+        warnings.append("cantonese_tone_melody_alignment_requires_listening_review")
+    syntactic_risk = "high" if language in {"zh", "yue"} and _repeated_chinese_opening(lyrics) else "low"
+    if syntactic_risk == "high":
+        warnings.append("repetitive_chinese_line_openings")
+    return warnings, {
+        "line_count": len(lines),
+        "line_length_variation": round(variation, 3),
+        "uniformity_risk": risk,
+        "syntactic_pattern_risk": syntactic_risk,
+    }
+
+
+def _repeated_chinese_opening(lyrics: str) -> bool:
+    previous = ""
+    run = 0
+    for raw in lyrics.splitlines():
+        line = raw.strip()
+        if not line or (line.startswith("[") and line.endswith("]")):
+            previous, run = "", 0
+            continue
+        opening = "".join(char for char in line if "\u3400" <= char <= "\u9fff")[:1]
+        if opening and opening == previous:
+            run += 1
+        else:
+            previous, run = opening, 1
+        if run >= 4:
+            return True
+    return False
+
+
+def _fit_caption(caption: str, limit: int = 512) -> tuple[str, bool]:
+    """Fit ACE's unconstrained /format_input caption into our API contract."""
+    caption = " ".join(caption.split()).strip()
+    if len(caption) <= limit:
+        return caption, False
+
+    prefix = caption[:limit]
+    # Prefer a complete sentence near the end of the available budget. ACE
+    # commonly emits 550-700 character prose despite receiving a <=512 input.
+    boundaries = [match.end() for match in re.finditer(r"[.!?;](?:\s|$)", prefix)]
+    cutoff = max((value for value in boundaries if value >= limit // 2), default=0)
+    if not cutoff:
+        cutoff = prefix.rfind(" ")
+    if cutoff <= 0:
+        cutoff = limit
+    return prefix[:cutoff].strip(), True
+
+
+def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
+    with TASKS_LOCK:
+        task = dict(TASKS[task_id])
+        task["status"] = "running"
+        TASKS[task_id] = task
+    try:
+        native = _native_json(
+            "/format_input",
+            {
+                "prompt": task["draft_prompt"],
+                "lyrics": task["draft_lyrics"],
+                "temperature": temperature,
+                "param_obj": json.dumps({
+                    "duration": duration,
+                    "language": task["vocal_language"],
+                }),
+            },
+            timeout=300,
+        )
+        data = native.get("data") or {}
+        effective_prompt, caption_truncated = _fit_caption(
+            str(data.get("caption") or task["draft_prompt"])
+        )
+        effective_lyrics = str(data.get("lyrics") or task["draft_lyrics"]).strip()
+        if not effective_prompt:
+            raise ValueError("ACE-Step returned an invalid formatted caption")
+        if len(effective_lyrics) > 4096:
+            raise ValueError("ACE-Step returned formatted lyrics that exceed 4096 characters")
+        warnings, metrics = _line_metrics(effective_lyrics, task["vocal_language"])
+        if caption_truncated:
+            warnings.insert(0, "formatted_caption_trimmed_to_512_characters")
+        task.update({
+            "status": "completed",
+            "effective_prompt": effective_prompt,
+            "effective_lyrics": effective_lyrics,
+            "warnings": warnings,
+            "metrics": metrics,
+        })
+    except Exception as exc:
+        task.update({
+            "status": "failed",
+            "error": {"code": "format_failed", "message": str(exc)},
+        })
+    with TASKS_LOCK:
+        TASKS[task_id] = task
 
 
 def _options(source: dict[str, Any]) -> dict[str, Any]:
@@ -189,15 +348,15 @@ def engine_spec() -> dict[str, Any]:
         "schema_version": 1,
         "model": MODEL_NAME,
         "mode": "music_generation",
-        "implements": ["music.generate", "music.repaint"],
-        "declares": ["music.generate", "music.repaint"],
-        "serves": ["music.generate", "music.repaint"],
+        "implements": ["music.generate", "music.repaint", "music.format"],
+        "declares": ["music.generate", "music.repaint", "music.format"],
+        "serves": ["music.generate", "music.repaint", "music.format"],
         "max_concurrency": 1,
         "workers": 1,
         "extensions": {
             "creative": {
                 "media": "music",
-                "operations": ["generate", "repaint"],
+                "operations": ["generate", "repaint", "format"],
             },
             "music": {
                 "quality_profiles": ["quality", "high_quality"],
@@ -216,8 +375,66 @@ def engine_spec() -> dict[str, Any]:
             {"method": "GET", "path": "/v1/music/generations/{id}", "available": True, "async_supported": True},
             {"method": "GET", "path": "/v1/music/generations/{id}/content", "available": True},
             {"method": "DELETE", "path": "/v1/music/generations/{id}", "available": True},
+            {"method": "POST", "path": "/v1/music/formats", "available": True, "async_supported": True},
+            {"method": "GET", "path": "/v1/music/formats/{id}", "available": True, "async_supported": True},
         ],
     }
+
+
+@app.post("/v1/music/formats", status_code=202)
+async def create_format(request: Request) -> dict[str, Any]:
+    try:
+        source = await request.json()
+    except json.JSONDecodeError as exc:
+        raise _error(400, "invalid_json", "Request body must be JSON.") from exc
+    allowed = {"model", "prompt", "lyrics", "vocal_language", "duration_seconds", "temperature"}
+    unknown = sorted(set(source) - allowed)
+    if unknown:
+        raise _error(400, "unknown_field", f"Unsupported format field: {unknown[0]}.")
+    prompt = str(source.get("prompt", "")).strip()
+    lyrics = str(source.get("lyrics", "")).strip()
+    language = str(source.get("vocal_language", "")).strip().lower()
+    try:
+        duration = int(source.get("duration_seconds", 240))
+        temperature = float(source.get("temperature", 0.85))
+    except (TypeError, ValueError) as exc:
+        raise _error(400, "invalid_format_request", "duration_seconds and temperature must be numbers.") from exc
+    if not prompt or len(prompt) > 512:
+        raise _error(400, "invalid_prompt", "prompt must contain 1-512 characters.")
+    if not lyrics or len(lyrics) > 4096:
+        raise _error(400, "invalid_lyrics", "lyrics must contain 1-4096 characters.")
+    if language not in VOCAL_LANGUAGE_SET:
+        raise _error(400, "invalid_vocal_language", "vocal_language must be a supported ACE-Step language code.")
+    if duration < 10 or duration > 600:
+        raise _error(400, "invalid_duration", "duration_seconds must be between 10 and 600.")
+    if temperature < 0 or temperature > 2:
+        raise _error(400, "invalid_temperature", "temperature must be between 0 and 2.")
+    if _active_task("format"):
+        raise _error(409, "format_in_progress", "Another ACE-Step format task is already running.")
+    task_id = "fmt_" + uuid.uuid4().hex
+    task = {
+        "id": task_id,
+        "kind": "format",
+        "status": "queued",
+        "created_at": int(time.time()),
+        "draft_prompt": prompt,
+        "draft_lyrics": lyrics,
+        "vocal_language": language,
+        "warnings": [],
+        "metrics": {},
+    }
+    with TASKS_LOCK:
+        TASKS[task_id] = task
+    threading.Thread(target=_run_format_task, args=(task_id, temperature, duration), daemon=True).start()
+    return _public_format(task)
+
+
+@app.get("/v1/music/formats/{task_id}")
+def get_format(task_id: str) -> dict[str, Any]:
+    task = _task(task_id)
+    if task.get("kind") != "format":
+        raise _error(404, "format_not_found", "The requested format task does not exist.")
+    return _public_format(task)
 
 
 @app.post("/v1/music/generations", status_code=202)
@@ -280,6 +497,7 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "prompt": _described_prompt(prompt, options),
         "lyrics": "" if instrumental else lyrics,
         "thinking": True,
+        "use_format": False,
         "use_cot_caption": caption_mode == "enhance",
         "use_cot_lyrics": False,
         "audio_format": "wav",
@@ -327,6 +545,7 @@ async def create_generation(request: Request) -> dict[str, Any]:
         raise _error(502, "invalid_upstream_response", "ACE-Step did not return a task ID.")
     task = {
         "id": task_id,
+        "kind": "generation",
         "status": "queued",
         "created_at": int(time.time()),
         "outputs": [],
@@ -338,7 +557,7 @@ async def create_generation(request: Request) -> dict[str, Any]:
     return _public(task)
 
 
-def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
+def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, Any]]:
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -347,6 +566,7 @@ def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any
     rows = value if isinstance(value, list) else []
     outputs: list[dict[str, Any]] = []
     native: dict[str, str] = {}
+    effective: dict[str, Any] = {}
     for index, row in enumerate(rows):
         if not isinstance(row, dict) or not row.get("file"):
             continue
@@ -355,6 +575,12 @@ def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any
         suffix = urllib.parse.urlparse(file_url).path.rsplit(".", 1)[-1].lower()
         content_type = mimetypes.types_map.get("." + suffix, "audio/wav")
         metas = row.get("metas") if isinstance(row.get("metas"), dict) else {}
+        if not effective:
+            effective = {
+                "effective_prompt": str(row.get("prompt") or "").strip(),
+                "effective_lyrics": str(row.get("lyrics") or "").strip(),
+                "metas": metas,
+            }
         outputs.append(
             {
                 "id": output_id,
@@ -364,7 +590,7 @@ def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any
             }
         )
         native[output_id] = file_url
-    return outputs, native
+    return outputs, native, effective
 
 
 @app.get("/v1/music/generations/{task_id}")
@@ -376,10 +602,11 @@ def get_generation(task_id: str) -> dict[str, Any]:
         row = rows[0] if isinstance(rows, list) and rows else {}
         native_status = int(row.get("status", 0)) if isinstance(row, dict) else 0
         if native_status == 1:
-            outputs, native_outputs = _decode_native_outputs(task_id, row.get("result"))
+            outputs, native_outputs, effective = _decode_native_outputs(task_id, row.get("result"))
             task["status"] = "completed"
             task["outputs"] = outputs
             task["native_outputs"] = native_outputs
+            task.update(effective)
             _cleanup_source(task)
         elif native_status == 2:
             task["status"] = "failed"
