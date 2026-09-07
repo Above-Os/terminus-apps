@@ -105,6 +105,13 @@ spec:
               value: /cache/hf/hub
             - name: WAIT_TIMEOUT
               value: "3600"
+            # Source the helpers llm-init publishes into RUN_DIR instead of a
+            # copy inlined in this chart: supervise_engine ships with the
+            # llm-init image, so a fix to it arrives with an image bump. The
+            # ConfigMap carries no fallback copy -- pinning llm-init below the
+            # version that publishes it would leave the wrapper waiting.
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
 {{- if $hfEndpoint }}
             - name: HF_ENDPOINT
               value: "{{ $hfEndpoint }}"
