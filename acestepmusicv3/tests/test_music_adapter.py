@@ -135,6 +135,41 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(lost.status_code, 410)
         self.assertEqual(lost.json()["error"]["code"], "task_lost")
 
+    def test_format_input_trims_native_caption_to_contract_limit(self):
+        long_caption = (
+            "Clean Mandarin pop with conversational female vocals. "
+            "Warm acoustic guitar and rounded bass support a relaxed groove. "
+            + "Detailed studio arrangement with separated instruments and gentle dynamics. " * 8
+        )
+
+        with mock.patch.object(
+            adapter,
+            "_native_json",
+            return_value={"code": 200, "data": {"caption": long_caption, "lyrics": "[Verse 1]\n回家的路\n\n[Chorus]\n江边的风"}},
+        ):
+            created = self.client.post(
+                "/v1/music/formats",
+                json={
+                    "model": "ace",
+                    "prompt": "Mandarin pop",
+                    "lyrics": "[Verse 1]\n回家的路\n\n[Chorus]\n江边的风",
+                    "vocal_language": "zh",
+                    "duration_seconds": 240,
+                },
+            )
+            task_id = created.json()["id"]
+            result = created.json()
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/formats/{task_id}").json()
+                if result["status"] == "completed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertLessEqual(len(result["effective_prompt"]), 512)
+        self.assertTrue(result["effective_prompt"].endswith("."))
+        self.assertIn("formatted_caption_trimmed_to_512_characters", result["warnings"])
+
     def test_chinese_format_metrics_flag_repeated_sentence_openings(self):
         warnings, metrics = adapter._line_metrics(
             "[Verse 1]\n我走过旧街\n我记得那场雨\n我想起你的话\n我看见天亮了",
