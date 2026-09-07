@@ -23,8 +23,28 @@ spec:
     OAuth2 と分かりやすい REST API
     - Mastodon は OAuth2 プロバイダーとして機能するため、サードパーティアプリは REST API と Streaming API を利用できます。これにより、豊富な選択肢を持つアプリエコシステムが生まれます。
   upgradeDescription: |
-    ストレージ：永続ボリュームを `appCache` から `appData` に移動しました。アップグレード後の初回起動時に、移行先が空の場合、initContainers が従来の appCache の内容を appData にコピーします（マーカー：`.migration_from_appcache_done`）。ロールバックできるよう、古い appCache データはそのまま残されます。
+    上流リリース：[Mastodon 4.7.1](https://github.com/mastodon/mastodon/releases/tag/v4.7.1)
 
-    従来の `sysVersion >= 1.12.3` による appCache パス分岐を削除しました。Olares の最小バージョンは 1.12.6 になりました。
+    **破壊的変更**
 
-    Redis と Elasticsearch の永続データを appCache から appData に移行しました。
+    - Mastodon 4.3 以降サインインしていないユーザーはログアウトされます。
+    - 4.5 からのデータベース移行は大規模インスタンスで時間がかかることがあります。アップグレード前にデータベースをバックアップしてください。
+    - 4.5 からアップグレードする場合は、[4.6.0](https://github.com/mastodon/mastodon/releases/tag/v4.6.0) と [4.7.0](https://github.com/mastodon/mastodon/releases/tag/v4.7.0) の注意も確認してください。
+
+    **変更内容**
+
+    - handle を変更したリモートアカウントは複製ではなく改名されます。
+    - プレビューカード付きの送信投稿に Link 添付が付きます。
+    - 管理画面にハッシュタグの監査ログと、IP ブロックの検索欄が追加されます。
+
+    **修正**
+
+    - LDAP / PAM / SSO アカウントの 2FA におけるパスワード認証の迂回。
+    - 異常な JSON-LD アクティビティ処理時のサービス拒否。
+    - 無効化されたスタッフアカウントが管理 API を使えていた問題。
+
+    **Olares のデプロイ変更**
+
+    - Olares のエントランスからアプリのホームページを開いても 500 にならなくなりました。
+    - リアルタイムストリーミングは有効です。これまではオフでした。
+    - ストリーミングのヘルス URL が壊れた `https:/…` へリダイレクトしなくなりました。
