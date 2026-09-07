@@ -177,6 +177,39 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertNotIn("lm_negative_prompt", payloads[1])
         self.assertNotIn("clean studio recording", payloads[1]["prompt"])
 
+    def test_full_caption_is_preserved_when_adapter_details_do_not_fit(self):
+        payloads = []
+
+        def native(path, payload=None):
+            payloads.append(payload)
+            return {"code": 200, "data": {"task_id": "task-full-caption"}}
+
+        caption = "A" * 512
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            response = self.client.post(
+                "/v1/music/generations",
+                json={
+                    "prompt": caption,
+                    "provider_options": {
+                        "production_profile": "clean",
+                        "caption_mode": "preserve",
+                        "vocal_type": "warm female lead",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payloads[0]["prompt"], caption)
+        self.assertIn("background hiss", payloads[0]["lm_negative_prompt"])
+
+    def test_rejects_overlong_vocal_type(self):
+        response = self.client.post(
+            "/v1/music/generations",
+            json={"prompt": "pop", "provider_options": {"vocal_type": "v" * 121}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_provider_options")
+
     def test_repaint_decodes_audio_and_maps_native_range(self):
         payloads = []
 

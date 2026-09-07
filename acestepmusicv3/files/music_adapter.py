@@ -130,9 +130,11 @@ def _described_prompt(prompt: str, options: dict[str, Any]) -> str:
             "Production: clean studio recording, low noise floor, clear lead vocal, "
             "separated instruments, controlled sibilance, polished master"
         )
-    described = ". ".join([prompt, *additions])
-    if len(described) > 512:
-        raise _error(400, "invalid_prompt", "prompt and vocal description must fit within 512 characters.")
+    described = prompt
+    for addition in additions:
+        candidate = f"{described}. {addition}"
+        if len(candidate) <= 512:
+            described = candidate
     return described
 
 
@@ -237,7 +239,8 @@ async def create_generation(request: Request) -> dict[str, Any]:
     vocal_language = str(options.get("vocal_language", "")).strip()
     if time_signature and time_signature not in {"2", "3", "4", "6"}:
         raise _error(400, "invalid_time_signature", "time_signature must be 2, 3, 4, or 6.")
-    if len(key_scale) > 40 or len(vocal_language) > 16:
+    vocal_type = str(options.get("vocal_type", "")).strip()
+    if len(key_scale) > 40 or len(vocal_language) > 16 or len(vocal_type) > 120:
         raise _error(400, "invalid_provider_options", "Music control text is too long.")
     if not prompt or len(prompt) > 512:
         raise _error(400, "invalid_prompt", "prompt must contain 1-512 characters.")
