@@ -7,7 +7,7 @@ metadata:
   description: "Gemma 4 26B served with Ollama."
   appid: ollamagemma426bv3
   title: Gemma 4 26B (Ollama)
-  version: '1.0.13'
+  version: '1.0.14'
   categories:
   - AI
 sharedEntrances:
@@ -35,6 +35,8 @@ spec:
   onlyAdmin: true
   versionName: 'gemma4:26b'
   upgradeDescription: |
+    v1.0.14: Model Console can now restart the Ollama daemon. llm-init and the daemon share a RUN_DIR under appCache, and the wrapper runs `ollama serve` under supervise_engine, so editing engine_args on the model card relaunches the daemon with the new values. The model card now also survives a Pod restart — and, being on disk, takes precedence over the ENGINE_ARGS app setting.
+
     v1.0.11: Lower the NVIDIA host-memory reservation so 1.12.6 timeslice nodes can install more easily (engine request 21Gi→6Gi, chart requiredMemory 22Gi→7Gi). GPU quota unchanged.
 
     v1.0.6: bump ollama to 0.32.1.
@@ -110,6 +112,9 @@ spec:
     - amd64
     - arm64
 permission:
+  # appCache holds the shared RUN_DIR handoff dir
+  # (<appCache>/llm-init-run/<release>), same as the llamacpp charts.
+  appCache: true
   appData: true
   appCommon: true
 options:
