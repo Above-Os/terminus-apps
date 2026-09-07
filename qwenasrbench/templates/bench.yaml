@@ -1,0 +1,44 @@
+{{- /* The benchmark runner's Service. The runner itself is a container in the llm-init
+       Pod (see llm-init.yaml): the platform's package check rejects a third workload in
+       this app, and llm-init is the right host anyway -- restarting it leaves the engine
+       and its loaded model alone, which a measuring tool must never disturb. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $me := dict -}}
+{{- range (.Files.Get "OlaresManifest.yaml" | fromYaml).envs -}}
+{{- if hasKey . "default" -}}{{- $_ := set $me .envName .default -}}{{- end -}}
+{{- end -}}
+{{- $benchPort := int ((get $me "BENCH_PORT") | default $oe.BENCH_PORT | default "8080") -}}
+# 🔴 Its own ConfigMap, not the engine's. The engine's Pod carries a checksum over the
+# whole wrappers ConfigMap, so a runner living in there restarted the engine -- and a
+# model reload costs a minute or two -- every time the benchmark code changed. Which is
+# exactly what putting the runner in another Pod was meant to avoid.
+#
+# Kept as a real file under files/ rather than pasted in here: 600 lines of Python inside
+# YAML cannot be linted, diffed or run, and this one already drifted from its source twice
+# when it lived that way.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asrbench-runner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+data:
+  bench_runner.py: |
+{{ .Files.Get "files/bench_runner.py" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bench-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: bench
+      port: {{ $benchPort }}
+      targetPort: {{ $benchPort }}
+  type: ClusterIP

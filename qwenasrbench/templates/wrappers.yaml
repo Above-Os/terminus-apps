@@ -1,0 +1,742 @@
+# Engine-container shell: source the helpers llm-init publishes, wait for the
+# download sentinel, then run the baked wrapper under supervise_engine so
+# Model Console can relaunch the engine without restarting the Pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+data:
+  # Instrumented boot: patch vLLM's LLM to record per-request token counts and the
+  # prefill/decode split, then run the engine as usual. Any failure logs one line and falls
+  # through to a plain start -- a measurement tool must not be able to take the engine down.
+  # The engine module with one generate() per batch instead of one per span, dropped over
+  # the installed copy when ASR_BATCH_ONE_SHOT=1. Generated from the audio-engines branch
+  # asrbench/batch-generate -- that branch is the canonical change; this is a copy so the
+  # experiment can run without building an image.
+  # Built against the file inside beclab/audio-qwen:v1.1.3, NOT against audio-engines main:
+  # the image predates main by two lines, one of which drops a positional argument from
+  # Runtime(), so the main version would fail to start here.
+  stt_stream_batch.py: |
+    # Streaming ASR on one in-process vLLM load (e.g. Qwen3-ASR etc.), serving BOTH offline stt
+    # and WebSocket stt_stream.
+    import os
+    import json
+    import asyncio
+    import logging
+    import threading
+    import time
+
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, Form
+    from fastapi.responses import Response
+
+    from .. import hfgate
+    from .. import tasks
+    from ..batch import parse_segments
+    from ..gpu import mount_metrics, memory_fraction
+    from ..contract import register, EngineArgs
+    from ..audioio import pcm16_to_float32, resample_linear
+    from ..runtime import Runtime
+
+    log = logging.getLogger("audio-stt-stream")
+
+    _runtime = Runtime(asr=None)
+    MODEL_NAME = _runtime.model_name
+    MODEL_REPO = _runtime.model_repo
+    PORT = _runtime.port
+
+    _args = EngineArgs()
+    # vLLM wants a share of the whole card; the platform hands out a quota, so derive one from it.
+    GPU_UTIL = _args.number("--gpu-memory-utilization", memory_fraction() or 0.45)
+    # Holds ONE unit of work; the chart sizes it per machine type, since unified memory needs less.
+    MAX_MODEL_LEN = _args.count("--max-model-len", 8192)
+    # Capture is where startup wedges holding the vGPU lock; inference is batch 1, so 4 shapes do.
+    ENFORCE_EAGER = _args.switch("--enforce-eager")
+    # One generate() for the whole batch instead of one per span. Off by default: this changes
+    # where a mid-batch cancellation can land, so the two paths have to be comparable in the
+    # same image before either becomes the default.
+    BATCH_ONE_SHOT = os.environ.get("ASR_BATCH_ONE_SHOT", "0") == "1"
+    # A cap proportional to how much audio there is. OFFLINE_MAX_TOKENS is one number for every
+    # span, so a three second span is handed the same 4096 as a nine minute one -- and a span
+    # that starts repeating runs all the way to that cap. One did: 3.3 seconds of audio produced
+    # 4096 tokens and 60 seconds of decode, a third of a serial run and, once spans are batched,
+    # 86% of one -- a batch cannot finish before its longest member. Measured output runs about
+    # 3.4 tokens per audio second, so 12 leaves roughly triple headroom. 0 keeps the old
+    # behaviour, which is what makes the two comparable in one image.
+    TOKENS_PER_AUDIO_SEC = float(os.environ.get("ASR_TOKENS_PER_AUDIO_SEC", "0") or 0)
+    TOKENS_FLOOR = int(os.environ.get("ASR_TOKENS_FLOOR", "64") or 64)
+    # Ending a span that has started repeating, rather than folding the repetition out of the text
+    # afterwards. A 2.2 second clip was measured producing 4096 tokens and six characters of
+    # transcript: qwen-asr's parse_asr_output collapses a repeated pattern (threshold 20), so the
+    # transcript reads correctly and only the clock suffers -- and once spans are batched, the whole
+    # batch waits for that one. vLLM's scheduler can end such a request instead. JSON for
+    # RepetitionDetectionParams; empty leaves the behaviour as it is.
+    #
+    # Two thresholds that have to be read together. min_pattern_size must be at least 2: "对对对"
+    # is real Mandarin speech, and stopping there drops the rest of the span. min_count must clear
+    # the 20 the downstream folding uses -- at 10 the request stops one repetition short of that
+    # threshold, and what is left survives into the transcript.
+    REPETITION_DETECTION = os.environ.get("ASR_REPETITION_DETECTION", "").strip()
+    _args.warn_unclaimed(log)
+
+    MAX_NEW_TOKENS = 32
+    UNFIXED_CHUNK_NUM = 2
+    UNFIXED_TOKEN_NUM = 5
+    CHUNK_SIZE_SEC = 2.0
+    DEFAULT_STEP_MS = 500
+    # Finalize + re-init this often, so a long session never overflows vLLM's ~8192-token encoder cache.
+    ROLL_SEC = 240.0
+    _CAPTURE_SIZES = (1, 2, 4, 8)
+    # qwen-asr silence-splits at this window; 540s keeps one call inside the ~600s encoder cache.
+    OFFLINE_MAX_INPUT_SEC = 540
+    OFFLINE_MAX_TOKENS = 4096
+
+    _state = _runtime.state
+    # One slot, filled on first use: see _repetition_params.
+    _repdet_cache = []
+    # vLLM's generate is blocking and not concurrency-safe, so all inference shares one lock.
+    _infer_lock = asyncio.Lock()
+    # The same engine is also driven by the task worker (offline stt), which lives on another thread.
+    _gpu = threading.Lock()
+
+
+    def _gated(fn, *a):
+        with _gpu:
+            return fn(*a)
+
+
+    def _p(msg):
+        print("[stream] " + msg, flush=True)
+
+
+    def _capture_kw():
+        if ENFORCE_EAGER:
+            _p("--enforce-eager given: skipping CUDA graphs entirely")
+            return {"enforce_eager": True}
+        sizes = list(_CAPTURE_SIZES)
+        try:
+            from vllm.config import CompilationConfig
+
+            fields = set(getattr(CompilationConfig, "model_fields", None) or {})
+        except Exception as e:
+            _p("WARN cannot inspect vLLM CompilationConfig (%s); leaving capture sizes alone" % e)
+            return {}
+        for name in ("cudagraph_capture_sizes", "capture_sizes"):
+            if name in fields:
+                return {"compilation_config": {name: sizes}}
+        _p("WARN CompilationConfig has no capture-size field; leaving capture sizes alone")
+        return {}
+
+
+    def _load_blocking():
+        # On the MAIN thread before uvicorn: vLLM installs signal handlers, so a daemon thread fails.
+        _p("importing qwen_asr ...")
+        from qwen_asr import Qwen3ASRModel
+
+        try:
+            import qwen_asr.inference.qwen3_asr as _qasr_mod
+            import qwen_asr.inference.utils as _qasr_utils
+
+            _qasr_utils.MAX_ASR_INPUT_SECONDS = OFFLINE_MAX_INPUT_SEC
+            _qasr_mod.MAX_ASR_INPUT_SECONDS = OFFLINE_MAX_INPUT_SEC
+            _p("patched qwen-asr MAX_ASR_INPUT_SECONDS -> %ds" % OFFLINE_MAX_INPUT_SEC)
+        except Exception as e:
+            _p("WARN could not patch MAX_ASR_INPUT_SECONDS (%s)" % e)
+        _p("constructing Qwen3ASRModel.LLM(model=%s, gpu_util=%.2f, max_model_len=%d) ..."
+           % (MODEL_REPO, GPU_UTIL, MAX_MODEL_LEN))
+        # These are vLLM kwargs qwen-asr forwards; a build that takes fewer of them gets less.
+        _kw = dict(model=MODEL_REPO, gpu_memory_utilization=GPU_UTIL, max_new_tokens=MAX_NEW_TOKENS)
+        _cap = _capture_kw()
+        if _cap:
+            _p("graph capture tuning: %s" % _cap)
+        _attempts = [dict(_kw, max_model_len=MAX_MODEL_LEN, **_cap)] if _cap else []
+        _attempts += [dict(_kw, max_model_len=MAX_MODEL_LEN), dict(_kw)]
+        asr = None
+        for _i, _try in enumerate(_attempts, 1):
+            try:
+                asr = Qwen3ASRModel.LLM(**_try)
+                break
+            # ValueError = pydantic rejected a field; OOM is a RuntimeError and must NOT be retried.
+            except (TypeError, ValueError) as e:
+                if _i == len(_attempts):
+                    raise
+                _p("LLM() rejected %s (%s); retrying with fewer kwargs"
+                   % (sorted(set(_try) - set(_kw)), e))
+        _state["asr"] = asr
+        _warmup()
+        _state["ready"] = True
+        _p("engine READY: %s (gpu_util=%.2f)" % (MODEL_REPO, GPU_UTIL))
+        log.info("qwen-asr streaming engine loaded: %s (gpu_util=%.2f)", MODEL_REPO, GPU_UTIL)
+
+
+    def _warmup():
+        """One throwaway transcription before we report ready, so no caller pays the cold-start cost.
+
+        vLLM answers as soon as its constructor returns, but the first real inference still compiles
+        and captures graphs: measured at 74s on a time-sliced card against 0.3s once warm. llm-init
+        allows an upstream 60s to produce response headers, so without this the first offline caller
+        reads a 502 where a transcript belongs. Streaming pays the same cost, only spread across an
+        already-open socket where nothing times out -- and either path warms the other, so warming
+        the simpler one here covers both.
+        """
+        import numpy as np
+
+        t0 = time.time()
+        try:
+            # A voiced-band tone, not silence: the encoder may skip a silent clip and warm nothing.
+            n = 16000
+            tone = (0.25 * np.sin(2 * np.pi * 220 * np.arange(n) / 16000.0)).astype("float32")
+            _offline_transcribe(tone)
+            _p("warmup transcription took %.0fs" % (time.time() - t0))
+        except Exception as e:
+            # Serviceable either way; failing here only means the first caller pays after all.
+            _p("WARN warmup transcription failed after %.0fs: %s" % (time.time() - t0, e))
+
+
+    def _decode_to_16k_mono(raw, filename):
+        import tempfile
+        import librosa
+
+        suffix = os.path.splitext(filename or "")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+            tf.write(raw)
+            path = tf.name
+        try:
+            y, _sr = librosa.load(path, sr=16000, mono=True)
+        finally:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        return y.astype("float32")
+
+
+    def _repetition_params():
+        """The detector this build can use, or None. Built once; a build without it says so once.
+
+        Not imported at module load: a vLLM without RepetitionDetectionParams must still serve,
+        and the failure has to be one log line rather than an engine that will not start.
+        """
+        if not REPETITION_DETECTION:
+            return None
+        if not _repdet_cache:
+            try:
+                from vllm.sampling_params import RepetitionDetectionParams
+
+                _repdet_cache.append(RepetitionDetectionParams(**json.loads(REPETITION_DETECTION)))
+                _p("repetition detection: %s" % REPETITION_DETECTION)
+            except Exception as e:
+                _p("WARN ASR_REPETITION_DETECTION ignored (%s)" % e)
+                _repdet_cache.append(None)
+        return _repdet_cache[0]
+
+
+    def _apply_repetition(sp):
+        """Sets the detector for one call and returns how to put the old value back, or None.
+
+        None when nothing was set, so a build that will not take the attribute does not then
+        fail again inside a finally block -- where the failure would replace the transcript.
+        """
+        params = _repetition_params()
+        if params is None:
+            return None
+        old = getattr(sp, "repetition_detection", None)
+        try:
+            sp.repetition_detection = params
+        except Exception as e:
+            _p("WARN could not set repetition_detection (%s)" % e)
+            return None
+
+        def restore():
+            sp.repetition_detection = old
+
+        return restore
+
+
+    def _token_budget(seconds):
+        if TOKENS_PER_AUDIO_SEC <= 0:
+            return OFFLINE_MAX_TOKENS
+        return max(TOKENS_FLOOR,
+                   min(OFFLINE_MAX_TOKENS, int(seconds * TOKENS_PER_AUDIO_SEC) + TOKENS_FLOOR))
+
+
+    def _offline_transcribe(audio):
+        # Native offline transcription on the same load; max_tokens is raised then restored.
+        asr = _state["asr"]
+        sp = getattr(asr, "sampling_params", None)
+        old = getattr(sp, "max_tokens", None) if sp is not None else None
+        restore_rep = None
+        try:
+            if sp is not None:
+                sp.max_tokens = _token_budget(len(audio) / 16000.0)
+                restore_rep = _apply_repetition(sp)
+            results = asr.transcribe(audio=(audio, 16000), language=None, return_time_stamps=False)
+        finally:
+            if sp is not None and old is not None:
+                sp.max_tokens = old
+            if restore_rep is not None:
+                restore_rep()
+        r = results[0] if results else None
+        t = getattr(r, "text", None) if r is not None else None
+        if t is None and isinstance(r, dict):
+            t = r.get("text")
+        return (t or "").strip()
+
+
+    def _offline_transcribe_many(clips):
+        # qwen-asr's transcribe() takes a list and hands the whole list to vLLM in one
+        # generate() call: max_inference_batch_size defaults to -1 on the LLM factory, and
+        # chunk_list yields the list unsplit for any non-positive size. Feeding it one clip at
+        # a time is what kept vLLM from ever batching -- a 40 minute meeting arrived as four
+        # HTTP requests and left as 214 single-sequence generate calls.
+        asr = _state["asr"]
+        sp = getattr(asr, "sampling_params", None)
+        old = getattr(sp, "max_tokens", None) if sp is not None else None
+        restore_rep = None
+        try:
+            if sp is not None:
+                # One SamplingParams covers the whole call, so the budget follows the longest
+                # clip in the batch. That is looser than the per-clip cap the serial path gets,
+                # and still far tighter than a flat 4096.
+                sp.max_tokens = _token_budget(max(len(c) for c in clips) / 16000.0)
+                restore_rep = _apply_repetition(sp)
+            results = asr.transcribe(audio=[(c, 16000) for c in clips],
+                                     language=None, return_time_stamps=False)
+        finally:
+            if sp is not None and old is not None:
+                sp.max_tokens = old
+            if restore_rep is not None:
+                restore_rep()
+        texts = []
+        for r in (results or []):
+            t = getattr(r, "text", None)
+            if t is None and isinstance(r, dict):
+                t = r.get("text")
+            texts.append((t or "").strip())
+        if len(texts) != len(clips):
+            raise RuntimeError("transcribe returned %d results for %d clips"
+                               % (len(texts), len(clips)))
+        return texts
+
+
+    def build_app(supports):
+        has_stt = "stt" in supports
+        has_stream = "stt_stream" in supports
+        app = FastAPI(title="audio-stt-stream (Qwen3-ASR)")
+        mount_metrics(app)
+
+        register(app, model_name=MODEL_NAME, module="stt_stream", served=supports, repo=MODEL_REPO,
+                 is_ready=lambda: _state["ready"], error=lambda: _state["error"], task_api=has_stt)
+
+        if has_stt:
+            @app.post("/v1/audio/transcriptions")
+            async def transcriptions(file: UploadFile = File(...),
+                                     model: str = Form(None),
+                                     language: str = Form(None),
+                                     response_format: str = Form("json"),
+                                     segments: str = Form(None),
+                                     async_: str = Form(None, alias="async")):
+                if not _state["ready"]:
+                    raise HTTPException(status_code=503, detail=_state["error"] or "model not ready")
+                raw = await file.read()
+                audio = await asyncio.to_thread(_decode_to_16k_mono, raw, file.filename)
+                # BATCH mode (opt-in): `segments` JSON [{start,end}] — slice + transcribe each.
+                if segments:
+                    segs = parse_segments(segments)
+
+                    def _work_batch(ctx):
+                        ctx.progress(stage="transcribe", done=0, total=len(segs))
+                        if BATCH_ONE_SHOT:
+                            # Slice every span first, then hand the whole list over once. The
+                            # spans in one request are independent -- the caller batches them
+                            # precisely because nothing downstream depends on their order.
+                            out = [None] * len(segs)
+                            spans = []
+                            for i, seg in enumerate(segs):
+                                lo = max(0, int(float(seg.get("start") or 0) * 16000))
+                                hi = min(len(audio), int(float(seg.get("end") or 0) * 16000))
+                                if hi <= lo:
+                                    out[i] = {"text": ""}
+                                else:
+                                    ctx.meter(input_seconds=(hi - lo) / 16000.0)
+                                    spans.append((i, audio[lo:hi]))
+                            if spans:
+                                # The only checkpoint there can be: one generate() covers the
+                                # whole batch, so a cancellation arriving mid-call is not seen
+                                # until it returns. That is the cost of this path.
+                                ctx.checkpoint()
+                                try:
+                                    texts = _offline_transcribe_many([c for _, c in spans])
+                                    for (i, _), t in zip(spans, texts):
+                                        out[i] = {"text": t}
+                                except tasks.Cancelled:
+                                    raise
+                                except Exception as e:
+                                    # No per-span outcome exists when the single call fails, so
+                                    # every span carries the same error and the caller retries
+                                    # the batch -- which is what it already does today.
+                                    for i, _ in spans:
+                                        out[i] = {"error": "stt failed: %s" % e}
+                            ctx.progress(done=len(segs), total=len(segs))
+                            return {"model": MODEL_NAME, "mode": "stt", "batch": True, "results": out}
+                        out = []
+                        for i, seg in enumerate(segs, 1):
+                            ctx.checkpoint()
+                            try:
+                                lo = max(0, int(float(seg.get("start") or 0) * 16000))
+                                hi = min(len(audio), int(float(seg.get("end") or 0) * 16000))
+                                if hi <= lo:
+                                    out.append({"text": ""})
+                                else:
+                                    ctx.meter(input_seconds=(hi - lo) / 16000.0)
+                                    out.append({"text": _offline_transcribe(audio[lo:hi])})
+                            except tasks.Cancelled:
+                                raise
+                            except Exception as e:
+                                out.append({"error": "stt failed: %s" % e})
+                            finally:
+                                ctx.progress(done=i, total=len(segs))
+                        return {"model": MODEL_NAME, "mode": "stt", "batch": True, "results": out}
+
+                    return await tasks.dispatch(async_, "stt", MODEL_NAME, _work_batch,
+                                                fail="transcription failed", gate=_gpu)
+
+                # SINGLE mode.
+                def _work(ctx):
+                    ctx.meter(input_seconds=len(audio) / 16000.0)
+                    ctx.progress(ratio=0.0, stage="transcribe")
+                    text = _offline_transcribe(audio)
+                    ctx.progress(ratio=1.0, stage="done")
+                    if response_format in ("text", "srt", "vtt"):
+                        return Response(content=text, media_type="text/plain")
+                    return {"text": text}
+
+                return await tasks.dispatch(async_, "stt", MODEL_NAME, _work,
+                                            fail="transcription failed", gate=_gpu)
+
+        if has_stream:
+            @app.websocket("/v1/audio/stream")
+            async def stream(ws: WebSocket):
+                import numpy as np
+
+                await ws.accept()
+                if not _state["ready"]:
+                    await ws.send_text(json.dumps({"type": "error",
+                                                   "detail": _state["error"] or "model not ready"}))
+                    await ws.close()
+                    return
+                asr = _state["asr"]
+                sample_rate = 16000
+                step_ms = DEFAULT_STEP_MS
+                language = None
+
+                def _new_state():
+                    return asr.init_streaming_state(
+                        unfixed_chunk_num=UNFIXED_CHUNK_NUM,
+                        unfixed_token_num=UNFIXED_TOKEN_NUM,
+                        chunk_size_sec=CHUNK_SIZE_SEC,
+                    )
+
+                # prefix = text finalized by earlier rolls; samples resets on a roll, total never does.
+                S = {"st": _new_state(), "prefix": "", "samples": 0, "total": 0}
+                roll_samples = max(16000, int(ROLL_SEC * 16000))
+                pending = np.zeros((0,), dtype="float32")
+                await ws.send_text(json.dumps({"type": "ready"}))
+
+                def _join(a, b):
+                    if not a:
+                        return b
+                    if not b:
+                        return a
+                    # Space only between two ASCII words (CJK needs none).
+                    if a[-1].isascii() and a[-1].isalnum() and b[0].isascii() and b[0].isalnum():
+                        return a + " " + b
+                    return a + b
+
+                def _full_text():
+                    return _join(S["prefix"], getattr(S["st"], "text", "") or "")
+
+                async def _emit(kind):
+                    await ws.send_text(json.dumps({
+                        "type": kind,
+                        "text": _full_text(),
+                        "language": getattr(S["st"], "language", None) or language,
+                    }))
+
+                async def _roll():
+                    # Fold the finalized text into prefix and start fresh, resetting encoder-cache use.
+                    async with _infer_lock:
+                        await asyncio.to_thread(_gated, asr.finish_streaming_transcribe, S["st"])
+                    S["prefix"] = _join(S["prefix"], getattr(S["st"], "text", "") or "")
+                    S["st"] = _new_state()
+                    S["samples"] = 0
+
+                async def _feed(cur):
+                    # Backstop: if the cache overflows despite the proactive roll, roll and retry once.
+                    try:
+                        async with _infer_lock:
+                            await asyncio.to_thread(_gated, asr.streaming_transcribe, cur, S["st"])
+                    except Exception as e:
+                        msg = str(e).lower()
+                        if "encoder cache" in msg or "exceeds" in msg or "pre-allocated" in msg:
+                            log.warning("encoder-cache overflow; rolling session and retrying: %s", e)
+                            await _roll()
+                            async with _infer_lock:
+                                await asyncio.to_thread(_gated, asr.streaming_transcribe,
+                                                        cur, S["st"])
+                        else:
+                            raise
+                    S["samples"] += int(cur.shape[0])
+                    S["total"] += int(cur.shape[0])
+
+                try:
+                    while True:
+                        msg = await ws.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            break
+                        text = msg.get("text")
+                        if text is not None:
+                            try:
+                                obj = json.loads(text)
+                            except Exception:
+                                obj = {}
+                            t = obj.get("type")
+                            if t == "start":
+                                language = obj.get("language") or None
+                                sample_rate = int(obj.get("sample_rate") or 16000)
+                                step_ms = int(obj.get("step_ms") or DEFAULT_STEP_MS)
+                                continue
+                            if t in ("stop", "done", "finish"):
+                                break
+                            continue
+                        data = msg.get("bytes")
+                        if not data:
+                            continue
+                        seg = resample_linear(pcm16_to_float32(data), sample_rate)
+                        pending = np.concatenate([pending, seg]) if pending.size else seg
+                        step = max(1, int(round(step_ms / 1000.0 * 16000)))
+                        while pending.shape[0] >= step:
+                            cur, pending = pending[:step], pending[step:]
+                            await _feed(cur)
+                            await _emit("partial")
+                            # Proactive roll at a safe point so we never approach the cap.
+                            if S["samples"] >= roll_samples:
+                                await _roll()
+                                await _emit("partial")
+                    # flush tail + finalize
+                    if pending.size:
+                        await _feed(pending)
+                    async with _infer_lock:
+                        await asyncio.to_thread(_gated, asr.finish_streaming_transcribe, S["st"])
+                    await _emit("final")
+                    # We consumed the audio, so the closing frame — not the caller — reports its length.
+                    await ws.send_text(json.dumps({
+                        "type": "closed",
+                        "audio_seconds": round(S["total"] / 16000.0, 3),
+                    }))
+                    await ws.close()
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    log.exception("stream error: %s", e)
+                    try:
+                        await ws.send_text(json.dumps({"type": "error", "detail": str(e)}))
+                        await ws.close()
+                    except Exception:
+                        pass
+
+        return app
+
+
+    def run(supports):
+        _p("stt_stream starting; model=%s port=%s supports=%s" % (MODEL_REPO, PORT, supports))
+
+        def load():
+            try:
+                _load_blocking()
+            except Exception as e:
+                _state["error"] = hfgate.explain(MODEL_REPO, e)
+                _p("engine load FAILED: %s" % e)
+                log.exception("engine load failed: %s", e)
+
+        def build(served):
+            app = build_app(served)
+            _p("starting uvicorn on :%s (ready=%s)" % (PORT, _state["ready"]))
+            return app
+
+        # No server-initiated WS keepalive: bursty inference lags Pong and drops a healthy session.
+        _runtime.serve(
+            supports,
+            load,
+            build,
+            "qwen-asr vLLM",
+            load_on_main=True,
+            disable_ws_ping=True,
+        )
+
+  bench_boot.py: |
+    import os, sys, time, threading
+
+    LOG = os.environ.get("BENCH_LOG", "/tmp/bench_requests.tsv")
+    _lock = threading.Lock()
+
+    def _note(m):
+        sys.stderr.write("[bench] %s\n" % m); sys.stderr.flush()
+
+    def _install():
+        import vllm.entrypoints.llm as m
+        LLM = m.LLM
+
+        # LLM.__init__ sets disable_log_stats=True unless the caller passes it, and then
+        # RequestOutput.metrics is never populated. That is why there are no timings.
+        #
+        # BENCH_LLM_KWARGS is the way past the wrapper claiming only three engine flags:
+        # whatever JSON object it holds is merged into the constructor, so quantization,
+        # kv_cache_dtype, max_num_seqs and speculative_config are all reachable without
+        # touching the engine repository. A bad value falls back to the unmodified
+        # constructor rather than leaving a dead engine, since the wrapper's own retry
+        # ladder only catches TypeError and ValueError.
+        _init = LLM.__init__
+        def __init__(self, *a, **kw):
+            kw.setdefault("disable_log_stats", False)
+            extra = {}
+            raw = os.environ.get("BENCH_LLM_KWARGS", "").strip()
+            if raw:
+                try:
+                    import json
+                    extra = json.loads(raw)
+                    if not isinstance(extra, dict):
+                        raise TypeError("BENCH_LLM_KWARGS must be a JSON object")
+                except Exception as e:
+                    _note("BENCH_LLM_KWARGS ignored, not usable JSON: %r" % e)
+                    extra = {}
+            if not extra:
+                return _init(self, *a, **kw)
+            merged = dict(kw); merged.update(extra)
+            _note("injecting LLM kwargs: %s" % sorted(extra))
+            try:
+                return _init(self, *a, **merged)
+            except Exception as e:
+                _note("injected kwargs REJECTED (%r); retrying without them" % e)
+                return _init(self, *a, **kw)
+        LLM.__init__ = __init__
+
+        # Stopping a runaway span while it runs, rather than folding it up afterwards.
+        # qwen-asr's parse_asr_output collapses a repeated pattern out of the text
+        # (detect_and_fix_repetitions, threshold 20), so a span that loops produces a
+        # sane transcript -- after the model has already spent the tokens generating it.
+        # vLLM's own detector ends such a request instead: FINISHED_REPETITION in
+        # v1/core/sched/utils.py. A per-second token cap only bounds the waste and, set
+        # too low, truncates real speech; this touches nothing that is not repeating.
+        _repdet = None
+        raw = os.environ.get("BENCH_REPETITION_DETECTION", "").strip()
+        if raw:
+            try:
+                import json as _json
+                from vllm.sampling_params import RepetitionDetectionParams
+                _repdet = RepetitionDetectionParams(**_json.loads(raw))
+                _note("repetition detection: %s" % raw)
+            except Exception as e:
+                _note("BENCH_REPETITION_DETECTION ignored (%r)" % e)
+
+        _gen = LLM.generate
+        def generate(self, *a, **kw):
+            if _repdet is not None:
+                for sp in (kw.get("sampling_params"), *(x for x in a if hasattr(x, "max_tokens"))):
+                    if sp is not None and getattr(sp, "repetition_detection", None) is None:
+                        try:
+                            sp.repetition_detection = _repdet
+                        except Exception as e:
+                            _note("could not set repetition_detection: %r" % e)
+            t0 = time.perf_counter()
+            outs = _gen(self, *a, **kw)
+            dt = time.perf_counter() - t0
+            try:
+                lines = []
+                for o in (outs or []):
+                    p = len(getattr(o, "prompt_token_ids", None) or [])
+                    g = sum(len(getattr(c, "token_ids", None) or []) for c in o.outputs)
+                    mt = getattr(o, "metrics", None)
+                    sch = getattr(mt, "scheduled_ts", 0.0) or 0.0
+                    ft = getattr(mt, "first_token_ts", 0.0) or 0.0
+                    lt = getattr(mt, "last_token_ts", 0.0) or 0.0
+                    lines.append("%.4f\t%d\t%d\t%d\t%.4f\t%.4f" % (
+                        dt, len(outs), p, g,
+                        (ft - sch) if (ft and sch) else -1.0,
+                        (lt - ft) if (lt and ft) else -1.0))
+                with _lock:
+                    new = not os.path.exists(LOG)
+                    with open(LOG, "a") as f:
+                        if new:
+                            f.write("generate_s\tn_out\tprompt_tok\tgen_tok\tprefill_s\tdecode_s\n")
+                        for ln in lines:
+                            f.write(ln + "\n")
+            except Exception as e:
+                _note("record failed: %r" % e)
+            return outs
+        LLM.generate = generate
+        _note("instrumented vllm LLM -> %s" % LOG)
+
+    # The guard is load-bearing, not style. VLLM_WORKER_MULTIPROC_METHOD=spawn makes the
+    # worker re-import the main module, which is this file once it is the entrypoint; without
+    # the guard that re-runs the engine inside the child and multiprocessing refuses with
+    # "an attempt has been made to start a new process before the current process has finished
+    # its bootstrapping phase". The child imports this as __mp_main__, so only the definitions
+    # above run there, which is all it needs.
+    if __name__ == "__main__":
+        # Drop the batching variant of the engine module over the installed one before
+        # anything imports it. Exec in this container is root and /app is writable, and the
+        # overlay resets on restart, so switching the flag off restores the shipped file.
+        if os.environ.get("ASR_BATCH_ONE_SHOT", "0") == "1":
+            try:
+                import shutil
+                shutil.copyfile("/wrappers/stt_stream_batch.py",
+                                "/app/wrapper/caps/stt_stream.py")
+                _note("installed batching stt_stream.py")
+            except Exception as e:
+                _note("could NOT install batching module, running stock: %r" % e)
+
+        if os.environ.get("BENCH_INSTRUMENT", "0") == "1":
+            try:
+                _install()
+            except Exception as e:
+                _note("instrumentation FAILED, running plain: %r" % e)
+
+        import runpy
+        runpy.run_module("wrapper.app", run_name="__main__")
+  qwen.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=qwen
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
+    # arrive late - the two containers are separate Deployments with no ordering
+    # between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    . "$WRAPPER_COMMON"
+
+    wait_for_sentinel
+
+    export HF_HUB_OFFLINE=1
+    export PYTHONUNBUFFERED=1
+
+    run_audio() {
+        if [ "${BENCH_INSTRUMENT:-0}" = "1" ]; then
+            log "starting engine offline, instrumented (bench_boot.py)"
+            exec audio-python /wrappers/bench_boot.py "$@"
+        fi
+        log "starting engine offline (audio-python -m wrapper.app)"
+        exec audio-python -m wrapper.app "$@"
+    }
+
+    supervise_engine run_audio "$@"

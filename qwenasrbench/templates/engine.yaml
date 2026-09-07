@@ -1,0 +1,251 @@
+{{- /* Qwen ASR engine: one baked image serves stt / stt_stream / align off a single load; this only sizes the GPU. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- /* The manifest wins, and the order is the whole point. The platform hands every
+       upgrade the olaresEnv it remembered from the previous install, so a value read from
+       olaresEnv first can never be changed by shipping a new chart: the manifest says one
+       thing, the render says the old thing, and every sign says the upgrade landed.
+       Upstream already guards the identity fields this way but not ENGINE_ARGS, which is
+       the one this project changes on every experiment. The trap is per-field, so every
+       field the manifest declares is listed here -- leaving one out is enough to lose it. */ -}}
+{{- $me := dict -}}
+{{- range (.Files.Get "OlaresManifest.yaml" | fromYaml).envs -}}
+{{- if hasKey . "default" -}}{{- $_ := set $me .envName .default -}}{{- end -}}
+{{- end -}}
+{{- /* An empty manifest value is a real value and has to beat the remembered one. `default`
+       cannot express that -- Go templates treat "" as unset, so `manifest | default olaresEnv`
+       silently falls through whenever the manifest says "". That is how a speculative-decoding
+       config from an earlier experiment came back in a run meant to be the baseline, with the
+       app reporting the new version and every other field correct. Fields whose default is
+       never empty can keep the shorter form; this one cannot. */ -}}
+{{- $benchKwargs := ($oe.BENCH_LLM_KWARGS | default "") -}}
+{{- if hasKey $me "BENCH_LLM_KWARGS" -}}{{- $benchKwargs = (get $me "BENCH_LLM_KWARGS") -}}{{- end -}}
+{{- $benchRepDet := ($oe.BENCH_REPETITION_DETECTION | default "") -}}
+{{- if hasKey $me "BENCH_REPETITION_DETECTION" -}}{{- $benchRepDet = (get $me "BENCH_REPETITION_DETECTION") -}}{{- end -}}
+{{- $asrRepDet := ($oe.ASR_REPETITION_DETECTION | default "") -}}
+{{- if hasKey $me "ASR_REPETITION_DETECTION" -}}{{- $asrRepDet = (get $me "ASR_REPETITION_DETECTION") -}}{{- end -}}
+{{- $modelName := (get $me "MODEL_NAME") | default $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := (get $me "MODEL_SOURCE") | default $oe.MODEL_SOURCE | default "" -}}
+{{- /* MODEL_SUPPORTS: bare capability names; llm-init and the engine both take supports_* keys. */ -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ((get $me "MODEL_SUPPORTS") | default $oe.MODEL_SUPPORTS | default "stt") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $supportsRaw := join "," $supportsKeys -}}
+{{- $engineImage := (get $me "ENGINE_IMAGE") | default $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen:v1.1.3" -}}
+{{- $enginePort := int ((get $me "ENGINE_PORT") | default $oe.ENGINE_PORT | default "8000") -}}
+{{- $cpuRequest := trim ((get $me "CPU_REQUEST") | default $oe.CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ((get $me "MEMORY_REQUEST") | default $oe.MEMORY_REQUEST | default "4Gi") -}}
+{{- $cpuLimit := trim ((get $me "CPU_LIMIT") | default $oe.CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ((get $me "MEMORY_LIMIT") | default $oe.MEMORY_LIMIT | default "16Gi") -}}
+{{- /* GPU is OPTIONAL (REQUIRED_GPU_MEMORY = "" or "0" => CPU-only). */ -}}
+{{- $gpuRaw := trim ((get $me "REQUIRED_GPU_MEMORY") | default $oe.REQUIRED_GPU_MEMORY | default "12Gi") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- /* Engine-native flags in llm-init's one channel; the engine derives its GPU share from the
+       quota below. gb10 profiles a smaller KV budget after the encoder than a discrete slice, and
+       graph capture is where startup has been seen to wedge holding the vGPU lock. */ -}}
+{{- $engineArgs := trim ((get $me "ENGINE_ARGS") | default $oe.ENGINE_ARGS | default "") -}}
+{{- if eq $engineArgs "" -}}
+{{- $engineArgs = printf "--max-model-len %s --enforce-eager" (ternary "3072" "8192" (eq $gpuType "nvidia-gb10")) -}}
+{{- end -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if $wantGpu }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.qwenasrbench.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        # Updating a ConfigMap restarts nothing: the new script lands on the node while the
+        # container keeps running the one it read at start, and every outward sign says the
+        # upgrade took. Rolling the hash in makes a script change a pod change.
+        checksum/wrappers: {{ include (print $.Template.BasePath "/wrappers.yaml") . | sha256sum }}
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        # DirectoryOrCreate, matching llm-init's mount of the same path. It was Directory,
+        # so that a missing corpus failed the Pod loudly rather than mounting an empty
+        # directory and failing later inside a benchmark. That is the right trade on the
+        # machine this was built for and the wrong one anywhere else: every install without
+        # a pre-seeded corpus directory gets an engine that will not start, reported as a
+        # mount error rather than as anything a reader could act on. The corpus that needs
+        # this mount says so itself now -- the runner raises "<path> is not on this machine"
+        # -- and the corpus that downloads itself never needed it.
+        - name: corpora
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/corpora"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+            defaultMode: 0555
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/qwen.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: audio
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: ENGINE_PORT
+              value: "{{ $enginePort }}"
+            - name: LOG_LEVEL
+              value: "{{ (get $me "LOG_LEVEL") | default $oe.LOG_LEVEL | default "info" }}"
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+{{- if $engineArgs }}
+            - name: ENGINE_ARGS
+              value: "{{ $engineArgs }}"
+{{- end }}
+{{- if $wantGpu }}
+            - name: REQUIRED_GPU_MEMORY
+              value: "{{ $gpuRaw }}"
+{{- end }}
+            - name: ASR_TOKENS_PER_AUDIO_SEC
+              value: "{{ (get $me "ASR_TOKENS_PER_AUDIO_SEC") | default $oe.ASR_TOKENS_PER_AUDIO_SEC | default "0" }}"
+            - name: ASR_BATCH_ONE_SHOT
+              value: "{{ (get $me "ASR_BATCH_ONE_SHOT") | default $oe.ASR_BATCH_ONE_SHOT | default "0" }}"
+            - name: BENCH_LLM_KWARGS
+              value: {{ $benchKwargs | quote }}
+            - name: BENCH_REPETITION_DETECTION
+              value: {{ $benchRepDet | quote }}
+            - name: ASR_REPETITION_DETECTION
+              value: {{ $asrRepDet | quote }}
+            - name: BENCH_INSTRUMENT
+              value: "{{ (get $me "BENCH_INSTRUMENT") | default $oe.BENCH_INSTRUMENT | default "0" }}"
+            - name: VLLM_USE_V1
+              value: "{{ (get $me "VLLM_USE_V1") | default $oe.VLLM_USE_V1 | default "0" }}"
+            - name: VLLM_WORKER_MULTIPROC_METHOD
+              value: spawn
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # No readinessProbe (like llamacpp): Ready at start so the app runs while the model downloads; llm-init gates /v1/*.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+            # Only this benchmarking app mounts it: a timing script can then run inside the
+            # engine pod, read local files and talk to localhost:8000, with no router, no
+            # llm-init reverse proxy and no mesh sidecar in the path. Reaching the engine
+            # from the caller's namespace is not an option -- shared_entrance_np.go restricts
+            # that to a frozen list of platform namespaces with no per-app opt-in.
+            - name: corpora
+              mountPath: /corpora
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP

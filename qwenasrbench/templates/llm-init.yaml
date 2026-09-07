@@ -1,0 +1,280 @@
+{{- /* llm-init (ENGINE_KIND=audio) is the whole entrance: it downloads MODEL_SOURCE and proxies /v1/* to the engine. */ -}}
+{{- $clientDomainENV := split "," .Values.domain.qwenasrbench -}}
+{{- $clientDomain := index $clientDomainENV "_0" -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- /* Manifest-first, for the reason at the top of engine.yaml: the platform renders an
+       upgrade from the values it remembered at the previous install. The identity fields
+       matter here too -- this workload and the engine disagreeing on the model name is the
+       failure the speakrs chart records hitting during a rename. */ -}}
+{{- $me := dict -}}
+{{- range (.Files.Get "OlaresManifest.yaml" | fromYaml).envs -}}
+{{- $_ := set $me .envName .default -}}
+{{- end -}}
+{{- $modelSource := (get $me "MODEL_SOURCE") | default $oe.MODEL_SOURCE | default "" -}}
+{{- $modelName := (get $me "MODEL_NAME") | default $oe.MODEL_NAME | default "" -}}
+{{- $modelMode := (get $me "MODEL_MODE") | default $oe.MODEL_MODE | default "audio" -}}
+{{- /* MODEL_SUPPORTS: bare capability names; llm-init and the engine both take supports_* keys. */ -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ((get $me "MODEL_SUPPORTS") | default $oe.MODEL_SUPPORTS | default "stt") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $modelSupports := join "," $supportsKeys -}}
+{{- $logLevel := (get $me "LOG_LEVEL") | default $oe.LOG_LEVEL | default "debug" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $benchRepDetForRunner := ($oe.BENCH_REPETITION_DETECTION | default "") -}}
+{{- if hasKey $me "BENCH_REPETITION_DETECTION" -}}{{- $benchRepDetForRunner = (get $me "BENCH_REPETITION_DETECTION") -}}{{- end -}}
+{{- $asrRepDetForRunner := ($oe.ASR_REPETITION_DETECTION | default "") -}}
+{{- if hasKey $me "ASR_REPETITION_DETECTION" -}}{{- $asrRepDetForRunner = (get $me "ASR_REPETITION_DETECTION") -}}{{- end -}}
+{{- $benchKwargsForRunner := ($oe.BENCH_LLM_KWARGS | default "") -}}
+{{- if hasKey $me "BENCH_LLM_KWARGS" -}}{{- $benchKwargsForRunner = (get $me "BENCH_LLM_KWARGS") -}}{{- end -}}
+{{- $benchImage := (get $me "ENGINE_IMAGE") | default $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen:v1.1.3" -}}
+{{- $benchEnginePort := int ((get $me "ENGINE_PORT") | default $oe.ENGINE_PORT | default "8000") -}}
+{{- $benchPort := int ((get $me "BENCH_PORT") | default $oe.BENCH_PORT | default "8080") -}}
+{{- $benchModelName := (get $me "MODEL_NAME") | default $oe.MODEL_NAME | default "" -}}
+{{- $benchBatchSeconds := (get $me "BENCH_BATCH_SECONDS") | default $oe.BENCH_BATCH_SECONDS | default "600" -}}
+{{- $runStateHostPath := printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Static name — the engine Deployment uses {{ .Release.Name }} for allowMultipleInstall.
+  name: llminit
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: llm-init
+spec:
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: llm-init
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: llm-init
+      annotations:
+        # The runner lives in a ConfigMap, and changing a ConfigMap does not restart a Pod:
+        # the new file lands on the node while the container keeps running the one it read
+        # at start. Without this the app reports the new version and runs the old code --
+        # which happened once here, between moving the runner into this Pod and noticing
+        # the annotation had been left behind in the file it came from.
+        checksum/bench: {{ .Files.Get "files/bench_runner.py" | sha256sum }}
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+        # The benchmark runner rides in this Pod rather than its own Deployment: the
+        # platform's package check rejects a third workload in this app, and llm-init is
+        # the right host for it -- restarting this Pod leaves the engine, and its model,
+        # untouched.
+        - name: bench-code
+          configMap:
+            name: asrbench-runner
+            defaultMode: 0555
+        # Fetched corpora and finished runs. On appCommon because a corpus costs hundreds
+        # of megabytes and minutes to prepare, and a run erased by a restart is a run
+        # nobody can quote.
+        - name: bench-store
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/asrbench"
+            type: DirectoryOrCreate
+        - name: corpora
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/corpora"
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-chown
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - "mkdir -p /cache/hf/hub/.locks && chown -R 1000:1000 /cache/hf/hub /run/llm-init || true"
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
+      containers:
+        - name: llm-init
+          image: docker.io/beclab/llm-init:v1.5.2
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ENGINE_KIND
+              value: "audio"
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_MODE
+              value: "{{ $modelMode }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $modelSupports }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: MAX_CONCURRENT_DOWNLOADS
+              value: "1"
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_LEVEL
+              value: "{{ $logLevel }}"
+            - name: LOG_FORMAT
+              value: json
+            - name: APP_URL
+              value: "https://{{ $clientDomain }}"
+          ports:
+            - name: http
+              containerPort: 8090
+          # Probes stay on /livez (process up), not the engine: llm-init 503-gates /v1/* until the engine is alive.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 4Gi
+        # Measures the engine from inside the cluster. Reaching an app from outside needs
+        # the LarePass network and `cluster pod exec` does not exist on every Olares
+        # version, so anything that needs a person's terminal to stay connected cannot be
+        # relied on to reproduce a figure. Uses the engine's image, which is already on the
+        # node and carries python, numpy and soundfile; it asks for no GPU.
+        - name: asrbench-runner
+          image: "{{ $benchImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["audio-python", "/bench-code/bench_runner.py"]
+          env:
+            - name: BENCH_ENGINE_URL
+              value: "http://audio-engine.{{ .Release.Namespace }}:{{ $benchEnginePort }}"
+            - name: BENCH_MODEL
+              value: "{{ $benchModelName }}"
+            - name: BENCH_PORT
+              value: "{{ $benchPort }}"
+            - name: BENCH_STORE
+              value: /bench
+            - name: BENCH_SHARED_CORPORA
+              value: /corpora
+            - name: BENCH_BATCH_SECONDS
+              value: "{{ $benchBatchSeconds }}"
+            - name: BENCH_CONSOLE_URL
+              value: "http://127.0.0.1:8090"
+            # 🔴 The same values the engine is rendered with, so a run can record what
+            # produced it. Recorded as "declared": this says what the chart deployed, it
+            # does not read the engine process back. The Model Console can restart the
+            # engine with different arguments and nothing here would notice.
+            - name: ASR_BATCH_ONE_SHOT
+              value: "{{ (get $me "ASR_BATCH_ONE_SHOT") | default $oe.ASR_BATCH_ONE_SHOT | default "" }}"
+            - name: ASR_TOKENS_PER_AUDIO_SEC
+              value: "{{ (get $me "ASR_TOKENS_PER_AUDIO_SEC") | default $oe.ASR_TOKENS_PER_AUDIO_SEC | default "" }}"
+            - name: BENCH_REPETITION_DETECTION
+              value: {{ ($benchRepDetForRunner | default "") | quote }}
+            - name: ASR_REPETITION_DETECTION
+              value: {{ ($asrRepDetForRunner | default "") | quote }}
+            - name: BENCH_LLM_KWARGS
+              value: {{ ($benchKwargsForRunner | default "") | quote }}
+            - name: ENGINE_ARGS
+              value: {{ ((get $me "ENGINE_ARGS") | default $oe.ENGINE_ARGS | default "") | quote }}
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - name: bench
+              containerPort: {{ $benchPort }}
+          volumeMounts:
+            - name: bench-code
+              mountPath: /bench-code
+            - name: bench-store
+              mountPath: /bench
+            - name: corpora
+              mountPath: /corpora
+              readOnly: true
+          resources:
+            # 🔴 Kept small on purpose. The manifest's accelerator block must cover the sum
+            # of every container's request and limit, and the package check refuses the
+            # upload when it does not -- saying only "failed to process", which is why this
+            # is worth a comment. Preparing a corpus holds one chunk in memory:
+            # BENCH_BATCH_SECONDS of 16 kHz mono is about 19 MB at the default.
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $benchPort }}
+            periodSeconds: 10
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
+---
+# The Service behind the sharedEntrances stub: :80 -> llm-init:8090, in-cluster only (no edge, no SSO).
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+  type: ClusterIP

@@ -1,0 +1,364 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: qwenasrbench
+  icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+  description: "ASR Bench for offline + streaming STT."
+  appid: qwenasrbench
+  title: ASR Bench
+  version: '0.0.61'
+  categories:
+    - AI
+    - models
+  tags:
+  - speech-to-text
+  - audio
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: qwenasrbenchapi
+    host: sharedentrances-api
+    port: 0
+    title: ASR Bench API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: qwenasrbench
+    port: 8090
+    host: download-svc
+    title: ASR Bench
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+    openMethod: window
+    authLevel: internal
+  # The benchmark runner's own page. Separate from the model console because they answer
+  # different questions: that one says whether the engine is up, this one says what it
+  # scores and how fast, on this machine and this corpus.
+  - name: asrbenchrunner
+    port: 8080
+    host: bench-svc
+    title: ASR Bench Runner
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  qwenasrbench: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'asrbench/Qwen3-ASR-1.7B'
+  fullDescription: |
+    **Model Overview**
+    ASR Bench for offline + streaming STT.
+
+    **Configuration**
+    - Model: `Qwen/Qwen3-ASR-1.7B`
+    - Source: `hf://Qwen/Qwen3-ASR-1.7B`
+    - Capabilities: `stt,stt_stream`
+    - Required GPU memory: `12Gi`
+    - Engine: Qwen ASR (qwen-asr / vLLM)
+
+    **How It Works**
+    First, Model Console (llm-init) downloads the model and gets it ready, then the
+    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
+    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
+
+    **Stack**
+    - **audio engine**: Qwen ASR (qwen-asr / vLLM) (port 8000); self-reports `/v1/models` + `/metrics`
+    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+
+  upgradeDescription: |
+    0.0.60: Repetition detection is read by the engine module rather than patched over
+    vLLM, which is the form going upstream. Measured equal to the patch it replaces on
+    AISHELL-4, three runs each way.
+    0.0.49: Benchmarks run inside the app -- pick a corpus, run it, read the error rate
+    beside the configuration that produced it. LibriSpeech test-clean lands on the 1.63%
+    WER its publisher reports for this model.
+    0.0.23: Initial release.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: huangzhenyuan-bytetrade
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/beclab/llm-init
+
+  accelerator:
+    # 🔴 Sum rule: accelerator must cover EVERY container's request and limit, added up:
+    # engine (500m/4Gi req, 6/16Gi lim) + llm-init (200m/256Mi, 1/4Gi) + the benchmark
+    # runner in llm-init's Pod (100m/256Mi, 1/2Gi). Breaking it is refused at upload with
+    # nothing but "failed to process uploaded package" -- no mention of which field.
+    - mode: nvidia
+      limitedCpu: "8"
+      requiredCpu: "800m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      # engine 24Gi + llm-init 4Gi + benchmark runner 2Gi. The node has 46.9GiB.
+      # 🔴 The check is exact and it names the numbers: raising the engine or adding a
+      # container without moving this gets "sum of container resources.limits.memory
+      # (30Gi) must be <= limitedMemory (28Gi)" in the market log -- and nothing but
+      # "failed to process uploaded package" at the CLI.
+      limitedMemory: "30Gi"
+      requiredMemory: "4608Mi"
+      requiredGPUMemory: "12Gi"
+      limitedGPUMemory: "12Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "8"
+      requiredCpu: "800m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      # Covers the same three containers as the block above.
+      limitedMemory: "30Gi"
+      requiredMemory: "12800Mi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://Qwen/Qwen3-ASR-1.7B"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "asrbench/Qwen3-ASR-1.7B"
+    # Deliberately unlike the deployed audioqwen3asrv3's Qwen/Qwen3-ASR-1.7B. Router
+    # addresses a model by name, so two deployments sharing one name make a benchmark
+    # record impossible to attribute to the configuration that produced it.
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "audio"
+    options:
+    - title: Audio
+      value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "stt,stt_stream"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: STT (offline transcription)
+      value: stt
+    - title: STT Stream (streaming ASR, WebSocket)
+      value: stt_stream
+    description: "Capabilities this app exposes."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "12Gi"
+    description: "GPU memory required for this model. `0` means CPU-only."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    # Upstream sets 16Gi and it is not enough: a 540s window at --max-model-len 16384 is
+    # OOMKilled (exit 137) on host memory, not on GPU memory. The node has 46.9GiB.
+    default: "24Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+  - envName: BENCH_INSTRUMENT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "1"
+    # When on, the engine starts through /wrappers/bench_boot.py, which patches vLLM's LLM
+    # to record per-request prompt/generated token counts and the prefill/decode split into
+    # /tmp/bench_requests.tsv. This field exists only in this benchmarking app.
+  - envName: BENCH_PORT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8080"
+    # The benchmark runner's own port. It serves a page and a small JSON API and holds no
+    # model, so it is nothing like the engine port.
+  - envName: BENCH_BATCH_SECONDS
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "600"
+    # How much audio one request carries, which is also how much a single generate call
+    # gets. Held fixed rather than tuned: it is what makes two runs at different span
+    # lengths comparable, and it is what the caller this engine serves already does.
+  - envName: ASR_BATCH_ONE_SHOT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "1"
+    # 1 makes the engine hand a whole batch of spans to vLLM in one generate() call instead
+    # of looping over them. Off by default so the same image can measure both paths.
+  - envName: ASR_TOKENS_PER_AUDIO_SEC
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "12"
+    # Output budget per second of audio, replacing the flat OFFLINE_MAX_TOKENS. 0 keeps the
+    # flat cap. Measured output is about 3.4 tokens per audio second, so 12 is triple
+    # headroom; a runaway span then stops in tens of tokens instead of thousands.
+  # 🔴 Two routes to one setting: exactly one of these carries the JSON, never both. They
+  # write the same SamplingParams.repetition_detection field, so with both on a run cannot
+  # say which one produced it. The engine log names the active one -- "[stream] repetition
+  # detection" is the module, "[bench] repetition detection" is the patch -- and reading
+  # that line back is what makes a number attributable.
+  #
+  # A JSON object for vLLM's RepetitionDetectionParams. The scheduler ends a request the
+  # moment its output starts repeating (FINISHED_REPETITION) rather than letting it run to
+  # the token cap and having qwen-asr fold the repetition out of the text afterwards --
+  # which is what a span costing 61 of a batch's 62 seconds was doing. Empty disables it.
+  # This changes output, so every measurement needs a CER too.
+  #
+  # min_count must clear the 20 the downstream folding uses: at 10 a request stops one
+  # repetition short of it and the residue reaches the transcript. min_pattern_size must be
+  # at least 2 -- "对对对" is real Mandarin speech.
+  - envName: BENCH_REPETITION_DETECTION
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    # The route every recorded number was measured on: a patch bench_boot.py installs over
+    # vLLM's LLM. Not the form that ships, and it reaches the streaming path too, which
+    # the module route deliberately does not. Kept for A/B; off.
+    default: ""
+  - envName: ASR_REPETITION_DETECTION
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    # The route the engine module reads itself, which is the form going to audio-engines.
+    # Measured equivalent on text (AISHELL-4, four runs against two, CER 15.47-15.50 either
+    # way); the speed half is open, because this card carries five other models and one run
+    # equivalent on speed as well once the card was quiet -- three runs each, 129.7-135.7s
+    # against 132.5-134.6s, every error rate inside the other's range. This is the default:
+    # the chart should deploy the code being contributed. Scoped to offline transcription,
+    # unlike the patch above.
+    default: '{"min_pattern_size":2,"max_pattern_size":20,"min_count":20}'
+  - envName: BENCH_LLM_KWARGS
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: ""
+    # A JSON object merged into vLLM's LLM constructor by bench_boot.py. This is how the
+    # sweep reaches settings the wrapper drops -- quantization, kv_cache_dtype, max_num_seqs,
+    # speculative_config -- without changing the engine repository. Empty means untouched.
+  - envName: VLLM_USE_V1
+    required: false
+    type: string
+    # Same rule as ENGINE_ARGS: every knob this project sweeps is manifest-first and not
+    # editable. Two sources for one value is exactly the shape that makes an upgrade lie.
+    editable: false
+    applyOnChange: false
+    default: "0"
+    # The deployed chart hardcodes "0" with no comment saying why. Exposed as a knob here
+    # because it is an environment variable, which is one of the few ways past the wrapper
+    # claiming only three engine flags. (Measured since: v0.23.0 has no V0 left, so this is
+    # inert -- the engine runs V1 either way.)
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    # editable: false on purpose, unlike the deployed chart. Olares renders an upgrade from
+    # the values it remembered at the previous install, so anything reached that way is
+    # quietly swapped back to the old value -- and changing this field then upgrading is
+    # exactly what this project does. Not editable, a real default here, and a manifest-first
+    # template together make the manifest the only source.
+    editable: false
+    applyOnChange: false
+    # --enforce-eager stays. Turning it off enables CUDA graphs, which measured +2.9% and
+    # changed the output by 0.5-0.8% because graph capture moves the numeric path; the
+    # baseline should not carry a quality change that small a speedup cannot pay for.
+    # 16384 rather than the upstream 8192: audio takes 13 tokens per second out of the same
+    # budget the text is written into, so 8192 truncates a 540s window at 56% of its output.
+    default: "--max-model-len 16384 --enforce-eager"
+    # Left blank on purpose: the built-in depends on the card, which a static default cannot express.
+    description: "Engine-native flags (llm-init ENGINE_ARGS). The value above REPLACES the
+      whole list, so carry every flag over when adding one. This is the field the experiment
+      matrix sweeps: change it here, repackage, upgrade, then read the flags back out of the
+      engine log before trusting any number."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
