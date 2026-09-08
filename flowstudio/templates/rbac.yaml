@@ -44,13 +44,16 @@ roleRef:
   name: {{ $sa }}
   apiGroup: rbac.authorization.k8s.io
 ---
-# ClusterRole for GPUBinding heal + pre-delete purge.
-# Runtime mutates only this instance's entries (ns / appName+owner).
+# ClusterRole for GPU node health, GPUBinding heal + pre-delete purge.
+# Nodes are read-only; runtime mutates only this instance's binding entries.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ $sa }}-gpubinding-{{ .Release.Namespace }}
 rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get"]
 - apiGroups: ["gpu.bytetrade.io"]
   resources: ["gpubindings"]
   verbs: ["get", "list", "watch", "update", "patch", "delete"]
