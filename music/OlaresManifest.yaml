@@ -1,0 +1,133 @@
+apiVersion: v3
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+metadata:
+  name: music
+  appid: music
+  title: Music Studio
+  description: Create and keep AI-generated music on your Olares
+  icon: https://raw.githubusercontent.com/beclab/music/main/deploy/music/assets/icon.svg
+  version: 0.1.22
+  categories:
+    - Creativity
+    - AI
+spec:
+  versionName: "0.1.22"
+  upgradeDescription: |
+    0.1.22 adds an interface-language preference with Follow system, Chinese,
+    and English choices. Music follows Olares language changes by default,
+    remembers the choice across devices, and localizes its primary workspace,
+    library, player, model status, and settings views.
+    0.1.21 stops discarding a draft whose song form is merely unusual and stops
+    asking for ACE optimization on words the music model wrote itself. An
+    untouched draft goes straight to creation; hand-written or edited lyrics
+    still get the optimization pass, which stays available for a second opinion.
+    0.1.20 asks the music model's own language model for a song draft instead
+    of a separate Chat model. Inspiration no longer wakes a second large model
+    onto a GPU the music model is already holding, and the draft's caption,
+    tempo, key and time signature now come from the engine that will render the
+    song. Inspire me needs a music model selected; there is no Chat default to
+    fall back on.
+    0.1.19 records why a song draft needs a repair pass, how long a request
+    waited for the GPU, and what the music model returned for a lyric
+    optimization task. An optimization task whose model stays unreachable now
+    fails with an actionable message instead of being polled forever, and a
+    rejected submission no longer renders as a blank error.
+    0.1.18 serializes the GPU work Music Studio issues, cancels a superseded
+    inspiration request, and replaces the single song draft deadline with a
+    generous time-to-first-token budget plus a short inter-token budget, so a
+    request queued behind another GPU task is no longer reported as a stuck
+    model. Audio downloads no longer inherit the Router request timeout.
+    0.1.17 adds random inspiration durations and a shared Random/Fixed duration
+    control, while preserving the selected duration through ACE formatting and
+    final music generation.
+    0.1.16 gives local Chat models up to ten minutes to finish a song draft
+    before showing the actionable stuck-model timeout message.
+    0.1.15 moves long-running Chat songwriting into owner-scoped asynchronous
+    draft tasks, converts a stuck Chat model into an actionable timeout message,
+    and keeps the synchronous draft response for older clients.
+    0.1.14 adds language-specific prosody profiles, removes the uniform
+    syllable quota that made Mandarin pop sound like seven-character verse,
+    and previews ACE 4B caption/lyric formatting before XL-SFT generation.
+    Original and effective conditioning text are both retained in the library.
+    0.1.13 keeps strict songwriting targets for one automatic repair, then
+    accepts drafts that satisfy ACE-Step's actual hard format and language
+    contract instead of rejecting usable lyrics for advisory quality details.
+    0.1.12 keeps low reasoning effort, raises the full-length lyric output budget
+    to 6144 tokens, and retries one transient single-worker capacity response.
+    0.1.11 prevents local reasoning models from exhausting the five-minute
+    songwriting request window by using the model-declared low reasoning level
+    and leaving timeout margin for Router to return a structured upstream error.
+    0.1.10 separates the user's song idea from the ACE Caption, adds automatic
+    or explicit ACE vocal-language selection, structured creative style plans,
+    three creativity levels, stale-draft protection, and two same-draft seed
+    variations. Draft Captions now default to ACE 4B LM enhancement.
+    0.1.9 shows ACE Caption and vocal-type limits in the creation form, counts
+    Unicode characters consistently, and prevents invalid vocal metadata from
+    reaching the model application.
+    0.1.8 adds clean and textured production profiles, preserves complete
+    Studio-generated ACE captions by default, and keeps explicit Router
+    rejection codes instead of misclassifying them as unknown submissions.
+    0.1.7 adds ACE-Step-aware Chinese singability checks, 512/4096 input
+    limits, an XL-SFT 64-step ADG quality profile, same-seed recreation, and
+    capability-gated interval repainting through Router.
+    0.1.6 raises the Router request timeout to five minutes so long-form
+    songwriting drafts from local Chat models are not cut off at 30 seconds.
+    0.1.5 adds ACE-Step-aware songwriting prompts, long-form lyric validation,
+    one repair attempt, and creative-context-aware inspiration drafts.
+    0.1.4 keeps creation on XL-SFT quality only and removes the Turbo control.
+    0.1.3 defaults creation to two XL-SFT quality candidates, estimates a
+    full-song duration from lyrics, and adds BPM, key, meter, language, vocal,
+    structure, and fixed-duration controls.
+  runAsUser: true
+  fullDescription: |
+    Music Studio creates songs through music models available in Olares Router.
+    Finished masters are copied into the application's private appData storage.
+    The application does not download models or manage inference engines.
+    Song drafts use Router's `default-chat`; generation always uses the explicit
+    music model selected by the user and fixed WAV output in this release.
+  developer: beclab
+  submitter: beclab
+  locale:
+    - en-US
+    - zh-CN
+  requiredCpu: 250m
+  limitedCpu: "2"
+  requiredMemory: 256Mi
+  limitedMemory: 2Gi
+  requiredDisk: 1Gi
+  limitedDisk: 100Gi
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+entrances:
+  - name: music
+    host: music-svc
+    port: 8440
+    title: Music Studio
+    icon: https://raw.githubusercontent.com/beclab/music/main/deploy/music/assets/icon.svg
+    authLevel: private
+    openMethod: window
+options:
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+    - name: router
+      version: '>=1.0.0'
+      type: application
+    - name: postgres
+      version: '>=14.0.0-0'
+      type: middleware
+      mandatory: true
+middleware:
+  postgres:
+    username: music
+    databases:
+      - name: music
+        distributed: false
+workloadReplicas:
+  music: 1
