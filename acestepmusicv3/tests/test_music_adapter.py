@@ -225,13 +225,14 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
         self.assertEqual([call["temperature"] for call in calls], [0.85, 0.75])
-        self.assertLessEqual(len(calls[1]["query"]), 512)
-        self.assertIn("regenerate from scratch", calls[1]["query"])
+        self.assertEqual([call["query"] for call in calls], ["walking home late"] * 2)
 
     def test_draft_rejects_lyrics_that_stay_phonetic_across_every_attempt(self):
         romanized = "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2"
+        calls = []
 
         def native(path, payload=None, timeout=30):
+            calls.append(payload)
             return {"code": 200, "data": {"caption": "Quiet Mandarin city folk", "lyrics": romanized}}
 
         with mock.patch.object(adapter, "_native_json", side_effect=native) as call:
@@ -247,6 +248,8 @@ class MusicAdapterContractTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
+        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.75, 0.65])
+        self.assertEqual([item["query"] for item in calls], ["walking home late"] * 3)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "lyrics_script_invalid")
 

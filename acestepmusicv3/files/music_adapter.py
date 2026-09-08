@@ -259,26 +259,6 @@ def _draft_validation_error(task: dict[str, Any], prompt: str, lyrics: str) -> D
     return None
 
 
-def _retry_brief(brief: str, code: str) -> str:
-    corrections = {
-        "lyrics_script_invalid": (
-            "regenerate from scratch using full readable lyrics in the requested writing system; "
-            "never use romanization, phonetic codes, tone numbers, or language prefixes"
-        ),
-        "lyrics_repetition_invalid": (
-            "regenerate from scratch with varied, meaningful verses and a concise chorus; "
-            "never loop the same line or filler words"
-        ),
-        "draft_failed": (
-            "regenerate from scratch with a non-empty English music caption and complete meaningful lyrics; "
-            "never return placeholders or [Instrumental] for a vocal song"
-        ),
-    }
-    correction = corrections[code]
-    suffix = "; " + correction
-    return brief[: max(0, 512 - len(suffix))] + suffix
-
-
 def _line_metrics(lyrics: str, language: str) -> tuple[list[str], dict[str, Any]]:
     lines = [
         line.strip() for line in lyrics.splitlines()
@@ -412,13 +392,12 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
         failure: DraftValidationError | None = None
         temperatures = (temperature, min(temperature, 0.75), 0.65)
         for attempt in range(DRAFT_ATTEMPTS):
-            brief = task["brief"]
-            if failure is not None:
-                brief = _retry_brief(brief, failure.code)
             native = _native_json(
                 "/v1/create_sample",
                 {
-                    "query": brief,
+                    # Keep retries on the same positive song subject. The 4B
+                    # writer may turn appended correction prose into lyrics.
+                    "query": task["brief"],
                     "instrumental": task["instrumental"],
                     "vocal_language": task["vocal_language"],
                     "temperature": temperatures[attempt],
