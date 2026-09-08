@@ -308,6 +308,10 @@ class MusicAdapterContractTest(unittest.TestCase):
                 "[Verse 1]\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡",
                 "lyrics_repetition_invalid",
             ),
+            (
+                "[Verse 1]\n霓虹闪烁映在窗上涌动的光\n脚步匆匆っちゃ이向谁在追赶\n心里的热火从未熄灭一半",
+                "lyrics_script_invalid",
+            ),
         )
         for lyrics, code in fixtures:
             with self.subTest(code=code):

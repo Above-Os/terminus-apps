@@ -201,6 +201,17 @@ def _has_expected_chinese_script(lyrics: str, language: str) -> bool:
     if language not in {"zh", "yue"}:
         return True
     letters = [character for line in _lyric_content_lines(lyrics) for character in line if character.isalpha()]
+    if any(
+        0x3040 <= ord(character) <= 0x30FF
+        or 0x31F0 <= ord(character) <= 0x31FF
+        or 0x1B000 <= ord(character) <= 0x1B16F
+        or 0x1100 <= ord(character) <= 0x11FF
+        or 0x3130 <= ord(character) <= 0x318F
+        or 0xA960 <= ord(character) <= 0xA97F
+        or 0xAC00 <= ord(character) <= 0xD7FF
+        for character in letters
+    ):
+        return False
     han = sum(1 for character in letters if _is_han(character))
     return han >= 20 and bool(letters) and han / len(letters) >= 0.70
 
