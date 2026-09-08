@@ -223,7 +223,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
 
-    def test_draft_flags_lyrics_that_stay_phonetic_across_every_attempt(self):
+    def test_draft_rejects_lyrics_that_stay_phonetic_across_every_attempt(self):
         romanized = "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2"
 
         def native(path, payload=None, timeout=30):
@@ -237,12 +237,13 @@ class MusicAdapterContractTest(unittest.TestCase):
             task_id = created.json()["id"]
             for _ in range(50):
                 result = self.client.get(f"/v1/music/drafts/{task_id}").json()
-                if result["status"] == "completed":
+                if result["status"] in {"completed", "failed"}:
                     break
                 time.sleep(0.01)
 
         self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
-        self.assertIn("lyrics_romanized", result["warnings"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["code"], "lyrics_script_invalid")
 
     def test_draft_fails_when_the_lm_returns_no_lyrics_for_a_vocal_brief(self):
         def native(path, payload=None, timeout=30):
