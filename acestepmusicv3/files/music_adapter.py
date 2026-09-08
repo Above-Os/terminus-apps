@@ -46,11 +46,19 @@ VOCAL_LANGUAGES = (
 )
 VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
-DRAFT_ATTEMPTS = 2
+DRAFT_ATTEMPTS = 3
 
 
 class PhoneticLyricsError(ValueError):
     """ACE returned internal pronunciation codes instead of display lyrics."""
+
+
+class DraftValidationError(ValueError):
+    """ACE returned a draft that cannot be shown as readable lyrics."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 app = FastAPI(title="Olares Music Engine", version="1")
 
@@ -170,6 +178,105 @@ def _has_sung_content(lyrics: str) -> bool:
         line and not (line.startswith("[") and line.endswith("]"))
         for line in (raw.strip() for raw in lyrics.splitlines())
     )
+
+
+def _lyric_content_lines(lyrics: str) -> list[str]:
+    return [
+        line for line in (raw.strip() for raw in lyrics.splitlines())
+        if line and not (line.startswith("[") and line.endswith("]"))
+    ]
+
+
+def _is_han(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0x20000 <= codepoint <= 0x323AF
+    )
+
+
+def _has_expected_chinese_script(lyrics: str, language: str) -> bool:
+    if language not in {"zh", "yue"}:
+        return True
+    letters = [character for line in _lyric_content_lines(lyrics) for character in line if character.isalpha()]
+    han = sum(1 for character in letters if _is_han(character))
+    return han >= 20 and bool(letters) and han / len(letters) >= 0.70
+
+
+def _normalized_lyric_value(value: str) -> str:
+    return "".join(character.lower() for character in value if character.isalnum())
+
+
+def _has_extreme_repetition(lyrics: str) -> bool:
+    lines = _lyric_content_lines(lyrics)
+    if len(lines) < 8:
+        return False
+    counts: dict[str, int] = {}
+    maximum = 0
+    for line in lines:
+        normalized = _normalized_lyric_value(line)
+        if normalized:
+            counts[normalized] = counts.get(normalized, 0) + 1
+            maximum = max(maximum, counts[normalized])
+        words = line.split()
+        if len(words) >= 8:
+            word_counts: dict[str, int] = {}
+            for word in words:
+                word = _normalized_lyric_value(word)
+                if word:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+            if word_counts and max(word_counts.values()) / len(words) >= 0.60:
+                return True
+    if not counts:
+        return False
+    return (
+        len(counts) / len(lines) < 0.40
+        or (maximum >= 4 and maximum / len(lines) >= 0.40)
+    )
+
+
+def _draft_validation_error(task: dict[str, Any], prompt: str, lyrics: str) -> DraftValidationError | None:
+    if not prompt:
+        return DraftValidationError("draft_failed", "ACE-Step returned an empty caption")
+    if task["instrumental"]:
+        return None
+    if not _has_sung_content(lyrics):
+        return DraftValidationError("draft_failed", "ACE-Step returned no lyrics for a vocal draft")
+    if _romanized(lyrics) or not _has_expected_chinese_script(lyrics, task["vocal_language"]):
+        return DraftValidationError(
+            "lyrics_script_invalid",
+            "ACE-Step returned lyrics outside the requested readable writing system",
+        )
+    if _has_extreme_repetition(lyrics):
+        return DraftValidationError(
+            "lyrics_repetition_invalid",
+            "ACE-Step returned excessively repetitive lyrics",
+        )
+    if len(lyrics) > 4096:
+        return DraftValidationError("draft_failed", "ACE-Step returned lyrics that exceed 4096 characters")
+    return None
+
+
+def _retry_brief(brief: str, code: str) -> str:
+    corrections = {
+        "lyrics_script_invalid": (
+            "regenerate from scratch using full readable lyrics in the requested writing system; "
+            "never use romanization, phonetic codes, tone numbers, or language prefixes"
+        ),
+        "lyrics_repetition_invalid": (
+            "regenerate from scratch with varied, meaningful verses and a concise chorus; "
+            "never loop the same line or filler words"
+        ),
+        "draft_failed": (
+            "regenerate from scratch with a non-empty English music caption and complete meaningful lyrics; "
+            "never return placeholders or [Instrumental] for a vocal song"
+        ),
+    }
+    correction = corrections[code]
+    suffix = "; " + correction
+    return brief[: max(0, 512 - len(suffix))] + suffix
 
 
 def _line_metrics(lyrics: str, language: str) -> tuple[list[str], dict[str, Any]]:
@@ -302,41 +409,30 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
         task["status"] = "running"
         TASKS[task_id] = task
     try:
+        failure: DraftValidationError | None = None
+        temperatures = (temperature, min(temperature, 0.75), 0.65)
         for attempt in range(DRAFT_ATTEMPTS):
             brief = task["brief"]
-            if attempt > 0:
-                brief += (
-                    "; return a non-empty English music caption and, for a vocal song, full readable lyrics "
-                    "in the requested writing system; never return [Instrumental], language-tagged phonetic "
-                    "codes, or tone-number romanization"
-                )
+            if failure is not None:
+                brief = _retry_brief(brief, failure.code)
             native = _native_json(
                 "/v1/create_sample",
                 {
                     "query": brief,
                     "instrumental": task["instrumental"],
                     "vocal_language": task["vocal_language"],
-                    "temperature": temperature,
+                    "temperature": temperatures[attempt],
                 },
                 timeout=600,
             )
             data = native.get("data") or {}
             lyrics = "" if task["instrumental"] else str(data.get("lyrics") or "").strip()
             prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
-            if (
-                not _romanized(lyrics)
-                and prompt
-                and (task["instrumental"] or _has_sung_content(lyrics))
-            ):
+            failure = _draft_validation_error(task, prompt, lyrics)
+            if failure is None:
                 break
-        if _romanized(lyrics):
-            raise PhoneticLyricsError("ACE-Step repeatedly returned phonetic codes instead of readable lyrics")
-        if not prompt:
-            raise ValueError("ACE-Step returned an empty caption")
-        if not task["instrumental"] and not _has_sung_content(lyrics):
-            raise ValueError("ACE-Step returned no lyrics for a vocal draft")
-        if len(lyrics) > 4096:
-            raise ValueError("ACE-Step returned lyrics that exceed 4096 characters")
+        if failure is not None:
+            raise failure
         warnings, metrics = _line_metrics(lyrics, task["vocal_language"])
         if caption_truncated:
             warnings.insert(0, "caption_trimmed_to_512_characters")
@@ -352,7 +448,10 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
     except Exception as exc:
         task.update({
             "status": "failed",
-            "error": {"code": "lyrics_script_invalid" if isinstance(exc, PhoneticLyricsError) else "draft_failed", "message": str(exc)},
+            "error": {
+                "code": exc.code if isinstance(exc, DraftValidationError) else "draft_failed",
+                "message": str(exc),
+            },
         })
     with TASKS_LOCK:
         TASKS[task_id] = task

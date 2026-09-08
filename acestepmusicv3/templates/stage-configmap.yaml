@@ -141,6 +141,21 @@ data:
     import acestep.inference as inference
 
 
+    _create_sample = inference.create_sample
+
+
+    @functools.wraps(_create_sample)
+    def _stable_create_sample(*args, **kwargs):
+        if kwargs.get("top_p") is None:
+            kwargs["top_p"] = 0.9
+        if kwargs.get("repetition_penalty") in (None, 1.0):
+            kwargs["repetition_penalty"] = 1.08
+        return _create_sample(*args, **kwargs)
+
+
+    inference.create_sample = _stable_create_sample
+
+
     _generate_music = inference.generate_music
 
 

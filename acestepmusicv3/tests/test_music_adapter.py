@@ -198,13 +198,15 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(missing.json()["error"]["code"], "invalid_brief")
 
-    def test_draft_retries_once_when_the_lm_answers_in_its_phonetic_encoding(self):
+    def test_draft_retries_with_safer_sampling_when_the_lm_answers_phonetically(self):
         answers = [
             "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2",
-            "[Verse 1]\n夜色落在肩上\n路灯把影子拉长",
+            "[Verse 1]\n夜色慢慢落在肩上\n路灯把回家的影子拉长\n雨后的街道安静明亮\n[Chorus]\n再走一段就能看见熟悉的窗",
         ]
+        calls = []
 
         def native(path, payload=None, timeout=30):
+            calls.append(payload)
             return {"code": 200, "data": {"caption": "Quiet Mandarin city folk", "lyrics": answers.pop(0)}}
 
         with mock.patch.object(adapter, "_native_json", side_effect=native):
@@ -219,9 +221,12 @@ class MusicAdapterContractTest(unittest.TestCase):
                     break
                 time.sleep(0.01)
 
-        self.assertEqual(result["lyrics"], "[Verse 1]\n夜色落在肩上\n路灯把影子拉长")
+        self.assertIn("熟悉的窗", result["lyrics"])
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
+        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.75])
+        self.assertLessEqual(len(calls[1]["query"]), 512)
+        self.assertIn("regenerate from scratch", calls[1]["query"])
 
     def test_draft_rejects_lyrics_that_stay_phonetic_across_every_attempt(self):
         romanized = "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2"
@@ -268,7 +273,7 @@ class MusicAdapterContractTest(unittest.TestCase):
     def test_draft_retries_instrumental_placeholder_for_a_vocal_brief(self):
         answers = [
             {"caption": "Clean acoustic pop", "lyrics": "[Instrumental]"},
-            {"caption": "Clean acoustic pop", "lyrics": "[Verse 1]\n回家的路\n\n[Chorus]\n灯还亮着"},
+            {"caption": "Clean acoustic pop", "lyrics": "[Verse 1]\n沿着熟悉街道慢慢走回家\n晚风把一天疲惫轻轻放下\n[Chorus]\n远处那扇窗还为我亮着"},
         ]
 
         def native(path, payload=None, timeout=30):
@@ -287,8 +292,49 @@ class MusicAdapterContractTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(result["status"], "completed")
-        self.assertIn("回家的路", result["lyrics"])
+        self.assertIn("慢慢走回家", result["lyrics"])
         self.assertEqual(answers, [])
+
+    def test_draft_rejects_latin_gibberish_and_extreme_chinese_repetition(self):
+        fixtures = (
+            (
+                "[Verse 1]\nOh, bua cha te, bua cha te\ntsok ko, tsok ko, all that\nOh, bua cha te, bua cha te\ntsok ko, tsok ko, all that\n[Chorus]\nBí pięk de beat, all that\nBí pięk de beat, all that\nBí pięk de beat, all that\nBí pięk de beat, all that",
+                "lyrics_script_invalid",
+            ),
+            (
+                "[Verse 1]\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡\n城市的灯还没有睡",
+                "lyrics_repetition_invalid",
+            ),
+        )
+        for lyrics, code in fixtures:
+            with self.subTest(code=code):
+                with mock.patch.object(
+                    adapter,
+                    "_native_json",
+                    return_value={"code": 200, "data": {"caption": "Mandarin pop", "lyrics": lyrics}},
+                ) as call:
+                    created = self.client.post(
+                        "/v1/music/drafts",
+                        json={"model": "ace", "brief": "write a coherent city song", "vocal_language": "zh"},
+                    )
+                    task_id = created.json()["id"]
+                    for _ in range(50):
+                        result = self.client.get(f"/v1/music/drafts/{task_id}").json()
+                        if result["status"] == "failed":
+                            break
+                        time.sleep(0.01)
+                self.assertEqual(call.call_count, 3)
+                self.assertEqual(result["error"]["code"], code)
+
+    def test_draft_accepts_a_complete_chinese_song_with_a_repeated_chorus(self):
+        lyrics = "\n".join([
+            "[Verse 1]", "晚风吹过旧街口", "我把影子留在身后", "末班车穿过沉默", "远处有人轻轻唱歌",
+            "[Chorus]", "带我回到那盏灯火", "带我回到你的身侧", "今夜不再独自漂泊", "让所有心事慢慢降落",
+            "[Verse 2]", "清晨沿着河岸醒来", "雨滴敲开灰色窗台", "昨天已经随风离开", "新的故事正在展开",
+            "[Chorus]", "带我回到那盏灯火", "带我回到你的身侧", "今夜不再独自漂泊", "让所有心事慢慢降落",
+        ])
+        self.assertTrue(adapter._has_expected_chinese_script(lyrics, "zh"))
+        self.assertFalse(adapter._has_extreme_repetition(lyrics))
 
     def test_text_and_audio_model_tasks_are_mutually_exclusive(self):
         adapter.TASKS["generation-running"] = {

@@ -66,6 +66,17 @@ class ChartContractTest(unittest.TestCase):
         # that import would never reach the registered routes.
         self.assertLess(patched_at, launcher.index("from acestep.api_server import main"))
 
+    def test_draft_sampling_has_conservative_repetition_defaults(self):
+        launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('if kwargs.get("top_p") is None:', launcher)
+        self.assertIn('kwargs["top_p"] = 0.9', launcher)
+        self.assertIn('if kwargs.get("repetition_penalty") in (None, 1.0):', launcher)
+        self.assertIn('kwargs["repetition_penalty"] = 1.08', launcher)
+        patched_at = launcher.index("inference.create_sample = _stable_create_sample")
+        self.assertLess(patched_at, launcher.index("from acestep.api_server import main"))
+
 
 if __name__ == "__main__":
     unittest.main()
