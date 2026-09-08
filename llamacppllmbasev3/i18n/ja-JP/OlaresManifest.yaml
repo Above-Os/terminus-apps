@@ -4,6 +4,10 @@ metadata:
 
 spec:
   upgradeDescription: |
+    Chart 1.2.44 — `amd-gpu` / `intel-gpu` の VRAM クォータを解決できるようにする。
+    これらのモードは `gpu.bytetrade.io/*-gpu-memory` Pod アノテーションを出す。
+    NVIDIA / Spark パスは変更なし。
+
     Chart 1.2.39 — llm-init を `v1.6.1` に更新。
 
     **イメージ**
@@ -35,7 +39,7 @@ spec:
     - `MODEL_SUPPORTS`: モデル能力（Vision / Tools / Thinking / None）。モデルが対応するものを選択。必須。
     - `ENGINE_ARGS`: `-c 8192 -ngl all -fa on`。`-c 8192 -ngl all -fa on` などの追加 llama.cpp オプション。GPU をフルに使うには `-ngl all`。`LLAMA_ARG_*=val` 形式も可。
     - `LOG_LEVEL`: `debug`、`info`、`warn`、または `error`。ログレベルは `debug`、`info`、`warn`、`error` から選択。
-    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。`8Gi`、`8192`、`8192Mi` などの値を使用可能。NVIDIA では MiB 単位の `nvidia.com/gpumem` を設定; Spark ではポッドメモリを設定。
+    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。`8Gi`、`8192`、`8192Mi` などの値を使用可能。NVIDIA では MiB 単位の `nvidia.com/gpumem` を設定; Spark ではポッドメモリを設定; `amd-gpu` と `intel-gpu` では Pod アノテーション `gpu.bytetrade.io/required-gpu-memory` でディスクリート VRAM クォータを宣言。
 
     **動作の仕組み**
     まず `llm-init` がモデルをダウンロードして準備し、準備ができたら `llama.cpp` がサービングを開始します。両者は別々に動作しますが、ファイルと進捗情報を共有します。

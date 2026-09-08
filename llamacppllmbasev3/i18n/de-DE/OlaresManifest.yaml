@@ -4,6 +4,10 @@ metadata:
 
 spec:
   upgradeDescription: |
+    Chart 1.2.44 — das `amd-gpu` / `intel-gpu` VRAM-Kontingent deklarieren, damit es aufgelöst wird.
+    Diese Modi setzen die Pod-Annotationen `gpu.bytetrade.io/*-gpu-memory`.
+    NVIDIA- und Spark-Pfade unverändert.
+
     Chart 1.2.39 — llm-init auf `v1.6.1` aktualisiert.
 
     **Images**
@@ -35,7 +39,7 @@ spec:
     - `MODEL_SUPPORTS`: Modellfähigkeiten (Vision / Tools / Thinking / None). Wählen Sie, was Ihr Modell unterstützt. Erforderlich.
     - `ENGINE_ARGS`: `-c 8192 -ngl all -fa on`. Zusätzliche llama.cpp-Optionen wie `-c 8192 -ngl all -fa on`. Für volle GPU-Nutzung `-ngl all` hinzufügen. Auch Werte wie `LLAMA_ARG_*=val` möglich.
     - `LOG_LEVEL`: `debug`, `info`, `warn` oder `error`. Log-Level: Wählen Sie zwischen `debug`, `info`, `warn` oder `error`.
-    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192` oder `8192Mi`. Benötigter Modellspeicher. Akzeptiert Werte wie `8Gi`, `8192` oder `8192Mi`. Auf NVIDIA setzt dies `nvidia.com/gpumem` in MiB; auf Spark die Pod-Memory.
+    - `LLAMACPP_REQUIRED_GPU_MEMORY`: `8Gi`, `8192` oder `8192Mi`. Benötigter Modellspeicher. Akzeptiert Werte wie `8Gi`, `8192` oder `8192Mi`. Auf NVIDIA setzt dies `nvidia.com/gpumem` in MiB; auf Spark die Pod-Memory; auf `amd-gpu` und `intel-gpu` deklariert es das diskrete VRAM-Kontingent über die Pod-Annotation `gpu.bytetrade.io/required-gpu-memory`.
 
     **Funktionsweise**
     Zuerst lädt `llm-init` Ihr Modell herunter und bereitet es vor, dann startet `llama.cpp` den Serving, wenn es bereit ist. Beide Teile laufen getrennt, teilen aber Dateien und Fortschrittsinformationen.
