@@ -11,10 +11,14 @@ data:
                           'upstream_addr="$upstream_addr" upstream_status="$upstream_status"';
       
       server {
-
+        client_body_temp_path /tmp/client_body;
+        proxy_temp_path /tmp/proxy;
+        fastcgi_temp_path /tmp/fastcgi;
+        uwsgi_temp_path /tmp/uwsgi;
+        scgi_temp_path /tmp/scgi;
         listen 8080;
-        access_log /usr/local/openresty/nginx/logs/access.log detailed;
-        error_log /usr/local/openresty/nginx/logs/error.log debug;
+        access_log /dev/stdout detailed;
+        error_log /dev/stderr debug;
 
         # Official OpenResty defaults to 1m; raise so media/plugin uploads are not 413.
         client_max_body_size 500m;
@@ -116,6 +120,15 @@ spec:
       containers:
         - name: nginx
           image: "docker.io/openresty/openresty:1.29.2.5-bookworm-fat"
+          command:
+            - /usr/local/openresty/bin/openresty
+          args:
+            - -g
+            - "daemon off; pid /tmp/nginx.pid;"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+
           ports:
             - containerPort: 8080
               protocol: TCP
