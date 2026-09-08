@@ -1,3 +1,4 @@
+import json
 import pathlib
 import re
 import unittest
@@ -13,8 +14,20 @@ class ChartContractTest(unittest.TestCase):
         )
         self.assertIn("elif ! grep -Eq '\"draft\"' \"$card\"; then", downloader)
         self.assertIn(
-            "refreshing ACE-Step card without music draft support", downloader
+            "replacing ACE-Step card without music draft support", downloader
         )
+        self.assertIn('cp /etc/olares/model-spec.json "$card"', downloader)
+
+        seed = json.loads(
+            (CHART_ROOT / "files" / "model-spec.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(seed["name"], "ACE-Step/acestep-v15-xl-sft")
+        self.assertEqual(seed["mode"], "music_generation")
+        self.assertEqual(
+            seed["extensions"]["creative"]["operations"],
+            ["generate", "repaint", "format", "draft"],
+        )
+        self.assertIn("zh", seed["extensions"]["music"]["vocal_languages"])
 
     def test_single_worker_never_enables_turbo_loading(self):
         server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
