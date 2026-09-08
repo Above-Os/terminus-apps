@@ -44,9 +44,14 @@ spec:
             - |
               set -e
               card=/run/llm-init/model-spec.json
-              if [ -f "$card" ] && grep -Eq '"mode"[[:space:]]*:[[:space:]]*"chat"|acestep-v15-xl-turbo' "$card"; then
-                echo "[model-card-migration] replacing legacy/Turbo ACE-Step card with XL-SFT"
-                rm -f "$card"
+              if [ -f "$card" ]; then
+                if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"chat"|acestep-v15-xl-turbo' "$card"; then
+                  echo "[model-card-migration] replacing legacy/Turbo ACE-Step card with XL-SFT"
+                  rm -f "$card"
+                elif ! grep -Eq '"draft"' "$card"; then
+                  echo "[model-card-migration] refreshing ACE-Step card without music draft support"
+                  rm -f "$card"
+                fi
               fi
               chown 1000:1000 /cache/hf/hub /run/llm-init
           volumeMounts:
