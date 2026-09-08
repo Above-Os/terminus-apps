@@ -155,12 +155,21 @@ def _public_format(task: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _active_task(kind: str) -> bool:
+def _active_task(kind: str | None = None) -> bool:
     with TASKS_LOCK:
         return any(
-            task.get("kind") == kind and task.get("status") not in {"completed", "failed"}
+            (kind is None or task.get("kind") == kind)
+            and task.get("status") not in {"completed", "failed"}
             for task in TASKS.values()
         )
+
+
+def _has_sung_content(lyrics: str) -> bool:
+    """Reject empty/section-only lyrics such as ACE's `[Instrumental]`."""
+    return any(
+        line and not (line.startswith("[") and line.endswith("]"))
+        for line in (raw.strip() for raw in lyrics.splitlines())
+    )
 
 
 def _line_metrics(lyrics: str, language: str) -> tuple[list[str], dict[str, Any]]:
@@ -296,7 +305,11 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
         for attempt in range(DRAFT_ATTEMPTS):
             brief = task["brief"]
             if attempt > 0:
-                brief += "; return readable lyrics in the requested writing system, never language-tagged phonetic codes or tone-number romanization"
+                brief += (
+                    "; return a non-empty English music caption and, for a vocal song, full readable lyrics "
+                    "in the requested writing system; never return [Instrumental], language-tagged phonetic "
+                    "codes, or tone-number romanization"
+                )
             native = _native_json(
                 "/v1/create_sample",
                 {
@@ -309,14 +322,18 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             )
             data = native.get("data") or {}
             lyrics = "" if task["instrumental"] else str(data.get("lyrics") or "").strip()
-            if not _romanized(lyrics):
+            prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
+            if (
+                not _romanized(lyrics)
+                and prompt
+                and (task["instrumental"] or _has_sung_content(lyrics))
+            ):
                 break
         if _romanized(lyrics):
             raise PhoneticLyricsError("ACE-Step repeatedly returned phonetic codes instead of readable lyrics")
-        prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
         if not prompt:
             raise ValueError("ACE-Step returned an empty caption")
-        if not lyrics and not task["instrumental"]:
+        if not task["instrumental"] and not _has_sung_content(lyrics):
             raise ValueError("ACE-Step returned no lyrics for a vocal draft")
         if len(lyrics) > 4096:
             raise ValueError("ACE-Step returned lyrics that exceed 4096 characters")
@@ -528,8 +545,8 @@ async def create_draft(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_vocal_language", "vocal_language must be a supported ACE-Step language code.")
     if temperature < 0 or temperature > 2:
         raise _error(400, "invalid_temperature", "temperature must be between 0 and 2.")
-    if _active_task("draft"):
-        raise _error(409, "draft_in_progress", "Another ACE-Step draft task is already running.")
+    if _active_task():
+        raise _error(409, "model_task_in_progress", "Another ACE-Step model task is already running.")
     task_id = "dft_" + uuid.uuid4().hex
     task = {
         "id": task_id,
@@ -584,8 +601,8 @@ async def create_format(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_duration", "duration_seconds must be between 10 and 600.")
     if temperature < 0 or temperature > 2:
         raise _error(400, "invalid_temperature", "temperature must be between 0 and 2.")
-    if _active_task("format"):
-        raise _error(409, "format_in_progress", "Another ACE-Step format task is already running.")
+    if _active_task():
+        raise _error(409, "model_task_in_progress", "Another ACE-Step model task is already running.")
     task_id = "fmt_" + uuid.uuid4().hex
     task = {
         "id": task_id,
@@ -708,6 +725,8 @@ async def create_generation(request: Request) -> dict[str, Any]:
         native["use_random_seed"] = False
     else:
         native["use_random_seed"] = True
+    if _active_task():
+        raise _error(409, "model_task_in_progress", "Another ACE-Step model task is already running.")
     try:
         released = _native_json("/release_task", native)
     except Exception:

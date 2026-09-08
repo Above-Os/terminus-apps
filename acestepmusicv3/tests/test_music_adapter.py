@@ -249,7 +249,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         def native(path, payload=None, timeout=30):
             return {"code": 200, "data": {"caption": "Quiet Mandarin city folk", "lyrics": "   "}}
 
-        with mock.patch.object(adapter, "_native_json", side_effect=native):
+        with mock.patch.object(adapter, "_native_json", side_effect=native) as call:
             created = self.client.post(
                 "/v1/music/drafts",
                 json={"model": "ace", "brief": "深夜加班后独自走回家", "vocal_language": "zh"},
@@ -263,6 +263,54 @@ class MusicAdapterContractTest(unittest.TestCase):
 
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "draft_failed")
+        self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
+
+    def test_draft_retries_instrumental_placeholder_for_a_vocal_brief(self):
+        answers = [
+            {"caption": "Clean acoustic pop", "lyrics": "[Instrumental]"},
+            {"caption": "Clean acoustic pop", "lyrics": "[Verse 1]\n回家的路\n\n[Chorus]\n灯还亮着"},
+        ]
+
+        def native(path, payload=None, timeout=30):
+            return {"code": 200, "data": answers.pop(0)}
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            created = self.client.post(
+                "/v1/music/drafts",
+                json={"model": "ace", "brief": "写一首回家的歌", "vocal_language": "zh"},
+            )
+            task_id = created.json()["id"]
+            for _ in range(50):
+                result = self.client.get(f"/v1/music/drafts/{task_id}").json()
+                if result["status"] == "completed":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("回家的路", result["lyrics"])
+        self.assertEqual(answers, [])
+
+    def test_text_and_audio_model_tasks_are_mutually_exclusive(self):
+        adapter.TASKS["generation-running"] = {
+            "id": "generation-running", "kind": "generation", "status": "running", "created_at": 1,
+        }
+        draft = self.client.post(
+            "/v1/music/drafts",
+            json={"model": "ace", "brief": "write a song", "vocal_language": "en"},
+        )
+        self.assertEqual(draft.status_code, 409)
+        self.assertEqual(draft.json()["error"]["code"], "model_task_in_progress")
+
+        adapter.TASKS.clear()
+        adapter.TASKS["draft-running"] = {
+            "id": "draft-running", "kind": "draft", "status": "running", "created_at": 1,
+        }
+        generation = self.client.post(
+            "/v1/music/generations",
+            json={"model": "ace", "prompt": "clean pop", "lyrics": "[Verse 1]\nHome", "duration_seconds": 120},
+        )
+        self.assertEqual(generation.status_code, 409)
+        self.assertEqual(generation.json()["error"]["code"], "model_task_in_progress")
 
     def test_format_input_trims_native_caption_to_contract_limit(self):
         long_caption = (
@@ -354,6 +402,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(fast.json()["error"]["code"], "invalid_quality_profile")
         self.assertEqual(len(payloads), 1)
 
+        adapter.TASKS.clear()
         with mock.patch.object(adapter, "_native_json", side_effect=native):
             high = self.client.post(
                 "/v1/music/generations",
@@ -379,6 +428,7 @@ class MusicAdapterContractTest(unittest.TestCase):
                 "/v1/music/generations",
                 json={"prompt": "polished Mandarin pop", "provider_options": {"production_profile": "clean", "caption_mode": "preserve"}},
             )
+            adapter.TASKS.clear()
             textured = self.client.post(
                 "/v1/music/generations",
                 json={"prompt": "lo-fi rainy folk", "provider_options": {"production_profile": "textured", "caption_mode": "enhance"}},
@@ -441,6 +491,7 @@ class MusicAdapterContractTest(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 202, language)
                 self.assertEqual(payloads[-1]["vocal_language"], language)
+                adapter.TASKS.clear()
 
         invalid = self.client.post(
             "/v1/music/generations",
@@ -452,6 +503,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         )
         self.assertEqual(invalid.json()["error"]["code"], "invalid_vocal_language")
         self.assertEqual(vocal_unknown.json()["error"]["code"], "invalid_vocal_language")
+        adapter.TASKS.clear()
         with mock.patch.object(adapter, "_native_json", side_effect=native):
             instrumental_unknown = self.client.post(
                 "/v1/music/generations",
