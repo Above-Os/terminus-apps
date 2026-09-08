@@ -312,6 +312,10 @@ class MusicAdapterContractTest(unittest.TestCase):
                 "[Verse 1]\n霓虹闪烁映在窗上涌动的光\n脚步匆匆っちゃ이向谁在追赶\n心里的热火从未熄灭一半",
                 "lyrics_script_invalid",
             ),
+            (
+                "[Verse 1]\n長安的雨傳染vocal上水袖\n穿過九條河的Inspiration\n讓回憶在晨光中悄然綻放",
+                "lyrics_script_invalid",
+            ),
         )
         for lyrics, code in fixtures:
             with self.subTest(code=code):
@@ -342,6 +346,8 @@ class MusicAdapterContractTest(unittest.TestCase):
         ])
         self.assertTrue(adapter._has_expected_chinese_script(lyrics, "zh"))
         self.assertFalse(adapter._has_extreme_repetition(lyrics))
+        hook_lyrics = lyrics + "\nHey 让心跳跟上旋律\ntonight\nI love you"
+        self.assertTrue(adapter._has_expected_chinese_script(hook_lyrics, "zh"))
 
     def test_live_consecutive_line_regression_is_extreme_repetition(self):
         lyrics = """[Verse 1]
