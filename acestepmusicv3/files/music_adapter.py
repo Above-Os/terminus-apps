@@ -46,6 +46,7 @@ VOCAL_LANGUAGES = (
 )
 VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
+ENGLISH_HOOK_WORDS = frozenset({"baby", "hey", "la", "love", "na", "oh", "tonight", "woo", "yeah", "you"})
 DRAFT_ATTEMPTS = 3
 
 
@@ -201,6 +202,11 @@ def _has_expected_chinese_script(lyrics: str, language: str) -> bool:
     if language not in {"zh", "yue"}:
         return True
     letters = [character for line in _lyric_content_lines(lyrics) for character in line if character.isalpha()]
+    for line in _lyric_content_lines(lyrics):
+        if any(_is_han(character) for character in line):
+            latin_words = re.findall(r"[A-Za-z]+", line.lower())
+            if any(word not in ENGLISH_HOOK_WORDS for word in latin_words):
+                return False
     if any(
         0x3040 <= ord(character) <= 0x30FF
         or 0x31F0 <= ord(character) <= 0x31FF
