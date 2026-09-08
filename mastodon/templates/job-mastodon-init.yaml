@@ -1,4 +1,5 @@
-﻿apiVersion: batch/v1
+﻿{{- if gt (int .Values.workloads.mastodon.replicaCount) 0 }}
+apiVersion: batch/v1
 kind: Job
 metadata:
   name: mastodon-init-{{ .Release.Revision }}
@@ -23,6 +24,9 @@ spec:
         app.kubernetes.io/instance: mastodon
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: init
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
       
       restartPolicy: OnFailure
@@ -211,3 +215,4 @@ spec:
           configMap:
             name: mastodon-init-scripts
             defaultMode: 0755
+{{- end }}
