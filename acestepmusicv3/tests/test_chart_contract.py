@@ -7,6 +7,15 @@ CHART_ROOT = pathlib.Path(__file__).parents[1]
 
 
 class ChartContractTest(unittest.TestCase):
+    def test_persisted_model_card_without_draft_is_refreshed(self):
+        downloader = (CHART_ROOT / "templates" / "download.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("elif ! grep -Eq '\"draft\"' \"$card\"; then", downloader)
+        self.assertIn(
+            "refreshing ACE-Step card without music draft support", downloader
+        )
+
     def test_single_worker_never_enables_turbo_loading(self):
         server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
         downloader = (CHART_ROOT / "templates" / "download.yaml").read_text(encoding="utf-8")
