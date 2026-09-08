@@ -6,17 +6,14 @@ metadata:
   appid: wisev3
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Your Digital Secret Garden
-  title: Wise V3 for test
-  version: '1.2.28'
+  title: Wise
+  version: '1.2.29'
   categories:
-    - Productivity_v112
+    - homelab
     - Fun
+  tags:
+    - reading
 
-# Exposed to other v3 apps over Service DNS (app installs into <appid>-shared):
-#   http://sharedentrances-knowledge.wisev3-shared.svc.cluster.local:80
-#     -> knowledge-base-api (3010)
-# Additional in-pod ports (8080 backend-server, 3100 ws) are also exposed on
-# the same Service for callers that need them.
 sharedEntrances:
   - name: knowledge
     host: sharedentrances-knowledge
@@ -50,13 +47,6 @@ entrances:
     authLevel: private
     invisible: true
 
-# Declares every workload's replica count (v3 schema). Keys MUST match the
-# rendered Deployment metadata.name and values.yaml workloads.<name>. The
-# primary workload MUST be named after the appid (upload validator requires a
-# Deployment/StatefulSet named exactly "wisev3"):
-#   wisev3    — Wise frontend nginx Deployment (== appid; the primary workload)
-#   knowledge — knowledge backend Deployment (4 containers in one Pod:
-#               knowledge + vectorcrawl + camoufox + nginx sidecar)
 workloadReplicas:
   wisev3: 1
   knowledge: 1
@@ -79,73 +69,52 @@ middleware:
           - btree_gin
 
 spec:
-  versionName: '1.0.1'
+  versionName: '1.11.43'
   featuredImage: https://app.cdn.olares.com/appstore/wise/1.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/wise/1.webp
     - https://app.cdn.olares.com/appstore/wise/2.webp
+    - https://app.cdn.olares.com/appstore/wise/3.webp
+    - https://app.cdn.olares.com/appstore/wise/4.webp
   fullDescription: |
-    **IMPORTANT NOTE**
-    This is a shared version of Wise. Only one service (the Wise frontend plus
-    the knowledge backend) is installed across the entire Olares system by the
-    Admin. Every user still gets a Wise entrance in their launcher, all pointing
-    at the same shared instance.
+    Wise is a local-first reader that collects articles, videos, audio, and
+    feeds into one library on Olares. Use it to save pages, upload files,
+    subscribe to sources, and organize what you want to read.
 
-    Wise is a modern knowledge management tool built for control and insight.
-    Wise empowers you to collect diverse content from across the web and your
-    devices. Crucially, it leverages locally-run AI to unearth valuable
-    insights, freeing you from the filter bubbles and privacy compromises of
-    big-platform algorithms.
+    **Key features**
 
-    **COMPONENTS**
-    - wise (port 80): the Wise frontend (nginx). Backs the `wiseclient` entrance.
-    - knowledge-base-api (port 3010): main HTTP API for the knowledge base.
-    - vectorcrawl (port 8080): vector indexing and crawl worker.
-    - camoufox (port 8191): CAPTCHA / Cloudflare bypass companion (in-pod, localhost).
-    - nginx (port 3009): reverse-proxy front door. rss-svc targets it; it
-      serves /download/* from the download provider-proxy and everything
-      else from knowledge-base-api on 127.0.0.1:3010.
+    - Subscribe to websites, blogs, podcasts, and video channels through RSS.
+    - Save web pages with the LarePass browser extension or the LarePass mobile app.
+    - Upload PDF, EPUB, audio, video, and other documents into the library.
+    - Organize items with Inbox, Read Later, tags, notes, and filtered views.
+    - Search PDF, web article, and EPUB items through Olares search.
+    - Import an existing feed list from an OPML file.
 
-    **STORAGE & MIDDLEWARE**
-    - Postgres database `knowledge` (extensions: pg_trgm, btree_gin).
-    - Redis (shared via platform middleware, namespace: knowledge).
-    - NATS subjects: rssubscribe_status, download_status, knowledge.*.
-  upgradeDescription: |
-    **Merged Wise frontend + knowledge backend into a single shared app.**
-    The previously separate per-user `wisev3` frontend and shared `knowledgev3`
-    backend are now one shared, admin-only app (`options.shared` +
-    `spec.onlyAdmin`). The Admin installs it once; the Wise frontend
-    (`wise-svc`) and the knowledge backend both run once in the shared
-    namespace, and the platform registers the `wiseclient` entrance for every
-    user.
+    **For Olares users**
 
-    Note: the Wise frontend's per-user `files-proxy` / `download-proxy` and
-    their ClusterRoleBindings are keyed on the installing Admin; per-user file
-    and download routing relies on the gateway propagating X-BFL-USER to the
-    multi-tenant backend.
+    This is a shared app. An Admin installs it once for the whole system.
+    Every user still gets a Wise entrance. All entrances open the same
+    shared instance.
 
-    **Previously**
-    v1.2.5: moved PG/REDIS passwords into a Secret and added the nginx
-    (openresty) reverse-proxy sidecar (port 3009) in front of the knowledge
-    API; rss-svc targets the sidecar, which routes /download/* to the
-    os-framework download provider-proxy and everything else to
-    knowledge-base-api on 127.0.0.1:3010.
+    Some features need extra Market apps. Use RSS Subscribe for in-browser
+    feeds, YT-DLP for media downloads, and the Twitter/X plugin for posts.
+
+    Login-restricted pages may need cookies. 
+
+    For setup and daily use, see the [Wise documentation](https://docs.olares.com/manual/olares/wise/).
+
   developer: Olares
   website: https://www.olares.com/
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
   doc: https://docs.olares.com/manual/olares/wise/
-
-  # Σ across all application containers (initContainers excluded):
-  #   knowledge      req 20m  / 50Mi   lim 3500m / 6Gi
-  #   vectorcrawl    req 20m  / 50Mi   lim 1000m / 2Gi
-  #   camoufox       req 250m / 512Mi  lim 2000m / 1.5Gi
-  #   nginx          req 10m  / 32Mi   lim 500m  / 256Mi
-  #   wise (frontend)req 10m  / 20Mi   lim 500m  / 200Mi
-  #   -------------------------------------------------
-  #   Σ              req 310m / 664Mi  lim 7500m / 10184Mi (~9.95Gi)
   requiredCpu: 310m
   limitedCpu: 7.5
   requiredMemory: 664Mi
@@ -160,16 +129,6 @@ spec:
 options:
   shared: true
   apiTimeout: 0
-  # No `conflicts:` against `wise` anymore.
-  #
-  # The old v2 wise (<= 1.1.51) used to bundle the knowledge sub-chart and
-  # claim the same postgres user `knowledge` / db `knowledge` / redis
-  # namespace `knowledge` that this shared backend now claims. Conflict
-  # entries only support `name` + `type` (no version range), so a blanket
-  # `conflicts: wise` would also block the new v3 wise (1.1.52+), which
-  # is exactly the per-user frontend that REQUIRES this backend. We rely
-  # on Olares' middleware-claim collision check to refuse install when an
-  # older v2 wise is still around.
   dependencies:
     - name: olares
       type: system
