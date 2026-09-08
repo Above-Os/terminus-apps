@@ -132,6 +132,7 @@ spec:
             {{- else }}
             path: '{{ .Values.userspace.appData }}/teable'
             {{- end }}
+{{- if gt (int .Values.workloads.teable.replicaCount) 0 }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -145,6 +146,13 @@ spec:
   ttlSecondsAfterFinished: 100
   backoffLimit: 3
   template:
+    metadata:
+      labels:
+        app: teable
+        component: db-migrate
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
       containers:
         - name: teable-db-migrate
@@ -179,6 +187,7 @@ spec:
               cpu: 500m
               memory: 500Mi
       restartPolicy: Never
+{{- end }}
 
 ---
 apiVersion: v1
