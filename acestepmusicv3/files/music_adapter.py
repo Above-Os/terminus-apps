@@ -215,11 +215,20 @@ def _has_extreme_repetition(lyrics: str) -> bool:
         return False
     counts: dict[str, int] = {}
     maximum = 0
+    previous = ""
+    consecutive = 0
     for line in lines:
         normalized = _normalized_lyric_value(line)
         if normalized:
             counts[normalized] = counts.get(normalized, 0) + 1
             maximum = max(maximum, counts[normalized])
+            if normalized == previous:
+                consecutive += 1
+            else:
+                previous = normalized
+                consecutive = 1
+            if consecutive >= 4:
+                return True
         words = line.split()
         if len(words) >= 8:
             word_counts: dict[str, int] = {}

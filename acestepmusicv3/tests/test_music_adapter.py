@@ -339,6 +339,24 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertTrue(adapter._has_expected_chinese_script(lyrics, "zh"))
         self.assertFalse(adapter._has_extreme_repetition(lyrics))
 
+    def test_live_consecutive_line_regression_is_extreme_repetition(self):
+        lyrics = """[Verse 1]
+我和这些年的老朋友
+老朋友的酒我们喝到吐
+回忆错的我还是要生活
+生活生活生活
+[Chorus]
+生活就是生活
+生活就是生活
+生活就是生活
+生活就是生活
+[Bridge]
+人生就像梦
+人生还是梦
+我们追着梦
+天亮继续走"""
+        self.assertTrue(adapter._has_extreme_repetition(lyrics))
+
     def test_text_and_audio_model_tasks_are_mutually_exclusive(self):
         adapter.TASKS["generation-running"] = {
             "id": "generation-running", "kind": "generation", "status": "running", "created_at": 1,
