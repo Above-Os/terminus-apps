@@ -35,6 +35,9 @@ spec:
           hostPath:
             path: {{ $runStateHostPath | quote }}
             type: DirectoryOrCreate
+        - name: model-spec-seed
+          configMap:
+            name: acestep-model-spec-seed
       initContainers:
         - name: init-permissions
           image: docker.io/beclab/aboveos-busybox:1.37.0
@@ -47,11 +50,13 @@ spec:
               if [ -f "$card" ]; then
                 if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"chat"|acestep-v15-xl-turbo' "$card"; then
                   echo "[model-card-migration] replacing legacy/Turbo ACE-Step card with XL-SFT"
-                  rm -f "$card"
+                  cp /etc/olares/model-spec.json "$card"
                 elif ! grep -Eq '"draft"' "$card"; then
-                  echo "[model-card-migration] refreshing ACE-Step card without music draft support"
-                  rm -f "$card"
+                  echo "[model-card-migration] replacing ACE-Step card without music draft support"
+                  cp /etc/olares/model-spec.json "$card"
                 fi
+              else
+                cp /etc/olares/model-spec.json "$card"
               fi
               chown 1000:1000 /cache/hf/hub /run/llm-init
           volumeMounts:
@@ -59,6 +64,9 @@ spec:
               mountPath: /cache/hf/hub
             - name: run-state
               mountPath: /run/llm-init
+            - name: model-spec-seed
+              mountPath: /etc/olares
+              readOnly: true
           securityContext:
             runAsUser: 0
       containers:
