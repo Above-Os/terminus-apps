@@ -48,6 +48,10 @@ VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
 DRAFT_ATTEMPTS = 2
 
+
+class PhoneticLyricsError(ValueError):
+    """ACE returned internal pronunciation codes instead of display lyrics."""
+
 app = FastAPI(title="Olares Music Engine", version="1")
 
 
@@ -262,6 +266,8 @@ def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
             raise ValueError("ACE-Step returned an invalid formatted caption")
         if len(effective_lyrics) > 4096:
             raise ValueError("ACE-Step returned formatted lyrics that exceed 4096 characters")
+        if _romanized(effective_lyrics):
+            raise PhoneticLyricsError("ACE-Step returned phonetic codes instead of readable formatted lyrics")
         warnings, metrics = _line_metrics(effective_lyrics, task["vocal_language"])
         if caption_truncated:
             warnings.insert(0, "formatted_caption_trimmed_to_512_characters")
@@ -275,7 +281,7 @@ def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
     except Exception as exc:
         task.update({
             "status": "failed",
-            "error": {"code": "format_failed", "message": str(exc)},
+            "error": {"code": "lyrics_script_invalid" if isinstance(exc, PhoneticLyricsError) else "format_failed", "message": str(exc)},
         })
     with TASKS_LOCK:
         TASKS[task_id] = task
@@ -288,10 +294,13 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
         TASKS[task_id] = task
     try:
         for attempt in range(DRAFT_ATTEMPTS):
+            brief = task["brief"]
+            if attempt > 0:
+                brief += "; return readable lyrics in the requested writing system, never language-tagged phonetic codes or tone-number romanization"
             native = _native_json(
                 "/v1/create_sample",
                 {
-                    "query": task["brief"],
+                    "query": brief,
                     "instrumental": task["instrumental"],
                     "vocal_language": task["vocal_language"],
                     "temperature": temperature,
@@ -302,6 +311,8 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             lyrics = "" if task["instrumental"] else str(data.get("lyrics") or "").strip()
             if not _romanized(lyrics):
                 break
+        if _romanized(lyrics):
+            raise PhoneticLyricsError("ACE-Step repeatedly returned phonetic codes instead of readable lyrics")
         prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
         if not prompt:
             raise ValueError("ACE-Step returned an empty caption")
@@ -310,8 +321,6 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
         if len(lyrics) > 4096:
             raise ValueError("ACE-Step returned lyrics that exceed 4096 characters")
         warnings, metrics = _line_metrics(lyrics, task["vocal_language"])
-        if _romanized(lyrics):
-            warnings.insert(0, "lyrics_romanized")
         if caption_truncated:
             warnings.insert(0, "caption_trimmed_to_512_characters")
         task.update({
@@ -326,7 +335,7 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
     except Exception as exc:
         task.update({
             "status": "failed",
-            "error": {"code": "draft_failed", "message": str(exc)},
+            "error": {"code": "lyrics_script_invalid" if isinstance(exc, PhoneticLyricsError) else "draft_failed", "message": str(exc)},
         })
     with TASKS_LOCK:
         TASKS[task_id] = task
