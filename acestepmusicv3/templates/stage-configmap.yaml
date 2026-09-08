@@ -205,11 +205,14 @@ data:
             app_state = args[0]
         handler = getattr(app_state, "llm_handler", None)
         if (
-            getattr(app_state, "_llm_initialized", False)
-            and handler is not None
+            handler is not None
             and not getattr(handler, "llm_initialized", False)
+            and (
+                getattr(app_state, "_llm_initialized", False)
+                or getattr(app_state, "_llm_init_error", None) is not None
+            )
         ):
-            print("[olares-stage] rearming LM for the next queued job", flush=True)
+            print("[olares-stage] rearming LM for the next model task", flush=True)
             app_state._llm_initialized = False
             app_state._llm_init_error = None
         return _ensure_llm_ready(*args, **kwargs)

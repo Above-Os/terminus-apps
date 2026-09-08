@@ -56,6 +56,8 @@ class ChartContractTest(unittest.TestCase):
             self.assertIn(
                 f'kwargs["{name}"] = _with_rearm(kwargs["{name}"])', launcher
             )
+        self.assertIn('or getattr(app_state, "_llm_init_error", None) is not None', launcher)
+        self.assertIn('app_state._llm_init_error = None', launcher)
         patched_at = launcher.index(
             "route_setup.register_sample_format_routes = "
             "_register_sample_format_routes_with_rearm"
