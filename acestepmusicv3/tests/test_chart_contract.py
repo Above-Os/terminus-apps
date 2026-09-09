@@ -119,6 +119,8 @@ class ChartContractTest(unittest.TestCase):
         self.assertNotIn("http", readability.lower())
         self.assertNotIn("openai", readability.lower())
         self.assertIn("for temperature in (0.2, 0.1):", readability)
+        self.assertIn('"top_k": 40', readability)
+        self.assertNotIn('"top_k": 0', readability)
         self.assertIn("mountPath: /opt/olares/lyrics_readability.py", server)
         self.assertIn("subPath: lyrics_readability.py", server)
 
