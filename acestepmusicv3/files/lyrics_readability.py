@@ -115,7 +115,10 @@ def render_readable_lyrics(llm_handler: Any, phonetic: str, language: str) -> st
             formatted_prompt=prompt,
             cfg={
                 "temperature": temperature,
-                "top_k": 0,
+                # ACE's bundled sampler requires a strictly positive top_k.
+                # Forty keeps conversion deterministic enough at 0.2/0.1
+                # without tripping the native assertion.
+                "top_k": 40,
                 "top_p": 0.9,
                 "repetition_penalty": 1.0,
                 "generation_phase": "understand",
