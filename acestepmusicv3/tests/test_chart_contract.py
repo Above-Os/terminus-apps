@@ -110,6 +110,7 @@ class ChartContractTest(unittest.TestCase):
 
     def test_phonetic_lyrics_are_rendered_by_the_loaded_ace_lm(self):
         launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(encoding="utf-8")
+        server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
         readability = (CHART_ROOT / "files" / "lyrics_readability.py").read_text(encoding="utf-8")
         self.assertIn("render_readable_lyrics(llm_handler, original, language)", launcher)
         self.assertIn("result.conditioning_lyrics = original", launcher)
@@ -118,6 +119,8 @@ class ChartContractTest(unittest.TestCase):
         self.assertNotIn("http", readability.lower())
         self.assertNotIn("openai", readability.lower())
         self.assertIn("for temperature in (0.2, 0.1):", readability)
+        self.assertIn("mountPath: /opt/olares/lyrics_readability.py", server)
+        self.assertIn("subPath: lyrics_readability.py", server)
 
 
 if __name__ == "__main__":
