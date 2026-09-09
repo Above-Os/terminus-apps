@@ -7,6 +7,7 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import re
@@ -33,6 +34,9 @@ QUALITY_MODEL = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft")
 TASKS: dict[str, dict[str, Any]] = {}
 TASKS_LOCK = threading.Lock()
 REPAINT_INPUT_DIR = os.getenv("REPAINT_INPUT_DIR", "/app/data/repaint-inputs")
+LYRICS_ALIGNMENT_DIR = os.getenv("LYRICS_ALIGNMENT_DIR", "/app/data/lyrics-alignments")
+ALIGNMENT_AUDIO_ROOTS = ("/app/data", "/app/gradio_outputs")
+MAX_ALIGNMENT_BYTES = 1024 * 1024
 MAX_REPAINT_AUDIO_BYTES = 64 * 1024 * 1024
 CLEAN_NEGATIVE_PROMPT = (
     "background hiss, static, vinyl crackle, tape noise, lo-fi noise, noisy room, "
@@ -573,6 +577,68 @@ def _cleanup_source(task: dict[str, Any]) -> None:
             pass
 
 
+def _alignment_path(task_id: str) -> str:
+    key = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
+    return os.path.join(LYRICS_ALIGNMENT_DIR, key + ".json")
+
+
+def _validate_alignment(value: Any, duration: float | None = None) -> dict[str, Any]:
+    if not isinstance(value, dict) or not isinstance(value.get("segments"), list):
+        raise ValueError("alignment must contain a segments array")
+    raw_segments = value["segments"]
+    if not raw_segments or len(raw_segments) > 4096:
+        raise ValueError("alignment segments must be bounded and non-empty")
+    segments: list[dict[str, Any]] = []
+    previous_end = 0.0
+    maximum = float(duration or 0)
+    for index, raw in enumerate(raw_segments):
+        if not isinstance(raw, dict):
+            raise ValueError(f"alignment segment {index} is not an object")
+        text = str(raw.get("text") or "").strip()
+        start = float(raw.get("start_seconds"))
+        end = float(raw.get("end_seconds"))
+        if not text or not math.isfinite(start) or not math.isfinite(end):
+            raise ValueError(f"alignment segment {index} has invalid values")
+        if start < 0 or end <= start or start < previous_end:
+            raise ValueError(f"alignment segment {index} is not monotonic")
+        if maximum > 0 and end > maximum + 0.05:
+            raise ValueError(f"alignment segment {index} exceeds audio duration")
+        segments.append({"text": text, "start_seconds": start, "end_seconds": min(end, maximum) if maximum > 0 else end})
+        previous_end = end
+    return {"segments": segments}
+
+
+def _persist_alignment(task_id: str, file_url: str, duration: float) -> bool:
+    parsed = urllib.parse.urlparse(file_url)
+    if parsed.path != "/v1/audio":
+        return False
+    source = urllib.parse.parse_qs(parsed.query).get("path", [""])[0]
+    source = os.path.realpath(source)
+    if not source or not any(
+        source == os.path.realpath(root) or source.startswith(os.path.realpath(root) + os.sep)
+        for root in ALIGNMENT_AUDIO_ROOTS
+    ):
+        return False
+    sidecar = source + ".lyrics-alignment.json"
+    try:
+        if os.path.getsize(sidecar) > MAX_ALIGNMENT_BYTES:
+            raise ValueError("alignment sidecar exceeds size limit")
+        with open(sidecar, "r", encoding="utf-8") as handle:
+            alignment = _validate_alignment(json.load(handle), duration)
+        destination = _alignment_path(task_id)
+        os.makedirs(os.path.dirname(destination), mode=0o750, exist_ok=True)
+        temporary = destination + "." + uuid.uuid4().hex + ".tmp"
+        with open(temporary, "x", encoding="utf-8") as handle:
+            json.dump(alignment, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        return True
+    except (FileNotFoundError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        print(f"[lyrics-alignment] unavailable task_id={task_id} error={exc}", flush=True)
+        return False
+
+
 @app.get("/v1/models")
 def models() -> dict[str, Any]:
     return {
@@ -587,9 +653,9 @@ def engine_spec() -> dict[str, Any]:
         "schema_version": 1,
         "model": MODEL_NAME,
         "mode": "music_generation",
-        "implements": ["music.generate", "music.repaint", "music.format", "music.draft"],
-        "declares": ["music.generate", "music.repaint", "music.format", "music.draft"],
-        "serves": ["music.generate", "music.repaint", "music.format", "music.draft"],
+        "implements": ["music.generate", "music.repaint", "music.format", "music.draft", "music.lyrics_alignment"],
+        "declares": ["music.generate", "music.repaint", "music.format", "music.draft", "music.lyrics_alignment"],
+        "serves": ["music.generate", "music.repaint", "music.format", "music.draft", "music.lyrics_alignment"],
         "max_concurrency": 1,
         "workers": 1,
         "extensions": {
@@ -613,6 +679,7 @@ def engine_spec() -> dict[str, Any]:
             {"method": "POST", "path": "/v1/music/generations", "available": True, "async_supported": True},
             {"method": "GET", "path": "/v1/music/generations/{id}", "available": True, "async_supported": True},
             {"method": "GET", "path": "/v1/music/generations/{id}/content", "available": True},
+            {"method": "GET", "path": "/v1/music/generations/{id}/lyrics-alignment", "available": True},
             {"method": "DELETE", "path": "/v1/music/generations/{id}", "available": True},
             {"method": "POST", "path": "/v1/music/formats", "available": True, "async_supported": True},
             {"method": "GET", "path": "/v1/music/formats/{id}", "available": True, "async_supported": True},
@@ -888,6 +955,8 @@ def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any
             }
         )
         native[output_id] = file_url
+        if len(outputs) == 1:
+            _persist_alignment(task_id, file_url, float(metas.get("duration") or 0))
     return outputs, native, effective
 
 
@@ -937,6 +1006,22 @@ def generation_content(task_id: str, output_id: str = Query(...)) -> StreamingRe
     upstream = urllib.request.urlopen(NATIVE_BASE + parsed.path + "?" + parsed.query, timeout=60)
     content_type = upstream.headers.get_content_type() or "audio/wav"
     return StreamingResponse(upstream, media_type=content_type)
+
+
+@app.get("/v1/music/generations/{task_id}/lyrics-alignment")
+def generation_lyrics_alignment(task_id: str) -> dict[str, Any]:
+    with TASKS_LOCK:
+        task = dict(TASKS[task_id]) if task_id in TASKS else None
+    if task is not None and task.get("status") != "completed":
+        raise _error(409, "lyrics_alignment_unavailable", "Lyrics alignment is available only after generation completes.")
+    path = _alignment_path(task_id)
+    try:
+        if os.path.getsize(path) > MAX_ALIGNMENT_BYTES:
+            raise ValueError("persisted alignment exceeds size limit")
+        with open(path, "r", encoding="utf-8") as handle:
+            return _validate_alignment(json.load(handle))
+    except (FileNotFoundError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        raise _error(404, "lyrics_alignment_unavailable", "Lyrics alignment is unavailable for this generation.")
 
 
 def _wait_native(process: subprocess.Popen[Any], timeout: int = 1800) -> None:

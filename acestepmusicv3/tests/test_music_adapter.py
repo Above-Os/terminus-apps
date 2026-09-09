@@ -4,6 +4,7 @@ import io
 import pathlib
 import tempfile
 import time
+import urllib.parse
 import unittest
 from email.message import Message
 from unittest import mock
@@ -89,13 +90,62 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(spec["mode"], "music_generation")
         self.assertEqual(spec["max_concurrency"], 1)
         self.assertEqual(
-            spec["serves"], ["music.generate", "music.repaint", "music.format", "music.draft"]
+            spec["serves"], ["music.generate", "music.repaint", "music.format", "music.draft", "music.lyrics_alignment"]
+        )
+        self.assertIn(
+            {"method": "GET", "path": "/v1/music/generations/{id}/lyrics-alignment", "available": True},
+            spec["endpoints"],
         )
         self.assertEqual(spec["extensions"]["music"]["default_quality_profile"], "high_quality")
         self.assertEqual(spec["extensions"]["music"]["default_production_profile"], "clean")
         self.assertEqual(spec["extensions"]["music"]["default_caption_mode"], "preserve")
         self.assertEqual(spec["extensions"]["music"]["vocal_languages"], list(adapter.VOCAL_LANGUAGES))
         self.assertNotIn("unknown", spec["extensions"]["music"]["vocal_languages"])
+
+    def test_alignment_is_persisted_and_read_after_task_memory_is_cleared(self):
+        audio = self.temp_dir / "song.wav"
+        audio.write_bytes(b"RIFF")
+        sidecar = pathlib.Path(str(audio) + ".lyrics-alignment.json")
+        sidecar.write_text(
+            '{"segments":[{"text":"雨落在窗前","start_seconds":1.2,"end_seconds":4.5}]}',
+            encoding="utf-8",
+        )
+        with mock.patch.object(adapter, "ALIGNMENT_AUDIO_ROOTS", (str(self.temp_dir),)), mock.patch.object(
+            adapter, "LYRICS_ALIGNMENT_DIR", str(self.temp_dir / "persisted")
+        ):
+            self.assertTrue(
+                adapter._persist_alignment(
+                    "new-song", "/v1/audio?path=" + urllib.parse.quote(str(audio), safe=""), 10.0
+                )
+            )
+            adapter.TASKS.clear()
+            response = self.client.get("/v1/music/generations/new-song/lyrics-alignment")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["segments"][0]["text"], "雨落在窗前")
+
+            old = self.client.get("/v1/music/generations/old-song/lyrics-alignment")
+            self.assertEqual(old.status_code, 404)
+            self.assertEqual(old.json()["error"]["code"], "lyrics_alignment_unavailable")
+
+    def test_alignment_rejects_out_of_range_and_incomplete_generations(self):
+        audio = self.temp_dir / "song.wav"
+        audio.write_bytes(b"RIFF")
+        pathlib.Path(str(audio) + ".lyrics-alignment.json").write_text(
+            '{"segments":[{"text":"too late","start_seconds":9,"end_seconds":12}]}',
+            encoding="utf-8",
+        )
+        with mock.patch.object(adapter, "ALIGNMENT_AUDIO_ROOTS", (str(self.temp_dir),)), mock.patch.object(
+            adapter, "LYRICS_ALIGNMENT_DIR", str(self.temp_dir / "persisted")
+        ):
+            self.assertFalse(
+                adapter._persist_alignment(
+                    "bad-song", "/v1/audio?path=" + urllib.parse.quote(str(audio), safe=""), 10.0
+                )
+            )
+            adapter.TASKS["queued-song"] = {"id": "queued-song", "status": "running"}
+            queued = self.client.get("/v1/music/generations/queued-song/lyrics-alignment")
+            self.assertEqual(queued.status_code, 409)
+            self.assertEqual(queued.json()["error"]["code"], "lyrics_alignment_unavailable")
 
     def test_format_input_is_async_and_exposes_draft_and_effective_versions(self):
         calls = []
