@@ -8,7 +8,7 @@ metadata:
   title: Speakrs Diarization
   description: Speaker diarization on ONNX Runtime, no torch stack
   icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  version: "0.0.29"
+  version: "0.0.30"
   categories:
     - AI
     - models
@@ -17,7 +17,7 @@ metadata:
     - audio
 
 spec:
-  versionName: "0.0.29"
+  versionName: "0.0.30"
   onlyAdmin: true
   developer: beclab
   website: https://github.com/avencera/speakrs
@@ -30,6 +30,10 @@ spec:
     - text: MIT
       url: https://github.com/beclab/llm-init
   upgradeDescription: |
+    0.0.30: A file that made ffmpeg write more than a pipe buffer of diagnostics could hang a
+    request forever -- no error, no timeout, just a caller waiting. Fixed, along with the child
+    process a failed decode left behind. Also says which cards this runs on, which nothing did
+    before: NVIDIA Turing or newer, and not Pascal or Volta, which CUDA 13 no longer supports.
     0.0.29: Runs on arm64 as well, which in practice means GB10 -- the only arm64 machine the
     platform can schedule a GPU onto. ONNX Runtime publishes no aarch64 build carrying the CUDA
     execution provider, so that half is built from source. GB10 allocates the GPU out of system
@@ -59,6 +63,8 @@ spec:
     - Capability: `diar`
     - Required GPU memory: `3Gi`
     - Engine: speakrs on ONNX Runtime CUDA
+    - GPU: NVIDIA, Turing or newer. Built on CUDA 13, which no longer supports Pascal
+      (GTX 10 series, P100) or Volta (V100); on arm64 the only supported machine is GB10
 
     **Accuracy against speed**
 
@@ -67,7 +73,7 @@ spec:
     3.6x faster and costs 0.3-1.0 DER points, the cost growing with how densely speakers
     overlap. Both modes load the same weights -- the mode changes how the pipeline is run,
     not what it runs -- so switching re-downloads nothing and the model name is the same
-    either way. This setting is where a run's mode is read.
+    either way. Because it is, this setting is the only place a run's mode is recorded.
 
     **Tuning**
 
@@ -185,8 +191,8 @@ envs:
       engine holds 1474 MiB and does not grow during inference -- the batch sizes are fixed by
       the exported ONNX graphs, so the arena is allocated when the sessions are built and a
       40-minute recording costs the same as a 40-second one. 3Gi is roughly twice that, which
-      covers the part that varies by card and driver, and is still less than the 4Gi the
-      pyannote engine reserves."
+      covers the part that varies by card and driver without claiming more than it needs -- on
+      a shared card every GiB named here is a GiB nothing else can use."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
