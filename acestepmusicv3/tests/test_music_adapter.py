@@ -228,7 +228,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(
             result["style_plan"], {"bpm": 77, "key_scale": "E minor", "time_signature": "4"}
         )
-        self.assertEqual(calls[0]["query"], "深夜加班后独自走回家")
+        self.assertEqual(calls[0]["query"], "中文歌曲，主题与风格：深夜加班后独自走回家")
         self.assertFalse(calls[0]["instrumental"])
 
         self.assertEqual(
@@ -274,8 +274,14 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertIn("熟悉的窗", result["lyrics"])
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
-        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.75])
-        self.assertEqual([call["query"] for call in calls], ["walking home late"] * 2)
+        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.95])
+        self.assertEqual(
+            [call["query"] for call in calls],
+            [
+                "中文歌曲，主题与风格：walking home late",
+                "普通话歌曲，主题与风格：walking home late",
+            ],
+        )
 
     def test_draft_rejects_lyrics_that_stay_phonetic_across_every_attempt(self):
         romanized = "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2"
@@ -298,10 +304,33 @@ class MusicAdapterContractTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
-        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.75, 0.65])
-        self.assertEqual([item["query"] for item in calls], ["walking home late"] * 3)
+        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.95, 1.05, 1.15, 1.15])
+        self.assertEqual(
+            [item["query"] for item in calls],
+            [
+                "中文歌曲，主题与风格：walking home late",
+                "普通话歌曲，主题与风格：walking home late",
+                "以中文演唱的歌曲，主题与风格：walking home late",
+                "以中文演唱的歌曲，主题与风格：walking home late",
+                "以中文演唱的歌曲，主题与风格：walking home late",
+            ],
+        )
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "lyrics_script_invalid")
+
+    def test_chinese_draft_query_preserves_the_limit_and_non_chinese_briefs(self):
+        chinese = {"brief": "夜" * 512, "vocal_language": "zh"}
+        self.assertEqual(len(adapter._draft_query(chinese, 0)), 512)
+        self.assertTrue(adapter._draft_query(chinese, 2).startswith("以中文演唱"))
+        english = {"brief": "walking home late", "vocal_language": "en"}
+        self.assertEqual(adapter._draft_query(english, 1), english["brief"])
+
+    def test_draft_temperature_escapes_script_paths_but_cools_repetition(self):
+        script = adapter.DraftValidationError("lyrics_script_invalid", "script")
+        repetition = adapter.DraftValidationError("lyrics_repetition_invalid", "loop")
+        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 1.0)
+        self.assertEqual(adapter._draft_temperature(0.9, 2, script), 1.1)
+        self.assertEqual(adapter._draft_temperature(0.9, 1, repetition), 0.75)
 
     def test_draft_fails_when_the_lm_returns_no_lyrics_for_a_vocal_brief(self):
         def native(path, payload=None, timeout=30):
@@ -384,7 +413,7 @@ class MusicAdapterContractTest(unittest.TestCase):
                         if result["status"] == "failed":
                             break
                         time.sleep(0.01)
-                self.assertEqual(call.call_count, 3)
+                    self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
                 self.assertEqual(result["error"]["code"], code)
 
     def test_draft_accepts_a_complete_chinese_song_with_a_repeated_chorus(self):

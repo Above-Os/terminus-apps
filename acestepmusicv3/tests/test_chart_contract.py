@@ -104,7 +104,7 @@ class ChartContractTest(unittest.TestCase):
         self.assertIn('if kwargs.get("top_p") is None:', launcher)
         self.assertIn('kwargs["top_p"] = 0.9', launcher)
         self.assertIn('if kwargs.get("repetition_penalty") in (None, 1.0):', launcher)
-        self.assertIn('kwargs["repetition_penalty"] = 1.08', launcher)
+        self.assertIn('1.0 if kwargs.get("vocal_language") in {"zh", "yue"} else 1.08', launcher)
         patched_at = launcher.index("inference.create_sample = _stable_create_sample")
         self.assertLess(patched_at, launcher.index("from acestep.api_server import main"))
 

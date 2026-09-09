@@ -51,7 +51,7 @@ VOCAL_LANGUAGES = (
 VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
 ENGLISH_HOOK_WORDS = frozenset({"baby", "hey", "la", "love", "na", "oh", "tonight", "woo", "yeah", "you"})
-DRAFT_ATTEMPTS = 3
+DRAFT_ATTEMPTS = 5
 
 
 class PhoneticLyricsError(ValueError):
@@ -289,6 +289,44 @@ def _draft_validation_error(task: dict[str, Any], prompt: str, lyrics: str) -> D
     return None
 
 
+def _draft_query(task: dict[str, Any], attempt: int) -> str:
+    """Keep Chinese writing anchored even when the supplied subject is English.
+
+    `vocal_language` alone does not reliably steer the bundled 4B writer: a
+    Latin-script brief can make all three samples phonetic or unrelated Latin
+    text.  These are positive song descriptions, not corrections based on the
+    rejected output, so they do not leak error instructions into the lyrics.
+    """
+    anchors = {
+        "zh": (
+            "中文歌曲，主题与风格：",
+            "普通话歌曲，主题与风格：",
+            "以中文演唱的歌曲，主题与风格：",
+        ),
+        "yue": (
+            "粤语歌曲，主题与风格：",
+            "广东话歌曲，主题与风格：",
+            "以粤语演唱的歌曲，主题与风格：",
+        ),
+    }
+    choices = anchors.get(task["vocal_language"])
+    if choices is None:
+        return task["brief"]
+    prefix = choices[min(attempt, len(choices) - 1)]
+    return prefix + task["brief"][: 512 - len(prefix)]
+
+
+def _draft_temperature(initial: float, attempt: int, failure: DraftValidationError | None) -> float:
+    if attempt == 0 or failure is None:
+        return initial
+    if failure.code == "lyrics_script_invalid":
+        # A phonetic/script path can be the highest-probability continuation;
+        # lowering temperature made repeated retries converge on it again.
+        return min(1.15, max(initial, 0.85) + 0.10 * attempt)
+    safer = (initial, min(initial, 0.75), 0.65, 0.60, 0.55)
+    return safer[min(attempt, len(safer) - 1)]
+
+
 def _line_metrics(lyrics: str, language: str) -> tuple[list[str], dict[str, Any]]:
     lines = [
         line.strip() for line in lyrics.splitlines()
@@ -420,17 +458,17 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
         TASKS[task_id] = task
     try:
         failure: DraftValidationError | None = None
-        temperatures = (temperature, min(temperature, 0.75), 0.65)
         for attempt in range(DRAFT_ATTEMPTS):
+            attempt_temperature = _draft_temperature(temperature, attempt, failure)
             native = _native_json(
                 "/v1/create_sample",
                 {
                     # Keep retries on the same positive song subject. The 4B
                     # writer may turn appended correction prose into lyrics.
-                    "query": task["brief"],
+                    "query": _draft_query(task, attempt),
                     "instrumental": task["instrumental"],
                     "vocal_language": task["vocal_language"],
-                    "temperature": temperatures[attempt],
+                    "temperature": attempt_temperature,
                 },
                 timeout=600,
             )
@@ -440,6 +478,11 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             failure = _draft_validation_error(task, prompt, lyrics)
             if failure is None:
                 break
+            print(
+                f"[draft-quality] attempt={attempt + 1} rejected={failure.code} "
+                f"temperature={attempt_temperature:.2f}",
+                flush=True,
+            )
         if failure is not None:
             raise failure
         warnings, metrics = _line_metrics(lyrics, task["vocal_language"])
