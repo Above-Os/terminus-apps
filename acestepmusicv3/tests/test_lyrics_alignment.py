@@ -24,11 +24,24 @@ class LyricsAlignmentTest(unittest.TestCase):
         for lrc in (
             "[00:11.00]too late",
             "[00:02.00]one\n[00:01.00]two",
-            "[00:01.00]one\n[00:01.00]two",
             "[00:00.00][Instrumental]",
         ):
             with self.subTest(lrc=lrc), self.assertRaises(ValueError):
                 alignment.alignment_segments(lrc, 10.0)
+
+    def test_equal_native_timestamps_are_split_without_losing_sentences(self):
+        result = alignment.alignment_segments(
+            "[00:01.00]First line\n[00:01.00]Second line\n[00:05.00]Final line",
+            9.0,
+        )
+        self.assertEqual(
+            result["segments"],
+            [
+                {"text": "First line", "start_seconds": 1.0, "end_seconds": 3.0},
+                {"text": "Second line", "start_seconds": 3.0, "end_seconds": 5.0},
+                {"text": "Final line", "start_seconds": 5.0, "end_seconds": 9.0},
+            ],
+        )
 
 
 if __name__ == "__main__":
