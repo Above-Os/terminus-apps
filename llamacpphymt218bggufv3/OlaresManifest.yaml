@@ -7,7 +7,7 @@ metadata:
   description: "Hy-MT2-1.8B (GGUF Q4_K_M) served with llama.cpp."
   appid: llamacpphymt218bggufv3
   title: Hy-MT2-1.8B (llama.cpp)
-  version: '1.0.31'
+  version: '1.0.32'
   categories:
     - AI
     - models
@@ -38,6 +38,10 @@ spec:
   onlyAdmin: true
   versionName: 'tencent/Hy-MT2-1.8B-GGUF:Q4_K_M'
   upgradeDescription: |
+    v1.0.32: ENGINE_ARGS -c 65536 -np 16 -kvu (migrate the shipped -np 8
+      split preset). One 64K unified pool, sixteen slots sharing it: short
+      immersive segments stay concurrent, a Note group of a few thousand
+      tokens can use the whole window instead of a 4096-token slice.
     v1.0.28: llm-init v1.6.1 — editing ENGINE_ARGS on the running app now
       reaches the two things that read it. Both used to settle their answer
       while the process was starting, so removing -np left the card reporting
@@ -77,12 +81,12 @@ spec:
     **Model Overview**
     Hy-MT2-1.8B is a lightweight multilingual translation model from Tencent Hunyuan (Hy-MT2 family). It supports translation among 33+ languages and follows complex translation instructions (terminology, style, structured data). This app serves the `Q4_K_M` GGUF build from `tencent/Hy-MT2-1.8B-GGUF` via llama.cpp.
 
-    Tuned for low-latency translation: 32K context, quantized KV cache, and full GPU offload.
+    Tuned for low-latency translation: 64K unified KV pool, sixteen shared slots, quantized KV cache, and full GPU offload.
 
     **Preset Configuration**
     - Model: `tencent/Hy-MT2-1.8B-GGUF:Q4_K_M` (~1.1 GiB weights)
     - Capabilities: translate (`/translate` on Model Console)
-    - Engine args: `-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 8`
+    - Engine args: `-c 65536 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 16 -kvu`
     - Required GPU memory: `4Gi`
 
     **Accelerator modes**
@@ -198,7 +202,7 @@ envs:
     description:  "The model capabilities. /translate comes from MODEL_MODE=translate, not from this field."
   - envName: ENGINE_ARGS
     required: true
-    default: "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 8"
+    default: "-c 65536 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 16 -kvu"
     type: string
     editable: true
     applyOnChange: true
