@@ -28,6 +28,22 @@ class ChartContractTest(unittest.TestCase):
             ["generate", "repaint", "format", "draft"],
         )
         self.assertIn("zh", seed["extensions"]["music"]["vocal_languages"])
+        self.assertTrue(seed["supports"]["supports_music_lyrics_alignment"])
+        self.assertIn(
+            "replacing ACE-Step card without lyrics alignment support", downloader
+        )
+
+    def test_native_alignment_runs_before_save_memory_payload_cleanup(self):
+        launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("dit_handler.get_lyric_timestamp(", launcher)
+        self.assertIn("_build_generate_music_success_payload", launcher)
+        self.assertIn("_write_alignment_sidecars(result, captured_alignment)", launcher)
+        self.assertLess(
+            launcher.index("dit_handler.get_lyric_timestamp("),
+            launcher.index("return original_builder(*builder_args, **builder_kwargs)"),
+        )
 
     def test_single_worker_never_enables_turbo_loading(self):
         server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
