@@ -25,7 +25,7 @@
 {{- end -}}
 
 {{- define "embeddinggemmav3.embedTag" -}}v0.1.3{{- end -}}
-{{- define "embeddinggemmav3.llmInitTag" -}}v1.7.1{{- end -}}
+{{- define "embeddinggemmav3.llmInitTag" -}}v1.7.12{{- end -}}
 {{- define "embeddinggemmav3.unifiedRepo" -}}beclab/embeddinggemma-300m{{- end -}}
 {{- define "embeddinggemmav3.modelRevision" -}}main{{- end -}}
 {{- define "embeddinggemmav3.logicalModelName" -}}embeddinggemma-300m{{- end -}}
