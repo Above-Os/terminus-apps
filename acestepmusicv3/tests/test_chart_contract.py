@@ -45,13 +45,17 @@ class ChartContractTest(unittest.TestCase):
             launcher.index("return original_builder(*builder_args, **builder_kwargs)"),
         )
 
-    def test_shared_api_routes_directly_to_the_staged_engine(self):
+    def test_shared_api_routes_through_llm_init(self):
+        # Router derives one base_url from this entrance and reads the control
+        # plane under it. Pointing it at the engine 404s all four control-plane
+        # endpoints, which leaves the model registered with no routes.
         downloader = (CHART_ROOT / "templates" / "download.yaml").read_text(
             encoding="utf-8"
         )
         shared_service = downloader.split("name: sharedentrances-api", 1)[1]
-        self.assertIn("io.kompose.service: acestepweb", shared_service)
-        self.assertIn("targetPort: 8001", shared_service)
+        self.assertIn("io.kompose.service: llminit", shared_service)
+        self.assertIn("targetPort: 8090", shared_service)
+        self.assertNotIn("io.kompose.service: acestepweb", shared_service)
 
         # The human-facing Model Console still belongs to llm-init.
         download_service = downloader.split("name: download-svc", 1)[1].split(
