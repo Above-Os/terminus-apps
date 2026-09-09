@@ -74,7 +74,7 @@ spec:
             runAsUser: 0
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.7.12
+          image: docker.io/beclab/llm-init:v1.7.17
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 1000
@@ -159,14 +159,15 @@ metadata:
   name: sharedentrances-api
   namespace: {{ .Release.Namespace | quote }}
 spec:
-  # The staged engine already implements the complete standard Music API and
-  # its model/engine spec endpoints. Route the shared data-plane entrance to
-  # it directly so optional generation subresources (lyrics alignment) are
-  # not rejected by an older llm-init proxy allowlist. The visible Model
-  # Console entrance remains on download-svc above.
+  # Router derives one base_url from sharedEntrances[0] and reads both planes
+  # under it: /api/model-spec, /api/endpoints, /api/progress and
+  # /api/engine/load alongside /v1/*. Only llm-init serves the control plane
+  # half -- the engine 404s all four, which leaves the model registered with
+  # no routes and permanently un-callable -- so this entrance must stay on
+  # llm-init, which proxies /v1/* through to the engine.
   selector:
-    io.kompose.service: acestepweb
+    io.kompose.service: llminit
   ports:
     - name: http
       port: 80
-      targetPort: 8001
+      targetPort: 8090
