@@ -25,7 +25,7 @@
 {{- end -}}
 
 {{- define "bgererankerv2m3.rerankTag" -}}v0.0.1{{- end -}}
-{{- define "bgererankerv2m3.llmInitTag" -}}v1.7.5{{- end -}}
+{{- define "bgererankerv2m3.llmInitTag" -}}v1.7.12{{- end -}}
 {{- define "bgererankerv2m3.unifiedRepo" -}}beclab/bge-reranker-v2-m3{{- end -}}
 {{- define "bgererankerv2m3.modelRevision" -}}main{{- end -}}
 {{- define "bgererankerv2m3.logicalModelName" -}}bge-reranker-v2-m3{{- end -}}
