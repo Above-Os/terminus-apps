@@ -331,7 +331,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertIn("熟悉的窗", result["lyrics"])
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
-        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.75])
+        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.80])
         self.assertEqual(
             [call["query"] for call in calls],
             [
@@ -361,7 +361,7 @@ class MusicAdapterContractTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
-        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.75, 0.65])
+        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.80, 0.75])
         self.assertEqual(
             [item["query"] for item in calls],
             [
@@ -383,9 +383,9 @@ class MusicAdapterContractTest(unittest.TestCase):
     def test_draft_temperature_cools_every_invalid_result(self):
         script = adapter.DraftValidationError("lyrics_script_invalid", "script")
         repetition = adapter.DraftValidationError("lyrics_repetition_invalid", "loop")
-        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 0.75)
-        self.assertEqual(adapter._draft_temperature(0.9, 2, script), 0.65)
-        self.assertEqual(adapter._draft_temperature(0.9, 1, repetition), 0.75)
+        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 0.80)
+        self.assertEqual(adapter._draft_temperature(0.9, 2, script), 0.75)
+        self.assertEqual(adapter._draft_temperature(0.9, 1, repetition), 0.80)
 
     def test_draft_fails_when_the_lm_returns_no_lyrics_for_a_vocal_brief(self):
         def native(path, payload=None, timeout=30):
