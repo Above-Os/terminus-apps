@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.8-27B (GGUF UD-Q4_K_XL) served with llama.cpp."
   appid: llamacppqwen3827bggufv3
   title: Qwen3.8-27B (llama.cpp)
-  version: '1.0.11'
+  version: '1.0.12'
   categories:
     - AI
     - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL'
   upgradeDescription: |
+    v1.0.12: Budget host memory for the GPU memory that time-slicing evicts into RAM. The old limit was already fully consumed, which cost the container an OOM kill whenever another model took the card.
+
     v1.0.11: Share the 102K KV pool across 2 slots (`-np 2 -kvu`) so one request can still use the whole window. Model Console moves to llm-init v1.7.14.
 
     v1.0.5: Upgrade llm-init to v1.3.10; pin MODEL_REASONING_EFFORT and MODEL_REASONING_EFFORT_DEFAULT as non-editable env; upgrade llama.cpp to server-cuda12-b10548.
@@ -99,9 +101,12 @@ spec:
       requiredCpu: "1100m"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # Engine MEMORY_REQUEST 6Gi + llm-init 256Mi <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
-      limitedMemory: "32Gi"
-      requiredMemory: "7Gi"
+      # MEMORY_LIMIT 38Gi = anon under 1Gi + the 23Gi gpumem that mode-2 eviction
+      # spills into host RAM as unreclaimable UVM pages + GGUF page cache headroom.
+      # Engine MEMORY_REQUEST 7Gi + llm-init 256Mi <= requiredMemory 8Gi;
+      # MEMORY_LIMIT 38Gi + llm-init 2Gi <= limitedMemory 40Gi.
+      limitedMemory: "40Gi"
+      requiredMemory: "8Gi"
       requiredGPUMemory: "23Gi"
       limitedGPUMemory: "23Gi"
     - mode: nvidia-gb10
@@ -235,7 +240,7 @@ envs:
     applyOnChange: false
   - envName: LLAMACPP_MEMORY_REQUEST
     required: true
-    default: "6Gi"
+    default: "7Gi"
     type: string
     editable: false
     applyOnChange: false
@@ -247,7 +252,7 @@ envs:
     applyOnChange: false
   - envName: LLAMACPP_MEMORY_LIMIT
     required: true
-    default: "30Gi"
+    default: "38Gi"
     type: string
     editable: false
     applyOnChange: false
