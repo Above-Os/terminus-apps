@@ -49,6 +49,12 @@ class LyricsReadabilityTest(unittest.TestCase):
         self.assertEqual(readability.phonetic_kind(READABLE, "zh"), "han")
         self.assertEqual(readability.phonetic_kind("[Verse]\nloram ipsum dolor sit amet", "zh"), "invalid")
 
+    def test_rejects_a_pure_latin_gibberish_line_inside_han_lyrics(self):
+        mixed = READABLE.replace("再走一段", "théwēi yīfān lìch gōng")
+        self.assertEqual(readability.phonetic_kind(mixed, "zh"), "invalid")
+        hook = READABLE.replace("再走一段", "yeah oh")
+        self.assertEqual(readability.phonetic_kind(hook, "zh"), "han")
+
     def test_converts_with_the_same_ace_handler(self):
         handler = FakeHandler(["<think>done</think>\n" + READABLE])
         self.assertEqual(readability.render_readable_lyrics(handler, PHONETIC, "zh"), READABLE)

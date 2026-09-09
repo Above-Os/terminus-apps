@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 
@@ -10,6 +11,7 @@ LANGUAGE_TAG = re.compile(r"^\[(?:zh|yue)\]\s*", re.IGNORECASE)
 BRACKET_TAG = re.compile(r"\[[^\]\r\n]+\]")
 PINYIN_TOKEN = re.compile(r"^[a-züv]+[1-5]$", re.IGNORECASE)
 WORD_TOKEN = re.compile(r"[A-Za-züÜvV]+[1-5]?", re.UNICODE)
+ENGLISH_HOOK_WORDS = frozenset({"baby", "hey", "i", "la", "love", "na", "oh", "tonight", "woo", "yeah", "you"})
 
 
 def _is_han(character: str) -> bool:
@@ -20,6 +22,34 @@ def _is_han(character: str) -> bool:
         or 0xF900 <= value <= 0xFAFF
         or 0x20000 <= value <= 0x323AF
     )
+
+
+def _is_latin(character: str) -> bool:
+    return character.isalpha() and "LATIN" in unicodedata.name(character, "")
+
+
+def _latin_words(line: str) -> list[str]:
+    words: list[str] = []
+    current: list[str] = []
+    for character in line:
+        if _is_latin(character):
+            current.append(character)
+        elif current:
+            words.append("".join(current).lower())
+            current = []
+    if current:
+        words.append("".join(current).lower())
+    return words
+
+
+def _has_disallowed_latin_line(lines: list[str]) -> bool:
+    for line in lines:
+        words = _latin_words(line)
+        if not words:
+            continue
+        if any(word not in ENGLISH_HOOK_WORDS for word in words) or len(words) > 4:
+            return True
+    return False
 
 
 def content_lines(lyrics: str) -> list[str]:
@@ -52,8 +82,6 @@ def phonetic_kind(lyrics: str, language: str) -> str:
         return "invalid"
     letters = [character for line in lines for character in line if character.isalpha()]
     han = sum(1 for character in letters if _is_han(character))
-    if han >= 20 and letters and han / len(letters) >= 0.70:
-        return "han"
     words = [token for line in lines for token in WORD_TOKEN.findall(line)]
     toned = sum(1 for token in words if PINYIN_TOKEN.fullmatch(token))
     tagged_lines = sum(
@@ -61,6 +89,8 @@ def phonetic_kind(lyrics: str, language: str) -> str:
     )
     if words and toned / len(words) >= 0.70 and tagged_lines >= max(1, len(lines) // 2):
         return "phonetic"
+    if han >= 20 and letters and han / len(letters) >= 0.70 and not _has_disallowed_latin_line(lines):
+        return "han"
     return "invalid"
 
 

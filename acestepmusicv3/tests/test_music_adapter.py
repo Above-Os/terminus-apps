@@ -450,6 +450,10 @@ class MusicAdapterContractTest(unittest.TestCase):
                 "[Verse 1]\n長安的雨傳染vocal上水袖\n穿過九條河的Inspiration\n讓回憶在晨光中悄然綻放",
                 "lyrics_script_invalid",
             ),
+            (
+                "[Verse 1]\n你什么也说不清\n你已经说得很清清楚楚\nthéwēi yīfān lìch gōng\n因为已经说得很明白\n[Chorus]\n我也不再是懵懂的少年\n今夜沿着灯光慢慢回家\n窗边的人还在等我回答",
+                "lyrics_script_invalid",
+            ),
         )
         for lyrics, code in fixtures:
             with self.subTest(code=code):
