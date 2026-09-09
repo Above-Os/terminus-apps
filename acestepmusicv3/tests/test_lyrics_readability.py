@@ -29,7 +29,7 @@ READABLE = """[Verse 1]
 
 class FakeTokenizer:
     def apply_chat_template(self, messages, **_kwargs):
-        return messages[0]["content"] + "\n" + messages[1]["content"]
+        return "\n".join(message["content"] for message in messages)
 
 
 class FakeHandler:
@@ -56,12 +56,19 @@ class LyricsReadabilityTest(unittest.TestCase):
         self.assertEqual(readability.phonetic_kind(hook, "zh"), "han")
 
     def test_converts_with_the_same_ace_handler(self):
-        handler = FakeHandler(["<think>done</think>\n" + READABLE])
+        handler = FakeHandler(["<think>done</think>\n# Readable Lyric\n" + READABLE])
         self.assertEqual(readability.render_readable_lyrics(handler, PHONETIC, "zh"), READABLE)
         self.assertEqual(len(handler.calls), 1)
         self.assertFalse(handler.calls[0]["use_constrained_decoding"])
         self.assertEqual(handler.calls[0]["cfg"]["target_duration"], 10)
         self.assertEqual(handler.calls[0]["cfg"]["repetition_penalty"], 1.08)
+        self.assertIn("夜色落在肩上", handler.calls[0]["formatted_prompt"])
+        self.assertIn("[zh] ye4 se4 luo4", handler.calls[0]["formatted_prompt"])
+
+    def test_uses_cantonese_few_shot_example(self):
+        prompt = readability._conversion_prompt(FakeTokenizer(), PHONETIC, "yue")
+        self.assertIn("晚风吹过街口", prompt)
+        self.assertIn("[yue] maan5 fung1", prompt)
 
     def test_restores_source_structure_instead_of_trusting_generated_tags(self):
         bad = READABLE.replace("[Chorus]", "[Bridge]")

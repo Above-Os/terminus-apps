@@ -132,18 +132,40 @@ def _restore_structure(phonetic: str, readable: str) -> str:
 
 def _conversion_prompt(tokenizer: Any, phonetic: str, language: str) -> str:
     dialect = "natural written Cantonese" if language == "yue" else "natural Simplified Chinese"
+    if language == "yue":
+        example_phonetic = """[Verse 1]
+[yue] maan5 fung1 ceoi1 gwo3 gaai1 hau2
+[yue] jat1 zaan2 dang1 ziu3 zoeng6 nei5"""
+        example_readable = """[Verse 1]
+晚风吹过街口
+一盏灯照着你"""
+    else:
+        example_phonetic = """[Verse 1]
+[zh] ye4 se4 luo4 zai4 jian1 shang4
+[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2
+
+[Chorus]
+[zh] zai4 zou3 yi1 duan4 jiu4 dao4 jia1 le5"""
+        example_readable = """[Verse 1]
+夜色落在肩上
+路灯把影子拉长
+
+[Chorus]
+再走一段就到家了"""
     return tokenizer.apply_chat_template(
         [
             {
                 "role": "system",
                 "content": (
                     "# Instruction\nConvert the supplied tone-number Hanyu Pinyin song script into "
-                    f"{dialect}. Output only the converted lyrics. Remove [zh] and [yue] pronunciation "
+                    f"{dialect}. Answer under the heading '# Readable Lyric'. Remove [zh] and [yue] pronunciation "
                     "markers, preserve every other bracketed section tag in the same order, preserve "
                     "the exact number and order of sung lines, and do not add, remove, summarize, or "
                     "rewrite any lyric. Never output Pinyin, explanations, Markdown fences, or JSON."
                 ),
             },
+            {"role": "user", "content": "# Phonetic Lyric\n" + example_phonetic},
+            {"role": "assistant", "content": "# Readable Lyric\n" + example_readable},
             {"role": "user", "content": "# Phonetic Lyric\n" + phonetic},
         ],
         tokenize=False,
@@ -160,6 +182,9 @@ def _clean_output(value: str) -> str:
         text = text[first_newline + 1 :] if first_newline >= 0 else ""
         if text.rstrip().endswith("```"):
             text = text.rstrip()[:-3]
+    lines = text.strip().splitlines()
+    if lines and lines[0].strip().lower() in {"# readable lyric", "# readable lyrics"}:
+        text = "\n".join(lines[1:])
     return text.strip()
 
 
@@ -180,10 +205,9 @@ def render_readable_lyrics(llm_handler: Any, phonetic: str, language: str) -> st
                 "repetition_penalty": 1.08,
                 # This API has no max_tokens argument. In ACE 0.1.8 the
                 # supported target_duration field bounds CoT output to
-                # duration*5+500 tokens, so use the sung-line count as a
-                # conservative conversion budget instead of the 4032-token
-                # fallback that can loop for tens of thousands of characters.
-                "target_duration": max(10, min(40, len(content_lines(phonetic)))),
+                # duration*5+500 tokens. Keep it fixed at the minimum because
+                # this is transcription, not open-ended song generation.
+                "target_duration": 10,
                 "generation_phase": "understand",
             },
             use_constrained_decoding=False,
