@@ -53,7 +53,7 @@ VOCAL_LANGUAGES = (
 VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
 ENGLISH_HOOK_WORDS = frozenset({"baby", "hey", "i", "la", "love", "na", "oh", "tonight", "woo", "yeah", "you"})
-DRAFT_ATTEMPTS = 3
+DRAFT_ATTEMPTS = 5
 
 
 class PhoneticLyricsError(ValueError):
@@ -247,6 +247,27 @@ def _normalized_lyric_value(value: str) -> str:
 
 def _has_extreme_repetition(lyrics: str) -> bool:
     lines = _lyric_content_lines(lyrics)
+    for line in lines:
+        han = [character for character in line if _is_han(character)]
+        if not han:
+            continue
+        run = 1
+        longest_run = 1
+        for previous, current in zip(han, han[1:]):
+            run = run + 1 if current == previous else 1
+            longest_run = max(longest_run, run)
+        if longest_run >= 4:
+            return True
+        if len(han) >= 8 and len(set(han)) / len(han) < 0.35:
+            return True
+        character_counts = {character: han.count(character) for character in set(han)}
+        if len(han) >= 8 and max(character_counts.values()) >= 4 and max(character_counts.values()) / len(han) >= 0.40:
+            return True
+        if len(han) >= 8:
+            bigrams = ["".join(han[index:index + 2]) for index in range(len(han) - 1)]
+            bigram_counts = {bigram: bigrams.count(bigram) for bigram in set(bigrams)}
+            if bigram_counts and max(bigram_counts.values()) >= 3 and max(bigram_counts.values()) * 2 / len(han) >= 0.50:
+                return True
     if len(lines) < 8:
         return False
     counts: dict[str, int] = {}
@@ -305,37 +326,24 @@ def _draft_validation_error(task: dict[str, Any], prompt: str, lyrics: str) -> D
 
 
 def _draft_query(task: dict[str, Any], attempt: int) -> str:
-    """Keep Chinese writing anchored even when the supplied subject is English.
-
-    `vocal_language` alone does not reliably steer the bundled 4B writer: a
-    Latin-script brief can make all three samples phonetic or unrelated Latin
-    text.  These are positive song descriptions, not corrections based on the
-    rejected output, so they do not leak error instructions into the lyrics.
-    """
-    anchors = {
-        "zh": (
-            "中文歌曲。内部歌词优先使用ACE标准发音脚本：每句以[zh]开头，只写带1-5声调数字的汉语拼音；也可直接写自然中文汉字。创作完整具体的情节和情绪发展，避免无意义重复。主题与风格：",
-            "普通话歌曲。请直接用自然、可读的中文汉字写16到28行完整歌词，不要使用拼音或其他拉丁字母。包含Verse、Chorus及连贯情绪发展，不写占位词或循环句。主题与风格：",
-            "以中文演唱。只写16到28行自然中文汉字歌词，包含具体故事、清晰段落发展和有意义的副歌；不要拼音、外语、术语罗列或无意义重复。主题与风格：",
-        ),
-        "yue": (
-            "粤语歌曲。内部歌词优先使用ACE标准发音脚本：每句以[yue]开头，只写带1-5声调数字的粤语音节；也可直接写自然粤语汉字。创作完整具体的情节和情绪发展。主题与风格：",
-            "广东话歌曲。请直接用自然、可读的粤语汉字写16到28行完整歌词，不要使用拼音或其他拉丁字母。必须有完整段落和连贯情绪发展。主题与风格：",
-            "以粤语演唱。只写16到28行自然粤语汉字歌词，包含具体故事、清晰段落发展和有意义的副歌；不要拼音、外语或无意义重复。主题与风格：",
-        ),
-    }
-    choices = anchors.get(task["vocal_language"])
-    if choices is None:
-        return task["brief"]
-    prefix = choices[min(attempt, len(choices) - 1)]
-    return prefix + task["brief"][: 512 - len(prefix)]
+    """Pass Music's subject through unchanged on every independent sample."""
+    del attempt
+    return task["brief"]
 
 
 def _draft_temperature(initial: float, attempt: int, failure: DraftValidationError | None) -> float:
-    if attempt == 0 or failure is None:
-        return initial
-    safer = (initial, min(initial, 0.80), min(initial, 0.75))
-    return safer[min(attempt, len(safer) - 1)]
+    del attempt, failure
+    return initial
+
+
+def _draft_candidate_kind(task: dict[str, Any], lyrics: str, failure: DraftValidationError | None) -> str:
+    if failure is None:
+        return "native_hanzi" if task["vocal_language"] in {"zh", "yue"} else "native_lyrics"
+    if phonetic_kind(lyrics, task["vocal_language"]) == "phonetic":
+        return "phonetic_rejected"
+    if failure.code == "lyrics_repetition_invalid":
+        return "repetition_rejected"
+    return "invalid_script"
 
 
 def _line_metrics(lyrics: str, language: str) -> tuple[list[str], dict[str, Any]]:
@@ -493,19 +501,18 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             )
             data = native.get("data") or {}
             lyrics = "" if task["instrumental"] else str(data.get("lyrics") or "").strip()
-            conditioning_lyrics = "" if task["instrumental"] else str(data.get("conditioning_lyrics") or "").strip()
             prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
             failure = _draft_validation_error(task, prompt, lyrics)
-            if failure is None and conditioning_lyrics and (
-                task["vocal_language"] not in {"zh", "yue"}
-                or phonetic_kind(conditioning_lyrics, task["vocal_language"]) != "phonetic"
-                or len(_lyric_content_lines(conditioning_lyrics)) != len(_lyric_content_lines(lyrics))
-            ):
-                failure = DraftValidationError("lyrics_script_invalid", "ACE-Step returned invalid internal conditioning lyrics")
+            candidate_kind = _draft_candidate_kind(task, lyrics, failure)
             if failure is None:
+                print(
+                    f"[draft-quality] attempt={attempt + 1} result={candidate_kind} "
+                    f"temperature={attempt_temperature:.2f}",
+                    flush=True,
+                )
                 break
             print(
-                f"[draft-quality] attempt={attempt + 1} rejected={failure.code} "
+                f"[draft-quality] attempt={attempt + 1} result={candidate_kind} "
                 f"temperature={attempt_temperature:.2f}",
                 flush=True,
             )
@@ -518,7 +525,6 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             "status": "completed",
             "prompt": prompt,
             "lyrics": lyrics,
-            "conditioning_lyrics": conditioning_lyrics,
             "duration_seconds": _draft_duration(data.get("duration")),
             "style_plan": _draft_style_plan(data),
             "warnings": warnings,
