@@ -54,10 +54,17 @@ class LyricsReadabilityTest(unittest.TestCase):
         self.assertEqual(readability.render_readable_lyrics(handler, PHONETIC, "zh"), READABLE)
         self.assertEqual(len(handler.calls), 1)
         self.assertFalse(handler.calls[0]["use_constrained_decoding"])
+        self.assertEqual(handler.calls[0]["cfg"]["target_duration"], 10)
+        self.assertEqual(handler.calls[0]["cfg"]["repetition_penalty"], 1.08)
 
-    def test_retries_low_temperature_and_rejects_changed_structure(self):
+    def test_restores_source_structure_instead_of_trusting_generated_tags(self):
         bad = READABLE.replace("[Chorus]", "[Bridge]")
-        handler = FakeHandler([bad, READABLE])
+        handler = FakeHandler([bad])
+        self.assertEqual(readability.render_readable_lyrics(handler, PHONETIC, "zh"), READABLE)
+        self.assertEqual(len(handler.calls), 1)
+
+    def test_retries_low_temperature_after_changed_line_count(self):
+        handler = FakeHandler([READABLE + "\n多出一行中文歌词", READABLE])
         self.assertEqual(readability.render_readable_lyrics(handler, PHONETIC, "zh"), READABLE)
         self.assertEqual([call["cfg"]["temperature"] for call in handler.calls], [0.2, 0.1])
 

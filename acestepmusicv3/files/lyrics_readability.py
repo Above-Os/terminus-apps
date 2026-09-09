@@ -73,6 +73,33 @@ def validate_readable(phonetic: str, readable: str, language: str) -> None:
         raise ValueError("converted lyrics changed the section structure")
 
 
+def _restore_structure(phonetic: str, readable: str) -> str:
+    """Put converted sung lines back into the exact source section structure."""
+    converted = iter(content_lines(readable))
+    output: list[str] = []
+    for raw in str(phonetic or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            output.append("")
+            continue
+        source_content = BRACKET_TAG.sub("", LANGUAGE_TAG.sub("", stripped)).strip()
+        tags = [
+            tag for tag in BRACKET_TAG.findall(stripped)
+            if tag.lower() not in {"[zh]", "[yue]"}
+        ]
+        if source_content:
+            if tags:
+                output.append(" ".join(tags))
+            output.append(next(converted))
+        elif tags:
+            output.append(" ".join(tags))
+    try:
+        next(converted)
+    except StopIteration:
+        return "\n".join(output).strip()
+    raise ValueError("converted lyrics added sung lines")
+
+
 def _conversion_prompt(tokenizer: Any, phonetic: str, language: str) -> str:
     dialect = "natural written Cantonese" if language == "yue" else "natural Simplified Chinese"
     return tokenizer.apply_chat_template(
@@ -120,7 +147,13 @@ def render_readable_lyrics(llm_handler: Any, phonetic: str, language: str) -> st
                 # without tripping the native assertion.
                 "top_k": 40,
                 "top_p": 0.9,
-                "repetition_penalty": 1.0,
+                "repetition_penalty": 1.08,
+                # This API has no max_tokens argument. In ACE 0.1.8 the
+                # supported target_duration field bounds CoT output to
+                # duration*5+500 tokens, so use the sung-line count as a
+                # conservative conversion budget instead of the 4032-token
+                # fallback that can loop for tens of thousands of characters.
+                "target_duration": max(10, min(40, len(content_lines(phonetic)))),
                 "generation_phase": "understand",
             },
             use_constrained_decoding=False,
@@ -129,12 +162,18 @@ def render_readable_lyrics(llm_handler: Any, phonetic: str, language: str) -> st
         )
         try:
             readable = _clean_output(output)
-            validate_readable(phonetic, readable, language)
-            return readable
+            if phonetic_kind(readable, language) != "han":
+                raise ValueError("converted lyrics are not readable Chinese characters")
+            if len(content_lines(phonetic)) != len(content_lines(readable)):
+                raise ValueError("converted lyrics changed the sung line count")
+            restored = _restore_structure(phonetic, readable)
+            validate_readable(phonetic, restored, language)
+            return restored
         except ValueError as exc:
             last_error = exc
             print(
-                f"[lyrics-readability] conversion_failed temperature={temperature:.1f} status={status}",
+                f"[lyrics-readability] conversion_failed temperature={temperature:.1f} "
+                f"reason={str(exc).replace(' ', '_')} status={status}",
                 flush=True,
             )
     raise ValueError("ACE 5Hz LM could not render readable lyrics") from last_error
