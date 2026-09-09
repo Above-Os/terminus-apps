@@ -97,10 +97,11 @@ class ChartContractTest(unittest.TestCase):
         # that import would never reach the registered routes.
         self.assertLess(patched_at, launcher.index("from acestep.api_server import main"))
 
-    def test_draft_sampling_has_conservative_repetition_defaults(self):
+    def test_chinese_draft_sampling_preserves_ace_defaults(self):
         launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(
             encoding="utf-8"
         )
+        self.assertIn('if language not in {"zh", "yue"}:', launcher)
         self.assertIn('if kwargs.get("top_p") is None:', launcher)
         self.assertIn('kwargs["top_p"] = 0.9', launcher)
         self.assertIn('if kwargs.get("repetition_penalty") in (None, 1.0):', launcher)
@@ -108,38 +109,26 @@ class ChartContractTest(unittest.TestCase):
         patched_at = launcher.index("inference.create_sample = _stable_create_sample")
         self.assertLess(patched_at, launcher.index("from acestep.api_server import main"))
 
-    def test_phonetic_lyrics_are_rendered_by_the_loaded_ace_lm(self):
+    def test_chinese_drafts_do_not_use_a_conversion_generation_path(self):
         launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(encoding="utf-8")
         server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
         readability = (CHART_ROOT / "files" / "lyrics_readability.py").read_text(encoding="utf-8")
-        self.assertIn("render_readable_lyrics(llm_handler, original, language)", launcher)
-        self.assertIn("class _HanOnlyLogitsProcessor", launcher)
-        self.assertIn("scores[..., ~allowed]", launcher)
-        self.assertIn("LLMHandler.olares_generate_han_line = _generate_han_line", launcher)
-        self.assertIn("_olares_han_token_ids", launcher)
-        self.assertIn("result.conditioning_lyrics = original", launcher)
-        self.assertIn('data["conditioning_lyrics"] = conditioning', launcher)
-        self.assertIn("generate_from_formatted_prompt(", readability)
+        for forbidden in (
+            "render_readable_lyrics", "_HanOnlyLogitsProcessor", "scores[..., ~allowed]",
+            "olares_generate_han_line", "_olares_han_token_ids", "generate_from_formatted_prompt(",
+        ):
+            self.assertNotIn(forbidden, launcher + readability)
         self.assertNotIn("http", readability.lower())
         self.assertNotIn("openai", readability.lower())
-        self.assertIn("for temperature in (0.2, 0.1):", readability)
-        self.assertIn('"top_k": 40', readability)
-        self.assertNotIn('"top_k": 0', readability)
-        self.assertIn('"target_duration": 10', readability)
-        self.assertIn('example_readable', readability)
-        self.assertIn('"repetition_penalty": 1.08', readability)
-        self.assertIn("restored = _restore_structure(phonetic, readable)", readability)
+        self.assertIn("def phonetic_kind", readability)
         self.assertIn("mountPath: /opt/olares/lyrics_readability.py", server)
         self.assertIn("subPath: lyrics_readability.py", server)
 
-    def test_chinese_draft_query_requests_ace_phonetic_protocol(self):
+    def test_chinese_draft_query_is_the_raw_music_brief(self):
         adapter = (CHART_ROOT / "files" / "music_adapter.py").read_text(encoding="utf-8")
-        self.assertIn("每句以[zh]开头", adapter)
-        self.assertIn("带1-5声调数字的汉语拼音", adapter)
-        self.assertIn("每句以[yue]开头", adapter)
-        self.assertIn("请直接用自然、可读的中文汉字写16到28行完整歌词", adapter)
-        self.assertIn("只写16到28行自然中文汉字歌词", adapter)
-        self.assertIn("16到28行", adapter)
+        self.assertIn('return task["brief"]', adapter)
+        for forbidden in ("每句以[zh]开头", "汉语拼音", "每句以[yue]开头", "16到28行"):
+            self.assertNotIn(forbidden, adapter)
 
 
 if __name__ == "__main__":

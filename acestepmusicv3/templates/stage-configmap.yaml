@@ -22,7 +22,6 @@ data:
     import uuid
     from lm_quality import assess_audio_codes, retry_seeds
     from lyrics_alignment import alignment_segments
-    from lyrics_readability import is_han_text_piece, phonetic_kind, render_readable_lyrics
 
     import torch
 
@@ -31,7 +30,6 @@ data:
     # KV cache, but force eager execution so initialization cannot corrupt the
     # CUDA context.
     from acestep.llm_inference import LLMHandler
-    from nanovllm import SamplingParams
 
     _initialize_vllm = LLMHandler._initialize_5hz_lm_vllm
     _unload_lm = LLMHandler.unload
@@ -51,76 +49,6 @@ data:
 
 
     LLMHandler._initialize_5hz_lm_vllm = _initialize_vllm_eager
-
-
-    class _HanOnlyLogitsProcessor:
-        """Keep an ACE transcription line inside the Han token alphabet."""
-
-        def __init__(self, tokenizer, allowed_ids, minimum_characters):
-            self.tokenizer = tokenizer
-            self.eos_token_id = tokenizer.eos_token_id
-            self.minimum_characters = minimum_characters
-            self.generated_characters = 0
-            self.allowed_ids = allowed_ids
-
-        def __call__(self, _input_ids, scores):
-            allowed = torch.zeros(scores.shape[-1], dtype=torch.bool, device=scores.device)
-            allowed[self.allowed_ids] = True
-            if self.generated_characters >= self.minimum_characters:
-                allowed[self.eos_token_id] = True
-            scores[..., ~allowed] = float("-inf")
-            return scores
-
-        def update_state(self, token_id):
-            piece = self.tokenizer.decode(
-                [int(token_id)],
-                skip_special_tokens=False,
-                clean_up_tokenization_spaces=False,
-            )
-            self.generated_characters += sum(1 for character in piece if is_han_text_piece(character))
-
-
-    def _generate_han_line(self, prompt, temperature, max_tokens, min_characters):
-        if self.llm_backend != "vllm":
-            raise RuntimeError("Han-only transcription requires ACE nano-vLLM")
-        allowed_ids = getattr(self, "_olares_han_token_ids", None)
-        if allowed_ids is None:
-            allowed_ids = []
-            for token_id in range(len(self.llm_tokenizer)):
-                piece = self.llm_tokenizer.decode(
-                    [token_id],
-                    skip_special_tokens=False,
-                    clean_up_tokenization_spaces=False,
-                )
-                if is_han_text_piece(piece):
-                    allowed_ids.append(token_id)
-            self._olares_han_token_ids = allowed_ids
-            print(
-                f"[lyrics-readability] han_token_mask_ready count={len(allowed_ids)}",
-                flush=True,
-            )
-        processor = _HanOnlyLogitsProcessor(
-            self.llm_tokenizer,
-            allowed_ids,
-            min_characters,
-        )
-        params = SamplingParams(
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_k=40,
-            top_p=0.9,
-            repetition_penalty=1.05,
-            logits_processor=processor,
-            logits_processor_update_state=processor.update_state,
-        )
-        output = self.llm.generate(prompt, params)
-        answer = output[0] if isinstance(output, list) else output
-        if hasattr(answer, "outputs") and answer.outputs:
-            return answer.outputs[0].text
-        return getattr(answer, "text", str(answer))
-
-
-    LLMHandler.olares_generate_han_line = _generate_han_line
 
 
     def _unload_lm_completely(self):
@@ -219,88 +147,22 @@ data:
 
     import acestep.inference as inference
 
-    _conditioning_by_readable = {}
-
 
     _create_sample = inference.create_sample
 
 
     @functools.wraps(_create_sample)
     def _stable_create_sample(*args, **kwargs):
-        if kwargs.get("top_p") is None:
-            kwargs["top_p"] = 0.9
-        if kwargs.get("repetition_penalty") in (None, 1.0):
-            kwargs["repetition_penalty"] = 1.08
-        result = _create_sample(*args, **kwargs)
         language = str(kwargs.get("vocal_language") or "").lower()
-        if getattr(result, "success", False) and language in {"zh", "yue"}:
-            original = str(getattr(result, "lyrics", "") or "").strip()
-            kind = phonetic_kind(original, language)
-            if kind == "phonetic":
-                llm_handler = kwargs.get("llm_handler") or (args[0] if args else None)
-                try:
-                    result.lyrics = render_readable_lyrics(llm_handler, original, language)
-                    result.conditioning_lyrics = original
-                    _conditioning_by_readable[result.lyrics] = original
-                    print("[lyrics-readability] phonetic_converted", flush=True)
-                except Exception:
-                    print("[lyrics-readability] conversion_failed", flush=True)
-            elif kind == "han":
-                print("[lyrics-readability] native_hanzi", flush=True)
-            else:
-                print("[lyrics-readability] invalid_latin", flush=True)
-        return result
+        if language not in {"zh", "yue"}:
+            if kwargs.get("top_p") is None:
+                kwargs["top_p"] = 0.9
+            if kwargs.get("repetition_penalty") in (None, 1.0):
+                kwargs["repetition_penalty"] = 1.08
+        return _create_sample(*args, **kwargs)
 
 
     inference.create_sample = _stable_create_sample
-
-    _create_sample_to_dict = inference.CreateSampleResult.to_dict
-
-    def _create_sample_dict(self):
-        value = _create_sample_to_dict(self)
-        conditioning = str(getattr(self, "conditioning_lyrics", "") or "").strip()
-        if conditioning:
-            value["conditioning_lyrics"] = conditioning
-        return value
-
-    inference.CreateSampleResult.to_dict = _create_sample_dict
-
-    _format_sample = inference.format_sample
-
-    @functools.wraps(_format_sample)
-    def _readable_format_sample(*args, **kwargs):
-        result = _format_sample(*args, **kwargs)
-        metadata = kwargs.get("user_metadata") or (args[3] if len(args) > 3 else {}) or {}
-        language = str(metadata.get("language") or getattr(result, "language", "") or "").lower()
-        if getattr(result, "success", False) and language in {"zh", "yue"}:
-            original = str(getattr(result, "lyrics", "") or "").strip()
-            kind = phonetic_kind(original, language)
-            if kind == "phonetic":
-                llm_handler = kwargs.get("llm_handler") or (args[0] if args else None)
-                try:
-                    result.lyrics = render_readable_lyrics(llm_handler, original, language)
-                    result.conditioning_lyrics = original
-                    _conditioning_by_readable[result.lyrics] = original
-                    print("[lyrics-readability] phonetic_converted", flush=True)
-                except Exception:
-                    print("[lyrics-readability] conversion_failed", flush=True)
-            elif kind == "han":
-                print("[lyrics-readability] native_hanzi", flush=True)
-            else:
-                print("[lyrics-readability] invalid_latin", flush=True)
-        return result
-
-    inference.format_sample = _readable_format_sample
-    _format_sample_to_dict = inference.FormatSampleResult.to_dict
-
-    def _format_sample_dict(self):
-        value = _format_sample_to_dict(self)
-        conditioning = str(getattr(self, "conditioning_lyrics", "") or "").strip()
-        if conditioning:
-            value["conditioning_lyrics"] = conditioning
-        return value
-
-    inference.FormatSampleResult.to_dict = _format_sample_dict
 
 
     _generate_music = inference.generate_music
@@ -487,16 +349,6 @@ data:
 
     def _register_sample_format_routes_with_rearm(**kwargs):
         app = kwargs["app"]
-        original_wrap_response = kwargs["wrap_response"]
-
-        def _wrap_response_with_conditioning(data, *wrap_args, **wrap_kwargs):
-            if isinstance(data, dict):
-                readable = str(data.get("lyrics") or "")
-                conditioning = _conditioning_by_readable.pop(readable, "")
-                if conditioning:
-                    data = dict(data)
-                    data["conditioning_lyrics"] = conditioning
-            return original_wrap_response(data, *wrap_args, **wrap_kwargs)
 
         def _with_rearm(call):
             @functools.wraps(call)
@@ -518,7 +370,6 @@ data:
 
         kwargs["format_sample"] = _with_rearm(kwargs["format_sample"])
         kwargs["create_sample_fn"] = _with_rearm(kwargs["create_sample_fn"])
-        kwargs["wrap_response"] = _wrap_response_with_conditioning
         return _register_sample_format_routes(**kwargs)
 
 

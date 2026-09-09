@@ -253,7 +253,6 @@ class MusicAdapterContractTest(unittest.TestCase):
                 "data": {
                     "caption": "Quiet Mandarin city folk",
                     "lyrics": "[Verse 1]\n夜色落在肩上\n路灯把影子拉长\n\n[Chorus]\n再走一段\n就到家了",
-                    "conditioning_lyrics": "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2\n\n[Chorus]\n[zh] zai4 zou3 yi2 duan4\n[zh] jiu4 dao4 jia1 le5",
                     "bpm": 77,
                     "keyscale": "E minor",
                     "timesignature": "4",
@@ -279,13 +278,12 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(result["object"], "music.draft")
         self.assertEqual(result["prompt"], "Quiet Mandarin city folk")
         self.assertIn("路灯把影子拉长", result["lyrics"])
-        self.assertTrue(result["conditioning_lyrics"].startswith("[Verse 1]\n[zh]"))
+        self.assertNotIn("conditioning_lyrics", result)
         self.assertEqual(result["duration_seconds"], 296)
         self.assertEqual(
             result["style_plan"], {"bpm": 77, "key_scale": "E minor", "time_signature": "4"}
         )
-        self.assertIn("每句以[zh]开头", calls[0]["query"])
-        self.assertTrue(calls[0]["query"].endswith("深夜加班后独自走回家"))
+        self.assertEqual(calls[0]["query"], "深夜加班后独自走回家")
         self.assertFalse(calls[0]["instrumental"])
 
         self.assertEqual(
@@ -305,7 +303,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(missing.json()["error"]["code"], "invalid_brief")
 
-    def test_draft_retries_with_safer_sampling_when_the_lm_answers_phonetically(self):
+    def test_draft_retries_with_native_sampling_when_the_lm_answers_phonetically(self):
         answers = [
             "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2",
             "[Verse 1]\n夜色慢慢落在肩上\n路灯把回家的影子拉长\n雨后的街道安静明亮\n[Chorus]\n再走一段就能看见熟悉的窗",
@@ -331,7 +329,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertIn("熟悉的窗", result["lyrics"])
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
-        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.80])
+        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.85])
         self.assertEqual(
             [call["query"] for call in calls],
             [
@@ -361,31 +359,24 @@ class MusicAdapterContractTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
-        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.80, 0.75])
-        self.assertEqual(
-            [item["query"] for item in calls],
-            [
-                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 0),
-                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 1),
-                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 2),
-            ],
-        )
+        self.assertEqual([item["temperature"] for item in calls], [0.85] * adapter.DRAFT_ATTEMPTS)
+        self.assertEqual([item["query"] for item in calls], ["walking home late"] * adapter.DRAFT_ATTEMPTS)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "lyrics_script_invalid")
 
-    def test_chinese_draft_query_preserves_the_limit_and_non_chinese_briefs(self):
+    def test_draft_query_passes_every_language_brief_through_unchanged(self):
         chinese = {"brief": "夜" * 512, "vocal_language": "zh"}
         self.assertEqual(len(adapter._draft_query(chinese, 0)), 512)
-        self.assertTrue(adapter._draft_query(chinese, 2).startswith("以中文演唱"))
+        self.assertEqual(adapter._draft_query(chinese, 2), chinese["brief"])
         english = {"brief": "walking home late", "vocal_language": "en"}
         self.assertEqual(adapter._draft_query(english, 1), english["brief"])
 
-    def test_draft_temperature_cools_every_invalid_result(self):
+    def test_draft_temperature_stays_at_the_user_value(self):
         script = adapter.DraftValidationError("lyrics_script_invalid", "script")
         repetition = adapter.DraftValidationError("lyrics_repetition_invalid", "loop")
-        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 0.80)
-        self.assertEqual(adapter._draft_temperature(0.9, 2, script), 0.75)
-        self.assertEqual(adapter._draft_temperature(0.9, 1, repetition), 0.80)
+        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 0.9)
+        self.assertEqual(adapter._draft_temperature(0.9, 4, script), 0.9)
+        self.assertEqual(adapter._draft_temperature(0.9, 2, repetition), 0.9)
 
     def test_draft_fails_when_the_lm_returns_no_lyrics_for_a_vocal_brief(self):
         def native(path, payload=None, timeout=30):
@@ -504,6 +495,16 @@ class MusicAdapterContractTest(unittest.TestCase):
 我们追着梦
 天亮继续走"""
         self.assertTrue(adapter._has_extreme_repetition(lyrics))
+
+    def test_rejects_character_and_bigram_loops_from_the_live_regression(self):
+        fixtures = (
+            "[Verse 1]\n診診診診诊断深层夜色",
+            "[Verse 1]\n深层深层深层深层回声",
+            "[Verse 1]\n灯影灯影灯影灯影灯影",
+        )
+        for lyrics in fixtures:
+            with self.subTest(lyrics=lyrics):
+                self.assertTrue(adapter._has_extreme_repetition(lyrics))
 
     def test_text_and_audio_model_tasks_are_mutually_exclusive(self):
         adapter.TASKS["generation-running"] = {
