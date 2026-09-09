@@ -22,7 +22,7 @@ data:
     import uuid
     from lm_quality import assess_audio_codes, retry_seeds
     from lyrics_alignment import alignment_segments
-    from lyrics_readability import phonetic_kind, render_readable_lyrics
+    from lyrics_readability import is_han_text_piece, phonetic_kind, render_readable_lyrics
 
     import torch
 
@@ -31,6 +31,7 @@ data:
     # KV cache, but force eager execution so initialization cannot corrupt the
     # CUDA context.
     from acestep.llm_inference import LLMHandler
+    from nanovllm import SamplingParams
 
     _initialize_vllm = LLMHandler._initialize_5hz_lm_vllm
     _unload_lm = LLMHandler.unload
@@ -50,6 +51,76 @@ data:
 
 
     LLMHandler._initialize_5hz_lm_vllm = _initialize_vllm_eager
+
+
+    class _HanOnlyLogitsProcessor:
+        """Keep an ACE transcription line inside the Han token alphabet."""
+
+        def __init__(self, tokenizer, allowed_ids, minimum_characters):
+            self.tokenizer = tokenizer
+            self.eos_token_id = tokenizer.eos_token_id
+            self.minimum_characters = minimum_characters
+            self.generated_characters = 0
+            self.allowed_ids = allowed_ids
+
+        def __call__(self, _input_ids, scores):
+            allowed = torch.zeros(scores.shape[-1], dtype=torch.bool, device=scores.device)
+            allowed[self.allowed_ids] = True
+            if self.generated_characters >= self.minimum_characters:
+                allowed[self.eos_token_id] = True
+            scores[..., ~allowed] = float("-inf")
+            return scores
+
+        def update_state(self, token_id):
+            piece = self.tokenizer.decode(
+                [int(token_id)],
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
+            )
+            self.generated_characters += sum(1 for character in piece if is_han_text_piece(character))
+
+
+    def _generate_han_line(self, prompt, temperature, max_tokens, min_characters):
+        if self.llm_backend != "vllm":
+            raise RuntimeError("Han-only transcription requires ACE nano-vLLM")
+        allowed_ids = getattr(self, "_olares_han_token_ids", None)
+        if allowed_ids is None:
+            allowed_ids = []
+            for token_id in range(len(self.llm_tokenizer)):
+                piece = self.llm_tokenizer.decode(
+                    [token_id],
+                    skip_special_tokens=False,
+                    clean_up_tokenization_spaces=False,
+                )
+                if is_han_text_piece(piece):
+                    allowed_ids.append(token_id)
+            self._olares_han_token_ids = allowed_ids
+            print(
+                f"[lyrics-readability] han_token_mask_ready count={len(allowed_ids)}",
+                flush=True,
+            )
+        processor = _HanOnlyLogitsProcessor(
+            self.llm_tokenizer,
+            allowed_ids,
+            min_characters,
+        )
+        params = SamplingParams(
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_k=40,
+            top_p=0.9,
+            repetition_penalty=1.05,
+            logits_processor=processor,
+            logits_processor_update_state=processor.update_state,
+        )
+        output = self.llm.generate(prompt, params)
+        answer = output[0] if isinstance(output, list) else output
+        if hasattr(answer, "outputs") and answer.outputs:
+            return answer.outputs[0].text
+        return getattr(answer, "text", str(answer))
+
+
+    LLMHandler.olares_generate_han_line = _generate_han_line
 
 
     def _unload_lm_completely(self):

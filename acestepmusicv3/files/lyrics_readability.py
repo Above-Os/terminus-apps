@@ -24,6 +24,12 @@ def _is_han(character: str) -> bool:
     )
 
 
+def is_han_text_piece(value: str) -> bool:
+    """Whether one tokenizer piece can safely appear in readable lyrics."""
+    visible = "".join(character for character in str(value or "") if not character.isspace())
+    return bool(visible) and all(_is_han(character) for character in visible)
+
+
 def _is_latin(character: str) -> bool:
     return character.isalpha() and "LATIN" in unicodedata.name(character, "")
 
@@ -173,6 +179,36 @@ def _conversion_prompt(tokenizer: Any, phonetic: str, language: str) -> str:
     )
 
 
+def _line_conversion_prompt(tokenizer: Any, phonetic_line: str, language: str) -> str:
+    if language == "yue":
+        examples = [
+            ("maan5 fung1 ceoi1 gwo3 gaai1 hau2", "晚风吹过街口"),
+            ("jat1 zaan2 dang1 ziu3 zoeng6 nei5", "一盏灯照着你"),
+        ]
+        dialect = "written Cantonese Chinese characters"
+    else:
+        examples = [
+            ("ye4 se4 luo4 zai4 jian1 shang4", "夜色落在肩上"),
+            ("lu4 deng1 ba3 ying3 zi5 la1 chang2", "路灯把影子拉长"),
+            ("zai4 zou3 yi1 duan4 jiu4 dao4 jia1 le5", "再走一段就到家了"),
+        ]
+        dialect = "Simplified Chinese characters"
+    messages = [{
+        "role": "system",
+        "content": (
+            f"Transcribe one tone-number pronunciation line into {dialect}. "
+            "Preserve its meaning exactly and answer with only the Chinese lyric line."
+        ),
+    }]
+    for source, readable in examples:
+        messages.extend((
+            {"role": "user", "content": source},
+            {"role": "assistant", "content": readable},
+        ))
+    messages.append({"role": "user", "content": phonetic_line})
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+
 def _clean_output(value: str) -> str:
     text = str(value or "").strip()
     if "</think>" in text:
@@ -190,6 +226,42 @@ def _clean_output(value: str) -> str:
 
 def render_readable_lyrics(llm_handler: Any, phonetic: str, language: str) -> str:
     """Use the already-loaded ACE 5Hz LM, never an external chat model."""
+    constrained_line = getattr(llm_handler, "olares_generate_han_line", None)
+    if callable(constrained_line):
+        source_lines = content_lines(phonetic)
+        last_error: Exception | None = None
+        for temperature in (0.2, 0.1):
+            converted: list[str] = []
+            try:
+                for source_line in source_lines:
+                    prompt = _line_conversion_prompt(
+                        llm_handler.llm_tokenizer, source_line, language
+                    )
+                    expected = max(1, len(WORD_TOKEN.findall(source_line)))
+                    raw = constrained_line(
+                        prompt,
+                        temperature=temperature,
+                        max_tokens=max(8, min(40, expected + 6)),
+                        min_characters=min(4, expected),
+                    )
+                    readable_line = "".join(
+                        character for character in str(raw or "") if _is_han(character)
+                    )
+                    if len(readable_line) < max(2, expected // 2):
+                        raise ValueError("constrained conversion returned a short lyric line")
+                    converted.append(readable_line[: expected + 4])
+                restored = _restore_structure(phonetic, "\n".join(converted))
+                validate_readable(phonetic, restored, language)
+                return restored
+            except ValueError as exc:
+                last_error = exc
+                print(
+                    f"[lyrics-readability] constrained_conversion_failed "
+                    f"temperature={temperature:.1f} reason={str(exc).replace(' ', '_')}",
+                    flush=True,
+                )
+        raise ValueError("ACE 5Hz LM could not render readable lyrics") from last_error
+
     prompt = _conversion_prompt(llm_handler.llm_tokenizer, phonetic, language)
     last_error: Exception | None = None
     for temperature in (0.2, 0.1):
