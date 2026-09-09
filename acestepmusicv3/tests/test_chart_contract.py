@@ -122,6 +122,12 @@ class ChartContractTest(unittest.TestCase):
         self.assertIn("mountPath: /opt/olares/lyrics_readability.py", server)
         self.assertIn("subPath: lyrics_readability.py", server)
 
+    def test_chinese_draft_query_requests_ace_phonetic_protocol(self):
+        adapter = (CHART_ROOT / "files" / "music_adapter.py").read_text(encoding="utf-8")
+        self.assertIn("每句以[zh]开头", adapter)
+        self.assertIn("带1-5声调数字的汉语拼音", adapter)
+        self.assertIn("每句以[yue]开头", adapter)
+
 
 if __name__ == "__main__":
     unittest.main()

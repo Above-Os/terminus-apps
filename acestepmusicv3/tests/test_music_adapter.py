@@ -284,7 +284,8 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(
             result["style_plan"], {"bpm": 77, "key_scale": "E minor", "time_signature": "4"}
         )
-        self.assertEqual(calls[0]["query"], "中文歌曲，主题与风格：深夜加班后独自走回家")
+        self.assertIn("每句以[zh]开头", calls[0]["query"])
+        self.assertTrue(calls[0]["query"].endswith("深夜加班后独自走回家"))
         self.assertFalse(calls[0]["instrumental"])
 
         self.assertEqual(
@@ -334,8 +335,8 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(
             [call["query"] for call in calls],
             [
-                "中文歌曲，主题与风格：walking home late",
-                "普通话歌曲，主题与风格：walking home late",
+                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 0),
+                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 1),
             ],
         )
 
@@ -364,9 +365,9 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(
             [item["query"] for item in calls],
             [
-                "中文歌曲，主题与风格：walking home late",
-                "普通话歌曲，主题与风格：walking home late",
-                "以中文演唱的歌曲，主题与风格：walking home late",
+                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 0),
+                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 1),
+                adapter._draft_query({"brief": "walking home late", "vocal_language": "zh"}, 2),
             ],
         )
         self.assertEqual(result["status"], "failed")
