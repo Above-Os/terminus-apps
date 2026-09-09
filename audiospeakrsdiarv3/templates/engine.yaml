@@ -17,6 +17,18 @@
 {{- $memRequest := $olaresEnv.MEMORY_REQUEST | default (get $manifestEnvs "MEMORY_REQUEST") | trim }}
 {{- $cpuLimit := $olaresEnv.CPU_LIMIT | default (get $manifestEnvs "CPU_LIMIT") | trim }}
 {{- $memLimit := $olaresEnv.MEMORY_LIMIT | default (get $manifestEnvs "MEMORY_LIMIT") | trim }}
+{{- $gpuRaw := $olaresEnv.REQUIRED_GPU_MEMORY | default (get $manifestEnvs "REQUIRED_GPU_MEMORY") | trim }}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") }}
+{{- $gpuType := .Values.gpu | default "" }}
+{{- if not $gpuType }}
+{{- if .Values.GPU }}{{- $gpuType = .Values.GPU.Type | default "nvidia" }}{{- else }}{{- $gpuType = "nvidia" }}{{- end }}
+{{- end }}
+{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") }}
+{{- if $unifiedMem }}
+{{- $gpuMiB := include "llmbase.gpuMiB" $gpuRaw }}
+{{- $memRequest = printf "%sMi" $gpuMiB }}
+{{- $memLimit = printf "%sMi" $gpuMiB }}
+{{- end }}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name }}
 {{- if not $modelName }}
 {{-   fail "MODEL_NAME resolves to nothing: the manifest's envs block is the source and it has no default" }}
@@ -50,7 +62,7 @@ spec:
     spec:
       containers:
         - name: audio-speakrs-speaker-diarization-community-1
-          image: "docker.io/olareshzy/audio-speakrs:a2bb141"
+          image: "docker.io/beclab/audio-speakrs:sha-0bd1a00"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "/wrappers/speakrs.sh"]
           env:
