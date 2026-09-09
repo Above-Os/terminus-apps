@@ -1,0 +1,47 @@
+apiVersion: apr.bytetrade.io/v1alpha1
+kind: MiddlewareRequest
+metadata:
+  name: note-router-catalog-nats
+  namespace: {{ .Release.Namespace }}
+spec:
+  app: note
+  appNamespace: router
+  middleware: nats
+  nats:
+    user: {{ printf "%s-note-catalog" .Release.Namespace | quote }}
+    password:
+      valueFrom:
+        secretKeyRef:
+          name: note-nats
+          key: password
+    subjects:
+      - name: catalog
+        permission:
+          pub: deny
+          sub: allow
+---
+apiVersion: apr.bytetrade.io/v1alpha1
+kind: MiddlewareRequest
+metadata:
+  name: note-user-directory-nats
+  namespace: {{ .Release.Namespace }}
+spec:
+  app: note-users
+  appNamespace: os
+  middleware: nats
+  nats:
+    user: {{ printf "%s-note-users" .Release.Namespace | quote }}
+    password:
+      valueFrom:
+        secretKeyRef:
+          name: note-nats
+          key: password
+    subjects:
+      - name: users
+        permission:
+          pub: deny
+          sub: allow
+      - name: groups
+        permission:
+          pub: deny
+          sub: allow
