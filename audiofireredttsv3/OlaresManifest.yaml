@@ -7,7 +7,7 @@ metadata:
   description: A text-to-speech model with preset, cloned, and designed voices
   appid: audiofireredttsv3
   title: FireRedTTS3 Instruct
-  version: '1.0.8'
+  version: '1.0.9'
   categories:
     - AI
     - models
@@ -49,6 +49,9 @@ spec:
     - Reuse cloned and designed voices on the same Olares installation.
 
     A compatible NVIDIA GPU with at least `16Gi` of GPU memory is required.
+
+  upgradeDescription: |
+    v1.0.9: Engine v1.1.12 — official sentence cuts, leftover requeue, 80 ms joins. Designs speak the approved sample; later slices keep the first as the anchor. History resumes with Range, can be named and stopped before start, and restarts if a slice wedges.
 
   developer: Xiaohongshu
   website: https://fireredteam.github.io/demos/firered_tts_3/
@@ -222,11 +225,15 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: "--n-timesteps 10 --inference-cfg 2.0 --design-cfg 1.2"
+    default: "--n-timesteps 10 --inference-cfg 2.0 --design-cfg 1.2 --speak-speed 1.0 --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500"
     description: "Engine-native flags (llm-init ENGINE_ARGS). Filling this replaces the whole
       string. --n-timesteps is the flow steps (official 10). --inference-cfg is clone CFG (official
-      2.0). --design-cfg is voice-design CFG (official 1.2). Also read: --seed, --voice-dir,
-      --preview-text, --attn-implementation, --use-wetext (default on), --use-llm-tn (default off)."
+      2.0). --design-cfg is voice-design CFG (official 1.2). --speak-speed is the tempo
+      baseline the caller's ElevenLabs `speed` multiplies (0.25–4.0); 1.0 is the model's
+      own pace. --ref-min-seconds / --ref-max-seconds / --ref-max-mb
+      reject at /v1/voices/add (0 = off). --design-min-chars / --design-max-chars reject
+      at design (0 = off). Also read: --seed, --voice-dir, --preview-text,
+      --attn-implementation, --use-wetext (default on), --use-llm-tn (default off)."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
