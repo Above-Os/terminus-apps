@@ -45,6 +45,21 @@ class ChartContractTest(unittest.TestCase):
             launcher.index("return original_builder(*builder_args, **builder_kwargs)"),
         )
 
+    def test_shared_api_routes_directly_to_the_staged_engine(self):
+        downloader = (CHART_ROOT / "templates" / "download.yaml").read_text(
+            encoding="utf-8"
+        )
+        shared_service = downloader.split("name: sharedentrances-api", 1)[1]
+        self.assertIn("io.kompose.service: acestepweb", shared_service)
+        self.assertIn("targetPort: 8001", shared_service)
+
+        # The human-facing Model Console still belongs to llm-init.
+        download_service = downloader.split("name: download-svc", 1)[1].split(
+            "name: sharedentrances-api", 1
+        )[0]
+        self.assertIn("io.kompose.service: llminit", download_service)
+        self.assertIn("targetPort: 8090", download_service)
+
     def test_single_worker_never_enables_turbo_loading(self):
         server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
         downloader = (CHART_ROOT / "templates" / "download.yaml").read_text(encoding="utf-8")

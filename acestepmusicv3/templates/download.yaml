@@ -159,9 +159,14 @@ metadata:
   name: sharedentrances-api
   namespace: {{ .Release.Namespace | quote }}
 spec:
+  # The staged engine already implements the complete standard Music API and
+  # its model/engine spec endpoints. Route the shared data-plane entrance to
+  # it directly so optional generation subresources (lyrics alignment) are
+  # not rejected by an older llm-init proxy allowlist. The visible Model
+  # Console entrance remains on download-svc above.
   selector:
-    io.kompose.service: llminit
+    io.kompose.service: acestepweb
   ports:
     - name: http
       port: 80
-      targetPort: 8090
+      targetPort: 8001
