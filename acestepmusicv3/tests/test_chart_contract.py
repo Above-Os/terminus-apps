@@ -121,6 +121,9 @@ class ChartContractTest(unittest.TestCase):
         self.assertIn("for temperature in (0.2, 0.1):", readability)
         self.assertIn('"top_k": 40', readability)
         self.assertNotIn('"top_k": 0', readability)
+        self.assertIn('"target_duration": max(10, min(40, len(content_lines(phonetic))))', readability)
+        self.assertIn('"repetition_penalty": 1.08', readability)
+        self.assertIn("restored = _restore_structure(phonetic, readable)", readability)
         self.assertIn("mountPath: /opt/olares/lyrics_readability.py", server)
         self.assertIn("subPath: lyrics_readability.py", server)
 
