@@ -43,6 +43,23 @@ class FakeHandler:
         return next(self.outputs), "ok"
 
 
+class ConstrainedFakeHandler:
+    def __init__(self):
+        self.llm_tokenizer = FakeTokenizer()
+        self.calls = []
+        self.transcriptions = {
+            "ye4 se4 luo4 zai4 jian1 shang4": "夜色落在肩上",
+            "lu4 deng1 ba3 ying3 zi5 la1 chang2": "路灯把影子拉长",
+            "zai4 zou3 yi1 duan4": "再走一段",
+            "jiu4 dao4 jia1 le5": "就到家了再见故乡",
+        }
+
+    def olares_generate_han_line(self, prompt, **kwargs):
+        self.calls.append({"prompt": prompt, **kwargs})
+        source = next(key for key in self.transcriptions if prompt.rstrip().endswith(key))
+        return self.transcriptions[source]
+
+
 class LyricsReadabilityTest(unittest.TestCase):
     def test_recognizes_official_tone_number_phonetics(self):
         self.assertEqual(readability.phonetic_kind(PHONETIC, "zh"), "phonetic")
@@ -64,6 +81,14 @@ class LyricsReadabilityTest(unittest.TestCase):
         self.assertEqual(handler.calls[0]["cfg"]["repetition_penalty"], 1.08)
         self.assertIn("夜色落在肩上", handler.calls[0]["formatted_prompt"])
         self.assertIn("[zh] ye4 se4 luo4", handler.calls[0]["formatted_prompt"])
+
+    def test_converts_each_line_through_han_constrained_ace_sampling(self):
+        handler = ConstrainedFakeHandler()
+        self.assertEqual(readability.render_readable_lyrics(handler, PHONETIC, "zh"), READABLE)
+        self.assertEqual(len(handler.calls), 4)
+        self.assertTrue(all(call["temperature"] == 0.2 for call in handler.calls))
+        self.assertTrue(all("[zh]" not in call["prompt"] for call in handler.calls))
+        self.assertIn("夜色落在肩上", handler.calls[0]["prompt"])
 
     def test_uses_cantonese_few_shot_example(self):
         prompt = readability._conversion_prompt(FakeTokenizer(), PHONETIC, "yue")
