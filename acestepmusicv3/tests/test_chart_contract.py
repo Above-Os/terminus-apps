@@ -132,6 +132,8 @@ class ChartContractTest(unittest.TestCase):
         self.assertIn("每句以[zh]开头", adapter)
         self.assertIn("带1-5声调数字的汉语拼音", adapter)
         self.assertIn("每句以[yue]开头", adapter)
+        self.assertIn("请直接用自然、可读的中文汉字写歌词", adapter)
+        self.assertIn("歌词只写自然中文汉字", adapter)
 
 
 if __name__ == "__main__":
