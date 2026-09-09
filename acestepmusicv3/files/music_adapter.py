@@ -26,6 +26,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
+from lyrics_readability import phonetic_kind
 
 
 NATIVE_BASE = "http://127.0.0.1:8002"
@@ -51,7 +52,7 @@ VOCAL_LANGUAGES = (
 VOCAL_LANGUAGE_SET = frozenset(VOCAL_LANGUAGES)
 ROMANIZED_LINE = re.compile(r"^\[[a-z]{2,3}\]\s")
 ENGLISH_HOOK_WORDS = frozenset({"baby", "hey", "la", "love", "na", "oh", "tonight", "woo", "yeah", "you"})
-DRAFT_ATTEMPTS = 5
+DRAFT_ATTEMPTS = 3
 
 
 class PhoneticLyricsError(ValueError):
@@ -138,7 +139,7 @@ def _public_draft(task: dict[str, Any]) -> dict[str, Any]:
         "warnings": task.get("warnings", []),
         "metrics": task.get("metrics", {}),
     }
-    for field in ("prompt", "lyrics", "duration_seconds", "style_plan"):
+    for field in ("prompt", "lyrics", "conditioning_lyrics", "duration_seconds", "style_plan"):
         if task.get(field) is not None:
             result[field] = task[field]
     if task.get("error"):
@@ -163,6 +164,8 @@ def _public_format(task: dict[str, Any]) -> dict[str, Any]:
         result["effective_prompt"] = task["effective_prompt"]
     if task.get("effective_lyrics") is not None:
         result["effective_lyrics"] = task["effective_lyrics"]
+    if task.get("conditioning_lyrics"):
+        result["conditioning_lyrics"] = task["conditioning_lyrics"]
     if task.get("error"):
         result["error"] = task["error"]
     return result
@@ -319,11 +322,7 @@ def _draft_query(task: dict[str, Any], attempt: int) -> str:
 def _draft_temperature(initial: float, attempt: int, failure: DraftValidationError | None) -> float:
     if attempt == 0 or failure is None:
         return initial
-    if failure.code == "lyrics_script_invalid":
-        # A phonetic/script path can be the highest-probability continuation;
-        # lowering temperature made repeated retries converge on it again.
-        return min(1.15, max(initial, 0.85) + 0.10 * attempt)
-    safer = (initial, min(initial, 0.75), 0.65, 0.60, 0.55)
+    safer = (initial, min(initial, 0.75), 0.65)
     return safer[min(attempt, len(safer) - 1)]
 
 
@@ -426,12 +425,19 @@ def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
             str(data.get("caption") or task["draft_prompt"])
         )
         effective_lyrics = str(data.get("lyrics") or task["draft_lyrics"]).strip()
+        conditioning_lyrics = str(data.get("conditioning_lyrics") or "").strip()
         if not effective_prompt:
             raise ValueError("ACE-Step returned an invalid formatted caption")
         if len(effective_lyrics) > 4096:
             raise ValueError("ACE-Step returned formatted lyrics that exceed 4096 characters")
         if _romanized(effective_lyrics):
             raise PhoneticLyricsError("ACE-Step returned phonetic codes instead of readable formatted lyrics")
+        if conditioning_lyrics and (
+            task["vocal_language"] not in {"zh", "yue"}
+            or phonetic_kind(conditioning_lyrics, task["vocal_language"]) != "phonetic"
+            or len(_lyric_content_lines(conditioning_lyrics)) != len(_lyric_content_lines(effective_lyrics))
+        ):
+            raise PhoneticLyricsError("ACE-Step returned an invalid internal conditioning lyric")
         warnings, metrics = _line_metrics(effective_lyrics, task["vocal_language"])
         if caption_truncated:
             warnings.insert(0, "formatted_caption_trimmed_to_512_characters")
@@ -439,6 +445,7 @@ def _run_format_task(task_id: str, temperature: float, duration: int) -> None:
             "status": "completed",
             "effective_prompt": effective_prompt,
             "effective_lyrics": effective_lyrics,
+            "conditioning_lyrics": conditioning_lyrics,
             "warnings": warnings,
             "metrics": metrics,
         })
@@ -474,8 +481,15 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             )
             data = native.get("data") or {}
             lyrics = "" if task["instrumental"] else str(data.get("lyrics") or "").strip()
+            conditioning_lyrics = "" if task["instrumental"] else str(data.get("conditioning_lyrics") or "").strip()
             prompt, caption_truncated = _fit_caption(str(data.get("caption") or ""))
             failure = _draft_validation_error(task, prompt, lyrics)
+            if failure is None and conditioning_lyrics and (
+                task["vocal_language"] not in {"zh", "yue"}
+                or phonetic_kind(conditioning_lyrics, task["vocal_language"]) != "phonetic"
+                or len(_lyric_content_lines(conditioning_lyrics)) != len(_lyric_content_lines(lyrics))
+            ):
+                failure = DraftValidationError("lyrics_script_invalid", "ACE-Step returned invalid internal conditioning lyrics")
             if failure is None:
                 break
             print(
@@ -492,6 +506,7 @@ def _run_draft_task(task_id: str, temperature: float) -> None:
             "status": "completed",
             "prompt": prompt,
             "lyrics": lyrics,
+            "conditioning_lyrics": conditioning_lyrics,
             "duration_seconds": _draft_duration(data.get("duration")),
             "style_plan": _draft_style_plan(data),
             "warnings": warnings,
@@ -552,6 +567,7 @@ def _options(source: dict[str, Any]) -> dict[str, Any]:
         "quality_profile", "bpm", "guidance_scale", "key_scale",
         "time_signature", "vocal_language", "vocal_type", "section_structure",
         "production_profile", "caption_mode",
+        "conditioning_lyrics",
         "repaint_start_seconds", "repaint_end_seconds", "repaint_mode", "repaint_strength",
     }
     unknown = sorted(set(value) - allowed)
@@ -668,6 +684,14 @@ def _persist_alignment(task_id: str, file_url: str, duration: float) -> bool:
             raise ValueError("alignment sidecar exceeds size limit")
         with open(sidecar, "r", encoding="utf-8") as handle:
             alignment = _validate_alignment(json.load(handle), duration)
+        with TASKS_LOCK:
+            task = dict(TASKS.get(task_id) or {})
+        if task.get("conditioning_lyrics"):
+            readable_lines = _lyric_content_lines(str(task.get("display_lyrics") or ""))
+            if len(readable_lines) != len(alignment["segments"]):
+                raise ValueError("readable lyrics do not match alignment segment count")
+            for segment, readable in zip(alignment["segments"], readable_lines):
+                segment["text"] = readable
         destination = _alignment_path(task_id)
         os.makedirs(os.path.dirname(destination), mode=0o750, exist_ok=True)
         temporary = destination + "." + uuid.uuid4().hex + ".tmp"
@@ -868,6 +892,7 @@ async def create_generation(request: Request) -> dict[str, Any]:
     key_scale = str(options.get("key_scale", "")).strip()
     time_signature = str(options.get("time_signature", "")).strip()
     vocal_language = str(options.get("vocal_language", "")).strip().lower()
+    conditioning_lyrics = str(options.get("conditioning_lyrics", "") or "").strip()
     if time_signature and time_signature not in {"2", "3", "4", "6"}:
         raise _error(400, "invalid_time_signature", "time_signature must be 2, 3, 4, or 6.")
     vocal_type = str(options.get("vocal_type", "")).strip()
@@ -881,6 +906,13 @@ async def create_generation(request: Request) -> dict[str, Any]:
         raise _error(400, "invalid_lyrics", "lyrics must contain at most 4096 characters.")
     if instrumental and lyrics:
         raise _error(400, "lyrics_not_allowed", "lyrics must be empty for instrumental music.")
+    if conditioning_lyrics:
+        if instrumental or vocal_language not in {"zh", "yue"}:
+            raise _error(400, "invalid_conditioning_lyrics", "conditioning_lyrics is only valid for Chinese vocal music.")
+        if len(conditioning_lyrics) > 4096 or phonetic_kind(conditioning_lyrics, vocal_language) != "phonetic":
+            raise _error(400, "invalid_conditioning_lyrics", "conditioning_lyrics must be an ACE phonetic lyric script.")
+        if len(_lyric_content_lines(conditioning_lyrics)) != len(_lyric_content_lines(lyrics)):
+            raise _error(400, "invalid_conditioning_lyrics", "conditioning_lyrics must match the readable lyric line count.")
     if duration < 10 or duration > 600:
         raise _error(400, "invalid_duration", "duration_seconds must be between 10 and 600.")
 
@@ -901,7 +933,7 @@ async def create_generation(request: Request) -> dict[str, Any]:
             raise _error(400, "invalid_repaint_mode", "repaint_mode must be conservative, balanced, or aggressive.")
     native = {
         "prompt": _described_prompt(prompt, options),
-        "lyrics": "" if instrumental else lyrics,
+        "lyrics": "" if instrumental else (conditioning_lyrics or lyrics),
         "thinking": True,
         "use_format": False,
         "use_cot_caption": caption_mode == "enhance",
@@ -959,6 +991,8 @@ async def create_generation(request: Request) -> dict[str, Any]:
         "outputs": [],
         "native_outputs": {},
         "source_path": source_path,
+        "display_lyrics": lyrics,
+        "conditioning_lyrics": conditioning_lyrics,
     }
     with TASKS_LOCK:
         TASKS[task_id] = task
@@ -984,9 +1018,11 @@ def _decode_native_outputs(task_id: str, value: Any) -> tuple[list[dict[str, Any
         content_type = mimetypes.types_map.get("." + suffix, "audio/wav")
         metas = row.get("metas") if isinstance(row.get("metas"), dict) else {}
         if not effective:
+            with TASKS_LOCK:
+                display_lyrics = str((TASKS.get(task_id) or {}).get("display_lyrics") or "").strip()
             effective = {
                 "effective_prompt": str(row.get("prompt") or "").strip(),
-                "effective_lyrics": str(row.get("lyrics") or "").strip(),
+                "effective_lyrics": display_lyrics or str(row.get("lyrics") or "").strip(),
                 "metas": metas,
             }
         outputs.append(
