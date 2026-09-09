@@ -10,6 +10,8 @@ data:
 {{ .Files.Get "files/lm_quality.py" | indent 4 }}
   lyrics_alignment.py: |
 {{ .Files.Get "files/lyrics_alignment.py" | indent 4 }}
+  lyrics_readability.py: |
+{{ .Files.Get "files/lyrics_readability.py" | indent 4 }}
   staged_api.py: |
     """Olares 24 GiB stage barrier for the official ACE-Step API."""
     import atexit
@@ -20,6 +22,7 @@ data:
     import uuid
     from lm_quality import assess_audio_codes, retry_seeds
     from lyrics_alignment import alignment_segments
+    from lyrics_readability import phonetic_kind, render_readable_lyrics
 
     import torch
 
@@ -145,6 +148,8 @@ data:
 
     import acestep.inference as inference
 
+    _conditioning_by_readable = {}
+
 
     _create_sample = inference.create_sample
 
@@ -154,13 +159,77 @@ data:
         if kwargs.get("top_p") is None:
             kwargs["top_p"] = 0.9
         if kwargs.get("repetition_penalty") in (None, 1.0):
-            kwargs["repetition_penalty"] = (
-                1.0 if kwargs.get("vocal_language") in {"zh", "yue"} else 1.08
-            )
-        return _create_sample(*args, **kwargs)
+            kwargs["repetition_penalty"] = 1.08
+        result = _create_sample(*args, **kwargs)
+        language = str(kwargs.get("vocal_language") or "").lower()
+        if getattr(result, "success", False) and language in {"zh", "yue"}:
+            original = str(getattr(result, "lyrics", "") or "").strip()
+            kind = phonetic_kind(original, language)
+            if kind == "phonetic":
+                llm_handler = kwargs.get("llm_handler") or (args[0] if args else None)
+                try:
+                    result.lyrics = render_readable_lyrics(llm_handler, original, language)
+                    result.conditioning_lyrics = original
+                    _conditioning_by_readable[result.lyrics] = original
+                    print("[lyrics-readability] phonetic_converted", flush=True)
+                except Exception:
+                    print("[lyrics-readability] conversion_failed", flush=True)
+            elif kind == "han":
+                print("[lyrics-readability] native_hanzi", flush=True)
+            else:
+                print("[lyrics-readability] invalid_latin", flush=True)
+        return result
 
 
     inference.create_sample = _stable_create_sample
+
+    _create_sample_to_dict = inference.CreateSampleResult.to_dict
+
+    def _create_sample_dict(self):
+        value = _create_sample_to_dict(self)
+        conditioning = str(getattr(self, "conditioning_lyrics", "") or "").strip()
+        if conditioning:
+            value["conditioning_lyrics"] = conditioning
+        return value
+
+    inference.CreateSampleResult.to_dict = _create_sample_dict
+
+    _format_sample = inference.format_sample
+
+    @functools.wraps(_format_sample)
+    def _readable_format_sample(*args, **kwargs):
+        result = _format_sample(*args, **kwargs)
+        metadata = kwargs.get("user_metadata") or (args[3] if len(args) > 3 else {}) or {}
+        language = str(metadata.get("language") or getattr(result, "language", "") or "").lower()
+        if getattr(result, "success", False) and language in {"zh", "yue"}:
+            original = str(getattr(result, "lyrics", "") or "").strip()
+            kind = phonetic_kind(original, language)
+            if kind == "phonetic":
+                llm_handler = kwargs.get("llm_handler") or (args[0] if args else None)
+                try:
+                    result.lyrics = render_readable_lyrics(llm_handler, original, language)
+                    result.conditioning_lyrics = original
+                    _conditioning_by_readable[result.lyrics] = original
+                    print("[lyrics-readability] phonetic_converted", flush=True)
+                except Exception:
+                    print("[lyrics-readability] conversion_failed", flush=True)
+            elif kind == "han":
+                print("[lyrics-readability] native_hanzi", flush=True)
+            else:
+                print("[lyrics-readability] invalid_latin", flush=True)
+        return result
+
+    inference.format_sample = _readable_format_sample
+    _format_sample_to_dict = inference.FormatSampleResult.to_dict
+
+    def _format_sample_dict(self):
+        value = _format_sample_to_dict(self)
+        conditioning = str(getattr(self, "conditioning_lyrics", "") or "").strip()
+        if conditioning:
+            value["conditioning_lyrics"] = conditioning
+        return value
+
+    inference.FormatSampleResult.to_dict = _format_sample_dict
 
 
     _generate_music = inference.generate_music
@@ -347,6 +416,16 @@ data:
 
     def _register_sample_format_routes_with_rearm(**kwargs):
         app = kwargs["app"]
+        original_wrap_response = kwargs["wrap_response"]
+
+        def _wrap_response_with_conditioning(data, *wrap_args, **wrap_kwargs):
+            if isinstance(data, dict):
+                readable = str(data.get("lyrics") or "")
+                conditioning = _conditioning_by_readable.pop(readable, "")
+                if conditioning:
+                    data = dict(data)
+                    data["conditioning_lyrics"] = conditioning
+            return original_wrap_response(data, *wrap_args, **wrap_kwargs)
 
         def _with_rearm(call):
             @functools.wraps(call)
@@ -368,6 +447,7 @@ data:
 
         kwargs["format_sample"] = _with_rearm(kwargs["format_sample"])
         kwargs["create_sample_fn"] = _with_rearm(kwargs["create_sample_fn"])
+        kwargs["wrap_response"] = _wrap_response_with_conditioning
         return _register_sample_format_routes(**kwargs)
 
 

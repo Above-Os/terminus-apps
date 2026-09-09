@@ -104,9 +104,20 @@ class ChartContractTest(unittest.TestCase):
         self.assertIn('if kwargs.get("top_p") is None:', launcher)
         self.assertIn('kwargs["top_p"] = 0.9', launcher)
         self.assertIn('if kwargs.get("repetition_penalty") in (None, 1.0):', launcher)
-        self.assertIn('1.0 if kwargs.get("vocal_language") in {"zh", "yue"} else 1.08', launcher)
+        self.assertIn('kwargs["repetition_penalty"] = 1.08', launcher)
         patched_at = launcher.index("inference.create_sample = _stable_create_sample")
         self.assertLess(patched_at, launcher.index("from acestep.api_server import main"))
+
+    def test_phonetic_lyrics_are_rendered_by_the_loaded_ace_lm(self):
+        launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(encoding="utf-8")
+        readability = (CHART_ROOT / "files" / "lyrics_readability.py").read_text(encoding="utf-8")
+        self.assertIn("render_readable_lyrics(llm_handler, original, language)", launcher)
+        self.assertIn("result.conditioning_lyrics = original", launcher)
+        self.assertIn('data["conditioning_lyrics"] = conditioning', launcher)
+        self.assertIn("generate_from_formatted_prompt(", readability)
+        self.assertNotIn("http", readability.lower())
+        self.assertNotIn("openai", readability.lower())
+        self.assertIn("for temperature in (0.2, 0.1):", readability)
 
 
 if __name__ == "__main__":

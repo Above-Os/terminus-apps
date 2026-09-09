@@ -2,6 +2,7 @@ import importlib.util
 import base64
 import io
 import pathlib
+import sys
 import tempfile
 import time
 import urllib.parse
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 
 
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "files" / "music_adapter.py"
+sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("music_adapter", MODULE_PATH)
 adapter = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -107,9 +109,13 @@ class MusicAdapterContractTest(unittest.TestCase):
         audio.write_bytes(b"RIFF")
         sidecar = pathlib.Path(str(audio) + ".lyrics-alignment.json")
         sidecar.write_text(
-            '{"segments":[{"text":"雨落在窗前","start_seconds":1.2,"end_seconds":4.5}]}',
+            '{"segments":[{"text":"[zh] yu3 luo4 zai4 chuang1 qian2","start_seconds":1.2,"end_seconds":4.5}]}',
             encoding="utf-8",
         )
+        adapter.TASKS["new-song"] = {
+            "display_lyrics": "[Verse 1]\n雨落在窗前",
+            "conditioning_lyrics": "[Verse 1]\n[zh] yu3 luo4 zai4 chuang1 qian2",
+        }
         with mock.patch.object(adapter, "ALIGNMENT_AUDIO_ROOTS", (str(self.temp_dir),)), mock.patch.object(
             adapter, "LYRICS_ALIGNMENT_DIR", str(self.temp_dir / "persisted")
         ):
@@ -187,6 +193,54 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(lost.status_code, 410)
         self.assertEqual(lost.json()["error"]["code"], "task_lost")
 
+    def test_dual_lyrics_are_returned_and_condition_only_native_generation(self):
+        phonetic = "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2"
+        readable = "[Verse 1]\n夜色落在肩上照亮回家的方向\n路灯把影子拉长陪我穿过街巷"
+        payloads = []
+
+        def native(path, payload=None, timeout=30):
+            payloads.append(payload)
+            if path == "/format_input":
+                return {"code": 200, "data": {"caption": "Mandarin pop", "lyrics": readable, "conditioning_lyrics": phonetic}}
+            if path == "/release_task":
+                return {"code": 200, "data": {"task_id": "dual-song"}}
+            raise AssertionError(path)
+
+        with mock.patch.object(adapter, "_native_json", side_effect=native):
+            created = self.client.post("/v1/music/formats", json={
+                "model": "ace", "prompt": "Mandarin pop", "lyrics": readable,
+                "vocal_language": "zh", "duration_seconds": 180,
+            })
+            task_id = created.json()["id"]
+            for _ in range(50):
+                formatted = self.client.get(f"/v1/music/formats/{task_id}").json()
+                if formatted["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            generated = self.client.post("/v1/music/generations", json={
+                "prompt": "Mandarin pop", "lyrics": readable,
+                "provider_options": {"vocal_language": "zh", "conditioning_lyrics": phonetic},
+            })
+
+        self.assertEqual(formatted["effective_lyrics"], readable)
+        self.assertEqual(formatted["conditioning_lyrics"], phonetic)
+        self.assertEqual(generated.status_code, 202)
+        self.assertEqual(payloads[-1]["lyrics"], phonetic)
+        self.assertEqual(adapter.TASKS["dual-song"]["display_lyrics"], readable)
+
+    def test_conditioning_lyrics_reject_invalid_latin_and_structure_mismatch(self):
+        readable = "[Verse 1]\n夜色落在肩上照亮回家的方向\n路灯把影子拉长陪我穿过街巷"
+        invalid = self.client.post("/v1/music/generations", json={
+            "prompt": "Mandarin pop", "lyrics": readable,
+            "provider_options": {"vocal_language": "zh", "conditioning_lyrics": "[zh] garbage words"},
+        })
+        mismatched = self.client.post("/v1/music/generations", json={
+            "prompt": "Mandarin pop", "lyrics": readable,
+            "provider_options": {"vocal_language": "zh", "conditioning_lyrics": "[zh] ye4 se4 luo4 zai4 jian1 shang4"},
+        })
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(mismatched.status_code, 400)
+
     def test_draft_asks_the_lm_for_a_whole_song_and_carries_its_style_plan(self):
         calls = []
 
@@ -199,6 +253,7 @@ class MusicAdapterContractTest(unittest.TestCase):
                 "data": {
                     "caption": "Quiet Mandarin city folk",
                     "lyrics": "[Verse 1]\n夜色落在肩上\n路灯把影子拉长\n\n[Chorus]\n再走一段\n就到家了",
+                    "conditioning_lyrics": "[Verse 1]\n[zh] ye4 se4 luo4 zai4 jian1 shang4\n[zh] lu4 deng1 ba3 ying3 zi5 la1 chang2\n\n[Chorus]\n[zh] zai4 zou3 yi2 duan4\n[zh] jiu4 dao4 jia1 le5",
                     "bpm": 77,
                     "keyscale": "E minor",
                     "timesignature": "4",
@@ -224,6 +279,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertEqual(result["object"], "music.draft")
         self.assertEqual(result["prompt"], "Quiet Mandarin city folk")
         self.assertIn("路灯把影子拉长", result["lyrics"])
+        self.assertTrue(result["conditioning_lyrics"].startswith("[Verse 1]\n[zh]"))
         self.assertEqual(result["duration_seconds"], 296)
         self.assertEqual(
             result["style_plan"], {"bpm": 77, "key_scale": "E minor", "time_signature": "4"}
@@ -274,7 +330,7 @@ class MusicAdapterContractTest(unittest.TestCase):
         self.assertIn("熟悉的窗", result["lyrics"])
         self.assertNotIn("lyrics_romanized", result["warnings"])
         self.assertEqual(answers, [])
-        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.95])
+        self.assertEqual([call["temperature"] for call in calls], [0.85, 0.75])
         self.assertEqual(
             [call["query"] for call in calls],
             [
@@ -304,14 +360,12 @@ class MusicAdapterContractTest(unittest.TestCase):
                 time.sleep(0.01)
 
         self.assertEqual(call.call_count, adapter.DRAFT_ATTEMPTS)
-        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.95, 1.05, 1.15, 1.15])
+        self.assertEqual([item["temperature"] for item in calls], [0.85, 0.75, 0.65])
         self.assertEqual(
             [item["query"] for item in calls],
             [
                 "中文歌曲，主题与风格：walking home late",
                 "普通话歌曲，主题与风格：walking home late",
-                "以中文演唱的歌曲，主题与风格：walking home late",
-                "以中文演唱的歌曲，主题与风格：walking home late",
                 "以中文演唱的歌曲，主题与风格：walking home late",
             ],
         )
@@ -325,11 +379,11 @@ class MusicAdapterContractTest(unittest.TestCase):
         english = {"brief": "walking home late", "vocal_language": "en"}
         self.assertEqual(adapter._draft_query(english, 1), english["brief"])
 
-    def test_draft_temperature_escapes_script_paths_but_cools_repetition(self):
+    def test_draft_temperature_cools_every_invalid_result(self):
         script = adapter.DraftValidationError("lyrics_script_invalid", "script")
         repetition = adapter.DraftValidationError("lyrics_repetition_invalid", "loop")
-        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 1.0)
-        self.assertEqual(adapter._draft_temperature(0.9, 2, script), 1.1)
+        self.assertEqual(adapter._draft_temperature(0.9, 1, script), 0.75)
+        self.assertEqual(adapter._draft_temperature(0.9, 2, script), 0.65)
         self.assertEqual(adapter._draft_temperature(0.9, 1, repetition), 0.75)
 
     def test_draft_fails_when_the_lm_returns_no_lyrics_for_a_vocal_brief(self):
