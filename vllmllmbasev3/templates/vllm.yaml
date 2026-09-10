@@ -150,6 +150,14 @@ spec:
             # container's default ~/.cache/huggingface (ephemeral, lost on restart). 
             - name: HF_HUB_CACHE
               value: /cache/hf/hub
+            # Weights are guaranteed local — wait_for_sentinel gates startup on
+            # llm-init finishing the download — so skip the Hub entirely. Without
+            # this, huggingface_hub HEADs the Hub for every file it cannot find
+            # (chat_template.jinja, adapter configs, ...) and cannot write the
+            # .no_exist negative cache to the read-only mount above, so the same
+            # ~90 lookups repeat on every start (measured 160s -> 105s on a 12B AWQ).
+            - name: HF_HUB_OFFLINE
+              value: "1"
             - name: VLLM_CACHE_ROOT
               value: /cache/vllm
             - name: PYTHONUNBUFFERED
