@@ -32,6 +32,7 @@ spec:
               chown 1000:1000 /app/.temporary
               touch /swagger/openapi.json
               chown 1000:1000 /swagger/openapi.json
+              chown 1000:1000 /next-cache
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -42,6 +43,8 @@ spec:
               name: teable-tmp
             - mountPath: /swagger
               name: swagger-write
+            - mountPath: /next-cache
+              name: next-cache
           imagePullPolicy: IfNotPresent
         - name: check-ready
           image: "docker.io/beclab/wait-for:0.1.0"
@@ -115,7 +118,11 @@ spec:
             - mountPath: /app/enterprise/backend-ee/dist/openapi.json
               name: swagger-write
               subPath: openapi.json
+            - mountPath: /app/enterprise/app-ee/.next/cache
+              name: next-cache
       volumes:
+        - name: next-cache
+          emptyDir: {}
         - name: swagger-write
           emptyDir: {}
         - name: teable-tmp
