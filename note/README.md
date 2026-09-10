@@ -2,12 +2,18 @@
 
 Turn recordings and videos into transcripts you can read, replay and export
 
-- Chart version: **0.4.12**
-- App version: **0.4.12**
-- Image: `docker.io/beclab/note:0.4.12` (amd64 + arm64, frontend embedded in the binary)
+- Chart version: **0.4.13**
+- App version: **0.4.13**
+- Image: `docker.io/beclab/note:0.4.13` (amd64 + arm64, frontend embedded in the binary)
 - Arch: amd64, arm64 · Olares >= 1.12.6
 
-## What changed in 0.4.12
+## What changed in 0.4.13
+
+Metadata only: the app is submitted under **Olares** rather than an individual
+name. The image at this tag is built from the same source as 0.4.12, so nothing
+about how the app behaves changed.
+
+## What 0.4.12 changed
 
 The implementation behind this app was replaced. It is now a Go service that runs
 a nine-stage pipeline (extract → chunk → enhance → diarize → segment → transcribe
