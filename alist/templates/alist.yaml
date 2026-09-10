@@ -6,7 +6,7 @@ metadata:
   name: alist
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.alist.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: alist
@@ -18,9 +18,23 @@ spec:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: alist
     spec:
+      initContainers:
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          command: ["sh", "-c", "chown 1000:1000 /data"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /data
       containers:
-        - image: "docker.io/beclab/aboveos-xhofe-alist:v3.44.0"
+        - image: "docker.io/xhofe/alist:v3.64.0"
           name: alist
+          command: ["/opt/alist/alist", "server", "--no-prefix"]
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
           ports:
             - containerPort: 5244
           lifecycle:
