@@ -4,10 +4,10 @@ apiVersion: 'v3'
 metadata:
   name: llamacpphymt218bggufv3
   icon: https://app.cdn.olares.com/appstore/llm/llamacpp/hymt2.png
-  description: "Hy-MT2-1.8B (GGUF Q4_K_M) served with llama.cpp."
+  description: A multilingual translation model served with llama.cpp
   appid: llamacpphymt218bggufv3
   title: Hy-MT2-1.8B (llama.cpp)
-  version: '1.0.32'
+  version: '1.0.33'
   categories:
     - AI
     - models
@@ -37,74 +37,16 @@ workloadReplicas:
 spec:
   onlyAdmin: true
   versionName: 'tencent/Hy-MT2-1.8B-GGUF:Q4_K_M'
-  upgradeDescription: |
-    v1.0.32: ENGINE_ARGS -c 65536 -np 16 -kvu (migrate the shipped -np 8
-      split preset). One 64K unified pool, sixteen slots sharing it: short
-      immersive segments stay concurrent, a Note group of a few thousand
-      tokens can use the whole window instead of a 4096-token slice.
-    v1.0.28: llm-init v1.6.1 — editing ENGINE_ARGS on the running app now
-      reaches the two things that read it. Both used to settle their answer
-      while the process was starting, so removing -np left the card reporting
-      the replaced engine's width and left the shared pool unaccounted for
-      until the deployment was restarted. This preset is unaffected as
-      shipped: -np 8 still gives each slot its own 4096-token share.
-    v1.0.27: llm-init v1.6.0 — a single turn's reply is accepted without its
-      list number, which this model often omits and which was reaching callers
-      as `unaligned` even though the turn had been translated. Context width
-      and slot count now come from the engine's own /props instead of being
-      inferred from the flags; -np 8 gives each slot a 4096-token share that
-      llama.cpp enforces itself, so this preset needs no admission gate.
-      Removing -np from ENGINE_ARGS is what would leave the pool shared and
-      unbounded.
-    v1.0.26: llm-init v1.5.5 — /translate/transcript carries the read-only
-      lead-in apart from the turns, which the model was translating as turn one.
-    v1.0.25: llm-init v1.5.4 — POST /translate/transcript translates a dialogue
-      as one unit (speakers, lead-in, glossary) instead of string by string.
-    v1.0.24: llama.cpp server-cuda12-b10588; ENGINE_ARGS -np 8 (migrate -np 1/-np 6).
-    v1.0.17: init migrates stale hostPath model-spec mode chat→translate so
-      /translate mounts and Status shows Translate API on upgrade.
-    v1.0.16: llm-init v1.3.6 — MODEL_MODE=translate mounts /translate (mode-based;
-      supports_translate retired, MODEL_SUPPORTS defaults to none).
-    v1.0.15: accelerator memory = engine + llm-init (nvidia 5Gi/10Gi; gb10 5Gi/6Gi).
-    v1.0.14: align system RAM with pod defaults (requiredMemory 4Gi, limitedMemory 8Gi).
-    v1.0.13: llm-init beclab/v1.3.2; llama.cpp server-cuda12-b10143.
-    v1.0.12: TRANSLATE_LANGUAGES from Hy-MT2 model card (per-model /languages catalog).
-    v1.0.11: llm-init harveyff/v1.2.31-ui-3-amd.
-    v1.0.10: app icon hymt2.png.
-    v1.0.9: HF_ENDPOINT from OLARES_SYSTEM_HUGGINGFACE_SERVICE (not USER).
-    v1.0.8: llm-init harveyff/v1.2.31-ui-2-amd (Translate Base URL + endpoints in Status).
-    v1.0.7: force MODEL_SUPPORTS=translate when unset/none so /translate mounts on upgrade.
-    v1.0.6: llm-init harveyff/v1.2.31-ui-1-amd; default MODEL_SUPPORTS=translate.
-    v1.0.5: context 32K (balance speed vs length); keep q4_0 KV + full GPU.
-    v1.0.0: initial release — Hy-MT2-1.8B GGUF Q4_K_M via llama.cpp + llm-init.
   fullDescription: |
-    **Model Overview**
-    Hy-MT2-1.8B is a lightweight multilingual translation model from Tencent Hunyuan (Hy-MT2 family). It supports translation among 33+ languages and follows complex translation instructions (terminology, style, structured data). This app serves the `Q4_K_M` GGUF build from `tencent/Hy-MT2-1.8B-GGUF` via llama.cpp.
+    Hy-MT2-1.8B translates written text among many languages. It can follow instructions about terminology, style, and structured input. This app serves the `Q4_K_M` GGUF build with llama.cpp.
 
-    Tuned for low-latency translation: 64K unified KV pool, sixteen shared slots, quantized KV cache, and full GPU offload.
+    **Key features**
 
-    **Preset Configuration**
-    - Model: `tencent/Hy-MT2-1.8B-GGUF:Q4_K_M` (~1.1 GiB weights)
-    - Capabilities: translate (`/translate` on Model Console)
-    - Engine args: `-c 65536 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 16 -kvu`
-    - Required GPU memory: `4Gi`
+    - Translate text between many languages.
+    - Follow translation instructions such as terminology and style.
+    - Make translation available to compatible Olares applications.
 
-    **Accelerator modes**
-    | Mode           | Device            | Details                                          |
-    |----------------|-------------------|--------------------------------------------------|
-    | `nvidia`       | GPU (CUDA)        | Uses `4Gi` GPU memory; `-ngl all` for full GPU   |
-    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
-
-    **How It Works**
-    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
-
-    **Stack**
-    - **llama.cpp**: Runs the model and serves API requests (port 8081)
-    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
-
-    **Model Storage**
-    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
-
+    A compatible NVIDIA GPU with at least `4Gi` of GPU memory is required.
   developer: Tencent
   website: https://huggingface.co/tencent/Hy-MT2-1.8B
   sourceCode: https://huggingface.co/tencent/Hy-MT2-1.8B
@@ -112,6 +54,12 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  doc: https://huggingface.co/tencent/Hy-MT2-1.8B
   license:
     - text: Apache-2.0
       url: https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF
@@ -151,7 +99,7 @@ options:
   templateOnly: false
   dependencies:
     - name: olares
-      version: '>=1.12.6-0'
+      version: '>=1.12.7-0'
       type: system
 envs:
   - envName: MODEL_SOURCE
