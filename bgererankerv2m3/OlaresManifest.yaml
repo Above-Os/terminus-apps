@@ -4,10 +4,10 @@ apiVersion: 'v3'
 metadata:
   name: bgererankerv2m3
   icon: https://app.cdn.olares.com/appstore/llm/vllm/rerank/bge-reranker-v2-m3.png
-  description: "BGE-Reranker-v2-m3 cross-encoder rerank via rerank-server (OpenVINO / ONNX)"
+  description: A multilingual model for reranking search results by relevance
   appid: bgererankerv2m3
   title: BGE-Reranker-v2-m3
-  version: '1.0.1'
+  version: '1.0.2'
   categories:
   - AI
   - models
@@ -46,44 +46,18 @@ spec:
   onlyAdmin: true
   versionName: '0.1.0'
   fullDescription: |
-    **BGE-Reranker-v2-m3** cross-encoder reranking service powered by rerank-server. Serves OpenAI-compatible `POST /v1/rerank` and `GET /v1/models` on port 8080 (via llm-init proxy on 8090).
+    BGE-Reranker-v2-m3 scores how well a document matches a search query, then reorders candidate results by that score. Compatible Olares applications can use it after a first-pass search.
 
-    **Accelerator modes**
-    | Olares mode | Image | Backend | `ACCELERATOR` |
-    |-------------|-------|---------|---------------|
-    | `intel` | `rerank-server:v0.1.0-ov-intel-amd64` | OpenVINO IR | `intel-gpu` |
-    | `cpu` | `rerank-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
-    | `nvidia` | `rerank-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `nvidia` |
-    | `nvidia-gb10` | `rerank-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `nvidia-gb10` |
+    **Key features**
 
-    **Naming contract**
-    - llm-init: `MODEL_NAME` = `MODEL_ID` = `bge-reranker-v2-m3` (proxy rewrite + Ready probe).
-    - rerank-server: `MODEL_ID` only (no `MODEL_NAME` env).
+    - Score the relevance of a query and a candidate document.
+    - Reorder search results by relevance.
+    - Work across multiple languages.
+    - Make reranking available to compatible Olares applications.
 
-    **Model download**
-    On first start, llm-init downloads from the unified Hugging Face repo into App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
-    - [beclab/bge-reranker-v2-m3](https://huggingface.co/beclab/bge-reranker-v2-m3)
-    - `intel` mode: `openvino/` subdirectory only (~4.3 GiB)
-    - All other modes: `onnx/` subdirectory only (~2.2 GiB)
-
-    **Resource sizing (measured 2026-09-07)**
-    | Mode | Engine RAM (steady) | GPU VRAM | Notes |
-    |------|---------------------|----------|-------|
-    | cpu | ~1.4 GiB | — | ~1 core at inference |
-    | nvidia | ~0.7 GiB | ~3.2 GiB | ~10 ms / rerank |
-    | intel | ~0.75 GiB inference; ~3.2 GiB compile peak | iGPU shared RAM | ~3 min first compile |
-
-    **Device mounts**
-    - `intel`: `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
-    - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
-
-    **Stack**
-    - **rerank-server** (`beclab/rerank-server:v0.1.0`, port 8080): Rust cross-encoder inference (internal; reached as `http://rerank:8080`).
-    - **llm-init** (`beclab/llm-init:v1.7.1`, `ENGINE_KIND=rerank`, `MODEL_MODE=rerank`, port 8090): model download, progress UI, and OpenAI API proxy (`/v1/rerank`, `/v1/models`).
-      Use **rerankclient** for download UI; **rerankapi** / shared entrance hit llm-init proxy on port 8090.
-
-  developer: beclab
+  developer: BAAI
   website: https://huggingface.co/BAAI/bge-reranker-v2-m3
+  sourceCode: https://huggingface.co/BAAI/bge-reranker-v2-m3
   submitter: Olares
   locale:
     - en-US
@@ -93,6 +67,7 @@ spec:
     - it-IT
     - fr-FR
     - ja-JP
+  doc: https://huggingface.co/BAAI/bge-reranker-v2-m3
   license:
     - text: Apache-2.0
       url: https://huggingface.co/BAAI/bge-reranker-v2-m3
@@ -143,7 +118,7 @@ options:
   shared: true
   dependencies:
     - name: olares
-      version: '>=1.12.6-0'
+      version: '>=1.12.7-0'
       type: system
 envs:
   - envName: MODEL_NAME
