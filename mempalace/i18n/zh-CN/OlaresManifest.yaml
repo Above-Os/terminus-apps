@@ -1,12 +1,19 @@
 metadata:
   title: MemPalace
-  description: 本地优先的 AI 记忆库，支持语义检索与 MCP 服务
-spec:
-  upgradeDescription: |
-    将反向代理镜像从 Bitnami OpenResty（`beclab/aboveos-bitnami-openresty:1.25.3-2`）切换为官方 OpenResty 镜像 `openresty/openresty:1.29.2.5-bookworm-fat`。
+  description: 用于保存对话原文并按含义查找的本地记忆应用
 
-    同步调整 nginx 配置挂载与日志路径以匹配官方镜像布局（`/etc/nginx/conf.d/default.conf`、`/usr/local/openresty/nginx/logs/...`），并移除 Bitnami 专用的 `OPENRESTY_CONF_FILE` 配置。
+spec:
   fullDescription: |
-    MemPalace 将对话历史以原文形式保存，并通过语义检索召回——不做摘要、不调用外部 API，数据始终留在本机。
-    索引结构分为 wings（人物/项目）、rooms（主题）与 drawers（原文片段），并辅以基于本地 SQLite 的时序知识图谱。
-    本应用运行 MemPalace MCP 服务（通过 SSE 对内暴露，供 Agent/MCP 客户端使用），并提供 Web 终端以使用 `mempalace` CLI（mine、search、wake-up 等）。
+    MemPalace 以原文保存对话历史，并按含义查找匹配片段，而不仅靠精确字词。不会对已保存内容做摘要或改写。索引按宫殿结构组织：wings 对应人物或项目，rooms 对应主题，drawers 存放原文。本地知识图谱会记录这些事实如何随时间关联。
+
+    本 Olares 应用提供用于 MemPalace 命令行工具的 Web 终端，可导入文件、搜索记忆，并为新会话加载简要说明。智能体也可以通过 MCP 查找和写入记忆。
+
+    **主要功能**
+
+    - 按原文保存对话文本，并按含义搜索。
+    - 按人物、项目和主题组织记忆。
+    - 通过 Web 终端从 Home 目录导入文件。
+    - 为新会话加载简要的记忆说明。
+    - 让智能体通过 MCP 查找和写入记忆。
+
+    记忆留在这台 Olares 上。向量化和搜索在本地运行，无需云端 API 密钥。
