@@ -1,53 +1,17 @@
-# 🔴 Not optional decoration. The Market serves an application's title as a language map
-# when translations exist and as a bare string when they do not, and Router's projector
-# decodes that field into map[string]string. One application without translations makes the
-# whole model-application catalog fail to decode -- Router then keeps its previous snapshot,
-# and every model application installed after that point is invisible, with the only symptom
-# a warning in Router's own log.
 metadata:
   title: Speakrs Diarization
-  description: Speaker diarization on ONNX Runtime, no torch stack
+  description: A local model for accurate speaker-turn separation in recordings
 
 spec:
-  onlyAdmin: true
   fullDescription: |
-    **Model**
+    Speakrs Diarization separates a recording into speaker turns and marks when each person speaks. It assigns anonymous labels rather than identifying people by name. This app uses the accuracy-focused pipeline and runs locally with ONNX Runtime.
 
-    speakrs, the pyannote `community-1` diarization pipeline reimplemented in Rust on
-    ONNX Runtime: segmentation, powerset decode, overlap-add aggregation, binarization,
-    embedding, PLDA and VBx clustering.
+    **Key features**
 
-    **Configuration**
-    - Model name: `speakrs/speakrs-community-1`
-    - Weights: `hf://avencera/speakrs-models`
-    - Capability: `diar`
-    - Required GPU memory: `3Gi`
-    - Engine: speakrs on ONNX Runtime CUDA
-    - GPU: NVIDIA, Turing or newer. Built on CUDA 13, which no longer supports Pascal
-      (GTX 10 series, P100) or Volta (V100); on arm64 the only supported machine is GB10
+    - Detect speech and changes between speakers.
+    - Assign consistent anonymous labels across a recording.
+    - Process segmentation, speaker embeddings, and clustering in one pipeline.
+    - Choose a more accurate or a faster processing mode after install.
+    - Make diarization results available to compatible Olares applications.
 
-    **Accuracy against speed**
-
-    The `EXECUTION_MODE` setting picks one, and changing it restarts the engine. `cuda`
-    matches pyannote's accuracy and runs about 1.8x faster than it. `cuda-fast` runs about
-    3.6x faster and costs 0.3-1.0 DER points, the cost growing with how densely speakers
-    overlap. Both modes load the same weights -- the mode changes how the pipeline is run,
-    not what it runs -- so switching re-downloads nothing and the model name is the same
-    either way. Because it is, this setting is the only place a run's mode is recorded.
-
-    **Tuning**
-
-    A caller may set `exclusive`, `min_duration_off`, `min_duration_on` and
-    `clustering_threshold` per request on `POST /v1/audio/diarization`; `ENGINE_ARGS` sets
-    the same four as this deployment's defaults. This engine derives the speaker count from
-    its clustering and cannot be constrained to one, so `num_speakers`, `min_speakers` and
-    `max_speakers` are refused rather than accepted and ignored.
-
-    **How it runs**
-
-    llm-init downloads the weights and serves the control plane; the engine waits for them
-    and then serves `/v1/*` behind llm-init's reverse proxy.
-
-entrances:
-  - name: audiospeakrsdiarv3
-    title: Speakrs Diarization
+    A compatible NVIDIA GPU with at least `3Gi` of GPU memory is required. GTX 10-series, Tesla P100, and V100 cards are not supported.
