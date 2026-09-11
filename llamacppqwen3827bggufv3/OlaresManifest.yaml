@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.8-27B (GGUF UD-Q4_K_XL) served with llama.cpp."
   appid: llamacppqwen3827bggufv3
   title: Qwen3.8-27B (llama.cpp)
-  version: '1.0.12'
+  version: '1.0.13'
   categories:
     - AI
     - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL'
   upgradeDescription: |
+    v1.0.13: Upgrade llama.cpp to server-cuda12-b10884 and set the default MTP draft depth to 2. Migrate exact previous presets while preserving custom engine arguments.
+
     v1.0.12: Budget host memory for the GPU memory that time-slicing evicts into RAM. The old limit was already fully consumed, which cost the container an OOM kill whenever another model took the card.
 
     v1.0.11: Share the 102K KV pool across 2 slots (`-np 2 -kvu`) so one request can still use the whole window. Model Console moves to llm-init v1.7.14.
@@ -58,7 +60,7 @@ spec:
     **Preset Configuration**
     - Model: `unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL` (with `mmproj-F16.gguf` projector for vision)
     - Capabilities: thinking, tools, vision
-    - Engine args: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 2 -kvu --spec-type draft-mtp --spec-draft-n-max 4` (102K shared pool, 2 slots, MTP speculative decode)
+    - Engine args: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 2 -kvu --spec-type draft-mtp --spec-draft-n-max 2` (102K shared pool, 2 slots, MTP speculative decode)
     - Required GPU memory: `23Gi`
 
     **Accelerator modes**
@@ -71,7 +73,7 @@ spec:
     First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
 
     **Stack**
-    - **llama.cpp** (`server-cuda12-b10548`): Runs the model and serves API requests (port 8081)
+    - **llama.cpp** (`server-cuda12-b10884`): Runs the model and serves API requests (port 8081)
     - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
 
     **Model Storage**
@@ -202,7 +204,7 @@ envs:
     description:  "The level this model uses when a request does not ask for one."
   - envName: ENGINE_ARGS
     required: true
-    default: "-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 2 -kvu --spec-type draft-mtp --spec-draft-n-max 4"
+    default: "-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 2 -kvu --spec-type draft-mtp --spec-draft-n-max 2"
     type: string
     editable: true
     applyOnChange: true
