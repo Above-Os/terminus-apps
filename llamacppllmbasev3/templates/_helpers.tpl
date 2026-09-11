@@ -23,7 +23,7 @@
 {{- $in := . -}}
 {{- trim ($in.Args | default "") -}}
 {{- end -}}
-{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 | amd-gpu | intel-gpu. */ -}}
+{{- /* Olares GPU mode at install: nvidia | nvidia-gb10 | amd-gpu | intel | intel-gpu. */ -}}
 {{- define "llmbase.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
@@ -41,6 +41,8 @@
 {{- $img.amdGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-rocm-b10731" -}}
 {{- else if eq $gpuType "intel-gpu" -}}
 {{- $img.intelGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-intel-b10752" -}}
+{{- else if eq $gpuType "intel" -}}
+{{- $img.intel | default "docker.io/beclab/ggml-org-llama.cpp:server-intel-b10884" -}}
 {{- else if $isGb10 -}}
 {{- $img.nvidiaGb10 | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10752" -}}
 {{- else -}}
