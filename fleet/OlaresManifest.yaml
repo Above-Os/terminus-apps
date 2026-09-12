@@ -10,7 +10,7 @@ metadata:
   appid: fleet
   description: Run and watch coding agents on the machines you own, from one place.
   icon: https://app.cdn.olares.com/appstore/fleet/icon.png
-  version: "0.1.2"
+  version: "0.1.4"
   title: Fleet
   categories:
     - Utilities_v112
@@ -23,12 +23,21 @@ permission:
   appData: true
 
 spec:
-  # Not admin-only. Everybody on this Olares is in the fleet, and what they can reach inside it is
-  # their own machines and whatever a colleague has lent them -- so an admin-only app would hide
-  # the product from the people it is for. Olares tells a non-admin that an admin-only app is "not
-  # installed" rather than "not permitted", which is the worst of both.
-  onlyAdmin: false
-  versionName: "0.1.2"
+  # Required: the platform refuses a manifest with `options.shared: true` and this false, and says
+  # why -- a shared app serves every user on the cluster, so installing one is an administrator's
+  # act.
+  #
+  # It reads like it contradicts "everybody on this Olares is in the fleet", and it does not. Both
+  # of the checks behind this flag are about installing, and their message says so: "only admin
+  # user can install this app". Neither hides an entrance. What `wording.md` warns about -- a
+  # non-admin being told an app is "not installed" rather than "not permitted" -- is the per-user
+  # case, where an admin-installed app genuinely exists only in the admin's namespace. A shared app
+  # is installed once for the cluster and is not that.
+  #
+  # Still worth confirming on a machine with a second account, which this one does not have: that a
+  # non-admin signing in can open the entrance and lands in the same fleet.
+  onlyAdmin: true
+  versionName: "0.1.4"
   requiredMemory: 128Mi
   limitedMemory: 512Mi
   requiredCpu: 50m
@@ -40,6 +49,18 @@ spec:
     - arm64
 
 options:
+  # Shared, because a fleet is one Olares. Not a preference: installed per user, every account
+  # would get its own server, its own database and its own mirror, and "one fleet, and everybody
+  # on this Olares is in it" would be false by construction -- each person alone in a fleet of one.
+  # The model this whole app rests on needs exactly one of it.
+  #
+  # It is also what makes the roster reachable, and missing it is why the RBAC in templates/
+  # looked like it was not working. From a per-user namespace the directory gateway answers a
+  # synthetic 504 after exactly one second -- a refusal rather than an absence, since an address
+  # that does not resolve fails in a millisecond. From the shared namespace the same address
+  # answers in three. The binding says which cluster role a namespace holds; this says which
+  # namespace the app gets.
+  shared: true
   dependencies:
     - name: olares
       version: ">=1.12.7-0"
