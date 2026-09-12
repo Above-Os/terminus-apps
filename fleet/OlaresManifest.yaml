@@ -1,0 +1,80 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+
+workloadReplicas:
+  fleet: 1
+
+metadata:
+  name: fleet
+  appid: fleet
+  description: Run and watch coding agents on the machines you own, from one place.
+  icon: https://app.cdn.olares.com/appstore/fleet/icon.png
+  version: "0.1.0"
+  title: Fleet
+  categories:
+    - Utilities_v112
+    - agents
+  tags:
+    - agents
+    - developer
+
+permission:
+  appData: true
+
+spec:
+  # Not admin-only. Everybody on this Olares is in the fleet, and what they can reach inside it is
+  # their own machines and whatever a colleague has lent them -- so an admin-only app would hide
+  # the product from the people it is for. Olares tells a non-admin that an admin-only app is "not
+  # installed" rather than "not permitted", which is the worst of both.
+  onlyAdmin: false
+  versionName: "0.1.0"
+  requiredMemory: 128Mi
+  limitedMemory: 512Mi
+  requiredCpu: 50m
+  limitedCpu: "1"
+  requiredDisk: 100Mi
+  limitedDisk: 1Gi
+  supportArch:
+    - amd64
+    - arm64
+
+options:
+  dependencies:
+    - name: olares
+      version: ">=1.12.7-0"
+      type: system
+
+# Two entrances, because this app has two kinds of caller and only one of them is a person.
+#
+# The control plane is a browser. The platform's edge authenticates it, strips whatever the client
+# sent, and stamps who it is -- which is the only reason this server trusts an identity header at
+# all. `private` because a fleet is this Olares's machines and its people.
+#
+# The data plane is a daemon on somebody's laptop, dialling in from wherever that laptop is. It is
+# not a person and has no session: it presents a token the server issued when the machine was
+# paired, and the server checks it. So this entrance is `public` -- the edge must let the request
+# reach the server for the server to be able to refuse it -- and `invisible`, because it is not a
+# page and belongs in nobody's launcher.
+entrances:
+  - name: fleet
+    host: fleet-svc
+    port: 80
+    title: Fleet
+    icon: https://app.cdn.olares.com/appstore/fleet/icon.png
+    openMethod: window
+    authLevel: private
+  - name: machines
+    host: fleet-machines-svc
+    port: 80
+    title: Fleet machines
+    authLevel: public
+    invisible: true
+
+middleware:
+  postgres:
+    username: fleet
+    password: fleet
+    databases:
+      - name: fleet
+        distributed: false
