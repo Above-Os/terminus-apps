@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: {{ .Values.workloads.fleet.replicaCount }}
+  # Recreate, not RollingUpdate. Two of these would both hold the scheduler's loop and both accept
+  # device tunnels, and while the second is survivable the database migration on startup is not:
+  # an old replica keeps serving against a schema the new one has already changed.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: fleet
+  template:
+    metadata:
+      labels:
+        app: fleet
+        io.bytetrade.app: "true"
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: fleet
+          image: docker.io/beclab/fleet:0.1.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: AGENTD_SERVER_ADDR
+              value: "0.0.0.0:8080"
+            # Postgres comes from the platform: the manifest's `middleware.postgres` block asks
+            # for the database and these values are what it was given. The password is a value
+            # here rather than a secret reference because that is where the chart receives it.
+            - name: DATABASE_URL
+              value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.fleet }}?sslmode=disable"
+            # Identity is the platform's. The edge authenticates every request and stamps who made
+            # it, having first stripped whatever the client sent -- which is what makes trusting
+            # the header safe here and nowhere else. Without this the server would look for an
+            # OpenID provider it has not been given and refuse every request.
+            - name: AGENTD_BEHIND_OLARES_EDGE
+              value: "1"
+            # The roster. The fleet refuses to start if this does not answer, which is the point:
+            # no roster means no administrators and nobody swept when the Olares deletes an
+            # account, and both look like an empty fleet rather than a failure.
+            #
+            # Three things have to line up for this address to answer, and missing any one of them
+            # looks like the directory being down. The app must be `shared`, or the mesh refuses
+            # the connection from a per-user namespace -- a synthetic 504 after exactly one second,
+            # where an address that does not resolve fails in a millisecond. The namespace must be
+            # bound to `backend:lldap-provider` (templates/rbac.yaml). And the request must carry
+            # this pod's service-account token, or the gateway answers 401.
+            - name: AGENTD_DIRECTORY_URL
+              value: "{{ .Values.directoryURL | default "http://lldap-provider-svc.os-framework:28080" }}"
+            # The control-plane address, because what this is used for is a page: when a laptop
+            # starts pairing, the server tells it where a person should go to type the code in,
+            # and that person is in a browser. The data-plane entrance is where `agentd link`
+            # points and nothing here needs to know it -- the daemon was told it by whoever ran
+            # the command.
+            - name: AGENTD_PUBLIC_URL
+              value: "https://{{ .Values.domain.fleet }}"
+            - name: TZ
+              value: "UTC"
+          # Readiness rather than liveness for the first one: a server that cannot reach its
+          # database should stop taking traffic, not be killed and restarted into the same
+          # database it still cannot reach.
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-svc
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  type: ClusterIP
+  selector:
+    app: fleet
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: http
+---
+# The data plane. The same pod as the entrance above: one server, two ways in, and which one a
+# request came through is the platform's business rather than this server's. What differs is what
+# the edge does before the request arrives -- it authenticates a person on one and lets a token
+# through on the other -- and the server's own `authenticate` is what decides either way.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-machines-svc
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  type: ClusterIP
+  selector:
+    app: fleet
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: http
