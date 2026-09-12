@@ -24,7 +24,7 @@ spec:
         runAsGroup: 1000
       containers:
         - name: fleet
-          image: docker.io/beclab/fleet:0.1.0
+          image: docker.io/beclab/fleet:0.1.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -43,11 +43,20 @@ spec:
             # OpenID provider it has not been given and refuse every request.
             - name: AGENTD_BEHIND_OLARES_EDGE
               value: "1"
-            # The roster, read from the Olares directory. The server will not start if this does
-            # not answer, which is deliberate: a fleet with no roster has no administrators and
-            # sweeps nobody the platform has deleted, and both look like an empty fleet.
+            # The roster, read from the Olares directory. Empty until this is settled, and empty
+            # is a real posture rather than a disabled feature: nobody arrives with a role, so
+            # everybody who signs in is a member and no account is swept when the Olares deletes
+            # it. Set it and the fleet refuses to start unless the directory answers, which is
+            # what makes the degraded state the one you chose rather than the one you got.
+            #
+            # Not set here because an app namespace cannot reach LLDAP on this platform. It runs
+            # in `os-platform`, and every port of it answers a synthetic 504 in exactly one second
+            # from here — the mesh refusing, not the directory being absent, since an address that
+            # does not resolve fails in a millisecond instead. Router reads the same directory and
+            # runs in a `-shared` namespace with `options.shared: true`, which is the difference
+            # worth asking about.
             - name: AGENTD_DIRECTORY_URL
-              value: "http://lldap-provider-svc.os-framework:28080"
+              value: "{{ .Values.directoryURL | default "" }}"
             # The control-plane address, because what this is used for is a page: when a laptop
             # starts pairing, the server tells it where a person should go to type the code in,
             # and that person is in a browser. The data-plane entrance is where `agentd link`
