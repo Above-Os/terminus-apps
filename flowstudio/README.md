@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.20** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.58** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -19,13 +19,14 @@ Resource envelope (`spec.accelerator`; must cover business API + engine):
 | Resource | Request | Limit |
 |----------|---------|-------|
 | CPU | 2 | 12 |
-| Memory | 4Gi | 40Gi |
+| Memory | 4Gi | 96Gi |
 | Disk | 2Gi | 10Gi |
 | GPU Memory | 6Gi | 24Gi |
 
 ## Install
 
 1. In Olares **Market**, search **FlowStudio** (test or public source, depending on release).
+   **Admin-only:** `options.shared: true` installs one cluster instance (`flowstudio-shared`).
 2. Bind an NVIDIA GPU when prompted.
 3. When status is running, open the **FlowStudio** entrance from the desktop.
 
@@ -65,6 +66,57 @@ Admins own project definition and environment; published projects can be used by
 
 Release packages must set `dev.hotReload: false`.
 
+## Olares Router (Market auto-discovery)
+
+Market lifts `options.LLMGatewaySupported` and `MODEL_MODE=image_generation` into the
+provider catalog. Router's Olares projector types this app's row as `flowstudio` rather
+than `model_console` — it is a channel of many workflows, not one model — and sets
+`base_url` to `http://<shared-entrance>/v1`. This chart is therefore a **shared**
+admin install (`options.shared` + `spec.onlyAdmin`) with an internal `sharedEntrances`
+entry on `flowstudio-svc:8080` so the projector gets a real in-cluster address.
+
+Router talks to two surfaces here, and neither is the OpenAI one. It reaches
+`flowstudio-svc` directly, so no platform identity is injected; it identifies itself
+with `x-caller-app-id: router` and the boundary is `sharedEntrances.authLevel: internal`.
+
+| Purpose | Endpoint |
+|---------|----------|
+| Workflow catalogue | `GET /api/v1/workflows` |
+| One workflow (exposed params) | `GET /api/v1/workflows/{id}` |
+| Start a generation | `POST /api/v1/generations` |
+| Poll it | `GET /api/v1/generations/{id}` |
+| Fetch the output | `GET /api/v1/generations/{id}/content?outputId=` |
+
+One create endpoint covers all four output families. The request body names a
+`workflowId` and never an output family: the workflow already decides it, and a caller
+that could name it could disagree with the catalogue Router built its model rows from.
+A generation started this way is owned by the chart owner, because Router sends no user
+header; separating one Router user's outputs from another's is Router's job, and it does
+it by sealing the binding on its side and never handing a FlowStudio id to a client.
+
+The OpenAI-shaped surface is a different consumer and is unchanged:
+
+| Purpose | Endpoint |
+|---------|----------|
+| Model card | `GET` / `PUT /api/model-spec` |
+| Console phase | `GET /api/progress` |
+| Engine restart | `POST /api/engine/restart` |
+| Model list | `GET /v1/models` |
+| Image generate (sync, `b64_json`) | `POST /v1/images/generations` |
+
+`GET /v1/models` lists every published, produce-ready scene whose output is image,
+video, audio, or 3D and that can run from a prompt (no required reference media).
+`id` is the scene name; collisions append the project id. Each row also has
+`output_type`: `image`, `video`, `audio`, or `model3d`.
+`POST /v1/images/generations` uses `model` to pick that scene and returns the first
+matching output as `b64_json`; omit `model` (or pass the Model Console card name) to
+use the newest eligible scene. It runs under the caller's own user identity, so
+workflows that require uploaded media stay in the FlowStudio UI — unlike the Router
+surface above, which accepts them as base64 data URLs.
+
+`MODEL_SUPPORTS` stays empty (Router has no image-generation `supports_*` key). This app
+does not run `llm-init`.
+
 ## Storage and middleware
 
 - **appData:** user projects and business data (`USER_DATA_DIR` → `{owner_id}/comfyui/…`)
@@ -82,8 +134,9 @@ olares-cli market uninstall flowstudio --watch
 
 Only pass `--delete-data` when you intentionally want appData wiped (projects / userdata).
 **Ask before using it** — models live on the shared Common volume and must not be treated as
-disposable per-app cache. The chart pre-delete hook removes dynamic engines and this app's
-GPUBindings only; it never deletes model weights.
+disposable per-app cache. The chart pre-delete hook drains runtime engines, prepull
+Jobs/Pods, and this app's GPUBindings so the namespace can terminate; it never
+deletes model weights.
 
 ## Upgrade
 
@@ -92,11 +145,13 @@ Bump together:
 1. `Chart.yaml` `version` / `appVersion`
 2. `OlaresManifest.yaml` `metadata.version` and `spec.versionName`
 3. If code or deps changed: push new image tags and update `values.yaml` `appImage` / `engineImage`
+   (**tag only** for Chat/test-market PRs — do **not** append `@sha256:…`; GitBot digest checks false-404)
 4. Fill `spec.upgradeDescription` (and `i18n/*/OlaresManifest.yaml`)
 
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
-See Manifest `upgradeDescription` for this release (0.3.20).  
+Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
+covers 0.3.58. This chart ships `docker.io/beclab/flowstudio:0.3.57` and `engine-1.0.7`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout

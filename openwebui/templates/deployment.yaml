@@ -117,7 +117,9 @@ spec:
             - name: WEBUI_DB_PATH
               value: /data/webui.db
             - name: SEED_INTERVAL_SEC
-              value: "10"
+              value: "60"
+            - name: SEED_IDLE_INTERVAL_SEC
+              value: "300"
           resources:
             requests:
               cpu: 10m
@@ -132,7 +134,7 @@ spec:
               mountPath: /scripts
               readOnly: true
         - name: openwebui
-          image: 'docker.io/openwebui/open-webui:0.11.0'
+          image: 'docker.io/openwebui/open-webui:0.11.3'
           ports:
             - containerPort: 8080
 
@@ -183,14 +185,33 @@ spec:
             - name: CORS_ALLOW_ORIGIN
               value: "*"
             - name: USER_AGENT
-              value: "OpenWebUI/0.11.0"
+              value: "OpenWebUI/0.11.3"
             - name: WEBSOCKET_EVENT_CALLER_TIMEOUT
               value: "600"
             - name: RAG_EMBEDDING_ENGINE
               value: "ollama"
+            # Keep SQLite; wait out knowledge-ingest writers instead of failing heartbeats.
+            - name: DATABASE_ENABLE_SQLITE_WAL
+              value: "true"
+            - name: DATABASE_SQLITE_PRAGMA_BUSY_TIMEOUT
+              value: "30000"
+            - name: ENABLE_ORJSON
+              value: "true"
+            - name: THREAD_POOL_SIZE
+              value: "256"
+            - name: DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
+              value: "300"
+            - name: ENABLE_BASE_MODELS_CACHE
+              value: "true"
+            - name: MODELS_CACHE_TTL
+              value: "300"
+            - name: CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE
+              value: "7"
+            - name: WEBSOCKET_HEARTBEAT_INTERVAL
+              value: "60"
           resources:
             limits:
-              cpu: "2"
+              cpu: "4"
 {{- if and .Values.olaresEnv (eq (lower (toString .Values.olaresEnv.HF_HUB_OFFLINE)) "false") }}
               memory: 8Gi
 {{- else }}
@@ -203,18 +224,12 @@ spec:
           volumeMounts:
             - name: appdata
               mountPath: /app/backend/data
-            - name: hf-cache
-              mountPath: /app/backend/data/cache
 
       volumes:
         - name: seed-scripts
           configMap:
             name: openwebui-seed-scripts
             defaultMode: 0555
-        - name: hf-cache
-          hostPath:
-            path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}"
-            type: DirectoryOrCreate
         - name: appdata
           hostPath:
             path: "{{ .Values.userspace.appData }}/data"

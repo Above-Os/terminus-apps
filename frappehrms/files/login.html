@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Frappe HR</title>
+  <style>
+    body { font-family: sans-serif; background: #f5f7fa; margin: 0; }
+    .wrap { max-width: 360px; margin: 12vh auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { color: #667085; margin: 0 0 20px; }
+    label { display: block; font-size: 13px; margin: 12px 0 6px; }
+    input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 8px; }
+    button { width: 100%; margin-top: 18px; padding: 10px; border: 0; border-radius: 8px; background: #2490ef; color: #fff; font-weight: 600; cursor: pointer; }
+    #err { color: #d92d20; min-height: 1.2em; margin-top: 12px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Frappe HR</h1>
+    <p>Sign in with your Administrator account.</p>
+    <form id="f">
+      <label for="usr">User</label>
+      <input id="usr" name="usr" value="Administrator" autocomplete="username"/>
+      <label for="pwd">Password</label>
+      <input id="pwd" name="pwd" type="password" autocomplete="current-password"/>
+      <button type="submit">Sign in</button>
+    </form>
+    <div id="err"></div>
+  </div>
+  <script>
+    document.getElementById("f").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      var err = document.getElementById("err");
+      err.textContent = "";
+      try {
+        var r = await fetch("/api/method/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            usr: document.getElementById("usr").value,
+            pwd: document.getElementById("pwd").value
+          })
+        });
+        var data = await r.json();
+        if (r.ok && (data.message === "Logged In" || (data.message && data.message.home_page))) {
+          window.location.href = "/app";
+          return;
+        }
+        err.textContent = data.message || data.exception || "Login failed";
+      } catch (ex) {
+        err.textContent = String(ex);
+      }
+    });
+  </script>
+</body>
+</html>

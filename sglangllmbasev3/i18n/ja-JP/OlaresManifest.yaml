@@ -1,0 +1,52 @@
+metadata:
+  description: "汎用 SGLang エンジンベース。インストール時に env で任意の HuggingFace Safetensors モデルを選択"
+  title: SGLang Engine Base
+
+spec:
+  upgradeDescription: |
+    SGLang を v0.5.17-cu130 から v0.5.18-cu130 へアップグレード。Chart 1.2.32。
+
+    **変更内容**（v0.5.17 → v0.5.18）
+    - 新モデル: Muse Glimmer、Intern-S2-Mobius、SANA-Video、LingBot-Video-MoE、LTX-2.5、Cosmos3 Edge & Distilled、LongCat-Image、加えて Qwen3.8、Ling-3.0、Nemotron 3.5 Lightning、Dots3-Note、DeepSeek-V4-Pro-0813 の cookbook レシピ
+    - 起動高速化: チェックポイントステージングが CUDA グラフキャプチャと重なるように（`--startup-weight-load-mode overlap`）— Qwen3-32B / H100 で通常のデフォルトより最大 2.38x高速
+    - 並列化: pure-DP dp-attention 向け TP LMHead all-to-all、FlashInfer MNNVL pure allreduce（DeepSeek-V3/V3.2/V4 で自動）、DSV4 向け CP V2 と多数の DCP 最適化
+    - 投機的デコード: DSpark と DFlash の logprobs、DP attention 下の DSpark 向け MegaMoE、ホスト側 ngram オーバーヘッド低減
+    - ランタイム＆キャッシュ: コンパイル済みカーネルキャッシュをすべて `SGLANG_CACHE_DIR` 下に統合、HiCache packed/sidecar ドラフトキャッシュ、ウォームアップ後に GC 凍結
+    - 依存関係: torch 2.13.0 + triton 3.7.1、FlashInfer 0.6.17、CuTeDSL 4.6.2、sgl-kernel 0.4.6.post1、DeepEP はリリースホイールから
+    - 破壊的変更: torchao 統合（`--torchao-config`）を削除; アップグレード後初回起動でカーネルが一度再コンパイル; リモートメディアダウンロード上限 64 MiB; MoE deferred finalize と DSV4 fused MHC post+pre パスはデフォルトオン
+
+    詳細なリリースノート:
+    https://github.com/sgl-project/sglang/releases
+  fullDescription: |
+    **重要なお知らせ**  
+    このアプリはテンプレートであり、単体では使えません。下の環境変数を設定して特定モデルを接続してください。
+
+    **環境変数セットアップガイド**
+    - `MODEL_SOURCE`: `hf://<repo>`。モデルをダウンロードする HuggingFace ソース。例: `hf://openai/gpt-oss-20b`。`.safetensors` 重みファイルを含むリポジトリを使用。任意で `--include <file>` または `--revision <sha>` を追加。
+    - `MODEL_NAME`: `owner/repo`。モデル名 — `MODEL_SOURCE` の `hf://` 以降。例: `openai/gpt-oss-20b`。OpenAI エイリアスおよび SGLang `--model-path` としても使用。
+    - `MODEL_MODE`: `chat` または `embedding`。会話モデルは `chat`; embedding の場合チャートが自動で `--is-embedding` を追加。
+    - `MODEL_SUPPORTS`: モデル能力（Vision / Tools / Thinking / None）。モデルが対応するものを選択。
+    - `ENGINE_ARGS`: `--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser gpt-oss --tool-call-parser gpt-oss`。追加の SGLang CLI フラグ。複数の `--key value` はスペース区切り。`--reasoning-parser` と `--tool-call-parser` をモデルファミリに合わせて調整。参照： https://docs.sglang.io/docs/advanced_features/server_arguments
+    - `LOG_LEVEL`: `debug`、`info`、`warn`、または `error`。llm-init コンテナのログレベル。
+    - `SGLANG_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。NVIDIA では MiB 単位の `nvidia.com/gpumem` を設定; Spark ではポッドメモリを設定。
+
+    **動作の仕組み**
+    まず `llm-init` がモデルをダウンロードして準備し、準備ができたら SGLang がサービングを開始します。両者は別 Deployment で動作しますが、App Common ストレージ経由で HF キャッシュと実行状態を共有します。
+
+    **スタック**
+    - **SGLang**（ポート 30000）: モデルを実行し API リクエストを処理
+    - **llm-init**（ポート 8090）: モデルをダウンロードし、進捗を表示し、OpenAI API を提供して SGLang へプロキシ
+
+    **アクセラレータモード**
+    | モード         | デバイス          | 詳細                                                                 |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | `SGLANG_REQUIRED_GPU_MEMORY` を設定; ENGINE_ARGS で `--mem-fraction-static` を調整 |
+    | `nvidia-gb10`  | GPU (Spark)       | 上記と同様だがメモリはポッドが管理                                   |
+
+    **モデルストレージ**
+    すべてのモデルファイルは共有フォルダ `appCommon/huggingface` に保存され、`/cache/hf/hub` にマウントされます。類似アプリもモデルにこの場所を使います。
+
+    **リソースのヒント**
+    - CPU、RAM、GPU はチャートに基づき自動設定; ディスク設定は固定。
+    - 大規模モデルの SGLang ロードには数分かかることがあります。Ready になるまで Running を維持。
+    - SGLang はプレフィックスキャッシュと構造化出力（JSON、ツールコール、エージェント）に優れ、プレフィックスキャッシュはデフォルトで有効です。

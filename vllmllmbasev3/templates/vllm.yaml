@@ -12,7 +12,25 @@
 {{- $gpuType := include "llmbase.gpuType" . -}}
 {{- $engineImage := include "vllmllmbasev3.engineImage" . -}}
 {{- $gb10FromNodes := eq (include "llmbase.isGb10" .) "true" -}}
+{{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
+{{- $needDri := or $isAmdGpu $isIntelGpu -}}
 {{- $unifiedMem := or $gb10FromNodes (eq $gpuType "nvidia-gb10") -}}
+{{- /* nvidia.com/gpumem is NVIDIA-HAMi only: HAMi's extender exempts it from
+       the node capacity check, so it can carry a quota the kubelet never
+       advertises. The discrete AMD/Intel plugins advertise a card count and
+       nothing else, so their quota cannot ride on a container resource at all
+       and travels on a pod annotation instead, which is inert to the
+       scheduler. app-service reads it to resolve the requiredGPUMemory /
+       limitedGPUMemory "-1" sentinel this manifest declares for those modes;
+       without it the sentinel resolves to 0 and the card is dropped from its
+       own compute binding on resume. */ -}}
+{{- $needNvidiaGpumem := and (not $unifiedMem) (not $isAmdGpu) (not $isIntelGpu) -}}
+{{- $needGpuMemAnnotation := or $isAmdGpu $isIntelGpu -}}
+{{- $shmLimit := "16Gi" -}}
+{{- if $isIntelGpu -}}
+{{- $shmLimit = "10Gi" -}}
+{{- end -}}
 {{- $engineArgs = include "vllmllmbasev3.engineArgs" (dict "Args" $engineArgs) -}}
 {{- /* nvidia.com/gpumem: nvidia -> explicit in chart; gb10 -> pod memory quota only,
        gpu-inject sets matching requests/limits (chart gpumem on gb10 breaks K8s
@@ -23,7 +41,7 @@
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
 {{- /* Must match llm-init.yaml: per-release run-state hostPath. */ -}}
-{{- $runStateHostPath := printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # vLLM engine Deployment. wrappers/vllm.sh waits on llm-init's sentinel in
 # the shared run-state dir, then serves --model "$MODEL_NAME" on :8000. llm-init
@@ -55,6 +73,13 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: vllm
+{{- if $needGpuMemAnnotation }}
+      # VRAM quota for the modes that cannot express it as a resource. Plain
+      # Kubernetes quantity (unlike nvidia.com/gpumem, which is a bare MiB int).
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -70,14 +95,46 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+{{- if $isAmdGpu }}
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+            type: CharDevice
+{{- end }}
+{{- if $needDri }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $shmLimit }}
+{{- end }}
+{{- if $isAmdGpu }}
+      securityContext:
+        supplementalGroups:
+          - 44
+          - 992
+{{- end }}
       containers:
         - name: vllm
           image: "{{ $engineImage }}"
           imagePullPolicy: IfNotPresent
+{{- if $isIntelGpu }}
+          command: ["/bin/bash", "/llm-init/wrappers/vllm.sh"]
+{{- else }}
           command: ["/bin/sh", "/llm-init/wrappers/vllm.sh"]
+{{- end }}
           env:
             - name: ENGINE_KIND
               value: vllm
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
             - name: MODEL_NAME
               value: "{{ $modelName }}"
             - name: VLLM_PORT
@@ -86,15 +143,29 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: OLARES_GPU_MODE
+              value: {{ $gpuType | quote }}
             # Read the model llm-init already downloaded to the shared HF Hub
             # cache (hostPath /cache/hf/hub) instead of re-downloading to the
             # container's default ~/.cache/huggingface (ephemeral, lost on restart). 
             - name: HF_HUB_CACHE
               value: /cache/hf/hub
+            # Weights are guaranteed local — wait_for_sentinel gates startup on
+            # llm-init finishing the download — so skip the Hub entirely. Without
+            # this, huggingface_hub HEADs the Hub for every file it cannot find
+            # (chat_template.jinja, adapter configs, ...) and cannot write the
+            # .no_exist negative cache to the read-only mount above, so the same
+            # ~90 lookups repeat on every start (measured 160s -> 105s on a 12B AWQ).
+            - name: HF_HUB_OFFLINE
+              value: "1"
             - name: VLLM_CACHE_ROOT
               value: /cache/vllm
             - name: PYTHONUNBUFFERED
               value: "1"
+{{- if $isIntelGpu }}
+            - name: VLLM_WORKER_MULTIPROC_METHOD
+              value: spawn
+{{- end }}
             - name: PGID
               value: "1000"
             - name: PUID
@@ -106,6 +177,23 @@ spec:
               value: "true"
             - name: VLLM_SPARK_AUTO_GPU_UTIL
               value: "false"
+{{- end }}
+{{- if $isAmdGpu }}
+            # RDNA4 (R9700 / gfx1201): AITER C++/ASM kernels are unreliable;
+            # Triton FlashAttention is the supported path. Wrapper also maps
+            # gfx1201 in AITER's Triton arch table for FP8 imports.
+            - name: VLLM_ROCM_USE_AITER
+              value: "0"
+            - name: FLASH_ATTENTION_TRITON_AMD_ENABLE
+              value: "TRUE"
+            # gfx1201 GDN/Triton autotune can hang mid-decode (0 tok/s, engine
+            # core stops logging). First-config skips the exploding IR path.
+            - name: VLLM_TRITON_FORCE_FIRST_CONFIG
+              value: "1"
+            # HIP still sees the whole card; same Spark tuner maps ENGINE_ARGS
+            # --gpu-memory-utilization 0.9 onto VLLM_REQUIRED_GPU_MEMORY.
+            - name: VLLM_POD_MEMORY_MIB
+              value: "{{ $gpuMiB }}"
 {{- end }}
           ports:
             - name: vllm
@@ -130,18 +218,31 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+{{- if $isAmdGpu }}
+            - name: kfd
+              mountPath: /dev/kfd
+{{- end }}
+{{- if $needDri }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
-            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory + gpu-inject.
+            # nvidia.com/gpumem: nvidia only in chart; gb10 via pod memory +
+            # gpu-inject; amd-gpu / intel-gpu via the pod annotation above.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if not $unifiedMem }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if not $unifiedMem }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---

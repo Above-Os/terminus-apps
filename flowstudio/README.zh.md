@@ -3,7 +3,7 @@
 Olares 上的一体化 AI 工作流生产应用：导入 ComfyUI 工作流、解析模型与节点、
 按项目动态分配 GPU，并在 PC / 移动双端完成生成。
 
-当前 Chart 版本：**0.3.15**（须与 `Chart.yaml` / `OlaresManifest.yaml` 一致）。
+当前 Chart 版本：**0.3.33**（须与 `Chart.yaml` / `OlaresManifest.yaml` 一致）。
 
 ## 运行要求
 
@@ -26,6 +26,7 @@ Olares 上的一体化 AI 工作流生产应用：导入 ComfyUI 工作流、解
 ## 安装
 
 1. 在 Olares **Market** 搜索 **FlowStudio**（测试源或正式源，以实际发布为准）。
+   **仅管理员可安装：** `options.shared: true` 会安装一个集群共享实例（`flowstudio-shared`）。
 2. 安装时按提示绑定 NVIDIA GPU。
 3. 状态为 running 后，从桌面打开 **FlowStudio** 入口。
 
@@ -61,9 +62,30 @@ olares-cli chart package deploy/flowstudio
 | 镜像 | `values.yaml` 字段 |
 |------|-------------------|
 | 业务 | `appImage` / `image`（upgrade 粘 values 时优先改 `appImage`） |
-| 引擎 | `engineImage`；可选 `engineImageAmd` |
+| NVIDIA 引擎 | `engineImage`（写入 `options.images` 安装期预拉取） |
+| AMD 引擎 | `engineImageAmd`（运行时选择；首次拉起引擎时由 kubelet 拉取，不进预取列表） |
 
 正式上架包必须 `dev.hotReload: false`。
+
+## Olares Router（Market 自动发现）
+
+Market 会把 `options.LLMGatewaySupported` 和 `MODEL_MODE=image_generation` 投影到 provider
+目录。Router 将该条目识别为 `model_console`，并使用内部 `sharedEntrances` 入口
+`flowstudio-svc:8080` 访问共享的管理员安装实例。
+
+Router 调用 OpenAI 风格的数据面：
+
+| 用途 | 端点 |
+|------|------|
+| 模型卡 | `GET` / `PUT /api/model-spec` |
+| 控制台阶段 | `GET /api/progress` |
+| 重启引擎 | `POST /api/engine/restart` |
+| 模型列表 | `GET /v1/models` |
+| 同步图片生成 | `POST /v1/images/generations` |
+
+`GET /v1/models` 会列出所有已发布、可生产且只需提示词即可运行的图片、视频、音频和 3D 场景；
+需要上传参考媒体的工作流仍在 FlowStudio UI 中使用。`MODEL_SUPPORTS` 保持为空，因为 Router
+没有图像生成对应的 `supports_*` 键，FlowStudio 也不运行 `llm-init`。
 
 ## 存储与中间件
 
@@ -82,7 +104,8 @@ olares-cli chart package deploy/flowstudio
 
 从 Market 升级到本版本后：重新打开应用；若 GPU 绑定丢失，在 Olares 加速器中重新绑定后再启动。
 
-本版（0.3.15）变更摘要见 Manifest 中的 `upgradeDescription`。
+Manifest 中的 `upgradeDescription` 跟随 `spec.versionName`（应用发布版本），目前对应 0.3.48。
+本 Chart 使用镜像 `flowstudio:0.3.48` 与 `engine-1.0.7`（安装期不预取 ROCm）。
 
 ## Chart 结构
 

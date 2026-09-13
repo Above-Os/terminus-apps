@@ -5,6 +5,8 @@ metadata:
   namespace: "{{ .Release.Namespace }}"
   labels:
     app: router
+  annotations:
+    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName": "router","entranceName":"router-frontend","thirdLevelDomain":"router"}]'
 spec:
   replicas: {{ .Values.workloads.router.replicaCount }}
   selector:
@@ -16,10 +18,12 @@ spec:
     metadata:
       labels:
         app: router
+      annotations:
+        config.linkerd.io/skip-outbound-ports: "4222"
     spec:
       containers:
         - name: router-frontend
-          image: docker.io/beclab/llm-gateway-frontend:v2.1.0
+          image: docker.io/beclab/router-frontend:v2.7.44
           resources:
             requests:
               cpu: 500m
@@ -60,7 +64,7 @@ spec:
           ports:
             - containerPort: 80
         - name: router-backend
-          image: docker.io/beclab/llm-gateway-backend:v2.1.0
+          image: docker.io/beclab/router:v2.7.44
           imagePullPolicy: IfNotPresent
           env:
             - name: PGID
@@ -76,6 +80,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: LLM_GATEWAY_CRYPTO_ENCRYPTION_KEY
+            - name: LLM_GATEWAY_CATALOG_EVENTS_NATS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: LLM_GATEWAY_CATALOG_EVENTS_NATS_PASS
           resources:
             requests:
               cpu: 200m

@@ -6,18 +6,31 @@ metadata:
   appid: wisev3
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Your Digital Secret Garden
-  title: Wise V3 for test
-  version: '1.1.12'
+  title: Wise
+  version: '1.2.32'
   categories:
-    - Productivity_v112
+    - homelab
     - Fun
+  tags:
+    - reading
 
-# Per-user app — every user installs their own frontend that talks to the
-# admin-installed shared backend (knowledge) over in-cluster DNS.
-# The Wise frontend image (TermiPass docker/wise/wise.conf) hardcodes the
-# FQDN `rss-svc.knowledge-shared:{3010,3100}`, so it resolves to the
-# knowledge namespace directly without a local Service in this chart.
-# No sharedEntrances: this app is not consumed by other v3 apps.
+sharedEntrances:
+  - name: knowledge
+    host: sharedentrances-knowledge
+    port: 0
+    title: Knowledge API
+    icon: https://app.cdn.olares.com/appstore/wise/icon.png
+    invisible: true
+    authLevel: internal
+
+# Entrances:
+#   - wiseclient: the Wise UI (merged-in frontend). Registered by the Olares
+#     gateway for every user; all users' entrances point at the single shared
+#     `wise-svc` frontend (admin installs once, everyone gets an entry).
+#   - knowledge: admin-only, invisible API entrance for direct access
+#     (debugging / admin tooling). Backed by the `rss-svc` Service (name kept
+#     for compatibility with the Wise frontend image, which hardcodes
+#     `rss-svc.<knowledge-ns>` as nginx upstreams).
 entrances:
   - name: wiseclient
     port: 80
@@ -26,12 +39,17 @@ entrances:
     icon: https://app.cdn.olares.com/appstore/wise/icon.png
     authLevel: internal
     openMethod: window
+  - name: knowledge
+    port: 3010
+    host: rss-svc
+    title: Knowledge API
+    icon: https://app.cdn.olares.com/appstore/wise/icon.png
+    authLevel: private
+    invisible: true
 
-# Declares every workload's replica count (v3 schema). Keys MUST match the
-# rendered Deployment metadata.name and values.yaml workloads.<name>:
-#   wisev3 — Wise frontend nginx Deployment (== appid / Release.Name)
 workloadReplicas:
   wisev3: 1
+  knowledge: 1
 
 permission:
   appData: true
@@ -39,8 +57,19 @@ permission:
   userData:
     - Home
 
+middleware:
+  redis:
+    namespace: knowledge
+  postgres:
+    username: knowledge
+    databases:
+      - name: knowledge
+        extensions:
+          - pg_trgm
+          - btree_gin
+
 spec:
-  versionName: '1.9.4'
+  versionName: '1.11.43'
   featuredImage: https://app.cdn.olares.com/appstore/wise/1.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/wise/1.webp
@@ -48,44 +77,31 @@ spec:
     - https://app.cdn.olares.com/appstore/wise/3.webp
     - https://app.cdn.olares.com/appstore/wise/4.webp
   fullDescription: |
-    Wise is a modern knowledge management tool built for control and insight. Wise empowers you to collect diverse content from across the web and your devices. Crucially, it leverages locally-run AI to unearth valuable insights, freeing you from the filter bubbles and privacy compromises of big-platform algorithms.
+    Wise is a local-first reader that collects articles, videos, audio, and
+    feeds into one library on Olares. Use it to save pages, upload files,
+    subscribe to sources, and organize what you want to read.
 
-    *Why Choose Wise*
-    - AI-Powered, Local-First Reader: Easily collect, read, and manage information from various platforms.
-    - Tailored Recommendations: Break out of filter bubbles with tailored content powered by self-hosted recommendation algoritms.
-    - Third-Party Integrations: Provide APIs for smooth integration with 3rd-party knowledge apps.
+    **Key features**
 
-    Key Features
-    *All-in-One Content Capture:*
-    - Click Once, Save Anything: Instantly capture web pages to read later.
-    - Own Your Media: Automatically save YouTube videos, podcasts, and other multimedia directly to your device.
-    - Bring It All In: Directly upload local files (PDFs, EPUBs, videos, audio) to your Olares system.
+    - Subscribe to websites, blogs, podcasts, and video channels through RSS.
+    - Save web pages with the LarePass browser extension or the LarePass mobile app.
+    - Upload PDF, EPUB, audio, video, and other documents into the library.
+    - Organize items with Inbox, Read Later, tags, notes, and filtered views.
+    - Search PDF, web article, and EPUB items through Olares search.
+    - Import an existing feed list from an OPML file.
 
-    *Distraction-Free Reading*
-    - Clean View: Extract pure content for a clean, focused reading experience.
-    - Switch theme: Seamlessly switch between light and dark themes.
-    - Keyboard-based: 90% of actions accessible via shortcuts
-    - Pick up where you left off: Sync reading progress automatically across all your devices.
+    **For Olares users**
 
-    *Curate Unbiased Insights:*
-    - Go Straight to the Source: Subscribe directly via RSS feeds.
-    - Smart, Local Suggestions: Discover relevant content based on your data using powerful local LLMs, bypassing mainstream bias.
+    This is a shared app. An Admin installs it once for the whole system.
+    Every user still gets a Wise entrance. All entrances open the same
+    shared instance.
 
-    *Streamlined Content Management:*
-    - Organize Effortlessly: Easily tag documents and add notes for simple yet powerful organization.
-    - Filtered View: Customize your reading list
-  upgradeDescription: |
-    Migrated Wise to apiVersion v3. The shared backend has been split out
-    into the standalone v3 shared app `knowledge` (admin-installed once).
+    Some features need extra Market apps. Use RSS Subscribe for in-browser
+    feeds, YT-DLP for media downloads, and the Twitter/X plugin for posts.
 
-    **What's Changed**
-    - **Architecture**: the wise client (frontend nginx) is now a per-user
-      v3 application; backend (knowledge + vectorcrawl + flaresolverr) is
-      installed once by the Olares Admin as the shared v3 app `knowledge`
-      and reached over in-cluster DNS.
-    - **Schema**: apiVersion v3, declared `workloadReplicas: { wisev3: 1 }`;
-      Deployment uses `{{ .Release.Name }}`.
-    - **Probes**: startup / liveness / readiness probes added on port 80.
+    Login-restricted pages may need cookies. 
+
+    For setup and daily use, see the [Wise documentation](https://docs.olares.com/manual/olares/wise/).
 
   developer: Olares
   website: https://www.olares.com/
@@ -93,25 +109,27 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
   doc: https://docs.olares.com/manual/olares/wise/
-  requiredCpu: 50m
-  limitedCpu: 1
-  requiredMemory: 50Mi
-  limitedMemory: 300Mi
+  requiredCpu: 310m
+  limitedCpu: 7.5
+  requiredMemory: 664Mi
+  limitedMemory: 10184Mi
   requiredDisk: 50Mi
   limitedDisk: 500Gi
   supportArch:
     - amd64
     - arm64
+  onlyAdmin: true
 
 options:
+  shared: true
   apiTimeout: 0
   dependencies:
     - name: olares
       type: system
       version: '>=1.12.6-0'
-    # wise frontend is useless without the shared knowledge backend.
-    # Forces Olares to refuse install until the Admin has installed knowledgev3.
-    - name: knowledgev3
-      type: application
-      version: '>=1.1.5'

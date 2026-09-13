@@ -4,17 +4,31 @@ metadata:
 
 spec:
   upgradeDescription: |
-    Upgrade Ollama from v0.31.2 to v0.32.1. Chart 1.3.10.
+    v1.3.20: Model Console can now restart the Ollama daemon. llm-init and the daemon share a RUN_DIR under appCache, and the wrapper runs `ollama serve` under supervise_engine, so editing engine_args on the model card relaunches the daemon with the new values. The model card now also survives a Pod restart — and, being on disk, takes precedence over the ENGINE_ARGS app setting.
+
+    Upgrade Ollama from v0.32.15 to v0.33.1. Chart 1.3.17.
 
     **What's Changed** (relevant to Olares)
 
-    v0.32.1
-    - Improved Gemma 4 tool calling and multi-turn reasoning, including more reliable tool-response continuations
+    v0.33.1
+    - MLX: Qwen3.8 Flash Next support
+    - MLX and llama.cpp updates
+    - mlxrunner: structured output support
+    - mlxrunner: avoid Metal GPU timeouts when loading models from slow storage
 
-    v0.32.0
-    - No server/runtime changes affecting Olares (release focused on interactive agent CLI and `ollama launch` integrations)
+    v0.33.0
+    - Fixed a hang when agent clients cancel long prefills
+    - Prefill restore points now survive cancellation, so retries resume instead of restarting from scratch
+    - Resumed prefills no longer record incomplete restore points (recurrent-layer models no longer reprocess from zero)
+    - Disabled Claude Code's "tokens left" system message, which broke the KV cache on every request
+    - Fixed Linux/Windows default packaging broken by macOS-specific assumptions
+    - MLX dependency update
 
-    Drop accelerator mode `cpu` (GPU-only: `nvidia` / `nvidia-gb10`). Chart 1.3.9.
+    v0.32.15
+    - Caches resolved model metadata between requests, cutting time-to-first-token by roughly half
+    - Fixes chat/generate wedging after a mid-stream parser error
+    - Qwen 3.8 system messages are normalized so non-leading system messages are handled consistently
+    - MLX and llama.cpp dependency updates
 
     For detailed release notes, visit:
     https://github.com/ollama/ollama/releases

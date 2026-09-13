@@ -1,0 +1,52 @@
+metadata:
+  description: "Generische SGLang-Engine-Basis. Beliebiges HuggingFace-Safetensors-Modell bei der Installation per Env wählen"
+  title: SGLang Engine Base
+
+spec:
+  upgradeDescription: |
+    SGLang von v0.5.17-cu130 auf v0.5.18-cu130 aktualisieren. Chart 1.2.32.
+
+    **Änderungen** (v0.5.17 → v0.5.18)
+    - Neue Modelle: Muse Glimmer, Intern-S2-Mobius, SANA-Video, LingBot-Video-MoE, LTX-2.5, Cosmos3 Edge & Distilled, LongCat-Image, plus Cookbook-Rezepte für Qwen3.8, Ling-3.0, Nemotron 3.5 Lightning, Dots3-Note und DeepSeek-V4-Pro-0813
+    - Schnellerer Start: Checkpoint-Staging überlappt jetzt CUDA-Graph-Capture (`--startup-weight-load-mode overlap`) — bis zu 2,38× schneller als der einfache Default auf Qwen3-32B / H100
+    - Parallelität: TP LMHead all-to-all für pure-DP dp-attention, FlashInfer MNNVL pure allreduce (auto für DeepSeek-V3/V3.2/V4), CP V2 für DSV4 und viele DCP-Optimierungen
+    - Spekulative Dekodierung: logprobs mit DSpark und DFlash, MegaMoE für DSpark unter DP-Attention, geringerer Host-seitiger ngram-Overhead
+    - Runtime & Cache: alle kompilierten Kernel-Caches unter `SGLANG_CACHE_DIR` zusammengeführt, HiCache packed/sidecar Draft-Caches, GC nach Warmup eingefroren
+    - Abhängigkeiten: torch 2.13.0 mit triton 3.7.1, FlashInfer 0.6.17, CuTeDSL 4.6.2, sgl-kernel 0.4.6.post1, DeepEP aus Release-Wheels
+    - Breaking: torchao-Integration (`--torchao-config`) entfernt; Kernel werden beim ersten Start nach dem Upgrade einmal neu kompiliert; Remote-Media-Downloads auf 64 MiB begrenzt; MoE deferred finalize und der DSV4 fused MHC post+pre-Pfad sind standardmäßig an
+
+    Detaillierte Release Notes:
+    https://github.com/sgl-project/sglang/releases
+  fullDescription: |
+    **WICHTIGER HINWEIS**  
+    Diese App ist eine Vorlage und kann nicht allein genutzt werden. Setzen Sie die unten stehenden Umgebungsvariablen, um ein konkretes Modell anzubinden.
+
+    **Einrichtungsleitfaden für Umgebungsvariablen**
+    - `MODEL_SOURCE`: `hf://<repo>`. HuggingFace-Quelle zum Herunterladen Ihres Modells, z. B. `hf://openai/gpt-oss-20b`. Nutzen Sie ein Repo mit `.safetensors`-Gewichtungsdateien. Optional `--include <file>` oder `--revision <sha>` anhängen.
+    - `MODEL_NAME`: `owner/repo`. Name Ihres Modells — der String nach `hf://` in `MODEL_SOURCE`, z. B. `openai/gpt-oss-20b`. Wird auch als OpenAI-Alias und SGLang `--model-path` verwendet.
+    - `MODEL_MODE`: `chat` oder `embedding`. `chat` für Konversationsmodelle; bei embedding fügt das Chart automatisch `--is-embedding` hinzu.
+    - `MODEL_SUPPORTS`: Modellfähigkeiten (Vision / Tools / Thinking / None). Wählen Sie, was Ihr Modell unterstützt.
+    - `ENGINE_ARGS`: `--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser gpt-oss --tool-call-parser gpt-oss`. Extra SGLang-CLI-Flags. Mehrere `--key value`-Paare durch Leerzeichen trennen. `--reasoning-parser` und `--tool-call-parser` an Ihre Modellfamilie anpassen. Siehe https://docs.sglang.io/docs/advanced_features/server_arguments.
+    - `LOG_LEVEL`: `debug`, `info`, `warn` oder `error`. Log-Level für den llm-init-Container.
+    - `SGLANG_REQUIRED_GPU_MEMORY`: `8Gi`, `8192` oder `8192Mi`. Benötigter Modellspeicher. Auf NVIDIA setzt dies `nvidia.com/gpumem` in MiB; auf Spark die Pod-Memory.
+
+    **Funktionsweise**
+    Zuerst lädt `llm-init` Ihr Modell herunter und bereitet es vor, dann startet SGLang das Serving, wenn es bereit ist. Beide Teile laufen in getrennten Deployments, teilen aber den HF-Cache und den Run-State über App-Common-Speicher.
+
+    **Stack**
+    - **SGLang** (Port 30000): führt das Modell aus und bedient API-Anfragen
+    - **llm-init** (Port 8090): lädt das Modell herunter, zeigt Fortschritt und stellt die OpenAI-API bereit, mit Proxy zu SGLang
+
+    **Beschleuniger-Modi**
+    | Modus          | Gerät             | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | `SGLANG_REQUIRED_GPU_MEMORY` setzen; `--mem-fraction-static` in ENGINE_ARGS abstimmen |
+    | `nvidia-gb10`  | GPU (Spark)       | Wie oben, aber Speicher wird vom Pod verwaltet                       |
+
+    **Modellspeicher**
+    Alle Modelldateien liegen im gemeinsamen Ordner `appCommon/huggingface`, gemountet als `/cache/hf/hub`. Ähnliche Apps nutzen denselben Ort für Modelle.
+
+    **Ressourcentipps**
+    - CPU, RAM und GPU konfigurieren sich automatisch anhand des Charts; Disk-Einstellungen sind fest.
+    - Das Laden großer Modelle in SGLang kann mehrere Minuten dauern. App Running lassen, bis bereit.
+    - SGLang glänzt bei Prefix-Caching und strukturierter Ausgabe (JSON, Tool Calls, Agents); Prefix-Caching ist standardmäßig aktiviert.

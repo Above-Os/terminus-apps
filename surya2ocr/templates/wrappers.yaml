@@ -1,5 +1,16 @@
 # llama.cpp wrapper: wait on llm-init sentinel, load main GGUF from model_path,
 # auto-attach sibling *mmproj*.gguf (covers surya-2-mmproj.gguf and mmproj-*.gguf).
+#
+# The helpers this sources are NOT here: llm-init publishes common.sh into the
+# shared run dir and the Deployment points WRAPPER_COMMON at that copy, so
+# supervise_engine -- which is what makes POST /api/engine/restart work -- has
+# one implementation instead of one per chart. The script waits for it, because
+# nothing orders the two Deployments.
+#
+# This therefore requires an llm-init image that publishes the helpers, and
+# there is no copy left here to fall back to: with an older image the engine
+# waits out WRAPPER_COMMON_WAIT and exits. Bump llmInitTag in _helpers.tpl in
+# the same change that ships this.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,49 +19,30 @@ metadata:
   labels:
     io.kompose.service: llamacpp
 data:
-  common.sh: |
-    #!/bin/sh
-    set -eu
-
-    SENTINEL=${SENTINEL:-/run/llm-init/model_download_finish}
-    MODEL_PATH_FILE=${MODEL_PATH_FILE:-/run/llm-init/model_path}
-    WAIT_INTERVAL=${WAIT_INTERVAL:-5}
-    WAIT_TIMEOUT=${WAIT_TIMEOUT:-3600}
-
-    log() {
-        printf '[wrapper-%s] %s\n' "${ENGINE:-engine}" "$*"
-    }
-
-    wait_for_sentinel() {
-        elapsed=0
-        while [ ! -f "$SENTINEL" ]; do
-            if [ "$elapsed" -ge "$WAIT_TIMEOUT" ]; then
-                log "timed out after ${WAIT_TIMEOUT}s waiting for $SENTINEL"
-                exit 1
-            fi
-            log "waiting for $SENTINEL (elapsed=${elapsed}s)"
-            sleep "$WAIT_INTERVAL"
-            elapsed=$((elapsed + WAIT_INTERVAL))
-        done
-        log "sentinel $SENTINEL found after ${elapsed}s"
-    }
-
-    read_model_path() {
-        if [ ! -f "$MODEL_PATH_FILE" ]; then
-            log "model path file $MODEL_PATH_FILE not found"
-            exit 1
-        fi
-        tr -d '\r\n' < "$MODEL_PATH_FILE"
-    }
-
   llamacpp.sh: |
     #!/bin/sh
     set -eu
 
     ENGINE=llamacpp
-    . "$(dirname "$0")/common.sh"
+    # Source the shared helpers: the sibling copy by default, or the one
+    # llm-init publishes into RUN_DIR when WRAPPER_COMMON says so. That copy
+    # can arrive late — the two containers are separate Deployments with no
+    # ordering between them — so waiting here is the normal path.
+    # Keep this block byte-identical across wrappers (tests/wrappers checks).
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    # shellcheck source=common.sh
+    . "$WRAPPER_COMMON"
 
     wait_for_sentinel
+    wait_for_engine_args_handoff
     MODEL_PATH=$(read_model_path)
 
     # HF multi-include → snapshot dir; pick main GGUF (not *mmproj*).
@@ -95,48 +87,59 @@ data:
         export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}/lib:${LD_LIBRARY_PATH}"
     fi
 
-    ARGV=""
-    HAS_MMPROJ=0
-    if [ -n "${ENGINE_ARGS:-}" ]; then
-        # shellcheck disable=SC2086
-        set -- $ENGINE_ARGS
-        for tok in "$@"; do
-            case "$tok" in
-                --mmproj) HAS_MMPROJ=1; ARGV="$ARGV $tok" ;;
-                -*)       ARGV="$ARGV $tok" ;;
-                LLAMA_ARG_*=*) export "$tok" && log "engine_args export: $tok" ;;
-                *=*)      log "engine_args drop non-LLAMA_ARG env: $tok" ;;
-                *)        ARGV="$ARGV $tok" ;;
-            esac
-        done
-    fi
+    # Everything that reads ENGINE_ARGS lives in here: supervise_engine
+    # reloads the handoff before each launch, so a restart after a model-card
+    # edit has to re-derive argv rather than reuse what boot computed.
+    run_llamacpp() {
+        # Preserve container CMD extras before ENGINE_ARGS word-splitting.
+        extra_argv="$*"
+        load_engine_args_from_handoff
 
-    # Auto --mmproj if not already in ENGINE_ARGS.
-    if [ "$HAS_MMPROJ" -eq 0 ]; then
-        MMPROJ=""
-        for f in "$MODEL_DIR"/mmproj*.gguf "$MODEL_DIR"/MMPROJ*.gguf \
-                 "$MODEL_DIR"/*mmproj*.gguf "$MODEL_DIR"/*MMPROJ*.gguf; do
-            if [ -f "$f" ]; then
-                MMPROJ="$f"
-                break
-            fi
-        done
-        if [ -n "$MMPROJ" ]; then
-            ARGV="$ARGV --mmproj $MMPROJ"
-            log "auto mmproj=$MMPROJ"
-        else
-            log "WARN: no *mmproj*.gguf beside $MODEL_PATH (vision OCR may fail)"
+        ARGV=""
+        HAS_MMPROJ=0
+        if [ -n "${ENGINE_ARGS:-}" ]; then
+            # shellcheck disable=SC2086
+            set -- $ENGINE_ARGS
+            for tok in "$@"; do
+                case "$tok" in
+                    --mmproj) HAS_MMPROJ=1; ARGV="$ARGV $tok" ;;
+                    -*)       ARGV="$ARGV $tok" ;;
+                    LLAMA_ARG_*=*) export "$tok" && log "engine_args export: $tok" ;;
+                    *=*)      log "engine_args drop non-LLAMA_ARG env: $tok" ;;
+                    *)        ARGV="$ARGV $tok" ;;
+                esac
+            done
         fi
-    fi
 
-    log "starting llama-server -m=$MODEL_PATH alias=${MODEL_NAME:-surya2} argv=${ARGV:-<empty>}"
-    # shellcheck disable=SC2086
-    exec "$LLAMA_SERVER_BIN" \
-        -m "$MODEL_PATH" \
-        --alias "${MODEL_NAME:-surya2}" \
-        --host 0.0.0.0 \
-        --port "${LLAMACPP_PORT:-8081}" \
-        --metrics \
-        --temp 0 \
-        $ARGV \
-        "$@"
+        # Auto --mmproj if not already in ENGINE_ARGS.
+        if [ "$HAS_MMPROJ" -eq 0 ]; then
+            MMPROJ=""
+            for f in "$MODEL_DIR"/mmproj*.gguf "$MODEL_DIR"/MMPROJ*.gguf \
+                     "$MODEL_DIR"/*mmproj*.gguf "$MODEL_DIR"/*MMPROJ*.gguf; do
+                if [ -f "$f" ]; then
+                    MMPROJ="$f"
+                    break
+                fi
+            done
+            if [ -n "$MMPROJ" ]; then
+                ARGV="$ARGV --mmproj $MMPROJ"
+                log "auto mmproj=$MMPROJ"
+            else
+                log "WARN: no *mmproj*.gguf beside $MODEL_PATH (vision OCR may fail)"
+            fi
+        fi
+
+        log "starting llama-server -m=$MODEL_PATH alias=${MODEL_NAME:-surya2} argv=${ARGV:-<empty>}"
+        # shellcheck disable=SC2086
+        exec "$LLAMA_SERVER_BIN" \
+            -m "$MODEL_PATH" \
+            --alias "${MODEL_NAME:-surya2}" \
+            --host 0.0.0.0 \
+            --port "${LLAMACPP_PORT:-8081}" \
+            --metrics \
+            --temp 0 \
+            $ARGV \
+            $extra_argv
+    }
+
+    supervise_engine run_llamacpp "$@"

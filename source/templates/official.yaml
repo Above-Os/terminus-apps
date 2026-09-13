@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-official
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-official
+spec:
+  replicas: {{ .Values.workloads.sourceofficial.replicaCount }}
+  selector:
+    matchLabels:
+      app: source-official
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-official
+    spec:
+      containers:
+        - name: official
+          image: aboveos/appstore-official:v2.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ADDR
+              value: ":8086"
+            - name: PG_DSN
+              value: postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.source }}
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: INTERNAL_API_TOKEN
+            - name: BACKFILL_SOURCE_SCHEMA
+              value: gitbot
+            - name: BACKFILL_RECONCILE_INTERVAL
+              value: 5m
+          ports:
+            - containerPort: 8086
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-official-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-official
+spec:
+  type: ClusterIP
+  selector:
+    app: source-official
+  ports:
+    - name: http
+      port: 8086
+      targetPort: 8086
+      protocol: TCP

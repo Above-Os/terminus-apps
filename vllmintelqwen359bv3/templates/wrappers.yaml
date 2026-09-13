@@ -1,0 +1,107 @@
+# Engine wrapper mounted into the Intel vLLM container at /llm-init/wrappers.
+# Sources the helpers llm-init publishes into RUN_DIR, sources oneAPI setvars
+# (libccl), waits for the llm-init sentinel, then starts the vLLM OpenAI server
+# with --model "$MODEL_NAME" under supervise_engine.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+data:
+  vllm.sh: |
+    #!/bin/bash
+    set -eu
+
+    ENGINE=vllm
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
+    # arrive late - the two containers are separate Deployments with no ordering
+    # between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    . "$WRAPPER_COMMON"
+
+    looks_like_hf_repo_id() {
+        s=$1
+        case "$s" in
+            ""|/*|./*|*://*) return 1 ;;
+        esac
+        case "$s" in
+            */*)
+                rest=${s#*/}
+                case "$rest" in
+                    */*|*:*) return 1 ;;
+                esac
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    wait_for_sentinel
+    wait_for_engine_args_handoff
+
+    if ! looks_like_hf_repo_id "${MODEL_NAME:-}"; then
+        log "MODEL_NAME must be owner/repo for --model (got ${MODEL_NAME:-<empty>})"
+        exit 1
+    fi
+
+    # Intel oneAPI / Level Zero: required for libccl and XPU runtime.
+    if [ -f /opt/intel/oneapi/setvars.sh ]; then
+        log "sourcing oneAPI env: /opt/intel/oneapi/setvars.sh"
+        # shellcheck disable=SC1091
+        set +u
+        # shellcheck source=/dev/null
+        source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
+        set -u
+    else
+        log "WARN: /opt/intel/oneapi/setvars.sh missing; continuing without oneAPI env"
+    fi
+
+    # XE1 / older iGPU: xpu_kernels may JIT bfloat16 SYCL paths the hardware
+    # lacks ("bf conversion instruction not supported"). Prefer native RMSNorm.
+    XE1_COMPAT_ARGS="--ir-op-priority.fused_add_rms_norm=native --ir-op-priority.rms_norm=native"
+
+    # XE1 unified ~32G: 8192 ctx KV profiling can hang on GDN/XPU — cap at 4K only
+    # for integrated/unified memory. Discrete Intel Arc (intel-gpu) uses 8192.
+    XE1_PERF_ARGS=""
+    case "${OLARES_GPU_MODE:-intel}" in
+        intel)
+            XE1_PERF_ARGS="--max-model-len 4096 --max-num-batched-tokens 4096 --gpu-memory-utilization 0.8"
+            ;;
+        intel-gpu)
+            XE1_PERF_ARGS="--max-model-len 32768 --max-num-batched-tokens 32768 --gpu-memory-utilization 0.95"
+            ;;
+    esac
+
+    if [ -n "$XE1_PERF_ARGS" ]; then
+        log "perf caps for mode=${OLARES_GPU_MODE:-intel}: $XE1_PERF_ARGS"
+    fi
+
+    run_vllm() {
+        load_engine_args_from_handoff
+        case "${ENGINE_ARGS:-}" in
+            ENGINE_ARGS=*) ENGINE_ARGS=${ENGINE_ARGS#ENGINE_ARGS=} ;;
+        esac
+        log "starting Intel XPU vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
+        # shellcheck disable=SC2086
+        exec python3 -m vllm.entrypoints.openai.api_server \
+            --model "$MODEL_NAME" \
+            --served-model-name "$MODEL_NAME" \
+            --host 0.0.0.0 \
+            --port "${VLLM_PORT:-8000}" \
+            ${ENGINE_ARGS:-} \
+            ${XE1_COMPAT_ARGS} \
+            ${XE1_PERF_ARGS} \
+            "$@"
+    }
+
+    supervise_engine run_vllm "$@"

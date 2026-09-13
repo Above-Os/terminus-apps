@@ -1,0 +1,234 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: romm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: romm
+spec:
+  replicas: {{ .Values.workloads.romm.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: romm
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: romm
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: init-chmod-data
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /library/roms /library/bios /config /assets /resources
+              chown -R 1000:1000 /library /config /assets /resources /app-cache
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: library
+              mountPath: /library
+            - name: config
+              mountPath: /config
+            - name: assets
+              mountPath: /assets
+            - name: resources
+              mountPath: /resources
+            - name: app-cache
+              mountPath: /app-cache
+        # RQ scan jobs live in system Redis and survive pod restarts.
+        # A watcher-scheduled scan that never runs leaves "already in progress"
+        # until these keys are deleted (rommapp/romm#2338).
+        - name: clear-stale-scans
+          image: docker.io/rommapp/romm:5.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - -c
+            - |
+              import os, sys
+              import redis
+              host = os.environ.get("REDIS_HOST") or ""
+              if not host:
+                  print("no REDIS_HOST, skip")
+                  sys.exit(0)
+              r = redis.Redis(
+                  host=host,
+                  port=int(os.environ.get("REDIS_PORT") or "6379"),
+                  password=os.environ.get("REDIS_PASSWORD") or None,
+                  decode_responses=True,
+                  socket_connect_timeout=10,
+                  socket_timeout=10,
+              )
+              r.ping()
+              n = 0
+              for key in r.scan_iter(match="rq:*", count=200):
+                  r.delete(key)
+                  n += 1
+              print("deleted %s rq keys" % n)
+          env:
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | toString | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: REDIS_PASSWORD
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      containers:
+        - name: romm
+          image: docker.io/rommapp/romm:5.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: ROMM_PORT
+              value: "8080"
+            - name: ROMM_DB_DRIVER
+              value: postgresql
+            - name: DB_HOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.postgres.port | toString | quote }}
+            - name: DB_NAME
+              value: {{ .Values.postgres.databases.romm | quote }}
+            - name: DB_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: DB_PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DB_PASSWD
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | toString | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: REDIS_PASSWORD
+            - name: ROMM_AUTH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: ROMM_AUTH_SECRET_KEY
+            - name: ROMM_BASE_URL
+              value: https://{{ .Values.domain.romm }}
+            - name: ROMM_SESSION_SECURE_COOKIE
+              value: "true"
+            - name: HASHEOUS_API_ENABLED
+              value: "true"
+            # Watcher + upload can leave a stale "scan already in progress" lock
+            # (rommapp/romm#2338). Manual Scan from the UI is the reliable path.
+            - name: ENABLE_RESCAN_ON_FILESYSTEM_CHANGE
+              value: "false"
+            - name: IGDB_CLIENT_ID
+              value: {{ .Values.olaresEnv.IGDB_CLIENT_ID | default "" | quote }}
+            - name: IGDB_CLIENT_SECRET
+              value: {{ .Values.olaresEnv.IGDB_CLIENT_SECRET | default "" | quote }}
+            - name: SCREENSCRAPER_USER
+              value: {{ .Values.olaresEnv.SCREENSCRAPER_USER | default "" | quote }}
+            - name: SCREENSCRAPER_PASSWORD
+              value: {{ .Values.olaresEnv.SCREENSCRAPER_PASSWORD | default "" | quote }}
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: library
+              mountPath: /romm/library
+            - name: config
+              mountPath: /romm/config
+            - name: assets
+              mountPath: /romm/assets
+            - name: resources
+              mountPath: /romm/resources
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-log
+              mountPath: /var/log/nginx
+      volumes:
+        - name: library
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.userData }}/Games'
+        - name: config
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}/config'
+        - name: assets
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}/assets'
+        - name: resources
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appData }}/resources'
+        - name: app-cache
+          hostPath:
+            type: DirectoryOrCreate
+            path: '{{ .Values.userspace.appCache }}'
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-log
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: romm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: romm
+spec:
+  type: ClusterIP
+  selector:
+    io.kompose.service: romm
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

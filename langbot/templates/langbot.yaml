@@ -18,11 +18,44 @@ spec:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: langbot
     spec:
+      enableServiceLinks: false
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - |
+              for d in /app/data /app/data/.cache /app/data/.cache/uv /app/data/metadata /app/data/logs /app/data/labels /app/plugins; do
+                mkdir -p "$d" && chown 1000:1000 "$d"
+              done
+          securityContext:
+            runAsUser: 0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+            - name: app-plugins
+              mountPath: /app/plugins
       containers:
-        - image: docker.io/beclab/rockchin-langbot:v3.4.13
+        - image: rockchin/langbot:v4.10.10
+          imagePullPolicy: IfNotPresent
           name: langbot
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
           ports:
-            - containerPort: 5300
+            - name: http
+              containerPort: 5300
           env:
             - name: PGID
               value: "1000"
@@ -32,6 +65,14 @@ spec:
               value: Asia/Shanghai
             - name: DISPLAY
               value: ':0'
+            - name: HOME
+              value: /app/data
+            - name: UV_CACHE_DIR
+              value: /app/data/.cache/uv
+            - name: XDG_CACHE_HOME
+              value: /app/data/.cache
+            - name: TMPDIR
+              value: /app/temp
           resources:
             requests:
               cpu: 200m
@@ -39,12 +80,32 @@ spec:
             limits:
               cpu: 1000m
               memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
           volumeMounts:
             - name: app-plugins
               mountPath: /app/plugins
             - name: app-data
               mountPath: /app/data
+            - name: app-temp
+              mountPath: /app/temp
       volumes:
+        - name: app-temp
+          emptyDir: {}
         - name: app-data
           hostPath:
             type: DirectoryOrCreate

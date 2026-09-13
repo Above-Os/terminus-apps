@@ -4,17 +4,31 @@ metadata:
 
 spec:
   upgradeDescription: |
-    将 Ollama 从 v0.31.2 升级至 v0.32.1。Chart 1.3.10。
+    v1.3.20: Model Console 现在可以重启 Ollama daemon。llm-init 与 daemon 共享 appCache 下的 RUN_DIR，wrapper 改在 supervise_engine 下启动 `ollama serve`，因此在模型卡上修改 engine_args 会让 daemon 带着新参数重新起来。模型卡也会在 Pod 重启后保留——它落盘之后优先级高于应用设置里的 ENGINE_ARGS。
+
+    将 Ollama 从 v0.32.15 升级至 v0.33.1。Chart 1.3.17。
 
     **更新内容**（与 Olares 相关）
 
-    v0.32.1
-    - 改进 Gemma 4 工具调用与多轮推理，工具响应续写更可靠
+    v0.33.1
+    - MLX：支持 Qwen3.8 Flash Next
+    - 更新 MLX 与 llama.cpp
+    - mlxrunner：支持结构化输出
+    - mlxrunner：从慢速存储加载模型时避免 Metal GPU 超时
 
-    v0.32.0
-    - 无影响 Olares 的服务端/运行时变更（本版本主要面向 interactive agent CLI 与 `ollama launch` 集成）
+    v0.33.0
+    - 修复 Agent 客户端取消长预填充时卡住
+    - 预填充恢复点在取消后仍保留，重试从中断处继续而非从头开始
+    - 恢复的预填充不再记录不完整的恢复点（循环层模型不再从零重算）
+    - 禁用 Claude Code 的 “tokens left” 系统消息，此前会在每次请求破坏 KV cache
+    - 修复 macOS 假设导致 Linux/Windows 默认打包损坏
+    - 更新 MLX 依赖
 
-    移除加速器模式 `cpu`（仅保留 GPU：`nvidia` / `nvidia-gb10`）。Chart 1.3.9。
+    v0.32.15
+    - 缓存已解析的模型元数据，首 token 延迟大约减半
+    - 修复流式解析中途出错后 chat/generate 卡住
+    - Qwen 3.8 会规范化非开头的 system 消息
+    - 更新 MLX 与 llama.cpp 依赖
 
     详细发布说明请访问：
     https://github.com/ollama/ollama/releases

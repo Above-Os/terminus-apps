@@ -60,10 +60,10 @@ server {
         try_files $uri =404;
     }
 
-    # SPA fallback. The HTML shell must not be cached so new deploys are picked
-    # up immediately.
+    # SPA fallback. HTML is rewritten by Olares BFL (terminus-language meta);
+    # no-store so refresh always gets a 200 body instead of a stale 304.
     location / {
-        add_header Cache-Control "no-cache";
+        add_header Cache-Control "no-store";
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;

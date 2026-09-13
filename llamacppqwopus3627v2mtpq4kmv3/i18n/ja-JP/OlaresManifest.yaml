@@ -1,0 +1,41 @@
+metadata:
+  title: Qwopus3.6-27B MTP (llama.cpp)
+  description: llama.cpp で提供する Qwopus3.6-27B-v2 MTP Q4_K_M
+spec:
+  upgradeDescription: |
+    v1.0.13: 1.12.6 タイムスライスノードでインストールしやすくするため NVIDIA ホストメモリ予約を引き下げ（エンジン要求 21Gi→6Gi、chart requiredMemory 22Gi→7Gi）。GPU クォータは変更なし。
+
+    v1.0.9: `HF_TOKEN` を Secret（`secretKeyRef`）へ移動；HF を `OLARES_SYSTEM_HUGGINGFACE_*` からマップ；llama.cpp を `server-cuda12-b10068` に更新。
+
+    v1.0.8: LLAMACPP_MEMORY_LIMIT 30Gi；llm-init 上限 2Gi；limitedMemory 32Gi（30+2）。
+    v1.0.7: nvidia ホストメモリ — requiredMemory 22Gi、LLAMACPP_MEMORY_REQUEST 21Gi、LLAMACPP_MEMORY_LIMIT 26Gi、limitedMemory 30Gi。
+    v1.0.6: nvidia ホストメモリ — requiredMemory 16Gi、LLAMACPP_MEMORY_REQUEST 15Gi、LLAMACPP_MEMORY_LIMIT 19Gi、limitedMemory 26Gi。
+    v1.0.5: llm-init を v1.3.1 に更新。
+  fullDescription: |
+    **モデル概要**
+    組み込み Multi-Token Prediction（MTP）ヘッド付きの Qwopus3.6-27B-v2、`Jackrong/Qwopus3.6-27B-v2-MTP-GGUF` の `Q4_K_M` 量子化を llama.cpp のドラフトデコードで提供。コーディング・数学・エージェント向けに微調整された Qwen3.6-27B 変種。テキスト専用プリセット（vision/mmproj なし）。
+
+    高いトークン生成速度が必要な場合、または厳密な構造化出力と DevOps 系タスクが求められるワークロード向け。このコミュニティビルドは、そうした場面でのコンパクトで整形式な出力に調整されています。
+
+    **プリセット構成**
+    - モデル: `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M`
+    - 能力: thinking, tools
+    - エンジン引数: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (12
+    - MTP は控えめな追加 VRAM を使います；フル 128K コンテキストで OOM する場合は `-c` を下げてください（例: `-c 65536`）。
+    - 必要 GPU メモリ: `23Gi`
+
+    **動作の仕組み**
+    まず `Model Console` がモデルをダウンロードして準備し、準備が整うと `llama.cpp` が提供を開始します。MTP（`--spec-type draft-mtp`）はモデル組み込みのドラフトヘッドで 1 ステップあたり複数トークンを予測し、デコードスループットを高めます。
+
+    **スタック**
+    - **llama.cpp**: モデルを実行し API リクエストを提供（ポート 8081）
+    - **Model Console**: モデルをダウンロードし進捗を表示し、ポート 8090 で OpenAI API を提供（`llamacpp` へプロキシ）
+
+    **アクセラレータモード**
+    | Mode           | Device            | Details                                          |
+    |----------------|-------------------|--------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | `23Gi` GPU メモリを使用；`-ngl all` でフル GPU     |
+    | `nvidia-gb10`  | GPU (Spark)       | 上記と同様だが、メモリは Pod が管理                 |
+
+    **モデルストレージ**
+    すべてのモデルファイルは `appCommon/huggingface` の共有フォルダに保存され、`/cache/hf/hub` としてマウントされます。同様のアプリはすべてこの場所をモデルに使います。

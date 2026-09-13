@@ -1,0 +1,19 @@
+metadata:
+  title: Voice Studio V3
+  description: VoiceStudio 网页界面；语音识别和合成经 LLM 网关走本机已装的引擎。
+
+spec:
+  onlyAdmin: true
+  fullDescription: |
+    把 VoiceStudio（debpalash/VoiceStudio）装成 Olares 应用。这个 Chart 是产品界面——
+    克隆、配音、听写、有声书。语音模型仍在本机引擎里（Qwen ASR、Voxtral TTS、VoxCPM2、
+    MOSS-TTS 等），经 LLM 网关调用。首次运行不会再下载 OmniVoice。
+
+    ASR、TTS、翻译用 OmniVoice 原生的 OpenAI 兼容环境变量钉住（Olares 应用环境变量；
+    Chart 里 URL / key / model 默认都是空的）。原生 TRANSLATE_* 留在进程里。
+    如果那次调用到不了网关，配音翻译会回退到 Argos。DIAR_MODEL 留空则走 VoiceStudio
+    自己的说话人分离；填了才打网关 POST /v1/audio/diarization async=1，再轮询
+    /v1/audio/tasks/{id}。连接失败 / 超时 / 5xx 时立刻失败，改走静音间隔启发式。
+
+    网关没有的能力（Demucs 人声分离，以及 DIAR_MODEL 为空时的应用内 pyannote）
+    可以用本 Chart 申请的 GPU。

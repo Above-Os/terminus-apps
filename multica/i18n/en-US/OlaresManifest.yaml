@@ -1,0 +1,55 @@
+metadata:
+  title: Multica
+  description: Assign issues to Claude Code, Codex, Cursor, and 17 more coding agents like teammates.
+
+spec:
+  fullDescription: |
+    Multica is an open-source platform for managing a human + agent engineering team on Olares.
+    Run the Multica server locally, assign issues to Codex, Claude Code, Cursor, and other coding
+    agents from a shared board, and watch task progress in real time.
+
+    Use cases on Olares
+    - Kanban issue board with humans and agents in the same assignee picker
+    - Long-running agent tasks with live tool-call streaming and lifecycle tracking
+    - Reusable skills shared across agents and runtimes
+    - One panel for local laptops and Olares Codex terminals connected to the same server
+
+    Entrances (Settings → Apps → Multica)
+    - Multica — web UI for login, workspaces, issues, agents, and runtimes
+    - Multica API — REST/WebSocket backend for the CLI and daemon (invisible entrance)
+
+    Connect a local machine
+    1. Install the Multica CLI on the computer that runs your agent (laptop, VPS, etc.).
+    2. Log in: multica login --token <token> (create the token in Web → Settings → API tokens).
+    3. Configure the CLI with your workspace and Olares URLs:
+       server_url: https://<multica-api-entrance>
+       app_url: https://<multica-web-entrance>
+       workspace_id: <workspace uuid from Web → Settings → Workspace>
+    4. Start the daemon and keep it running:
+       multica daemon start --foreground
+       (use tmux if the terminal may close)
+
+    Connect Olares Codex
+    1. Install Codex from Olares Market and open its terminal entrance.
+    2. Install the Multica CLI inside Codex (copy /app/multica from the backend image, or upload
+       the binary via Olares Files if GitHub downloads are blocked).
+    3. Use the Multica API entrance as server_url and the web entrance as app_url — Codex cannot
+       reach in-cluster service names, and the web /health route is not the backend API.
+    4. Log in with multica login --token <token>, then run the daemon in tmux:
+       tmux new -s multica
+       multica daemon start --foreground
+    5. In Multica Web → Settings → Runtimes you should see Codex online alongside other computers.
+
+    Email verification
+    - Enable Olares system SMTP in Settings (default) or provide Resend credentials at install time.
+      One-time codes can also be read from backend logs:
+      olares-cli cluster container logs <multica-pod>/backend
+
+    Requirements
+    - Olares >= 1.12.6
+    - PostgreSQL middleware with the vector extension
+  upgradeDescription: |
+    Switch entrances to authLevel internal (Olares default for
+    desktop apps). Authelia stays in front; the invisible API matches
+    the usual intra-Olares pattern. Dependencies only declare the
+    Olares version floor.

@@ -1,0 +1,19 @@
+metadata:
+  title: PaddleOCR Hybrid
+  description: "PaddleOCR-VL 混合 OCR（GGUF + PP-DocLayoutV3）：llm-init + OCRAdapter + llama.cpp + layout"
+
+spec:
+  fullDescription: |
+    **PaddleOCR Hybrid** 文档 OCR：版面检测（CPU ONNX）+ PaddleOCR-VL-1.5 GGUF（CUDA）。
+
+    **拓扑**
+    客户端 → llm-init:8090 → ocradapter:8080 → llamacpp:8081
+                              ├─ Redis（Olares 中间件）
+                              └─ layout:8090（PP-DocLayoutV3）
+
+    **模型（整仓下载，无 --include）**
+    - [PaddlePaddle/PaddleOCR-VL-1.5-GGUF](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF)
+    - [beclab/PP-DocLayoutV3_onnx](https://huggingface.co/beclab/PP-DocLayoutV3_onnx)
+
+    **加速器：** VLM 仅 CUDA（`nvidia` / `nvidia-gb10`）；layout 跑 CPU。
+    **资源（全栈实测 2026-08-11）：** VLM 显存峰值约 **8.4 GiB**，申请 **8Gi**；layout RAM 峰值约 **1.1 GiB**（limit **2Gi**）。
