@@ -56,12 +56,20 @@ spec:
             - name: AGENTD_DIRECTORY_URL
               value: "{{ .Values.directoryURL | default "http://lldap-provider-svc.os-framework:28080" }}"
             # The control-plane address, because what this is used for is a page: when a laptop
-            # starts pairing, the server tells it where a person should go to type the code in,
-            # and that person is in a browser. The data-plane entrance is where `agentd link`
-            # points and nothing here needs to know it -- the daemon was told it by whoever ran
-            # the command.
+            # starts pairing, the fleet tells it where a person should go to type the code in, and
+            # that person is in a browser. The data-plane entrance is where `agentd link` points
+            # and nothing here needs to know it -- the daemon was told it by whoever ran it.
+            #
+            # `.Values.domain.fleet` alone was wrong and printed an address that does not answer.
+            # Olares serves one entrance on two zones -- the public `<prefix>.<user>.olares.com`
+            # and the LAN `<prefix>.<user>.olares.local` -- and on an Olares without the public
+            # one set up, only the LAN name resolves. The prefix is the same on both, which is
+            # what makes this rewritable; `lares` does the same thing for the same reason.
+            #
+            # Overridable, because which of the two a person can actually open is a property of
+            # the deployment rather than of this chart.
             - name: AGENTD_PUBLIC_URL
-              value: "https://{{ .Values.domain.fleet }}"
+              value: "{{ .Values.publicURL | default (printf "http://%s.%s.olares.local" (splitList "." .Values.domain.fleet | first) .Values.bfl.username) }}"
             - name: TZ
               value: "UTC"
           # Readiness rather than liveness for the first one: a server that cannot reach its
