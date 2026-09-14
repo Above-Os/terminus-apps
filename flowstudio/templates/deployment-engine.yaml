@@ -1,5 +1,15 @@
-{{- if eq (toString (default dict .Values.dynamicEngine).enabled) "false" }}
-# Static-engine fallback only; default is dynamicEngine.enabled=true.
+{{- $static := eq (toString (default dict .Values.dynamicEngine).enabled) "false" -}}
+# Always rendered, but replicas is 0 under the default dynamicEngine.enabled=true:
+# app-service builds the install-time pre-pull list from a helm dry-run of the
+# Deployments and StatefulSets, so an engine that only exists at runtime (created
+# by EngineManager as fs-eng-*) would download outside the app's install progress.
+# With dynamicEngine.enabled=false this is the static engine and needs
+# workloads.flowstudioengine.replicaCount overridden back to 1.
+#
+# The GPU and memory envelope below is claimed only in static mode. A dynamic
+# engine's real spec comes from EngineManager, and OlaresManifest's
+# requiredMemory covers the API alone, so a never-scheduled Pod must not book
+# 80Gi against it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,16 +27,20 @@ spec:
     metadata:
       labels:
         app: flowstudioengine
+      {{- if $static }}
       annotations:
         # Absolute gpumem only — never percentage (dynamic path uses EngineManager).
         applications.app.bytetrade.io/gpu-inject: "engine"
+      {{- end }}
     spec:
       enableServiceLinks: false
+      {{- if $static }}
       runtimeClassName: nvidia
+      {{- end }}
       terminationGracePeriodSeconds: 10
       containers:
       - name: engine
-        image: {{ .Values.engineImage }}
+        image: {{ include "flowstudio.engineImage" . }}
         imagePullPolicy: {{ .Values.engineImagePullPolicy | default "IfNotPresent" }}
         securityContext:
           runAsUser: 1000
@@ -55,6 +69,7 @@ spec:
         ports:
         - containerPort: 8188
         resources:
+        {{- if $static }}
           requests:
             cpu: "1"
             memory: 80Gi
@@ -63,6 +78,14 @@ spec:
             memory: 80Gi
             nvidia.com/gpu: "1"
             nvidia.com/gpumem: {{ (default dict .Values.dynamicEngine).gpuMemMiB | default 6144 | quote }}
+        {{- else }}
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        {{- end }}
         volumeMounts:
         - name: app-common
           mountPath: /data/appCommon
@@ -85,4 +108,3 @@ spec:
           type: DirectoryOrCreate
       - name: engine-run
         emptyDir: {}
-{{- end }}
