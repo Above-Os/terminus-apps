@@ -103,8 +103,23 @@ spec:
             - '-c'
             - |
               set -eu
-              # Existing application-owned files keep their ownership.
-              chown 1000:1000 /app-data-root /app-data-root/config /app-data-root/cache
+              # Older charts ran Jellyfin as root. Migrate only root-owned
+              # application data; never follow symlinks or revisit user-owned files.
+              for dir in /app-data-root /app-data-root/config /app-data-root/cache; do
+                [ -d "$dir" ] && [ ! -L "$dir" ] || exit 1
+                if [ "$(stat -c %u "$dir")" = 0 ]; then
+                  chown 1000:1000 "$dir"
+                fi
+              done
+              for dir in /app-data-root/config /app-data-root/cache; do
+                find "$dir" -xdev -user 0 \( -type d -o -type f \) -exec sh -ec '
+                  for path do
+                    [ ! -L "$path" ] || exit 1
+                    [ "$(stat -c %u "$path")" = 0 ] || continue
+                    chown -h 1000:1000 "$path"
+                  done
+                ' sh {} +
+              done
           resources: {}
           volumeMounts:
             - name: app-data-root
