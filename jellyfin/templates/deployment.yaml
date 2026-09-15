@@ -1,21 +1,32 @@
-﻿apiVersion: v1
+apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: config-scripts
+  name: jellyfin-migration
   namespace: {{ .Release.Namespace }}
 data:
-  copy-config.sh: |
-    #!/bin/bash
-
-    new_dir="/config-new"
-    source_dir="/config"
-
-    if [ -z "$(ls -A $new_dir)" ]; then
-        echo "Directory $new_dir is empty. Copying contents from $source_dir..."
-        cp -r $source_dir/* $new_dir
-        echo "Contents copied successfully."
-    else
-        echo "Directory $new_dir is not empty, no action needed."
+  encoding.sh: |
+    #!/bin/sh
+    set -eu
+    file=/config/config/encoding.xml
+    [ -f "$file" ] || exit 0
+    pattern='<EncoderPreset([[:space:]]+xsi:nil="true")?[[:space:]]*/>|<EncoderPreset>[[:space:]]*</EncoderPreset>'
+    if grep -Eq "$pattern" "$file"; then
+      backup="$file.pre-12.1"
+      if [ ! -e "$backup" ]; then
+        cp -p "$file" "$backup"
+        cmp -s "$file" "$backup"
+      fi
+      tmp=$(mktemp "$file.tmp.XXXXXX")
+      trap 'rm -f "$tmp"' EXIT HUP INT TERM
+      cp -p "$file" "$tmp"
+      sed -E "s#$pattern#<EncoderPreset>auto</EncoderPreset>#g" "$file" > "$tmp"
+      [ -s "$tmp" ]
+      if grep -Eq "$pattern" "$tmp"; then
+        echo 'Encoding migration incomplete; refusing to start' >&2
+        exit 1
+      fi
+      mv "$tmp" "$file"
+      echo 'Converted legacy empty EncoderPreset to auto; original encoding.xml retained'
     fi
 ---
 {{- $gpuObj := .Values.GPU | default dict }}
@@ -61,6 +72,9 @@ spec:
                   - key: node-role.kubernetes.io/control-plane
                     operator: Exists
       volumes:
+        - name: migration
+          configMap:
+            name: jellyfin-migration
         - name: home
           hostPath:
             type: Directory
@@ -81,48 +95,47 @@ spec:
           hostPath:
             type: DirectoryOrCreate
             path: "{{ .Values.sharedlib }}"
-        - name: config-scripts
-          configMap:
-            name: config-scripts
-            defaultMode: 438
-            items:
-            - key: copy-config.sh
-              path: copy-config.sh
       initContainers:
-        - name: init-config
-          image: "docker.io/beclab/jellyfin-jellyfin:10.11.11"
-          resources: {}
-          command: ["/bin/bash", "-c", "chmod +x /scripts/copy-config.sh & bash /scripts/copy-config.sh"]
-          volumeMounts:
-          - name: config
-            mountPath: /config-new
-          - name: config-scripts
-            mountPath: /scripts/copy-config.sh
-            subPath: copy-config.sh
-          imagePullPolicy: IfNotPresent
-          securityContext:
-            runAsUser: 0
         - name: init-chmod-data
           image: "docker.io/beclab/aboveos-busybox:1.37.0"
           command:
             - sh
             - '-c'
             - |
-              # appData only — do not recurse the whole Home (user media libraries).
-              chown -R 1000:1000 /app-data-root
+              set -eu
+              # Existing application-owned files keep their ownership.
+              chown 1000:1000 /app-data-root /app-data-root/config /app-data-root/cache
           resources: {}
           volumeMounts:
-            - name: home
-              mountPath: /olares/userdata/home
             - name: app-data-root
               mountPath: /app-data-root
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
 
+        - name: migrate-encoding
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command: ["sh", "/migration/encoding.sh"]
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: migration
+              mountPath: /migration
+              readOnly: true
+            - name: config
+              mountPath: /config
+
       containers:
         - name: jellyfin
-          image: "docker.io/beclab/jellyfin-jellyfin:10.11.11"
+          image: "docker.io/beclab/jellyfin-jellyfin:12.1"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 1000
