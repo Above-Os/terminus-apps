@@ -1,0 +1,25 @@
+# Reaching the platform's directory needs saying so.
+#
+# `lldap-provider-svc` is a provider gateway, not a plain service: it answers only for a namespace
+# whose service account is bound to `backend:lldap-provider`. Without this binding the address
+# resolves, the connection opens, and the request times out with a 504 -- which reads like the
+# directory being down rather than like this app never having asked for it.
+#
+# One binding and nothing else. The roster is the only thing the fleet wants from the platform, and
+# the read takes no credentials -- the gateway authorises the namespace, which is what this binds,
+# rather than a token in the request. Router also grants itself `serviceaccounts/token` and several
+# CRD reads; those belong to the market provider and the application CRDs it watches, and the fleet
+# looks at neither.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fleet-cluster-view:lldap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backend:lldap-provider
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: "{{ .Release.Namespace }}"
