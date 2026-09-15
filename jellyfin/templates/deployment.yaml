@@ -4,6 +4,76 @@ metadata:
   name: jellyfin-migration
   namespace: {{ .Release.Namespace }}
 data:
+  ownership.sh: |
+    #!/bin/sh
+    set -eu
+    state=/app-data-root/config/.olares-migrations
+    marker=$state/ownership-v1.done
+    for dir in /app-data-root /app-data-root/config /app-data-root/cache; do
+      [ -d "$dir" ] && [ ! -L "$dir" ] || exit 1
+    done
+    [ ! -L "$state" ] && [ ! -L "$marker" ] || exit 1
+    if [ -f "$marker" ] && [ "$(cat "$marker")" = ownership-v1 ]; then
+      echo 'Ownership v1 already completed; skipping tree traversal'
+      exit 0
+    fi
+    started=$(date +%s)
+    mkdir -p "$state"
+    journal=$state/ownership-v1.tsv
+    [ ! -L "$journal" ] || exit 1
+    touch "$journal"
+    before=$(wc -l < "$journal")
+    # Append original metadata before each change; retain it across retries.
+    for dir in /app-data-root /app-data-root/config /app-data-root/cache "$state"; do
+      if [ "$(stat -c %u "$dir")" = 0 ]; then
+        stat -c '%u:%g:%a %n' "$dir" >> "$journal"
+        chown 1000:1000 "$dir"
+      fi
+    done
+    for dir in /app-data-root/config /app-data-root/cache; do
+      device=$(stat -c %d "$dir")
+      find "$dir" -xdev -path "$state" -prune -o -user 0 \( -type d -o -type f \) -exec sh -ec '
+        journal=$1; device=$2; shift 2
+        for path do
+          [ ! -L "$path" ] || exit 1
+          [ "$(stat -c %d "$path")" = "$device" ] || continue
+          [ "$(stat -c %u "$path")" = 0 ] || continue
+          stat -c "%u:%g:%a %n" "$path" >> "$journal"
+          chown -h 1000:1000 "$path"
+        done
+      ' sh "$journal" "$device" {} +
+    done
+    if [ "$(stat -c %u "$journal")" = 0 ]; then
+      chown 1000:1000 "$journal"
+    fi
+    echo "Ownership v1 changed $(($(wc -l < "$journal") - before)) entries in $(($(date +%s) - started))s; awaiting UID1000 validation"
+  verify.sh: |
+    #!/bin/sh
+    set -eu
+    [ "$(id -u)" = 1000 ] || exit 1
+    for dir in /config /cache /config/config /config/data /config/.olares-migrations; do
+      [ ! -L "$dir" ] || exit 1
+      if [ -d "$dir" ]; then
+        probe=$(mktemp "$dir/.olares-write-test.XXXXXX")
+        rm "$probe"
+      fi
+    done
+    for file in /config/data/jellyfin.db /config/config/encoding.xml; do
+      [ ! -L "$file" ] || exit 1
+      if [ -e "$file" ]; then
+        [ -r "$file" ] && [ -w "$file" ] || { echo "Not readable/writable: $file" >&2; exit 1; }
+      fi
+    done
+    sh /migration/encoding.sh
+    marker=/config/.olares-migrations/ownership-v1.done
+    [ ! -L "$marker" ] || exit 1
+    if [ ! -f "$marker" ] || [ "$(cat "$marker")" != ownership-v1 ]; then
+      tmp=$(mktemp /config/.olares-migrations/ownership-v1.XXXXXX)
+      trap 'rm -f "$tmp"' EXIT HUP INT TERM
+      printf 'ownership-v1\n' > "$tmp"
+      mv "$tmp" "$marker"
+    fi
+    echo 'UID1000 write checks and encoding migration passed; ownership v1 complete'
   encoding.sh: |
     #!/bin/sh
     set -eu
@@ -98,15 +168,12 @@ spec:
       initContainers:
         - name: init-chmod-data
           image: "docker.io/beclab/aboveos-busybox:1.37.0"
-          command:
-            - sh
-            - '-c'
-            - |
-              set -eu
-              # Existing application-owned files keep their ownership.
-              chown 1000:1000 /app-data-root /app-data-root/config /app-data-root/cache
+          command: ["sh", "/migration/ownership.sh"]
           resources: {}
           volumeMounts:
+            - name: migration
+              mountPath: /migration
+              readOnly: true
             - name: app-data-root
               mountPath: /app-data-root
           imagePullPolicy: IfNotPresent
@@ -115,7 +182,7 @@ spec:
 
         - name: migrate-encoding
           image: "docker.io/beclab/aboveos-busybox:1.37.0"
-          command: ["sh", "/migration/encoding.sh"]
+          command: ["sh", "/migration/verify.sh"]
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
@@ -132,6 +199,8 @@ spec:
               readOnly: true
             - name: config
               mountPath: /config
+            - name: cache
+              mountPath: /cache
 
       containers:
         - name: jellyfin
