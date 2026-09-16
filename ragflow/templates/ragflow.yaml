@@ -23,8 +23,6 @@ spec:
     metadata:
       labels:
         app: ragflow
-      annotations:
-        checksum/nginx: {{ include (print $.Template.BasePath "/nginx-config.yaml") . | sha256sum }}
     spec:
       initContainers:
       - name: migrate-appcache-to-appdata
@@ -97,10 +95,8 @@ spec:
         - containerPort: 9380
         - containerPort: 9381
         - containerPort: 80
-        {{- if $mcpEnabled }}
         - name: mcp
           containerPort: 9382
-        {{- end }}
         env:
         - name: HF_ENDPOINT
           value: {{ $olaresEnv.HF_ENDPOINT | default "" | quote }}
@@ -185,14 +181,7 @@ spec:
         volumeMounts:
           - name: ragflow-logs
             mountPath: /ragflow/logs
-          - name: ragflow-nginx
-            mountPath: /etc/nginx/conf.d/ragflow.conf.python
-            subPath: ragflow.conf.python
-            readOnly: true
       volumes:
-      - name: ragflow-nginx
-        configMap:
-          name: ragflow-nginx
       - hostPath:
           path: '{{ .Values.userspace.appData }}/ragflow'
           type: DirectoryOrCreate
@@ -212,10 +201,8 @@ spec:
   - name: http
     port: 80
     targetPort: 80
-  {{- if $mcpEnabled }}
   - name: mcp
     port: 9382
     targetPort: mcp
-  {{- end }}
   selector:
     app: ragflow
