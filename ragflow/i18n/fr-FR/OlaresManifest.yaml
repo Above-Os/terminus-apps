@@ -1,28 +1,8 @@
 metadata:
   title: RAGFlow
   description: Un moteur RAG open source basé sur une compréhension approfondie des documents
+
 spec:
-  upgradeDescription: |
-    v1.0.36: Mise à jour de RAGFlow vers v0.27.2.
-    - Serveur MCP facultatif sur le port interne 9382, désactivé par défaut. Chaque client utilise sa propre clé API RAGFlow.
-    - Taille de lot des embeddings configurable, avec une valeur par défaut de 1. La valeur 1 est recommandée pour les modèles locaux ; elle peut être augmentée avec les services cloud pour accélérer le traitement.
-    https://github.com/infiniflow/ragflow/releases/tag/v0.27.2
-
-    v1.0.30 : Mettre à niveau RAGFlow vers v0.26.4 (`docker.io/infiniflow/ragflow:v0.26.4`). Images compagnons inchangées (Infinity v0.7.0, Elasticsearch 8.11.3, MinIO, Valkey).
-
-    Points forts depuis v0.26.1
-    - NLP : stemmer Snowball sensible à la langue (16 langues), prise en charge de la tokenisation néerlandaise.
-    - Canaux de chat (v0.26.2) : intégrations WhatsApp, DingTalk, WeCom.
-    - Parsing (v0.26.3) : SoMark OCR pour mises en page complexes ; API Ingest documents ; gestion du succès partiel en téléversement par lots.
-    - Correctifs (v0.26.4) : noms de modèles LM-Studio avec `@`, pagination MCP list_chats, formules mathématiques Docling, édition inline des métadonnées, liaison en masse fichier-vers-dataset, filtre chinois, titres Laws chunker, et plus.
-
-    Note de version complète : https://github.com/infiniflow/ragflow/releases/tag/v0.26.4
-
-    v1.0.29 : Déplacer `ELASTIC_PASSWORD`, `REDIS_PASSWORD` et `MINIO_PASSWORD` dans un Secret Kubernetes (`secretKeyRef`).
-
-    Stockage : volumes durables (logs ragflow, infinity, minio, redis, elasticsearch) déplacés de `appCache` vers des sous-chemins `appData`. Au premier démarrage après la mise à niveau, les initContainers copient le contenu legacy d'appCache vers appData lorsque les destinations sont vides (marqueurs uniques `.migration_from_appcache_*_done` par volume). Les anciennes données appCache sont conservées pour un rollback.
-
-    Configurez les modèles LLM et d'embedding dans les paramètres RAGFlow après l'installation ou la mise à niveau.
   fullDescription: |
     Qu'est-ce que RAGFlow ?
     RAGFlow est un moteur RAG (Retrieval-Augmented Generation) open source basé sur une compréhension approfondie des documents. Il offre un flux de travail RAG allégé pour les entreprises de toute taille, combinant des LLM (Large Language Models) pour fournir des capacités de questions-réponses véridiques, étayées par des citations bien fondées à partir de données aux formats complexes.
@@ -49,8 +29,13 @@ spec:
     - Multiple recall associé à un re-ranking fusionné.
     - API intuitives pour une intégration fluide avec l'entreprise.
 
-envs:
-- envName: MCP_ENABLED
-  description: "Activer le serveur MCP RAGFlow sur le port interne du Service 9382 (/mcp pour Streamable HTTP, /sse pour SSE). Chaque client doit fournir sa clé API RAGFlow. Désactivé par défaut."
-- envName: EMBEDDING_BATCH_SIZE
-  description: "Pour les modèles locaux, une taille de lot de 1 est recommandée. Avec les services cloud, augmentez cette valeur pour accélérer le traitement."
+  upgradeDescription: |
+    Mise à jour vers RAGFlow v0.27.2 avec des améliorations de l’aperçu des documents et de la recherche, un accès MCP facultatif et une taille de lot configurable pour la vectorisation.
+
+    [Notes de version officielles de v0.27.2](https://github.com/infiniflow/ragflow/releases/tag/v0.27.2)
+
+    - Affichez un aperçu des documents EPUB et retrouvez les sources des citations Excel dans l’aperçu du document.
+    - Les correspondances sont mises en évidence dans les résultats de recherche et les tests de récupération.
+    - Les outils d’IA compatibles peuvent accéder à vos bases de connaissances via MCP. Cette option est désactivée par défaut ; les clients doivent fournir une clé API RAGFlow.
+    - La taille de lot pour la vectorisation est réglable dans les paramètres de l’application Olares. La valeur par défaut est 1, recommandée pour les modèles locaux. Avec des services cloud, augmentez-la pour accélérer le traitement.
+    - L’accès web utilise désormais le niveau `internal` par défaut.
