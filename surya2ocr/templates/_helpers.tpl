@@ -14,8 +14,8 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "surya2ocr.llmInitTag" -}}v1.7.12{{- end -}}
-{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.8{{- end -}}
+{{- define "surya2ocr.llmInitTag" -}}v1.7.20{{- end -}}
+{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.9{{- end -}}
 {{- define "surya2ocr.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
 
 {{- /* Comma dual-source, each one --include (single-file hf path).
