@@ -78,41 +78,6 @@ spec:
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
-      - name: backup-mysql-before-upgrade
-        image: "docker.io/beclab/mysql:8.0"
-        imagePullPolicy: IfNotPresent
-        command: ["bash", "/upgrade/backup-mysql.sh"]
-        env:
-        - name: MYSQL_HOST
-          value: {{ .Values.mysql.host | quote }}
-        - name: MYSQL_PORT
-          value: {{ .Values.mysql.port | quote }}
-        - name: MYSQL_USER
-          value: {{ .Values.mysql.username | quote }}
-        - name: MYSQL_DBNAME
-          value: {{ .Values.mysql.databases.rag_flow | quote }}
-        - name: MYSQL_PWD
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Release.Name }}-secrets
-              key: MYSQL_PASSWORD
-        securityContext:
-          runAsUser: 1000
-          runAsGroup: 1000
-          allowPrivilegeEscalation: false
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: "1"
-            memory: 512Mi
-        volumeMounts:
-          - name: ragflow-logs
-            mountPath: /backup
-          - name: upgrade-scripts
-            mountPath: /upgrade
-            readOnly: true
       containers:
       - name: ragflow
         image: "docker.io/infiniflow/ragflow:v0.27.2"
@@ -219,9 +184,6 @@ spec:
           - name: ragflow-logs
             mountPath: /ragflow/logs
       volumes:
-      - name: upgrade-scripts
-        configMap:
-          name: {{ .Release.Name }}-upgrade
       - hostPath:
           path: '{{ .Values.userspace.appData }}/ragflow'
           type: DirectoryOrCreate
