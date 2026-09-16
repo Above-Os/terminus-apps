@@ -1,6 +1,7 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $queueWorkers := include "acestepmusicv3.queueWorkers" . -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,7 +75,7 @@ spec:
             runAsUser: 0
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.7.17
+          image: docker.io/beclab/llm-init:v1.7.20
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 1000
@@ -82,6 +83,8 @@ spec:
           env:
             - name: ENGINE_KIND
               value: music
+            - name: ENGINE_MAX_CONCURRENCY
+              value: "{{ $queueWorkers }}"
             - name: MODEL_NAME
               value: "ACE-Step/acestep-v15-xl-sft"
             - name: MODEL_MODE
