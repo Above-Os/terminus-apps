@@ -23,6 +23,8 @@ spec:
     metadata:
       labels:
         app: ragflow
+      annotations:
+        checksum/nginx: {{ include (print $.Template.BasePath "/nginx-config.yaml") . | sha256sum }}
     spec:
       initContainers:
       - name: migrate-appcache-to-appdata
@@ -183,7 +185,14 @@ spec:
         volumeMounts:
           - name: ragflow-logs
             mountPath: /ragflow/logs
+          - name: ragflow-nginx
+            mountPath: /etc/nginx/conf.d/ragflow.conf.python
+            subPath: ragflow.conf.python
+            readOnly: true
       volumes:
+      - name: ragflow-nginx
+        configMap:
+          name: ragflow-nginx
       - hostPath:
           path: '{{ .Values.userspace.appData }}/ragflow'
           type: DirectoryOrCreate
