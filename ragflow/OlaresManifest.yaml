@@ -13,7 +13,7 @@ metadata:
   description: An open-source RAG engine based on deep document understanding.
   icon: https://app.cdn.olares.com/appstore/ragflow/icon.png
   appid: ragflow
-  version: '1.0.35'
+  version: '1.0.36'
   title: RAGFlow
   categories:
   - Productivity_v112
@@ -34,7 +34,7 @@ permission:
   appData: true
   appCache: true
 spec:
-  versionName: '0.26.4'
+  versionName: '0.27.2'
   featuredImage: https://app.cdn.olares.com/appstore/ragflow/1.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/ragflow/1.webp
@@ -68,6 +68,12 @@ spec:
     - Multiple recall paired with fused re-ranking.
     - Intuitive APIs for seamless integration with business.
   upgradeDescription: |
+    v1.0.36: Upgrade RAGFlow to v0.27.2.
+    - Add an optional MCP server on internal port 9382; disabled by default. Clients authenticate with their own RAGFlow API keys.
+    - Add a configurable embedding batch size, defaulting to 1. Use 1 for local models; increase it for cloud services to speed up embedding.
+    - Back up the application MySQL database before running the upstream v0.27.2 model provider migrations. Keep the backup in appData/ragflow/upgrade-backups/v0.27.2.
+    https://github.com/infiniflow/ragflow/releases/tag/v0.27.2
+
     v1.0.30: Upgrade RAGFlow to v0.26.4 (`docker.io/infiniflow/ragflow:v0.26.4`). Companion images unchanged (Infinity v0.7.0, Elasticsearch 8.11.3, MinIO, Valkey).
 
     Highlights since v0.26.1
@@ -130,3 +136,18 @@ envs:
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: MCP_ENABLED
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "false"
+    description: "Enable the RAGFlow MCP server on internal service port 9382 (/mcp for Streamable HTTP, /sse for SSE). Each client must provide its RAGFlow API key. Disabled by default."
+  - envName: EMBEDDING_BATCH_SIZE
+    type: int
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "1"
+    regex: '^[1-9][0-9]*$'
+    description: "Use a batch size of 1 for local embedding models. For cloud services, increase it to speed up embedding."

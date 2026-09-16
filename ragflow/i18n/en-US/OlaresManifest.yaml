@@ -30,6 +30,12 @@ spec:
     - Intuitive APIs for seamless integration with business.
 
   upgradeDescription: |
+    v1.0.36: Upgrade RAGFlow to v0.27.2.
+    - Add an optional MCP server on internal port 9382; disabled by default. Clients authenticate with their own RAGFlow API keys.
+    - Add a configurable embedding batch size, defaulting to 1. Use 1 for local models; increase it for cloud services to speed up embedding.
+    - Back up the application MySQL database before running the upstream v0.27.2 model provider migrations. Keep the backup in appData/ragflow/upgrade-backups/v0.27.2.
+    https://github.com/infiniflow/ragflow/releases/tag/v0.27.2
+
     v1.0.30: Upgrade RAGFlow to v0.26.4 (`docker.io/infiniflow/ragflow:v0.26.4`). Companion images unchanged (Infinity v0.7.0, Elasticsearch 8.11.3, MinIO, Valkey).
 
     Highlights since v0.26.1
@@ -45,3 +51,9 @@ spec:
     Storage: durable volumes (ragflow logs, infinity, minio, redis, elasticsearch) moved from `appCache` to `appData` subpaths. On first start after upgrade, initContainers copy legacy appCache contents into appData when destinations are empty (unique `.migration_from_appcache_*_done` markers per volume). Old appCache data is left intact for rollback.
 
     Configure LLM and embedding models in RAGFlow settings after install or upgrade.
+
+envs:
+- envName: MCP_ENABLED
+  description: "Enable the RAGFlow MCP server on internal service port 9382 (/mcp for Streamable HTTP, /sse for SSE). Each client must provide its RAGFlow API key. Disabled by default."
+- envName: EMBEDDING_BATCH_SIZE
+  description: "Use a batch size of 1 for local embedding models. For cloud services, increase it to speed up embedding."

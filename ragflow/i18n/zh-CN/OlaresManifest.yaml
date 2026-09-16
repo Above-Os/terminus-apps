@@ -30,6 +30,12 @@ spec:
     - 提供易用的 API，可以轻松集成到各类企业系统。
 
   upgradeDescription: |
+    v1.0.36: 升级 RAGFlow 至 v0.27.2。
+    - 新增可选 MCP 服务，使用集群内部端口 9382，默认关闭。客户端需携带各自的 RAGFlow API Key。
+    - 新增 Embedding batch size 配置，默认值为 1。本地模型建议设置为 1；使用云服务时可以调高以加快速度。
+    - 在执行上游 v0.27.2 模型供应商表迁移前备份应用 MySQL 数据库，备份保留在 appData/ragflow/upgrade-backups/v0.27.2。
+    https://github.com/infiniflow/ragflow/releases/tag/v0.27.2
+
     v1.0.30: 升级 RAGFlow 至 v0.26.4（`docker.io/infiniflow/ragflow:v0.26.4`）。配套镜像不变（Infinity v0.7.0、Elasticsearch 8.11.3、MinIO、Valkey）。
 
     自 v0.26.1 以来的要点
@@ -45,3 +51,9 @@ spec:
     存储：持久化卷（ragflow 日志、infinity、minio、redis、elasticsearch）从 `appCache` 迁移至 `appData` 子路径。升级后首次启动时，initContainer 会在目标目录为空时将旧 appCache 内容复制到 appData（各卷使用独立的 `.migration_from_appcache_*_done` 标记）。旧 appCache 数据保留以便回滚。
 
     安装或升级后请在 RAGFlow 设置中自行配置 LLM 与 Embedding 模型。
+
+envs:
+- envName: MCP_ENABLED
+  description: "开启 RAGFlow MCP 服务，使用内部 Service 端口 9382（Streamable HTTP 路径为 /mcp，SSE 路径为 /sse）。客户端需携带自己的 RAGFlow API Key。默认关闭。"
+- envName: EMBEDDING_BATCH_SIZE
+  description: "如果使用本地模型，建议 batch size 设置为 1；如果使用云服务，可以调高以加快速度。"

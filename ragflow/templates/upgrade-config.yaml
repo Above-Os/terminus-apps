@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-upgrade
+  namespace: {{ .Release.Namespace }}
+data:
+  backup-mysql.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    umask 077
+
+    # Keep a completed pre-migration backup across restarts and failed retries.
+    # Include the database identity so a changed middleware binding gets its own backup.
+    identity=$(printf '%s\n' "$MYSQL_HOST" "$MYSQL_PORT" "$MYSQL_DBNAME" | sha256sum)
+    identity=${identity%% *}
+    backup_dir="/backup/upgrade-backups/v0.27.2/${identity}"
+    mkdir -p "$backup_dir"
+    backup_file="$backup_dir/mysql.sql"
+    if [ -s "$backup_file" ]; then
+      echo "[upgrade] Completed pre-v0.27.2 MySQL backup already exists; keeping it."
+      exit 0
+    fi
+
+    partial=$(mktemp "$backup_dir/mysql.sql.partial.XXXXXX")
+    trap 'rm -f "$partial"' EXIT
+    mysqldump --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USER" \
+      --single-transaction --quick --skip-lock-tables --no-tablespaces \
+      --set-gtid-purged=OFF --hex-blob "$MYSQL_DBNAME" > "$partial"
+    test -s "$partial"
+    mv "$partial" "$backup_file"
+    echo "[upgrade] MySQL backup completed. Upstream model provider migrations may now run."
