@@ -10,6 +10,7 @@
 {{- $llmInitTag := include "bgererankerv2m3.llmInitTag" . -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "bgererankerv2m3.logicalModelName" .) -}}
 {{- $modelSource := include "bgererankerv2m3.modelSource" . -}}
+{{- $maxConcurrency := include "bgererankerv2m3.maxConcurrency" . -}}
 ---
 # llm-init (ENGINE_KIND=rerank): model download + /v1/* proxy to sibling rerank-server.
 apiVersion: apps/v1
@@ -63,6 +64,8 @@ spec:
           env:
             - name: ENGINE_KIND
               value: "rerank"
+            - name: ENGINE_MAX_CONCURRENCY
+              value: "{{ $maxConcurrency }}"
             - name: MODEL_NAME
               value: "{{ $modelName }}"
             - name: MODEL_MODE
