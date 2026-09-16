@@ -25,7 +25,9 @@
 {{- end -}}
 
 {{- define "bgererankerv2m3.rerankTag" -}}v0.0.1{{- end -}}
-{{- define "bgererankerv2m3.llmInitTag" -}}v1.7.12{{- end -}}
+{{- define "bgererankerv2m3.llmInitTag" -}}v1.7.20{{- end -}}
+{{- /* RuntimeQueue serializes scoring through exactly one active permit. */ -}}
+{{- define "bgererankerv2m3.maxConcurrency" -}}1{{- end -}}
 {{- define "bgererankerv2m3.unifiedRepo" -}}beclab/bge-reranker-v2-m3{{- end -}}
 {{- define "bgererankerv2m3.modelRevision" -}}main{{- end -}}
 {{- define "bgererankerv2m3.logicalModelName" -}}bge-reranker-v2-m3{{- end -}}
