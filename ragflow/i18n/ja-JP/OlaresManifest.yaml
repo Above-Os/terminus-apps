@@ -1,23 +1,8 @@
 metadata:
   title: RAGFlow
   description: 深い文書理解に基づくオープンソース RAG エンジン
+
 spec:
-  upgradeDescription: |
-    v1.0.30: RAGFlow を v0.26.4（`docker.io/infiniflow/ragflow:v0.26.4`）へアップグレード。付随イメージは変更なし（Infinity v0.7.0、Elasticsearch 8.11.3、MinIO、Valkey）。
-
-    v0.26.1 以降のハイライト
-    - NLP: 言語対応 Snowball stemmer（16 言語）、オランダ語トークン化サポート。
-    - チャットチャネル（v0.26.2）: WhatsApp、DingTalk、WeCom 連携。
-    - 解析（v0.26.3）: 複雑レイアウト向け SoMark OCR；Ingest documents API；バッチアップロードの部分成功処理。
-    - 修正（v0.26.4）: `@` を含む LM-Studio モデル名、MCP list_chats ページネーション、Docling 数式、メタデータのインライン編集、一括ファイル→データセット連携、中国語フィルター、Laws chunker 見出しなど。
-
-    完全なリリースノート: https://github.com/infiniflow/ragflow/releases/tag/v0.26.4
-
-    v1.0.29: `ELASTIC_PASSWORD`、`REDIS_PASSWORD`、`MINIO_PASSWORD` を Kubernetes Secret（`secretKeyRef`）へ移動。
-
-    ストレージ: 永続ボリューム（ragflow ログ、infinity、minio、redis、elasticsearch）を `appCache` から `appData` サブパスへ移動。アップグレード後の初回起動時、宛先が空なら initContainers が旧 appCache 内容を appData にコピー（ボリュームごとの一意な `.migration_from_appcache_*_done` マーカー）。旧 appCache データはロールバック用に残します。
-
-    インストールまたはアップグレード後、RAGFlow 設定で LLM と embedding モデルを構成してください。
   fullDescription: |
     RAGFlow とは？
     RAGFlow は深い文書理解に基づくオープンソースの RAG（Retrieval-Augmented Generation）エンジンです。あらゆる規模のビジネス向けに合理化された RAG ワークフローを提供し、LLM（大規模言語モデル）と組み合わせて、複雑な形式の多様なデータからの十分な根拠付き引用に裏付けられた、信頼性の高い質問応答能力を実現します。
@@ -43,3 +28,16 @@ spec:
     - 設定可能な LLM および embedding モデル。
     - Multiple recall と fused re-ranking の組み合わせ。
     - ビジネスとのシームレスな統合のための直感的な API。
+
+  upgradeDescription: |
+    この更新では既定のWebアドレスが変更され、独立したMCPアドレスが追加されます。Olaresのアプリ設定に表示される最新の入口アドレスを使用してください。
+
+    RAGFlow v0.27.2に更新しました。文書プレビューと検索を改善し、任意で有効にできるMCP接続と、埋め込み処理のバッチサイズ設定を追加しました。
+
+    [v0.27.2の公式リリースノート](https://github.com/infiniflow/ragflow/releases/tag/v0.27.2)
+
+    - EPUB文書のプレビューと、文書プレビュー内でのExcel引用元の確認に対応しました。
+    - 検索結果と検索テストで、一致する内容が強調表示されます。
+    - 対応するAIツールから、デスクトップに表示されない独立したMCP入口経由でナレッジベースにアクセスできます。この機能は初期設定では無効で、クライアントにはRAGFlowのAPIキーが必要です。
+    - Olaresのアプリ設定で埋め込み処理のバッチサイズを変更できます。初期値は1で、ローカルモデルには1を推奨します。クラウドサービスでは値を大きくすると処理を高速化できます。
+    - Webアクセスの初期設定を`internal`に変更しました。
