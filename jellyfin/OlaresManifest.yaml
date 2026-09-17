@@ -10,7 +10,7 @@ metadata:
   description: The Free Software Media System
   icon: https://app.cdn.olares.com/appstore/jellyfin/icon.png
   appid: jellyfin
-  version: '1.0.33'
+  version: '1.0.34'
   title: Jellyfin
   categories:
   - Fun
@@ -62,9 +62,11 @@ spec:
     The project relies entirely on contributions from volunteers. Want to help out? There's lots of ways to do so, and you don't even have to code!
 
   upgradeDescription: |
+    v1.0.34: Dual-path hw transcoding — Olares **12.6** uses legacy `cpu` + `ENABLE_HW_ACCEL` (hostPath `/dev/dri`, privileged); Olares **12.7+** uses **intel/amd** accelerator install with gpu-inject (no privileged, no hostPath).
+
+    v1.0.33: Jellyfin 12.1 upgrade; root→user ownership migration; encoding preset migration.
     Record completion only after application-user write checks and encoding migration succeed; subsequent starts skip the ownership scan.
-    Fix upgrades from older charts that leave configuration and database files owned by root. Migrate root-owned configuration and cache to the application user before startup, preserving other owners and permission bits and skipping symbolic links.
-    Back up configuration and data before upgrading. Jellyfin remains at version 12.1.
+    Back up configuration and data before upgrading.
 
   developer: Jellyfin
   website: https://jellyfin.org/
@@ -123,6 +125,32 @@ options:
   - name: olares
     type: system
     version: '>=1.12.6-0'
+envs:
+  - envName: ENABLE_HW_ACCEL
+    type: bool
+    default: 'false'
+    required: false
+    editable: true
+    applyOnChange: true
+    description: |
+      **Olares 12.6 only.** Enable Intel/AMD iGPU hw transcoding on **cpu** install: mounts /dev/dri, supplementalGroups, privileged. On Olares **12.7+**, install with **intel** or **amd** accelerator instead — this env is ignored when gpu-inject is active.
+      Host must expose /dev/dri. Set VIDEO_GID and RENDER_GID from the host if not on Olares One.
+  - envName: VIDEO_GID
+    type: int
+    default: '44'
+    required: false
+    editable: true
+    applyOnChange: true
+    description: |
+      **Olares 12.6 legacy path only** (when ENABLE_HW_ACCEL=true). GID of the host "video" group for /dev/dri/card*. Run `getent group video` on the host.
+  - envName: RENDER_GID
+    type: int
+    default: '994'
+    required: false
+    editable: true
+    applyOnChange: true
+    description: |
+      **Olares 12.6 legacy path only** (when ENABLE_HW_ACCEL=true). GID of the host "render" group for /dev/dri/renderD*. Run `getent group render` on the host.
 entrances:
 - name: jellyfin-svc
   port: 8096
