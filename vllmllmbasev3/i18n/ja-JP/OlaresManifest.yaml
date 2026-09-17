@@ -3,6 +3,24 @@ metadata:
   description: 汎用 vLLM エンジンベース。インストール時に env で任意の HuggingFace Safetensors モデルを選択
 spec:
   upgradeDescription: |
+    v1.2.44: NVIDIA エンジンイメージを vLLM v0.29.0 に更新しました（`v0.27.1` -> `v0.29.0`、Spark / GB10 が使う `-aarch64` タグを含む）。ROCm は `v0.28.0`、Intel XPU は `0.21.0-ubuntu24.04-20260805` のままです。
+
+    **vLLM v0.29.0（2026-09-09）**
+    - Model Runner V2 が全モデルの既定になり、KV キャッシュ自動サイズ決定のための CUDA グラフメモリプロファイリング、バッチシャーディングされたサンプリング（ステップごとの logits メモリを 1/TP に削減）、prompt embeds、padded FULL cudagraph ディスパッチが追加されました。Model Runner V1 は非推奨で、v0.32 での削除が予定されています。
+    - Mamba のプレフィックスキャッシュがプリフィル内部チェックポイントに対応し、TTFT が 9%-25% 改善します。
+    - 新モデル: Hy4-preview、Qwen3.8-Flash-Next、GraniteSWA / GraniteMoeSWA、NemotronH_Omni_Reasoning_V3、Kimi K3 NVFP4。
+    - 投機的デコード: リクエスト単位の受理率統計（`--per-request-spec-decode-metrics`）、logprobs に対応した適応検証、SM100 スパース MLA。
+    - 既定値の変更: TP CUDA グループで FlashInfer all-reduce が既定で有効（`VLLM_ALLREDUCE_USE_FLASHINFER=0` で無効化）、プレフィックスキャッシュの `NONE_HASH` が決定的に、`--max-num-queued-reqs` / `--max-num-queued-tokens` による受付制御を追加。
+    - 破壊的変更: 非推奨だったモデルアーキテクチャ 10 種と PyAV 動画デコーダーを削除。`python -m vllm.entrypoints.openai.api_server` は非推奨となり `vllm serve` を使用します。
+
+    **vLLM v0.28.0（2026-08-26）**
+    - 既定値の変更: `max_num_batched_tokens` を 8192 -> 16384 に引き上げ、Mamba 系モデルでプレフィックスキャッシュを既定で有効化、Blackwell の CUDA グラフキャプチャ既定値を 1024 に引き上げ。
+    - Model Runner V2 の成熟: E/P/D 分離、重みオフロード、エンコーダー CUDA グラフ、`thinking_token_budget`。
+    - 階層型 KV キャッシュオフロード: ディスクへのオフロードと階層メトリクスを追加。
+    - Kimi-K3 / DeepSeek V4 の大規模な性能改善（カーネル、デコードコンテキスト並列、投機的デコード）。
+    - 新モデル: Muse Glimmer、Ling 3.0 Flash、Dots3 NOTE、Interns2mobius。
+    - 破壊的変更: bitsandbytes を外部プラグイン化、Transformers を 5.15.0 に更新、`calculate_kv_scales` と `override_attention_dtype` を削除。
+
     v1.2.43: Model Console を llm-init v1.7.19 にアップグレードしました。
 
     ROCm による AMD ディスクリート GPU（`amd-gpu`）対応を追加。Chart 1.2.36：Spark 方式の GPU メモリバジェット。

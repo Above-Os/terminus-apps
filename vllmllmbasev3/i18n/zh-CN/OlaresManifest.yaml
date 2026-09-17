@@ -4,6 +4,24 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.2.44: NVIDIA 引擎镜像升级到 vLLM v0.29.0（`v0.27.1` -> `v0.29.0`，含 Spark / GB10 使用的 `-aarch64` 标签）。ROCm 仍为 `v0.28.0`；Intel XPU 仍为 `0.21.0-ubuntu24.04-20260805`。
+
+    **vLLM v0.29.0（2026-09-09）**
+    - Model Runner V2 成为所有模型的默认执行器，新增 KV 缓存自动分配所需的 CUDA Graph 显存分析、批分片采样（单步 logits 显存降为 1/TP）、prompt embeds 以及 padded FULL cudagraph 调度。Model Runner V1 已弃用，计划在 v0.32 移除。
+    - Mamba 前缀缓存引入预填充内部检查点：TTFT 提升 9%-25%。
+    - 新增模型：Hy4-preview、Qwen3.8-Flash-Next、GraniteSWA / GraniteMoeSWA、NemotronH_Omni_Reasoning_V3、Kimi K3 NVFP4。
+    - 投机解码：按请求统计接受率（`--per-request-spec-decode-metrics`）、支持 logprobs 的自适应校验、SM100 稀疏 MLA。
+    - 默认值变更：TP CUDA 组默认启用 FlashInfer all-reduce（可用 `VLLM_ALLREDUCE_USE_FLASHINFER=0` 关闭）、前缀缓存 `NONE_HASH` 改为确定性、新增 `--max-num-queued-reqs` / `--max-num-queued-tokens` 准入控制。
+    - 破坏性变更：移除十个已弃用的模型架构与 PyAV 视频解码后端；`python -m vllm.entrypoints.openai.api_server` 弃用，改用 `vllm serve`。
+
+    **vLLM v0.28.0（2026-08-26）**
+    - 默认值变更：`max_num_batched_tokens` 由 8192 提升到 16384；Mamba 类模型默认开启前缀缓存；Blackwell CUDA Graph 捕获上限提升到 1024。
+    - Model Runner V2 完善：E/P/D 分离部署、权重卸载、编码器 CUDA Graph、`thinking_token_budget`。
+    - 分层 KV 缓存卸载：支持卸载到磁盘，并新增分层指标。
+    - Kimi-K3 / DeepSeek V4 的大规模性能优化，覆盖算子、解码上下文并行与投机解码。
+    - 新增模型：Muse Glimmer、Ling 3.0 Flash、Dots3 NOTE、Interns2mobius。
+    - 破坏性变更：bitsandbytes 迁出为独立插件；Transformers 升级到 5.15.0；移除 `calculate_kv_scales` 与 `override_attention_dtype`。
+
     v1.2.43: Model Console 升级到 llm-init v1.7.19。
 
     Chart 1.2.39 — 让 `amd-gpu` / `intel-gpu` 的显存配额可被解析。

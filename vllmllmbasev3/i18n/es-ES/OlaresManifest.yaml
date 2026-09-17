@@ -3,6 +3,24 @@ metadata:
   description: Base genérica del motor vLLM. Elija cualquier modelo HuggingFace Safetensors en la instalación mediante env
 spec:
   upgradeDescription: |
+    v1.2.44: la imagen del motor NVIDIA se actualiza a vLLM v0.29.0 (`v0.27.1` -> `v0.29.0`, incluida la etiqueta `-aarch64` que usan Spark / GB10). ROCm permanece en `v0.28.0` e Intel XPU en `0.21.0-ubuntu24.04-20260805`.
+
+    **vLLM v0.29.0 (09-09-2026)**
+    - Model Runner V2 pasa a ser el predeterminado para todos los modelos, con perfilado de memoria de grafos CUDA para dimensionar el caché KV automáticamente, muestreo repartido por lote (memoria de logits por paso reducida a 1/TP), prompt embeds y despacho cudagraph FULL con relleno. Model Runner V1 queda obsoleto y se prevé eliminarlo en v0.32.
+    - Caché de prefijos en Mamba con puntos de control internos de prellenado: mejora de TTFT del 9% al 25%.
+    - Nuevos modelos: Hy4-preview, Qwen3.8-Flash-Next, GraniteSWA / GraniteMoeSWA, NemotronH_Omni_Reasoning_V3, Kimi K3 NVFP4.
+    - Decodificación especulativa: estadísticas de aceptación por solicitud (`--per-request-spec-decode-metrics`), verificación adaptativa con logprobs y MLA disperso en SM100.
+    - Nuevos valores por defecto: all-reduce de FlashInfer activo para grupos CUDA TP (se desactiva con `VLLM_ALLREDUCE_USE_FLASHINFER=0`), `NONE_HASH` determinista en el caché de prefijos y nuevo control de admisión `--max-num-queued-reqs` / `--max-num-queued-tokens`.
+    - Cambios incompatibles: se eliminan diez arquitecturas de modelo obsoletas y el decodificador de vídeo PyAV; `python -m vllm.entrypoints.openai.api_server` queda obsoleto en favor de `vllm serve`.
+
+    **vLLM v0.28.0 (26-08-2026)**
+    - Nuevos valores por defecto: `max_num_batched_tokens` sube de 8192 a 16384, caché de prefijos activado por defecto en modelos Mamba y captura de grafos CUDA en Blackwell elevada a 1024.
+    - Maduración de Model Runner V2: desagregación E/P/D, descarga de pesos, grafos CUDA del codificador y `thinking_token_budget`.
+    - Descarga escalonada del caché KV, incluida la descarga a disco, con métricas de niveles.
+    - Gran trabajo de rendimiento para Kimi-K3 / DeepSeek V4 en kernels, paralelismo de contexto de decodificación y decodificación especulativa.
+    - Nuevos modelos: Muse Glimmer, Ling 3.0 Flash, Dots3 NOTE, Interns2mobius.
+    - Cambios incompatibles: bitsandbytes pasa a ser un plugin externo, Transformers sube a 5.15.0 y se eliminan `calculate_kv_scales` y `override_attention_dtype`.
+
     v1.2.43: Model Console se actualiza a llm-init v1.7.19.
 
     Se añade compatibilidad con GPU discretas AMD (`amd-gpu`) mediante ROCm. Chart 1.2.36: presupuesto de memoria de GPU al estilo Spark.

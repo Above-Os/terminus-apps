@@ -7,7 +7,7 @@ metadata:
   description: "Generic vLLM engine base. Pick any HuggingFace Safetensors model at install via env."
   appid: vllmllmbasev3
   title: vLLM Engine Base
-  version: '1.2.43'
+  version: '1.2.44'
   categories:
   - AI
   - models
@@ -36,8 +36,26 @@ workloadReplicas:
   llminit: 1
 spec:
   onlyAdmin: true
-  versionName: '0.27.1 / 0.28.0-rocm / 0.21.0-xpu'
+  versionName: '0.29.0 / 0.28.0-rocm / 0.21.0-xpu'
   upgradeDescription: |
+    v1.2.44: NVIDIA engine image upgrades to vLLM v0.29.0 (`v0.27.1` -> `v0.29.0`, x86_64 plus the `-aarch64` tag used by Spark / GB10). ROCm stays on `v0.28.0`; Intel XPU stays on `0.21.0-ubuntu24.04-20260805`.
+
+    **vLLM v0.29.0 (2026-09-09)**
+    - Model Runner V2 is now the default for every model, gaining CUDA graph memory profiling for KV-cache auto-sizing, batch-sharded sampling (per-step logits memory cut by 1/TP), prompt embeds and padded FULL cudagraph dispatch. Model Runner V1 is deprecated and targeted for removal in v0.32.
+    - Mamba prefix caching with internal prefill checkpoints: 9%-25% TTFT improvement.
+    - New models: Hy4-preview, Qwen3.8-Flash-Next, GraniteSWA / GraniteMoeSWA, NemotronH_Omni_Reasoning_V3, Kimi K3 NVFP4.
+    - Speculative decoding: per-request acceptance stats (`--per-request-spec-decode-metrics`), adaptive verification with logprobs, SM100 sparse MLA.
+    - New defaults: FlashInfer all-reduce on for TP CUDA groups (opt out with `VLLM_ALLREDUCE_USE_FLASHINFER=0`), deterministic prefix-cache `NONE_HASH`, and new `--max-num-queued-reqs` / `--max-num-queued-tokens` admission control.
+    - Breaking: ten deprecated model architectures removed, the PyAV video decoder removed, and `python -m vllm.entrypoints.openai.api_server` deprecated in favor of `vllm serve`.
+
+    **vLLM v0.28.0 (2026-08-26)**
+    - New defaults: `max_num_batched_tokens` raised 8192 -> 16384, prefix caching on by default for Mamba models, Blackwell CUDA graph capture raised to 1024.
+    - Model Runner V2 maturation: E/P/D disaggregation, weight offloading, encoder CUDA graphs, `thinking_token_budget`.
+    - Tiered KV-cache offloading, including offload to disk and tiering metrics.
+    - Large Kimi-K3 / DeepSeek V4 performance push across kernels, decode context parallel and speculative decoding.
+    - New models: Muse Glimmer, Ling 3.0 Flash, Dots3 NOTE, Interns2mobius.
+    - Breaking: bitsandbytes moved to an out-of-tree plugin, Transformers bumped to 5.15.0, `calculate_kv_scales` and `override_attention_dtype` removed.
+
     v1.2.43: Model Console upgrades to llm-init v1.7.19.
 
     v1.2.42: Skip the HuggingFace Hub at startup (`HF_HUB_OFFLINE=1`). Weights are already local when the engine starts, but the read-only cache mount could not hold huggingface_hub's negative cache, so ~90 Hub lookups repeated on every start. Startup 160s → 105s measured on a 12B AWQ model.
