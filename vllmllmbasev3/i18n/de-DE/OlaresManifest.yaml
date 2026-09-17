@@ -3,6 +3,24 @@ metadata:
   description: Generische vLLM-Engine-Basis. Wählen Sie bei der Installation über Env ein beliebiges HuggingFace-Safetensors-Modell
 spec:
   upgradeDescription: |
+    v1.2.44: NVIDIA-Engine-Image wird auf vLLM v0.29.0 aktualisiert (`v0.27.1` -> `v0.29.0`, inklusive des von Spark / GB10 genutzten `-aarch64`-Tags). ROCm bleibt auf `v0.28.0`, Intel XPU bleibt auf `0.21.0-ubuntu24.04-20260805`.
+
+    **vLLM v0.29.0 (09.09.2026)**
+    - Model Runner V2 ist jetzt Standard für alle Modelle, mit CUDA-Graph-Speicherprofiling für die automatische KV-Cache-Dimensionierung, batch-shardiertem Sampling (Logits-Speicher pro Schritt auf 1/TP reduziert), Prompt Embeds und padded FULL-Cudagraph-Dispatch. Model Runner V1 gilt als veraltet und soll in v0.32 entfernt werden.
+    - Mamba-Prefix-Caching mit internen Prefill-Checkpoints: 9%-25% bessere TTFT.
+    - Neue Modelle: Hy4-preview, Qwen3.8-Flash-Next, GraniteSWA / GraniteMoeSWA, NemotronH_Omni_Reasoning_V3, Kimi K3 NVFP4.
+    - Spekulatives Dekodieren: Akzeptanzstatistiken pro Anfrage (`--per-request-spec-decode-metrics`), adaptive Verifikation mit Logprobs, SM100 Sparse MLA.
+    - Neue Standardwerte: FlashInfer-All-Reduce für TP-CUDA-Gruppen aktiv (abschaltbar mit `VLLM_ALLREDUCE_USE_FLASHINFER=0`), deterministischer Prefix-Cache-`NONE_HASH` sowie neue Zulassungssteuerung über `--max-num-queued-reqs` / `--max-num-queued-tokens`.
+    - Breaking Changes: zehn veraltete Modellarchitekturen und der PyAV-Video-Decoder entfernt; `python -m vllm.entrypoints.openai.api_server` zugunsten von `vllm serve` veraltet.
+
+    **vLLM v0.28.0 (26.08.2026)**
+    - Neue Standardwerte: `max_num_batched_tokens` von 8192 auf 16384 erhöht, Prefix-Caching für Mamba-Modelle standardmäßig aktiv, Blackwell-CUDA-Graph-Capture auf 1024 erhöht.
+    - Reifung von Model Runner V2: E/P/D-Disaggregation, Gewichts-Offloading, Encoder-CUDA-Graphs, `thinking_token_budget`.
+    - Gestuftes KV-Cache-Offloading inklusive Auslagerung auf Festplatte und Metriken.
+    - Umfangreiche Performance-Arbeit für Kimi-K3 / DeepSeek V4 über Kernel, Decode Context Parallel und spekulatives Dekodieren.
+    - Neue Modelle: Muse Glimmer, Ling 3.0 Flash, Dots3 NOTE, Interns2mobius.
+    - Breaking Changes: bitsandbytes als externes Plugin ausgelagert, Transformers auf 5.15.0 angehoben, `calculate_kv_scales` und `override_attention_dtype` entfernt.
+
     v1.2.43: Model Console wird auf llm-init v1.7.19 aktualisiert.
 
     Unterstützung für diskrete AMD-GPUs (`amd-gpu`) über ROCm hinzugefügt. Chart 1.2.36: GPU-Speicherbudget im Spark-Stil.
