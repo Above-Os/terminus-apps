@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.58** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.66** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -90,9 +90,8 @@ with `x-caller-app-id: router` and the boundary is `sharedEntrances.authLevel: i
 One create endpoint covers all four output families. The request body names a
 `workflowId` and never an output family: the workflow already decides it, and a caller
 that could name it could disagree with the catalogue Router built its model rows from.
-A generation started this way is owned by the chart owner, because Router sends no user
-header; separating one Router user's outputs from another's is Router's job, and it does
-it by sealing the binding on its side and never handing a FlowStudio id to a client.
+A generation started this way is owned by the end user Router forwards
+(``x-bfl-user`` / ``remote-user``). Without that header it falls back to the chart owner.
 
 The OpenAI-shaped surface is a different consumer and is unchanged:
 
@@ -151,7 +150,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.58. This chart ships `docker.io/beclab/flowstudio:0.3.57` and `engine-1.0.7`.
+covers 0.3.66. This chart ships `docker.io/beclab/flowstudio:0.3.66` and `engine-1.0.7`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
