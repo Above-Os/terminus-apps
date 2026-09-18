@@ -2,7 +2,7 @@
 
 Chat on Olares, wired to Router.
 
-Current app version: **0.26.16** — `appVersion` in `Chart.yaml` and the image tag in
+Current app version: **0.26.17** — `appVersion` in `Chart.yaml` and the image tag in
 `values.yaml`. In the `terminus-apps` / `apps` index the chart's own `version` follows a
 separate `0.0.N` sequence, bumped once per submission.
 
@@ -29,4 +29,6 @@ owners:
 2. Confirm Router is running.
 3. Open the Lares entrance and chat.
 
-Auth is the in-cluster app identity (`x-caller-appid`). The default model, web search, and voice input are chosen in Settings.
+Auth is the in-cluster app identity (`x-caller-appid`) plus the person logged
+into this Lares (`x-bfl-user` / `OLARES_USERNAME`). Image jobs in FlowStudio
+must belong to that person, not the shared FlowStudio chart owner.
