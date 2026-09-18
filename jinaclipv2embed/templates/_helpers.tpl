@@ -25,7 +25,7 @@
 {{- end -}}
 
 {{- define "jinaclipv2embed.embedTag" -}}v0.1.9{{- end -}}
-{{- define "jinaclipv2embed.llmInitTag" -}}v1.7.20{{- end -}}
+{{- define "jinaclipv2embed.llmInitTag" -}}v1.7.21{{- end -}}
 {{- define "jinaclipv2embed.unifiedRepo" -}}beclab/jina-clip-v2-split{{- end -}}
 {{- define "jinaclipv2embed.modelRevision" -}}main{{- end -}}
 {{- define "jinaclipv2embed.logicalModelName" -}}jina-clip-v2{{- end -}}
