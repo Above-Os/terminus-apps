@@ -1,37 +1,21 @@
 metadata:
   title: Unbound
-  description: A DNS resolver that resolves names from the root servers instead of using a public service
+  description: A DNS resolver that looks up domain names, validates replies, and caches results
 spec:
   fullDescription: |
-    Unbound answers domain name lookups by asking the root servers itself and
-    working down to whichever server is authoritative for the name, instead of
-    handing the question to a public DNS service. It then checks the DNSSEC
-    signatures on the reply on your own machine, rather than trusting another
-    resolver's word that it checked them.
+    Unbound is a DNS resolver that translates domain names into IP addresses. It can find answers by querying the DNS hierarchy, validate digitally signed DNS data with DNSSEC, and cache results for later requests.
 
-    Installed alongside a DNS filter such as AdGuard Home, it takes the place of
-    the public upstream that filter would otherwise forward to.
+    **Key features**
 
-    **What you get**
-    - No single provider sees your full query history
-    - DNSSEC validated on your own machine, not trusted from an upstream
-    - A local cache shared by every app on this Olares
+    - Resolve domain names recursively without forwarding every request to a public DNS resolver.
+    - Check DNSSEC signatures to verify the authenticity and integrity of signed DNS data.
+    - Reuse cached answers for repeated queries.
+    - Serve as an upstream resolver for a DNS filter such as AdGuard Home.
 
-    **Worth knowing before you install**
-    - Recursive queries to the root, TLD and authoritative servers travel as plaintext
-      DNS. DNSSEC guarantees authenticity and integrity, not encryption or anonymity.
-      Your ISP can observe these queries; a public resolver reached over DoT/DoH cannot.
-    - The first lookup of an unseen domain is slower than a large public resolver.
-    - Some ISPs block or intercept outbound port 53, which breaks recursion entirely.
-      Unbound can fall back to forwarding over DoT (port 853) on such networks, but
-      it has no DoH client -- where only port 443 is open, Unbound cannot work at
-      all and AdGuard Home with a DoH upstream is the only option.
-    - One resolver serves this whole Olares, and so does its cache. That is what
-      makes it fast, but a cached answer is visible to anyone who can query the
-      resolver or read its cache: it shows that someone here looked a name up,
-      though not who. A DNS resolver is shared infrastructure, like the filter in
-      front of it.
+    **Using Unbound on Olares**
 
-    Unbound has no web interface. It is configured by editing `unbound.conf` from the
-    built-in terminal; the file lives on persistent storage and survives restarts and
-    upgrades.
+    An administrator installs one shared resolver. Apps and devices must be configured to use it, directly or through a DNS filter. Configure Unbound by editing `unbound.conf` in the included terminal. The configuration is stored persistently across restarts and upgrades; there is no graphical configuration interface.
+
+    Recursive resolution requires outbound DNS access on port 53. If your network blocks or intercepts it, forwarding to a DNS-over-TLS provider on port 853 is an alternative you can configure. DNSSEC validates DNS data but does not encrypt queries; recursive queries to DNS servers are sent in plaintext.
+
+    [Unbound documentation](https://unbound.docs.nlnetlabs.nl/)
