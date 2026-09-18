@@ -4,12 +4,24 @@
 {{- end }}
 {{- $olaresEnv := .Values.olaresEnv | default dict }}
 {{- $modelName := (get $manifestEnvs "MODEL_NAME") | default $olaresEnv.MODEL_NAME }}
-{{- $modelMode := (get $manifestEnvs "MODEL_MODE") | default $olaresEnv.MODEL_MODE }}
 {{- $modelSupports := (get $manifestEnvs "MODEL_SUPPORTS") | default $olaresEnv.MODEL_SUPPORTS }}
 {{- $modelSource := (get $manifestEnvs "MODEL_SOURCE") | default $olaresEnv.MODEL_SOURCE }}
 {{- $logLevel := $olaresEnv.LOG_LEVEL | default (get $manifestEnvs "LOG_LEVEL") | default .Values.logLevel }}
 {{- $engineArgs := $olaresEnv.ENGINE_ARGS | default (get $manifestEnvs "ENGINE_ARGS") | default .Values.model.engineArgs | trim }}
-{{- $executionMode := $olaresEnv.EXECUTION_MODE | default (get $manifestEnvs "EXECUTION_MODE") | default .Values.model.executionMode }}
+{{- $gpuType := .Values.gpu | default "" }}
+{{- if not $gpuType }}
+{{- if .Values.GPU }}{{- $gpuType = .Values.GPU.Type | default "nvidia" }}{{- else }}{{- $gpuType = "nvidia" }}{{- end }}
+{{- end }}
+{{- $intel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") }}
+{{- $requestedMode := $olaresEnv.EXECUTION_MODE | default (get $manifestEnvs "EXECUTION_MODE") | default "auto" }}
+{{- $executionMode := $requestedMode }}
+{{- if eq $gpuType "cpu" }}
+{{- $executionMode = "cpu" }}
+{{- else if $intel }}
+{{- $executionMode = "openvino" }}
+{{- else if or (eq $executionMode "auto") (eq $executionMode "openvino") }}
+{{- $executionMode = .Values.model.executionMode | default "cuda" }}
+{{- end }}
 {{- $engineArgs = printf "%s --execution-mode %s" $engineArgs $executionMode | trim }}
 {{- $hfEndpoint := $olaresEnv.HF_ENDPOINT | default .Values.hf.endpoint }}
 {{- $hfToken := $olaresEnv.HF_TOKEN | default "" }}
@@ -18,16 +30,16 @@
 {{- $cpuLimit := $olaresEnv.CPU_LIMIT | default (get $manifestEnvs "CPU_LIMIT") | trim }}
 {{- $memLimit := $olaresEnv.MEMORY_LIMIT | default (get $manifestEnvs "MEMORY_LIMIT") | trim }}
 {{- $gpuRaw := $olaresEnv.REQUIRED_GPU_MEMORY | default (get $manifestEnvs "REQUIRED_GPU_MEMORY") | trim }}
-{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") }}
-{{- $gpuType := .Values.gpu | default "" }}
-{{- if not $gpuType }}
-{{- if .Values.GPU }}{{- $gpuType = .Values.GPU.Type | default "nvidia" }}{{- else }}{{- $gpuType = "nvidia" }}{{- end }}
-{{- end }}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") (ne $gpuType "cpu") }}
 {{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") }}
 {{- if $unifiedMem }}
 {{- $gpuMiB := include "llmbase.gpuMiB" $gpuRaw }}
 {{- $memRequest = printf "%sMi" $gpuMiB }}
 {{- $memLimit = printf "%sMi" $gpuMiB }}
+{{- end }}
+{{- if eq $gpuType "intel" }}
+{{- $memRequest = "9Gi" }}
+{{- $memLimit = "12Gi" }}
 {{- end }}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name }}
 {{- if not $modelName }}
@@ -43,8 +55,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: audiospeakrsdiarv3
+    {{- if or $intel $wantGpu }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "audio-speakrs-speaker-diarization-community-1"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.audiospeakrsdiarv3.replicaCount }}
   strategy:
@@ -62,7 +76,7 @@ spec:
     spec:
       containers:
         - name: audio-speakrs-speaker-diarization-community-1
-          image: "docker.io/beclab/audio-speakrs:v1.1.15"
+          image: "{{ if $intel }}docker.io/beclab/audio-speakrs-ov:v1.1.17{{ else }}docker.io/beclab/audio-speakrs:v1.1.17{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "/wrappers/speakrs.sh"]
           env:
@@ -97,7 +111,7 @@ spec:
             - name: PGID
               value: "1000"
             - name: GPU_TYPE
-              value: nvidia
+              value: {{ if or (eq $gpuType "cpu") $intel }}{{ $gpuType }}{{ else }}nvidia{{ end }}
             - name: GPU_CORE_UTILIZATION_POLICY
               value: disable
           ports:
@@ -109,12 +123,18 @@ spec:
               mountPath: /cache/hf/hub
             - name: run-state
               mountPath: /run/llm-init
-              readOnly: true   # this side only waits on the sentinel; llm-init is the writer
+              readOnly: true
             - name: wrappers
               mountPath: /wrappers
               readOnly: true
             - name: app-data
               mountPath: /tmp
+            {{- if $intel }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            {{- end }}
           resources:
             requests:
               cpu: {{ $cpuRequest | quote }}
@@ -123,6 +143,16 @@ spec:
               cpu: {{ $cpuLimit | quote }}
               memory: {{ $memLimit | quote }}
       volumes:
+        {{- if $intel }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        {{- end }}
         - name: hf-cache
           hostPath:
             path: {{ .Values.userspace.appCommon }}/huggingface

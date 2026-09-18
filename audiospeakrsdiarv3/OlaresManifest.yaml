@@ -8,7 +8,7 @@ metadata:
   title: Speakrs Diarization
   description: A local model for accurate speaker-turn separation in recordings
   icon: https://app.cdn.olares.com/appstore/audioengines/avencera/icon.png
-  version: '0.0.36'
+  version: "0.0.37"
   categories:
     - AI
     - models
@@ -17,15 +17,12 @@ metadata:
     - audio
 
 spec:
-  upgradeDescription: |
-    v0.0.36: Model Console (llm-init) updated to v1.7.21.
-
-  versionName: "0.0.34"
+  versionName: "0.0.37"
   onlyAdmin: true
   developer: Avencera
   website: https://avencera.com
   sourceCode: https://github.com/avencera/speakrs
-  submitter: Olares
+  submitter: huangzhenyuan-bytetrade
   locale:
     - en-US
     - zh-CN
@@ -38,6 +35,8 @@ spec:
   license:
     - text: Apache-2.0
       url: https://github.com/avencera/speakrs/blob/master/LICENSE
+  upgradeDescription: |
+    v0.0.37: Runs on Intel machines, and installs where there is no GPU at all. The compute mode offered at install now includes CPU, Intel and Intel GPU alongside NVIDIA.
   fullDescription: |
     Speakrs Diarization separates a recording into speaker turns and marks when each person speaks. It assigns anonymous labels rather than identifying people by name. This app uses the accuracy-focused pipeline and runs locally with ONNX Runtime.
 
@@ -49,7 +48,7 @@ spec:
     - Choose a more accurate or a faster processing mode after install.
     - Make diarization results available to compatible Olares applications.
 
-    A compatible NVIDIA GPU with at least `3Gi` of GPU memory is required. GTX 10-series, Tesla P100, and V100 cards are not supported.
+    Runs on an NVIDIA GPU, on an Intel integrated or discrete GPU, or on the CPU alone; the compute mode is chosen at install. An NVIDIA card needs at least `3Gi` of GPU memory and Turing or newer, so GTX 10-series, Tesla P100 and V100 are not supported. An Intel install has no CPU fallback: if the card cannot be used the engine stops rather than serving slowly, and reinstalling on the CPU compute mode is the way back.
   supportArch:
     - amd64
     - arm64
@@ -75,6 +74,38 @@ spec:
       limitedMemory: 7Gi
       requiredDisk: 2Gi
       limitedDisk: 20Gi
+
+    - mode: cpu
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3328Mi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+
+    - mode: intel
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 10Gi
+      limitedMemory: 16Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+
+    - mode: intel-gpu
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3Gi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 3Gi
+      limitedGPUMemory: 3Gi
 
 envs:
   - envName: MODEL_SOURCE
@@ -171,15 +202,37 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: cuda
+    default: auto
     options:
+      - title: Match the compute mode (auto)
+        value: auto
       - title: Accurate (cuda)
         value: cuda
       - title: Fast (cuda-fast)
         value: cuda-fast
-    description: "Accuracy against speed. `cuda` matches pyannote's accuracy and runs about
+      - title: CPU (cpu)
+        value: cpu
+      - title: Intel GPU (openvino)
+        value: openvino
+    description: "Accuracy against speed. `auto`, the default, follows the compute mode chosen
+      at install: a CPU install runs `cpu`, an Intel install runs `openvino`, an NVIDIA install
+      runs `cuda`. It exists because the
+      platform supplies this setting's default on every install, including the validation pass
+      the store makes for each compute mode a manifest declares -- so without a value that means
+      \"whatever fits\", a CPU install carries a CUDA mode it cannot run and there is no way to
+      tell that apart from an installer who asked for one. An NVIDIA install is the only one
+      where this setting decides anything: `cuda`, `cuda-fast` and `cpu` all run there, while
+      `openvino` does not and falls back to `cuda`. On a CPU or an Intel install the engine runs
+      the mode that fits the hardware whatever is selected here, because the platform also
+      re-sends the value it remembers from an earlier install, and a chart cannot tell that
+      from a deliberate choice. Choosing `cpu` on an NVIDIA install does not give the card
+      back: the reservation is made by the compute mode when the app is installed, so it is
+      still held while the engine runs on the processor.
+      `cuda` matches pyannote's accuracy and runs about
       1.8x faster than it. `cuda-fast` runs about 3.6x faster by stepping the segmentation
-      window 2s instead of 1s, and costs 0.3-1.0 DER points -- the cost is speaker confusion
+      window 2s instead of 1s, and costs 0.3-1.0 DER points. That trade is offered on NVIDIA
+      only: there is no fast variant of the CPU or Intel modes, so on those the speed this
+      setting can buy is none -- the cost is speaker confusion
       and grows with how densely speakers overlap, so it is small on clean single-speaker-at-
       a-time audio and around a point on far-field meetings. Changing this restarts the engine
       and reloads the model. The first request after any restart costs about 50
@@ -214,7 +267,10 @@ envs:
       drops speech bursts shorter than it; --exclusive returns non-overlapping turns by
       default. A caller may override those four per request. --max-audio-seconds (default
       14400, four hours) caps clip length; this engine holds the whole clip in memory, so
-      raising it past what MEMORY_LIMIT covers turns a long upload into an OOM kill. The
+      raising it past what MEMORY_LIMIT covers turns a long upload into an OOM kill. On an
+      Intel install, --openvino-batching off runs segmentation one window at a time instead of
+      through the batched model prepared at startup; it is there for measuring, about 4x
+      slower on integrated graphics, and on is the default. The
       execution mode is NOT set here -- it has its own setting above. A flag this engine does
       not take is ignored with a warning in the log, not an error."
 
