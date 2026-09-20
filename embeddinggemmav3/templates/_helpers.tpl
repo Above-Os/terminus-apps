@@ -14,15 +14,12 @@
 {{- end -}}
 {{- end -}}
 
-{{- /* Olares GPU mode: cpu | intel | intel-gpu | nvidia | nvidia-gb10 */ -}}
+{{- /* Olares accelerator mode supplied by the platform; default to cpu. */ -}}
 {{- define "embeddinggemmav3.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
 {{- if not $gpuType -}}
 {{- $gpuType = $gpuObj.Type | default "cpu" -}}
-{{- end -}}
-{{- if not (has $gpuType (list "cpu" "intel" "intel-gpu" "nvidia" "nvidia-gb10")) -}}
-{{- fail (printf "unsupported accelerator: %s" $gpuType) -}}
 {{- end -}}
 {{- $gpuType -}}
 {{- end -}}
