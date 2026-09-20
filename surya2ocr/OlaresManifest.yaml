@@ -3,7 +3,7 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: surya2ocr
-  icon: "https://avatars.githubusercontent.com/u/176631703?v=4&s=256"
+  icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
   description: "Multilingual text extraction from document images and PDFs"
   appid: surya2ocr
   title: Surya OCR 2
@@ -20,26 +20,23 @@ sharedEntrances:
     title: Surya OCR 2 API
     invisible: true
     authLevel: internal
-    icon: "https://avatars.githubusercontent.com/u/176631703?v=4&s=256"
+    icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
 entrances:
   - name: ocrclient
     port: 8090
     host: download-svc
     title: Surya OCR 2
-    icon: "https://avatars.githubusercontent.com/u/176631703?v=4&s=256"
+    icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
     openMethod: window
     authLevel: internal
   - name: ocrapi
     port: 8090
     host: download-svc
     title: Surya OCR 2 API
-    icon: "https://avatars.githubusercontent.com/u/176631703?v=4&s=256"
+    icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
     invisible: true
     openMethod: window
     authLevel: internal
-#   surya2ocr   — llama.cpp CUDA (== appid / Release.Name)
-#   llminit     — llm-init (ENGINE_KIND=ocr): download + /v1/ocr* proxy
-#   ocradapter  — OCRAdapter job worker
 workloadReplicas:
   surya2ocr: 1
   llminit: 1
@@ -70,7 +67,6 @@ spec:
     - text: AI Pubs Open RAIL-M (modified)
       url: https://huggingface.co/datalab-to/surya-ocr-2-gguf/blob/main/LICENSE
   accelerator:
-    # Sum ≈ llamacpp + llm-init + ocradapter. GPU from surya2 peak ~8.1Gi → 10Gi.
     - mode: nvidia
       requiredCpu: "2"
       limitedCpu: "6"
@@ -117,8 +113,6 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    # Comma dual-source (each one --include) → two single-file hf downloads.
-    # Do NOT use one hf:// with two --include: that path can leave only mmproj in snapshot.
     default: "hf://datalab-to/surya-ocr-2-gguf --include surya-2.gguf,hf://datalab-to/surya-ocr-2-gguf --include surya-2-mmproj.gguf"
     description: "Comma dual hf:// (main GGUF + mmproj). Each segment one --include so only the two GGUFs download."
     regex: "^hf://"
@@ -143,7 +137,6 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    # Matches local resource profile; mmproj is auto-resolved beside the main GGUF.
     default: "-ngl 99 -c 16384 -n 4096 --image-min-tokens 1024"
     description: "llama.cpp flags on the engine Pod only (not llm-init). mmproj is auto-resolved next to the main GGUF."
   - envName: LLAMACPP_REQUIRED_GPU_MEMORY
