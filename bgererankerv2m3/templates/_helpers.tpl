@@ -14,7 +14,7 @@
 {{- end -}}
 {{- end -}}
 
-{{- /* Olares GPU mode: cpu | intel | nvidia | nvidia-gb10 */ -}}
+{{- /* Olares GPU mode: cpu | intel | intel-gpu | nvidia | nvidia-gb10 */ -}}
 {{- define "bgererankerv2m3.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
@@ -24,7 +24,7 @@
 {{- $gpuType -}}
 {{- end -}}
 
-{{- define "bgererankerv2m3.rerankTag" -}}v0.0.1{{- end -}}
+{{- define "bgererankerv2m3.rerankTag" -}}v0.0.4{{- end -}}
 {{- define "bgererankerv2m3.llmInitTag" -}}v1.7.21{{- end -}}
 {{- /* RuntimeQueue serializes scoring through exactly one active permit. */ -}}
 {{- define "bgererankerv2m3.maxConcurrency" -}}1{{- end -}}
@@ -32,9 +32,10 @@
 {{- define "bgererankerv2m3.modelRevision" -}}main{{- end -}}
 {{- define "bgererankerv2m3.logicalModelName" -}}bge-reranker-v2-m3{{- end -}}
 
-{{- /* intel → OpenVINO subdir; all other modes → ONNX subdir */ -}}
+{{- /* intel / intel-gpu → OpenVINO subdir; all other modes → ONNX subdir */ -}}
 {{- define "bgererankerv2m3.useOpenVino" -}}
-{{- eq (include "bgererankerv2m3.gpuType" .) "intel" -}}
+{{- $mode := include "bgererankerv2m3.gpuType" . -}}
+{{- or (eq $mode "intel") (eq $mode "intel-gpu") -}}
 {{- end -}}
 
 {{- /* rerank-server: MODEL_NAME == MODEL_ID (no -ov/-onnx suffix). */ -}}
