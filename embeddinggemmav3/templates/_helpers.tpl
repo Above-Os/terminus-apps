@@ -14,34 +14,31 @@
 {{- end -}}
 {{- end -}}
 
-{{- /* Olares GPU mode: cpu | intel | nvidia | nvidia-gb10 */ -}}
+{{- /* Olares GPU mode: cpu | intel | intel-gpu | nvidia | nvidia-gb10 */ -}}
 {{- define "embeddinggemmav3.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $gpuType := .Values.gpu | default "" -}}
 {{- if not $gpuType -}}
 {{- $gpuType = $gpuObj.Type | default "cpu" -}}
 {{- end -}}
+{{- if not (has $gpuType (list "cpu" "intel" "intel-gpu" "nvidia" "nvidia-gb10")) -}}
+{{- fail (printf "unsupported accelerator: %s" $gpuType) -}}
+{{- end -}}
 {{- $gpuType -}}
 {{- end -}}
 
-{{- define "embeddinggemmav3.embedTag" -}}v0.2.0{{- end -}}
+{{- define "embeddinggemmav3.embedTag" -}}hw-bfaa3cc{{- end -}}
 {{- define "embeddinggemmav3.llmInitTag" -}}v1.7.21{{- end -}}
 {{- define "embeddinggemmav3.unifiedRepo" -}}beclab/embeddinggemma-300m{{- end -}}
 {{- define "embeddinggemmav3.modelRevision" -}}main{{- end -}}
 {{- define "embeddinggemmav3.logicalModelName" -}}embeddinggemma-300m{{- end -}}
 
-{{- /* intel → OpenVINO subdir; all other modes → ONNX subdir */ -}}
+{{- /* intel / intel-gpu → OpenVINO subdir; all other modes → ONNX subdir */ -}}
 {{- define "embeddinggemmav3.useOpenVino" -}}
-{{- eq (include "embeddinggemmav3.gpuType" .) "intel" -}}
+{{- has (include "embeddinggemmav3.gpuType" .) (list "intel" "intel-gpu") -}}
 {{- end -}}
 
-{{- define "embeddinggemmav3.modelId" -}}
-{{- if eq (include "embeddinggemmav3.useOpenVino" .) "true" -}}
-embeddinggemma-300m-ov
-{{- else -}}
-embeddinggemma-300m-onnx
-{{- end -}}
-{{- end -}}
+{{- define "embeddinggemmav3.modelId" -}}embeddinggemma-300m{{- end -}}
 
 {{- define "embeddinggemmav3.modelSource" -}}
 {{- $repo := include "embeddinggemmav3.unifiedRepo" . -}}

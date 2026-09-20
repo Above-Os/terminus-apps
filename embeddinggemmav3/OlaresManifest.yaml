@@ -7,7 +7,7 @@ metadata:
   description: "EmbeddingGemma-300M text embeddings via IREmbeddingServer (OpenVINO / ONNX)"
   appid: embeddinggemmav3
   title: EmbeddingGemma
-  version: '1.1.4'
+  version: '1.1.5'
   categories:
   - AI
   - models
@@ -44,33 +44,35 @@ workloadReplicas:
   llminit: 1
 spec:
   upgradeDescription: |
-    v1.1.4: Model Console (llm-init) updated to v1.7.21.
+    v1.1.5: Explicit accelerators, Intel integrated/discrete selection and unified model ID.
+    Candidate engine hw-bfaa3cc; upgrade image and configuration together.
 
   onlyAdmin: true
-  versionName: '0.1.0'
+  versionName: 'hw-bfaa3cc'
   fullDescription: |
     **EmbeddingGemma-300M** text embedding service powered by IREmbeddingServer. Serves OpenAI-compatible `/v1/embeddings` and `/v1/models` on port 8080.
 
     **Accelerator modes**
-    | Olares mode | Image | Backend | `EMBED_DEVICE` |
+    | Olares mode | Image | Backend | `ACCELERATOR` |
     |-------------|-------|---------|----------------|
-    | `intel` | `embed-server:v0.1.0-ov-intel` | OpenVINO IR | `igpu` |
-    | `cpu` | `embed-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
-    | `nvidia` | `embed-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
-    | `nvidia-gb10` | `embed-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
+    | `intel` | `embed-server:hw-bfaa3cc-ov-intel` | OpenVINO IR | `intel` |
+    | `intel-gpu` | `embed-server:hw-bfaa3cc-ov-intel` | OpenVINO IR | `intel-gpu` |
+    | `cpu` | `embed-server:hw-bfaa3cc-onnx-cpu` | ONNX CPU EP | `cpu` |
+    | `nvidia` | `embed-server:hw-bfaa3cc-onnx-cuda12/13` | ONNX CUDA EP | `nvidia` |
+    | `nvidia-gb10` | `embed-server:hw-bfaa3cc-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `nvidia-gb10` |
 
     **Model download**
     On first start, llm-init downloads from the unified Hugging Face repo into App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
     - [beclab/embeddinggemma-300m](https://huggingface.co/beclab/embeddinggemma-300m)
-    - `intel` mode: `openvino/` subdirectory only
+    - `intel` / `intel-gpu` modes: `openvino/` subdirectory only
     - All other modes: `onnx/` subdirectory only
 
     **Device mounts**
-    - `intel`: `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
+    - `intel` / `intel-gpu`: `/dev/dri`, `/sys/class/drm`; discrete mode also uses Olares GPU injection
     - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
 
     **Stack**
-    - **embed-server** (`beclab/embed-server:v0.1.0`, port 8080): Rust embedding inference (internal; reached as `http://embed:8080`).
+    - **embed-server** (`beclab/embed-server:hw-bfaa3cc`, port 8080): Rust embedding inference (internal; reached as `http://embed:8080`).
     - **llm-init** (`beclab/llm-init:v1.3.5`, `ENGINE_KIND=embed`, port 8090): model download, progress UI, and OpenAI API proxy (`/v1/embeddings`, `/v1/models`).
       Use **embedclient** for download UI; **embedapi** / shared entrance hit llm-init proxy on port 8090.
 
@@ -120,6 +122,16 @@ spec:
       limitedMemory: 5Gi
       requiredDisk: 3Gi
       limitedDisk: 50Gi
+
+    - mode: intel-gpu
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 3Gi
+      limitedMemory: 5Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+      requiredGPUMemory: 2048Mi
+      limitedGPUMemory: 4096Mi
 
   supportArch:
     - amd64
