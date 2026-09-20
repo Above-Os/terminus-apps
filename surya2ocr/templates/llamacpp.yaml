@@ -11,8 +11,7 @@
 {{- if not $gpuType -}}
 {{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
 {{- end -}}
-{{- /* Do not fail() on cpu/intel: Market check-chart helm-renders mode=cpu to extract images.
-       Installability is gated by OlaresManifest accelerator (nvidia / nvidia-gb10 only). */ -}}
+{{- /* Market validation renders CPU mode to extract images; the manifest restricts installation to NVIDIA. */ -}}
 {{- $isCpuMode := or (eq $gpuType "cpu") (eq $gpuType "intel") -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
 {{- $gpuMiB := include "surya2ocr.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "10Gi") -}}
@@ -22,8 +21,6 @@
 {{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
-# llama.cpp CUDA engine. Deployment name == Release.Name (allowMultipleInstall).
-# Service name MUST be "llamacpp" (OCRAdapter LLAMACPP_URL default).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
