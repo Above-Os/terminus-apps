@@ -11,7 +11,8 @@
 {{- $useOpenVino := eq (include "embeddinggemmav3.useOpenVino" .) "true" -}}
 {{- $isNvidia := or (eq $gpuType "nvidia") (eq $gpuType "nvidia-gb10") -}}
 {{- $isGb10 := eq $gpuType "nvidia-gb10" -}}
-{{- $isIntelMode := eq $gpuType "intel" -}}
+{{- $isIntelDgpu := eq $gpuType "intel-gpu" -}}
+{{- $isIntelMode := or (eq $gpuType "intel") $isIntelDgpu -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $cudaMajor := $gpuObj.Cuda | default 12 -}}
 {{- $embedTag := include "embeddinggemmav3.embedTag" . -}}
@@ -30,12 +31,6 @@
 {{- $embedImage = printf "docker.io/beclab/embed-server:%s-onnx-cuda12" $embedTag -}}
 {{- end -}}
 {{- end -}}
-{{- $embedDevice := "cpu" -}}
-{{- if $useOpenVino -}}
-{{- $embedDevice = "igpu" -}}
-{{- else if $isNvidia -}}
-{{- $embedDevice = "cuda" -}}
-{{- end -}}
 {{- $needDri := $isIntelMode -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
@@ -46,7 +41,7 @@ metadata:
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: embed-server
-  {{- if $isNvidia }}
+  {{- if or $isNvidia $isIntelDgpu }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "embed-server"
   {{- end }}
@@ -62,6 +57,11 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: embed-server
+{{- if $isIntelDgpu }}
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMem }}"
+        gpu.bytetrade.io/limited-gpu-memory: "4096Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -95,8 +95,8 @@ spec:
           env:
             - name: MODEL_ID
               value: "{{ $modelId }}"
-            - name: EMBED_DEVICE
-              value: "{{ $embedDevice }}"
+            - name: ACCELERATOR
+              value: "{{ $gpuType }}"
             - name: EMBED_HOST
               value: "0.0.0.0"
             - name: EMBED_PORT
