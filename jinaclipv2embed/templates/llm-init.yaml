@@ -6,6 +6,15 @@
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "info" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "embedding" -}}
+{{- /* MODEL_SUPPORTS: bare capability names; llm-init takes supports_* keys. */ -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ($oe.MODEL_SUPPORTS | default "embedding_image_input") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $modelSupports := join "," $supportsKeys -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 {{- $llmInitTag := include "jinaclipv2embed.llmInitTag" . -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "jinaclipv2embed.logicalModelName" .) -}}
@@ -67,6 +76,8 @@ spec:
               value: "{{ $modelName }}"
             - name: MODEL_MODE
               value: "{{ $modelMode }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $modelSupports }}"
             - name: MODEL_SOURCE
               value: "{{ $modelSource }}"
 {{- if $hfEndpoint }}

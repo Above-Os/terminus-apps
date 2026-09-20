@@ -11,7 +11,7 @@
 {{- end -}}
 {{- end -}}
 {{- $supportsRaw := join "," $supportsKeys -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen:v1.1.0" -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen:v1.1.21" -}}
 {{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
 {{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
 {{- $memRequest := trim ($oe.MEMORY_REQUEST | default "4Gi") -}}
@@ -35,10 +35,14 @@
 {{- end -}}
 {{- /* Engine-native flags in llm-init's one channel; the engine derives its GPU share from the
        quota below. gb10 profiles a smaller KV budget after the encoder than a discrete slice, and
-       graph capture is where startup has been seen to wedge holding the vGPU lock. */ -}}
+       graph capture is where startup has been seen to wedge holding the vGPU lock.
+       NO batching flag on purpose: the transcription engine sizes each call from what it measures
+       on this machine, and a span COUNT is not a measure of memory -- 32 spans can be 64 padded
+       seconds or 57,600. --batch-max-spans is still accepted as a ceiling for a deployment that
+       wants one; leaving it out is what turns the measurement on. */ -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
 {{- if eq $engineArgs "" -}}
-{{- $engineArgs = printf "--max-model-len %s --enforce-eager" (ternary "3072" "8192" (eq $gpuType "nvidia-gb10")) -}}
+{{- $engineArgs = printf "--max-model-len %s --enforce-eager --repetition-detection" (ternary "3072" "8192" (eq $gpuType "nvidia-gb10")) -}}
 {{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
@@ -83,7 +87,7 @@ spec:
             type: DirectoryOrCreate
         - name: run-state
           hostPath:
-            path: "{{ printf "%s/huggingface/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            path: "{{ printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name }}"
             type: DirectoryOrCreate
         - name: wrappers
           configMap:

@@ -5,64 +5,72 @@ metadata:
   name: lares
   appid: lares
   title: Lares
-  description: Chat shell on DeepSeek Harness, wired to Olares Router
-  icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
-  version: 0.0.12
+  description: An AI assistant for managing Olares and researching the web
+  icon: https://app.cdn.olares.com/appstore/lares/icon_new.png
+  version: 0.26.22
   categories:
-    - Utilities_v112
-    - AI
+    - agents
+  tags:
+    - framework
+    - personal-assistant
 spec:
-  versionName: "0.22.0"
+  versionName: "0.26.22"
   runAsUser: true
   fullDescription: |
-    ## Overview
-    Lares is a chat app on Olares built on DeepSeek Harness (dsh web).
-    It uses the official dsh UI shell and talks to Olares Router for LLM access.
+    Lares is the official AI assistant for Olares. Describe a goal in plain language to manage apps, files, and your system. With Router and a connected AI model, Lares plans the steps and uses tools to carry out tasks on your device through conversation.
 
-    ## Highlights
-    - Official dsh web UI (three-column layout) with Lares product profile
-    - Zero-config Router auth via in-cluster app identity (`x-caller-appid`)
-    - Bundled client plugins (voice input, web search) when enabled in the build
+    **Key features**
 
-    ## Requirements
-    - Olares >= 1.12.7
-    - Router app installed and running (`router` dependency)
-    - Arch: amd64, arm64
+    - Handle everyday requests and tasks that need several steps in one conversation.
+    - Use the AI models and tools configured in Router.
+    - Control what Lares can do with Read Only, Write, or Full Access permissions.
+    - Research public web content with configured search and page-reading tools, then combine the findings into summaries with source links.
 
-    ## Getting started
-    1. Install Lares from Market (test source: `market.test`).
-    2. Ensure Router is installed.
-    3. Open the Lares entrance and start a chat.
+    **Before you start**
+
+    Lares requires Olares 1.12.7 or later, Router, and a connected AI model. Select a model and confirm the permission level before starting a task.
+
+    For web research, configure and enable the tools in Router. To use web search, also select a default search service in Lares settings. Tools that only read web pages are called when you ask Lares to read a specific URL.
+
   upgradeDescription: |
-    ## Lares 0.22.0
+    ## Lares 0.26.22
 
-    - Published as a multi-architecture image: arm64 nodes are now supported.
-    - The olares-* agent skills now come out of the olares-cli binary in the
-      image, so they always describe the release that is actually installed.
-    - Base image gains a Python 3 development environment and the
-      command-line tools an agent expects (gh, less, unzip, rsync, dig).
-  developer: luolong
-  submitter: luolong
+    - Files preview now stats a file from its parent listing and serves GET
+      raw with `inline=true`. HEAD `/api/raw` is not a Files verb, so Drive
+      opens were 404ing before any bytes arrived.
+    - Workspace and Files playable media share the turn-tail preview. Closing
+      a reply with the published path as a chip or inline code is a duplicate
+      of that preview and is hidden.
+    - Publishing a Files directory (`drive/.../`) is rejected as a Files path,
+      not as a missing workspace file.
+  developer: Olares
+  submitter: Olares
   locale:
     - en-US
     - zh-CN
-  requiredCpu: 200m
-  limitedCpu: "2"
-  requiredMemory: 512Mi
-  limitedMemory: 4Gi
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  requiredCpu: 400m
+  limitedCpu: "6"
+  requiredMemory: 768Mi
+  limitedMemory: 12Gi
   requiredDisk: 2Gi
-  limitedDisk: 20Gi
+  limitedDisk: 50Gi
   supportArch:
     - amd64
     - arm64
 permission:
   appData: true
+  loginOlaresCLI: true
 entrances:
   - name: lares
     host: lares-svc
     port: 8080
     title: Lares
-    icon: https://raw.githubusercontent.com/ffkijjkokok/dina-assets/main/icon.png
+    icon: https://app.cdn.olares.com/appstore/lares/icon_new.png
     authLevel: private
     openMethod: window
 options:
@@ -81,5 +89,20 @@ options:
     - name: router
       version: '>=1.0.0'
       type: application
+      mandatory: true
 workloadReplicas:
   lares: 1
+envs:
+  - envName: TIMEZONE
+    required: true
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_TIMEZONE
+    description: "Time zone used by Lares, its agents, and commands (IANA name such as Asia/Shanghai)"
+  - envName: ENABLE_DIND
+    type: bool
+    required: false
+    applyOnChange: true
+    editable: true
+    default: "true"
+    description: "Run a privileged Docker-in-Docker sidecar in the pod. Exposes the docker CLI via DOCKER_HOST=tcp://localhost:2375 (uses extra CPU/RAM/disk under app data). Disable if your environment forbids privileged containers"

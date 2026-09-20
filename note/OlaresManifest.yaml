@@ -1,94 +1,92 @@
-olaresManifest.version: "0.12.0"
+apiVersion: v3
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
-apiVersion: "v3"
-
 metadata:
   name: note
   appid: note
   title: Note
-  description: Turn recordings and videos into transcripts you can read, replay and export
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  version: "0.1.11"
+  description: Local meeting transcripts with speaker identities, glossary and cited AI answers
+  icon: https://app.cdn.olares.com/appstore/note/icon.png
+  version: 0.5.10
   categories:
-    - workspace
+  - workspace  
 
 spec:
-  versionName: "2.0.45"
+  onlyAdmin: true
+  versionName: "0.5.10"
+  runAsUser: true
   fullDescription: |
-    Note turns recordings and videos into transcripts you can read, replay and export.
-    Click any sentence in the transcript and the player jumps to that second.
+    Note turns recordings into local, verifiable transcripts: who spoke, when each word was said, and which source passage supports an answer or action item. Personal and project glossaries keep important names consistent.
 
-    - Transcription with word-level alignment, so text and audio stay in sync
-    - Speaker diarization, with speakers you can rename
-    - Meeting digests (decisions, sections, action items) and translation
-    - Import from your own Olares drive, or upload from the browser
-    - Export transcripts and subtitles in several formats at once
+    **Key features**
 
-    All model calls go through Olares Router — no bundled models, no API key to fill in.
-    The app authenticates with the platform-issued app identity (caller JWT).
+    - Check local Router readiness before processing and recover interrupted stages.
+    - Separate speakers, review voice identities, and label who spoke when.
+    - Improve important names with personal and project glossaries.
+    - Transcribe speech with word-level timings so text and audio stay in sync.
+    - Ask questions with answers linked back to transcript evidence and timestamps.
+    - Track structured action items with owners, due dates, status, and sources.
+    - Optionally generate versioned summaries, translations, and subtitles.
+    - Import a file from Files or upload it in the browser.
+    - Create personal API keys for restricted external audio uploads and progress checks.
 
-    - Olares >= 1.12.6
-    - Router installed and running
-    - Architecture: amd64
+    This app uses Router and the model applications installed on this Olares. Router must be running, with local speech recognition, diarization, speaker embedding, and forced alignment models available for a complete transcript. Chat and translation models are optional. One install serves everyone on this Olares.
+  developer: Olares
+  submitter: Olares
   locale:
     - en-US
     - zh-CN
-  submitter: huangzhenyuan-bytetrade
-  developer: huangzhenyuan-bytetrade
-  runAsUser: true
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  requiredCpu: 500m
+  limitedCpu: "4"
+  requiredMemory: 512Mi
+  limitedMemory: 4Gi
+  requiredDisk: 2Gi
+  limitedDisk: 100Gi
   supportArch:
     - amd64
-  requiredCpu: 200m
-  limitedCpu: "4"
-  requiredMemory: 256Mi
-  limitedMemory: 2Gi
-  requiredDisk: 1Gi
-  limitedDisk: 100Gi
-
+    - arm64
 permission:
   appData: true
-  appCache: true
   userData:
-    - Home/
-
+    - Home
 entrances:
   - name: note
     host: note-svc
     port: 8080
     title: Note
+    icon: https://app.cdn.olares.com/appstore/note/icon.png
     authLevel: private
-    invisible: false
     openMethod: window
-
+  - name: note-api
+    host: note-svc
+    port: 8081
+    title: Note Upload API
+    icon: https://app.cdn.olares.com/appstore/note/icon.png
+    authLevel: public
+    invisible: true
+options:
+  shared: true
+  # The entrance proxy cuts every request at 15s by default, which would kill
+  # both the progress event stream and any upload larger than a short clip.
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+    - name: router
+      version: '>=1.0.0'
+      type: application
 middleware:
   postgres:
     username: note
+    password: note
     databases:
       - name: note
-
-envs:
-  - envName: GATEWAY_URL
-    required: false
-    type: url
-    editable: true
-    description: "Override the Router address. Normally leave empty — the chart fills in https://router.<your zone>. Do not append /v1; the app adds it."
-  - envName: GATEWAY_API_KEY
-    required: false
-    type: password
-    editable: true
-    description: "Router data-plane key (starts with sk-). Normally leave empty — the app has its own platform-issued identity and needs no key."
-
-options:
-  apiTimeout: 0
-  needsSharedAccess: true
-  dependencies:
-    - name: olares
-      version: ">=1.12.6-0"
-      type: system
-    - name: llmgatewayv3
-      version: ">=1.0.0-0"
-      type: application
-      mandatory: false
-
+        distributed: false
 workloadReplicas:
   note: 1

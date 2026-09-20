@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.34** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.66** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -19,7 +19,7 @@ Resource envelope (`spec.accelerator`; must cover business API + engine):
 | Resource | Request | Limit |
 |----------|---------|-------|
 | CPU | 2 | 12 |
-| Memory | 4Gi | 40Gi |
+| Memory | 4Gi | 96Gi |
 | Disk | 2Gi | 10Gi |
 | GPU Memory | 6Gi | 24Gi |
 
@@ -57,12 +57,12 @@ Admins own project definition and environment; published projects can be used by
 | Workload | Role |
 |----------|------|
 | `flowstudio` | Business API + dual frontend static (entrance `:8080`) |
-| `flowstudioengine` | Static engine placeholder; with default `dynamicEngine.enabled=true`, engines are created per project |
+| `flowstudioengine` | With default `dynamicEngine.enabled=true` it renders at 0 replicas so the engine image joins the install-time pre-pull; engines themselves are created per project. Set `dynamicEngine.enabled=false` and `workloads.flowstudioengine.replicaCount=1` to run it as the static engine |
 
 | Image | `values.yaml` field |
 |-------|---------------------|
 | App | `appImage` / `image` (prefer bumping `appImage` when upgrade sticks values) |
-| Engine | `engineImage`; optional `engineImageAmd` |
+| Engine | `engine.images.nvidia`; optional `engine.images.amdGpu` |
 
 Release packages must set `dev.hotReload: false`.
 
@@ -90,9 +90,8 @@ with `x-caller-app-id: router` and the boundary is `sharedEntrances.authLevel: i
 One create endpoint covers all four output families. The request body names a
 `workflowId` and never an output family: the workflow already decides it, and a caller
 that could name it could disagree with the catalogue Router built its model rows from.
-A generation started this way is owned by the chart owner, because Router sends no user
-header; separating one Router user's outputs from another's is Router's job, and it does
-it by sealing the binding on its side and never handing a FlowStudio id to a client.
+A generation started this way is owned by the end user Router forwards
+(``x-bfl-user`` / ``remote-user``). Without that header it falls back to the chart owner.
 
 The OpenAI-shaped surface is a different consumer and is unchanged:
 
@@ -134,8 +133,9 @@ olares-cli market uninstall flowstudio --watch
 
 Only pass `--delete-data` when you intentionally want appData wiped (projects / userdata).
 **Ask before using it** — models live on the shared Common volume and must not be treated as
-disposable per-app cache. The chart pre-delete hook removes dynamic engines and this app's
-GPUBindings only; it never deletes model weights.
+disposable per-app cache. The chart pre-delete hook drains runtime engines, prepull
+Jobs/Pods, and this app's GPUBindings so the namespace can terminate; it never
+deletes model weights.
 
 ## Upgrade
 
@@ -143,14 +143,14 @@ Bump together:
 
 1. `Chart.yaml` `version` / `appVersion`
 2. `OlaresManifest.yaml` `metadata.version` and `spec.versionName`
-3. If code or deps changed: push new image tags and update `values.yaml` `appImage` / `engineImage`
+3. If code or deps changed: push new image tags and update `values.yaml` `appImage` / `engine.images.nvidia`
    (**tag only** for Chat/test-market PRs — do **not** append `@sha256:…`; GitBot digest checks false-404)
 4. Fill `spec.upgradeDescription` (and `i18n/*/OlaresManifest.yaml`)
 
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.34. This chart ships `flowstudio:0.3.34` and `engine-1.0.6`.
+covers 0.3.66. This chart ships `docker.io/beclab/flowstudio:0.3.66` and `engine-1.0.7`.
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout

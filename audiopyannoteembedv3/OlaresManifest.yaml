@@ -4,10 +4,10 @@ apiVersion: 'v3'
 metadata:
   name: audiopyannoteembedv3
   icon: https://app.cdn.olares.com/appstore/audioengines/pyannote/icon.png
-  description: "Pyannote speaker embedding / voiceprint."
+  description: A model for creating voice representations that applications can compare
   appid: audiopyannoteembedv3
   title: Pyannote Embedding
-  version: '1.0.9'
+  version: '1.0.19'
   categories:
     - AI
     - models
@@ -39,60 +39,39 @@ spec:
   onlyAdmin: true
   versionName: 'pyannote/embedding'
   fullDescription: |
-    **Model Overview**
-    Pyannote speaker embedding / voiceprint.
+    Pyannote Embedding turns a speech sample into a compact numerical representation of the speaker's voice. Applications can compare these representations to estimate whether samples contain the same speaker; the model does not identify people by name.
 
-    **Configuration**
-    - Model: `pyannote/embedding`
-    - Source: `hf://beclab/embedding`
-    - Capabilities: `speaker_embed`
-    - Required GPU memory: `2Gi`
-    - Engine: Pyannote speaker embedding
+    **Key features**
+    - Create a speaker embedding from a speech sample.
+    - Compare voice samples for speaker similarity.
+    - Support speaker matching in diarization and audio analysis.
+    - Run on the CPU without requiring a GPU.
 
-    **How It Works**
-    First, Model Console (llm-init) downloads the model and gets it ready, then the
-    audio engine starts serving when the download sentinel appears. llm-init reverse-proxies
-    `/v1/*` to the engine and serves its control plane / dashboard on `/`.
 
-    **Stack**
-    - **audio engine**: Pyannote speaker embedding (port 8000); self-reports `/v1/models` + `/metrics`
-    - **Model Console (llm-init)**: Downloads the model, shows progress, OpenAI API on 8090
-
-    **Model Storage**
-    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
-
-  upgradeDescription: |
-    v1.0.1: Initial release.
-
-  developer: beclab
-  website: https://github.com/beclab/llm-init
-  sourceCode: https://github.com/beclab/audio-engines
+  developer: pyannoteAI
+  website: https://www.pyannote.ai/
+  sourceCode: https://huggingface.co/pyannote/embedding
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  doc: https://huggingface.co/pyannote/embedding
   license:
     - text: MIT
-      url: https://github.com/beclab/llm-init
+      url: https://github.com/pyannote/pyannote-audio/blob/main/LICENSE
 
-  accelerator:
-    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
-    - mode: nvidia
-      limitedCpu: "3"
-      requiredCpu: "400m"
-      requiredDisk: 50Mi
-      limitedDisk: 20Gi
-      limitedMemory: "10Gi"
-      requiredMemory: "768Mi"
-      requiredGPUMemory: "2Gi"
-      limitedGPUMemory: "2Gi"
-    - mode: nvidia-gb10
-      limitedCpu: "3"
-      requiredCpu: "400m"
-      requiredDisk: 50Mi
-      limitedDisk: 20Gi
-      limitedMemory: "6Gi"
-      requiredMemory: "2304Mi"
+  # Sum rule: envelope >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
+  limitedCpu: "3"
+  requiredCpu: "400m"
+  requiredDisk: 50Mi
+  limitedDisk: 20Gi
+  limitedMemory: "8Gi"
+  requiredMemory: "768Mi"
 
   supportArch:
     - amd64
@@ -108,7 +87,7 @@ options:
   templateOnly: false
   dependencies:
     - name: olares
-      version: '>=1.12.6-0'
+      version: '>=1.12.7-0'
       type: system
 envs:
   - envName: MODEL_SOURCE
@@ -153,7 +132,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "2Gi"
+    default: "0"
     description: "GPU memory required for this model. `0` means CPU-only."
   - envName: CPU_REQUEST
     required: true
@@ -204,14 +183,14 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    description: "Engine-native flags (llm-init ENGINE_ARGS), e.g. --segmentation-batch-size 16."
+    description: "Engine-container flags (ENGINE_ARGS); speaker embedding currently accepts none."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
     valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_SERVICE
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
   - envName: HF_TOKEN
     required: false
     applyOnChange: true
     valueFrom:
-      envName: OLARES_USER_HUGGINGFACE_TOKEN
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN

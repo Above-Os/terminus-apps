@@ -2,14 +2,21 @@
 # postgres / userspace / user / domain.
 # Upgrade reuses values: bump appImage (templates prefer it over image).
 
-appImage: docker.io/luolong01/flowstudio:0.3.34
-image: docker.io/luolong01/flowstudio:0.3.34
+# Keep the docker.io/ prefix: app-service rewrites every chart image ref to this
+# image's registry, and OPA only trusts docker.io/beclab for the root init containers.
+appImage: docker.io/beclab/flowstudio:0.3.66
+image: docker.io/beclab/flowstudio:0.3.66
 imagePullPolicy: IfNotPresent
 
-engineImage: docker.io/luolong01/flowstudio:engine-1.0.6
+# ComfyUI engine images by Olares accelerator mode, resolved through
+# flowstudio.engineImage. Empty amdGpu = AMD unavailable (never fall back to
+# CUDA silently); OlaresManifest declares nvidia only, so amdGpu is reachable
+# only by overriding GPU.Type.
+engine:
+  images:
+    nvidia: docker.io/beclab/flowstudio:engine-1.0.7
+    amdGpu: docker.io/beclab/flowstudio:engine-1.0.6-rocm
 engineImagePullPolicy: IfNotPresent
-# Empty = AMD unavailable (never fall back to CUDA silently).
-engineImageAmd: docker.io/luolong01/flowstudio:engine-1.0.1-rocm
 
 # exclusiveGpu: absolute gpumem only — never gpumem-percentage.
 dynamicEngine:
@@ -17,12 +24,12 @@ dynamicEngine:
   serviceAccountName: flowstudio-engine-orchestrator
   exclusiveGpu: true
   gpuMemMiB: 6144
+  memLimit: 80Gi
+  memRequestMax: 80Gi
   idleTtlSeconds: 900
   gpuVendor: auto
   # Empty → probe default app-service compute-resources URL.
   gpuApiUrl: ""
-  # On API SIGTERM / uninstall: delete dynamic engines (hotReload forces false).
-  shutdownReap: true
 
 # Defaults only; admin network probe may persist overrides later.
 network:
@@ -42,8 +49,10 @@ nodeInstall:
 workloads:
   flowstudio:
     replicaCount: 1
+  # 0 under dynamicEngine: the Deployment exists only so its image joins the
+  # install-time pre-pull. Override to 1 together with dynamicEngine.enabled=false.
   flowstudioengine:
-    replicaCount: 1
+    replicaCount: 0
 
 # Must be false for release / Market submit.
 # true also sets SHOW_TEST_WORKFLOW_TEMPLATES (ControlNet fixtures).

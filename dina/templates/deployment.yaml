@@ -1,7 +1,3 @@
-{{- $appDomainENV := split "," .Values.domain.dina -}}
-{{- $appDomain := index $appDomainENV "_0" -}}
-{{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -105,8 +101,12 @@ spec:
             # Router's shared entrance, not its Service: only the gateway hop
             # verifies the caller JWT and writes x-caller-appid, which is the
             # identity Router authenticates the data plane with.
+            # The zone is fixed. The platform resolves shared entrances under
+            # shared.olares.com whatever this cluster's own domain is, so
+            # deriving the suffix from the install domain builds a host that
+            # nothing answers on.
             - name: LLM_GATEWAY_URL
-              value: {{ .Values.olaresEnv.LLM_GATEWAY_URL | default (printf "http://3a77b15d.shared.%s/v1" $topDomain) | quote }}
+              value: {{ .Values.olaresEnv.LLM_GATEWAY_URL | default "http://3a77b15d.shared.olares.com/v1" | quote }}
             - name: OLARES_APP_ID
               value: {{ .Values.olaresEnv.OLARES_APP_ID | default "dina" | quote }}
             - name: DINA_ROUTER_API_KEY

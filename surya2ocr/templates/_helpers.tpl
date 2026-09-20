@@ -1,4 +1,3 @@
-{{- /* surya2ocr.gpuMiB: normalize GPU memory to bare MiB int for nvidia.com/gpumem. */ -}}
 {{- define "surya2ocr.gpuMiB" -}}
 {{- $g := trim . -}}
 {{- if hasSuffix "Gi" $g -}}
@@ -14,20 +13,17 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "surya2ocr.llmInitTag" -}}v1.5.0{{- end -}}
-{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.2{{- end -}}
+{{- define "surya2ocr.llmInitTag" -}}v1.7.21{{- end -}}
+{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.9{{- end -}}
 {{- define "surya2ocr.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
 
-{{- /* Comma dual-source, each one --include (single-file hf path).
-       Avoids one hf:// with two --include leaving snapshot without main GGUF.
-       Also skips tokenizer/assets in the same HF repo. */ -}}
+{{- /* Separate downloads ensure both the model and vision projector are cached. */ -}}
 {{- define "surya2ocr.modelSource" -}}
 hf://datalab-to/surya-ocr-2-gguf --include surya-2.gguf,hf://datalab-to/surya-ocr-2-gguf --include surya-2-mmproj.gguf
 {{- end -}}
 
 {{- define "surya2ocr.modelName" -}}surya2{{- end -}}
 
-{{- /* Redis URL from Olares middleware (.Values.redis). */ -}}
 {{- define "surya2ocr.redisURL" -}}
 {{- $r := .Values.redis | default dict -}}
 {{- $host := $r.host | default "redis" -}}

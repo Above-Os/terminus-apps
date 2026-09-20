@@ -1,3 +1,7 @@
+{{- $claudecodeDomainENV := split  ","  .Values.domain.terminal -}}
+{{- $claudecodeDomain := index $claudecodeDomainENV "_0" -}}
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -205,7 +209,7 @@ spec:
             - mountPath: /docker-cli
               name: docker-cli-bin
         {{- end }}
-
+      serviceAccountName: proxylistener
       containers:
         # Workspace container. kubectl exec from the beclab terminal
         # apiserver lands here as UID 1000. HOME/PATH are set on env so
@@ -368,7 +372,41 @@ spec:
             - mountPath: /opt/data
               name: app-data-home
         {{- end }}
-
+        - name: port-watcher
+          image: beclab/proxy-listener:0.0.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT_WATCHER_ADDR
+              value: "127.0.0.1:19790"
+            - name: PORT_WATCHER_DENYLIST
+              value: "19790"
+            - name: PORT_WATCHER_DEBOUNCE
+              value: "1s"
+            - name: ENTRANCE_HOST
+              value: "{{ $claudecodeDomain }}"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       restartPolicy: Always
       volumes:
         - name: certbot-wrapper
@@ -402,3 +440,39 @@ spec:
             path: "{{ .Values.userspace.appData }}/docker"
             type: DirectoryOrCreate
         {{- end }}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: proxylistener
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.bfl.username }}
+rules:
+  - apiGroups:
+      - app.bytetrade.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-{{ .Values.bfl.username }}
+subjects:
+  - kind: ServiceAccount
+    name: proxylistener
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Name }}-{{ .Values.bfl.username }}
+  apiGroup: rbac.authorization.k8s.io

@@ -17,6 +17,27 @@
 {{- int $g -}}
 {{- end -}}
 {{- end -}}
+{{- /* llamacpphymt218bggufv3.presetArgs: resolve the speed preset for an install
+       whose stored ENGINE_ARGS predates it. Both the engine container and
+       llm-init must call this: llm-init's value becomes the model card, and
+       Router derives admission width from that card, so an engine given more
+       slots than the card declares gets refused traffic it could serve.
+       $stale* match the whole previous presets rather than a lone "-np N",
+       which would also catch -np 16, and which would override a hand-tuned value.
+       Keep $preset byte-identical to ENGINE_ARGS.default in OlaresManifest.yaml.
+       Usage: {{ include "llamacpphymt218bggufv3.presetArgs" ($oe.ENGINE_ARGS | default "") }} */ -}}
+{{- define "llamacpphymt218bggufv3.presetArgs" -}}
+{{- $args := trim (. | default "") -}}
+{{- $preset := "-c 65536 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 16 -kvu" -}}
+{{- $stale := "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 1" -}}
+{{- $stale6 := "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 6" -}}
+{{- $stale8 := "-c 32768 -ngl all -fa on -ctk q4_0 -ctv q4_0 --jinja -np 8" -}}
+{{- if or (eq $args "") (contains "-c 8192" $args) (contains "-c 131072" $args) (eq $args $stale) (eq $args $stale6) (eq $args $stale8) -}}
+{{- $preset -}}
+{{- else -}}
+{{- $args -}}
+{{- end -}}
+{{- end -}}
 {{- /* llamacpphymt218bggufv3.engineArgs: CPU mode auto-adds -ngl 0 unless user set -ngl.
        Usage: {{ include "llamacpphymt218bggufv3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) }} */ -}}
 {{- define "llamacpphymt218bggufv3.engineArgs" -}}

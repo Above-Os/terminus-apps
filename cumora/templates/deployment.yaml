@@ -1,7 +1,7 @@
 {{- $cumoraDomainENV := split "," (.Values.domain.cumora | default "") -}}
 {{- $cumoraDomain := index $cumoraDomainENV "_0" -}}
 {{- $publicOrigin := printf "https://%s" $cumoraDomain -}}
-{{- $image := "docker.io/beclab/harveyff-cumora-server:v0.1.64" -}}
+{{- $image := "docker.io/beclab/harveyff-cumora-server:v0.4.0" -}}
 {{- $secretName := printf "%s-secrets" .Release.Name -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -178,6 +178,23 @@ spec:
                 secretKeyRef:
                   name: {{ $secretName }}
                   key: GITHUB_CLIENT_SECRET
+            - name: CUMORA_BOOTSTRAP_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: CUMORA_BOOTSTRAP_EMAIL
+            - name: CUMORA_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: CUMORA_BOOTSTRAP_PASSWORD
+            - name: CUMORA_ALLOW_SIGNUP
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: CUMORA_ALLOW_SIGNUP
+            - name: CUMORA_PASSWORD_LOGIN
+              value: "true"
           readinessProbe:
             httpGet:
               path: /api/health

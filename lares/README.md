@@ -1,8 +1,9 @@
 # Lares
 
-Chat shell on Olares: DeepSeek Harness (dsh web) UI wired to Olares Router.
+Chat on Olares, wired to Router.
 
-Current Chart version: **0.0.11** (product/image 0.21.1).
+Current app version: **0.26.22** — `version` and `appVersion` in `Chart.yaml`, the
+manifest version, and the image tag in `values.yaml` move together.
 
 ## Chart ownership (test / public index)
 
@@ -19,7 +20,7 @@ owners:
 |------|-------------|
 | Olares | >= 1.12.7 |
 | Dependency | Router (`>=1.0.0`) |
-| Arch | `amd64` |
+| Arch | `amd64`, `arm64` |
 
 ## Install
 

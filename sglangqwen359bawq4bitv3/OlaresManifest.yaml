@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.5-9B (AWQ-4bit) served with SGLang."
   appid: sglangqwen359bawq4bitv3
   title: Qwen3.5-9B (SGLang)
-  version: '1.0.16'
+  version: '1.0.25'
   categories:
   - AI
   - models
@@ -38,6 +38,23 @@ spec:
   onlyAdmin: true
   versionName: 'cyankiwi/Qwen3.5-9B-AWQ-4bit'
   upgradeDescription: |
+    v1.0.23: Model Console upgrades to llm-init v1.7.19.
+
+    v1.0.22: Persist the JIT caches and skip the HuggingFace Hub at startup. `SGLANG_JIT_CACHE_ROOT` is not a variable SGLang reads, so the Triton kernel builds landed on the container's overlay layer and were lost on every restart; renamed to `SGLANG_CACHE_DIR`, which `TRITON_CACHE_DIR` and the deep_gemm / JIT caches all derive from. Also added `HF_HUB_OFFLINE=1`. Startup 268s → 168s on olarestest01.
+
+    v1.0.20: bump SGLang from v0.5.17-cu130 to v0.5.18-cu130.
+
+    **What's Changed** (v0.5.17 → v0.5.18)
+    - New models: Muse Glimmer, Intern-S2-Mobius, SANA-Video, LingBot-Video-MoE, LTX-2.5, Cosmos3, LongCat-Image, plus Qwen3.8 / Ling-3.0 / Nemotron 3.5 Lightning recipes
+    - Faster startup: overlapped checkpoint staging, up to 2.38x faster model load via `--startup-weight-load-mode overlap`
+    - Throughput: TP LMHead all-to-all for pure-DP dp-attention, FlashInfer MNNVL pure allreduce, Kimi K3 MLA kernels tuned for MI355X
+    - Quantization: NVFP4 checkpoints run on AMD via `--quantization quark_mxfp4`
+    - Dependencies: torch 2.13.0 with triton 3.7.1, flashinfer 0.6.17, sgl-kernel 0.4.6.post1
+    - Breaking: compiled-kernel caches move under `SGLANG_CACHE_DIR` (one extra recompile on first launch); torchao integration removed
+
+    For detailed release notes, visit:
+    https://github.com/sgl-project/sglang/releases
+
     v1.0.15: Lower the NVIDIA host-memory reservation so 1.12.6 timeslice nodes can install more easily (engine request 21Gi→6Gi, chart requiredMemory 22Gi→7Gi). GPU quota unchanged.
 
     v1.0.11: bump SGLang from v0.5.14-cu130 to v0.5.17-cu130.
@@ -79,7 +96,7 @@ spec:
     | `nvidia-gb10`  | GPU (Spark)       | Same as `nvidia`: `23Gi` memory, managed by the pod                  |
     
     **How It Works**
-    First, Model Console downloads the model and gets it ready, then SGLang starts serving the model when it's ready. These two parts run in separate Deployments but share the HF cache and run-state via App Common storage.
+    First, Model Console downloads the model and gets it ready, then SGLang starts serving the model when it's ready. These two parts run in separate Deployments, sharing the HF cache via App Common and transient run-state via App Cache.
 
     **Stack**
     - **SGLang** (port 30000): runs the model and serves API requests
@@ -96,6 +113,11 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
   license:
     - text: Apache-2.0
       url: https://huggingface.co/Qwen/Qwen3.5-9B
@@ -125,6 +147,7 @@ spec:
     - amd64
     - arm64
 permission:
+  appCache: true
   appData: true
   appCommon: true
 options:

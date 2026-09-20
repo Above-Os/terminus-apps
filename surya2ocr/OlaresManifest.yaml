@@ -3,13 +3,16 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: surya2ocr
-  icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
-  description: "Surya OCR 2 document OCR (GGUF) via llm-init + OCRAdapter + llama.cpp (CUDA)"
+  icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
+  description: "Multilingual text extraction from document images and PDFs"
   appid: surya2ocr
   title: Surya OCR 2
-  version: '1.0.5'
+  version: '1.0.14'
   categories:
     - AI
+    - models
+  tags:
+    - ocr
 sharedEntrances:
   - name: surya2ocr
     host: sharedentrances-api
@@ -17,26 +20,23 @@ sharedEntrances:
     title: Surya OCR 2 API
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
 entrances:
   - name: ocrclient
     port: 8090
     host: download-svc
     title: Surya OCR 2
-    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
     openMethod: window
     authLevel: internal
   - name: ocrapi
     port: 8090
     host: download-svc
     title: Surya OCR 2 API
-    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    icon: "https://app.cdn.olares.com/appstore/surya2ocr/icon.png"
     invisible: true
     openMethod: window
     authLevel: internal
-#   surya2ocr   — llama.cpp CUDA (== appid / Release.Name)
-#   llminit     — llm-init (ENGINE_KIND=ocr): download + /v1/ocr* proxy
-#   ocradapter  — OCRAdapter job worker
 workloadReplicas:
   surya2ocr: 1
   llminit: 1
@@ -45,48 +45,28 @@ spec:
   onlyAdmin: true
   versionName: 'datalab-to/surya-ocr-2-gguf'
   fullDescription: |
-    **Surya OCR 2** document OCR, served as GGUF on CUDA via llama.cpp.
+    Surya OCR 2 recognizes text in document images and PDF pages, turning page content into text that compatible Olares applications can use for further processing.
 
-    **Stack** (same topology as llm-init `deploy/compose/ocr.yml`)
-    ```
-    Client → llm-init:8090 → ocradapter:8080 → llamacpp:8081
-                                └─ Olares middleware Redis
-    ```
-    - **llm-init** (`ENGINE_KIND=ocr`, `MODEL_MODE=ocr`): downloads GGUF weights, progress UI, proxies `/v1/ocr*` and `/v1/models`.
-    - **OCRAdapter**: async OCR jobs (Redis queue); pipeline `surya2`.
-    - **llama.cpp** (CUDA): vision VLM with mmproj.
+    This app uses Datalab's Surya OCR 2 model in GGUF format and requires a supported NVIDIA GPU.
 
-    **Model**
-    Source: [datalab-to/surya-ocr-2-gguf](https://huggingface.co/datalab-to/surya-ocr-2-gguf)
-    llm-init downloads **only** (comma dual-source, one `--include` each):
-    - `surya-2.gguf` (~1.2 GiB) — main
-    - `surya-2-mmproj.gguf` (~0.2 GiB) — projector
-    Tokenizer / assets in the same repo are **not** downloaded.
-
-    **Accelerator**
-    CUDA only (`nvidia` / `nvidia-gb10`). No CPU / Intel mode.
-
-    **Sizing** (local resource profile, png + pdf page1)
-    - Peak VRAM ~8.1 GiB → request **10Gi** GPU memory
-    - Stack RAM ~0.44 GiB peak (plus download headroom on llm-init)
-    - Suggested engine CPU request **1250m**
-
-  upgradeDescription: |
-    v1.0.0: initial — Surya OCR 2 GGUF via llm-init + OCRAdapter + llama.cpp CUDA; Olares Redis middleware.
-
-  developer: datalab-to
-  website: https://huggingface.co/datalab-to/surya-ocr-2-gguf
+    The model weights use a modified AI Pubs Open RAIL-M license. Except for personal use or research, use by you or your organization is restricted if prior-year gross revenue or total funding exceeds US$5 million. The license also restricts use by providers of products or services that compete with Datalab. See the model license for the full terms and contact Datalab for broader licensing.
+  developer: Datalab
+  website: https://www.datalab.to/
   sourceCode: https://github.com/datalab-to/surya
+  doc: https://huggingface.co/datalab-to/surya-ocr-2-gguf
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
   license:
     - text: OpenRAIL
-      url: https://huggingface.co/datalab-to/surya-ocr-2-gguf
-
+      url: https://huggingface.co/datalab-to/surya-ocr-2-gguf/blob/main/LICENSE
   accelerator:
-    # Sum ≈ llamacpp + llm-init + ocradapter. GPU from surya2 peak ~8.1Gi → 10Gi.
     - mode: nvidia
       requiredCpu: "2"
       limitedCpu: "6"
@@ -124,7 +104,7 @@ options:
   shared: true
   dependencies:
     - name: olares
-      version: '>=1.12.6-0'
+      version: '>=1.12.7-0'
       type: system
 
 envs:
@@ -133,8 +113,6 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    # Comma dual-source (each one --include) → two single-file hf downloads.
-    # Do NOT use one hf:// with two --include: that path can leave only mmproj in snapshot.
     default: "hf://datalab-to/surya-ocr-2-gguf --include surya-2.gguf,hf://datalab-to/surya-ocr-2-gguf --include surya-2-mmproj.gguf"
     description: "Comma dual hf:// (main GGUF + mmproj). Each segment one --include so only the two GGUFs download."
     regex: "^hf://"
@@ -159,7 +137,6 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    # Matches local resource profile; mmproj is auto-resolved beside the main GGUF.
     default: "-ngl 99 -c 16384 -n 4096 --image-min-tokens 1024"
     description: "llama.cpp flags on the engine Pod only (not llm-init). mmproj is auto-resolved next to the main GGUF."
   - envName: LLAMACPP_REQUIRED_GPU_MEMORY
