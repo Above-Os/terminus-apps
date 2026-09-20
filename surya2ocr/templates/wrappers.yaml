@@ -1,16 +1,3 @@
-# llama.cpp wrapper: wait on llm-init sentinel, load main GGUF from model_path,
-# auto-attach sibling *mmproj*.gguf (covers surya-2-mmproj.gguf and mmproj-*.gguf).
-#
-# The helpers this sources are NOT here: llm-init publishes common.sh into the
-# shared run dir and the Deployment points WRAPPER_COMMON at that copy, so
-# supervise_engine -- which is what makes POST /api/engine/restart work -- has
-# one implementation instead of one per chart. The script waits for it, because
-# nothing orders the two Deployments.
-#
-# This therefore requires an llm-init image that publishes the helpers, and
-# there is no copy left here to fall back to: with an older image the engine
-# waits out WRAPPER_COMMON_WAIT and exits. Bump llmInitTag in _helpers.tpl in
-# the same change that ships this.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,11 +11,7 @@ data:
     set -eu
 
     ENGINE=llamacpp
-    # Source the shared helpers: the sibling copy by default, or the one
-    # llm-init publishes into RUN_DIR when WRAPPER_COMMON says so. That copy
-    # can arrive late — the two containers are separate Deployments with no
-    # ordering between them — so waiting here is the normal path.
-    # Keep this block byte-identical across wrappers (tests/wrappers checks).
+    # Wait for llm-init to publish shared helpers; the Deployments start independently.
     WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
     _wc=0
     while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
@@ -45,8 +28,7 @@ data:
     wait_for_engine_args_handoff
     MODEL_PATH=$(read_model_path)
 
-    # HF multi-include → snapshot dir; pick main GGUF (not *mmproj*).
-    # surya uses surya-2-mmproj.gguf (suffix), dots uses mmproj-*.gguf (prefix).
+    # A snapshot directory contains both the model and its vision projector.
     if [ -d "$MODEL_PATH" ]; then
         GGUF_FILE=""
         for f in "$MODEL_PATH"/*.gguf; do
@@ -87,11 +69,9 @@ data:
         export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}/lib:${LD_LIBRARY_PATH}"
     fi
 
-    # Everything that reads ENGINE_ARGS lives in here: supervise_engine
-    # reloads the handoff before each launch, so a restart after a model-card
-    # edit has to re-derive argv rather than reuse what boot computed.
+    # Reload arguments on each launch so model-setting changes apply after restart.
     run_llamacpp() {
-        # Preserve container CMD extras before ENGINE_ARGS word-splitting.
+        # Save container arguments before splitting ENGINE_ARGS.
         extra_argv="$*"
         load_engine_args_from_handoff
 
@@ -111,7 +91,6 @@ data:
             done
         fi
 
-        # Auto --mmproj if not already in ENGINE_ARGS.
         if [ "$HAS_MMPROJ" -eq 0 ]; then
             MMPROJ=""
             for f in "$MODEL_DIR"/mmproj*.gguf "$MODEL_DIR"/MMPROJ*.gguf \
