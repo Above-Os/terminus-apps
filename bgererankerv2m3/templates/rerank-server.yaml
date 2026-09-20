@@ -11,7 +11,8 @@
 {{- $useOpenVino := eq (include "bgererankerv2m3.useOpenVino" .) "true" -}}
 {{- $isNvidia := or (eq $gpuType "nvidia") (eq $gpuType "nvidia-gb10") -}}
 {{- $isGb10 := eq $gpuType "nvidia-gb10" -}}
-{{- $isIntelMode := eq $gpuType "intel" -}}
+{{- $isIntelDgpu := eq $gpuType "intel-gpu" -}}
+{{- $isIntelMode := or (eq $gpuType "intel") $isIntelDgpu -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
 {{- $cudaMajor := $gpuObj.Cuda | default 12 -}}
 {{- $rerankTag := include "bgererankerv2m3.rerankTag" . -}}
@@ -21,7 +22,7 @@
 {{- $rerankRuntime := "onnx" -}}
 {{- if $useOpenVino -}}
 {{- $rerankImage = printf "docker.io/beclab/rerank-server:%s-ov-intel-amd64" $rerankTag -}}
-{{- $accelerator = "intel-gpu" -}}
+{{- $accelerator = $gpuType -}}
 {{- $rerankRuntime = "openvino" -}}
 {{- $cpuRequest = "2" -}}
 {{- $memRequest = "4Gi" -}}
@@ -58,7 +59,7 @@ metadata:
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: rerank-server
-  {{- if $isNvidia }}
+  {{- if or $isNvidia $isIntelDgpu }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "rerank-server"
   {{- end }}
@@ -74,6 +75,12 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: rerank-server
+{{- if $isIntelDgpu }}
+      # Discrete Intel VRAM uses Olares pod annotations, not nvidia.com/gpumem.
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMem }}"
+        gpu.bytetrade.io/limited-gpu-memory: "6144Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
