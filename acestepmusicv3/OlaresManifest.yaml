@@ -3,7 +3,7 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: acestepmusicv3
-  description: ACE-Step 1.5 XL-SFT and 4B LM behind the standard Olares Music API
+  description: Music generation from text descriptions and lyrics
   icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
   appid: acestepmusicv3
   version: '0.1.65'
@@ -53,126 +53,22 @@ permission:
 spec:
   versionName: 'ACE-Step/acestep-v15-xl-sft'
   upgradeDescription: |
-    v0.1.65: This release requires Olares 1.12.7 or later.
-
-    v0.1.64: Model Console (llm-init) updated to v1.7.21.
-
-    0.1.62 makes the model callable again. Its shared API entrance had been
-    routed straight to the engine, which answers no control-plane endpoints, so
-    the gateway registered the model with no routes and left it stuck on
-    "starting". The entrance goes back to Model Console, and the Model Console
-    it upgrades to no longer trims the lyrics-alignment route that the detour
-    was working around.
-    0.1.61 stops pinning GPU memory. The app no longer asks PyTorch for
-    expandable segments, so its allocations stay migratable and another model
-    sharing the same card keeps its full speed while this one is idle.
-    0.1.60 restores ACE's native Chinese Draft sampling distribution: it passes
-    Music's brief through unchanged, keeps the requested temperature and ACE's
-    default Chinese sampling parameters, and tries up to five independent
-    candidates. Phonetic or malformed candidates are rejected rather than
-    rewritten, and stronger character-loop checks reject degenerate Han text.
-    0.1.49 keeps ACE's phonetic Chinese lyric script for synthesis while the
-    same loaded 5Hz 4B model renders readable Han lyrics for Music Studio.
-    0.1.48 anchors Mandarin and Cantonese draft prompts in their requested
-    writing language, uses five reason-aware attempts, raises randomness to
-    escape a recurring phonetic path, and restores the native repetition
-    penalty for Chinese scripts. This reduces repeated user-visible failures.
-    0.1.47 routes the shared standard Music API directly to the staged engine,
-    allowing the lyrics-alignment generation subresource through while keeping
-    the visible Model Console on llm-init.
-    0.1.46 preserves adjacent lyric sentences when ACE-Step rounds their native
-    LRC starts to the same timestamp, splitting the available interval into
-    strictly positive sentence ranges instead of dropping the whole alignment.
-    0.1.45 generates native cross-attention lyric timing for new vocal songs,
-    persists sentence-level alignment across engine restarts, and advertises
-    the standard lyrics-alignment read capability. Existing songs are unchanged.
-    0.1.43 rejects non-Hook Latin words embedded in Chinese lyric lines while
-    preserving standalone English hooks and common vocal interjections.
-    0.1.42 rejects Japanese kana and Korean script mixed into Chinese drafts
-    while continuing to allow a small English hook.
-    0.1.41 rejects four or more consecutive copies of the same lyric line,
-    covering a live loop pattern that could stay below the global ratio gate.
-    0.1.40 keeps retries on the original positive song subject so corrective
-    meta-instructions cannot leak into lyrics produced by the small writer.
-    0.1.39 retries unreadable or degenerately repetitive drafts with safer
-    sampling, enforces readable Chinese writing, and reports specific failures
-    instead of completing with romanized filler or lyric loops.
-    0.1.38 serializes drafting, formatting and audio generation inside the
-    adapter so the 4B writing model cannot reload while XL-SFT owns the GPU.
-    Vocal drafts also retry empty captions and section-only placeholders such
-    as [Instrumental] instead of completing without usable lyrics.
-    0.1.37 seeds the complete music capability card during migration, so
-    Router sees draft support even when it discovers Model Console before the
-    ACE-Step engine has finished starting.
-    0.1.36 refreshes persisted model cards that predate the music draft
-    operation, so Router can route /v1/music/drafts after an in-place upgrade.
-    0.1.34 upgrades Model Console to llm-init 1.7.8, which is the release that
-    passes /v1/music/drafts through to the engine. Without it 0.1.33's draft
-    route answered 404 from behind the proxy.
-    0.1.33 lets the 4B LM write a whole song from one sentence. POST
-    /v1/music/drafts returns a caption, lyrics and the LM's own BPM, key and
-    time signature, so an application no longer needs a separate chat model to
-    reach a first draft.
-    0.1.31 keeps caption and lyric formatting available after a generation.
-    The stage barrier unloads the 4B LM before diffusion, and only queued
-    generations reloaded it, so the first song of a session left every later
-    formatting request answering "LLM not initialized".
-    0.1.30 safely fits verbose ACE 4B formatted Captions into the standard
-    512-character Music API contract and reports an explicit preview warning
-    instead of failing an otherwise valid lyric optimization.
-    0.1.29 adds asynchronous caption and lyric formatting through ACE-Step's
-    4B LM. The standard Music API now exposes draft/effective conditioning
-    text for explicit review before XL-SFT generation; accepted text is sent
-    with all second-pass rewriting disabled.
-    0.1.28 declares and validates the complete ACE-Step vocal language catalog.
-    0.1.27 preserves valid full-length ACE Captions: optional vocal and clean
-    production hints are appended only when they fit the 512-character model
-    limit. Vocal type input is now validated consistently at 120 characters.
-    0.1.26 adds clean and textured production profiles, preserves complete
-    Studio captions without 4B LM rewriting, applies a clean-production LM
-    negative prompt, and aligns high-quality XL-SFT inference with the official
-    64-step, CFG 8, shift 3, ADG recommendation. Turbo remains disabled.
-    0.1.25: Upgrade Model Console to llm-init 1.7.3 so authoritative music
-    engine capabilities, including repaint, are projected to Router.
-    0.1.24: Complete the v1 engine-spec capability contract so Model Console
-    can publish generate and repaint operations to Router.
-    0.1.23: Add an XL-SFT high-quality profile with 64 diffusion steps and
-    ADG, enforce ACE-Step's 512-character Caption and 4096-character Lyrics
-    limits, and expose real source-audio interval repainting. Song structure
-    remains in Lyrics instead of being duplicated into Caption.
-    0.1.22: Disable DCW for XL-SFT. The bundled pre-#1273 ACE-Step runtime
-    otherwise produces structured noise for every SFT generation.
-    0.1.21: Keep the 24 GiB runtime on XL-SFT only. Remove the Turbo profile,
-    download and runtime-switch path so every accepted request uses the full
-    50-step quality model.
-    0.1.20: Enable ACE-Step's serialized on-demand DiT model swap so the fast
-    profile really loads XL-Turbo instead of silently falling back to XL-SFT.
-    0.1.19: Make XL-SFT the default quality profile with 50 DiT steps, CFG 7
-    and shift 1 while retaining XL-Turbo as an explicit fast profile. Add an
-    LM audio-code quality gate with deterministic re-sampling, and accept the
-    advanced music controls forwarded by Router provider_options.
-  featuredImage: https://app.cdn.olares.com/appstore/acestep/1.webp
-  promoteImage:
-    - https://app.cdn.olares.com/appstore/acestep/1.webp
-    - https://app.cdn.olares.com/appstore/acestep/2.webp
-    - https://app.cdn.olares.com/appstore/acestep/3.webp
+    This release requires Olares 1.12.7 or later.
 
   fullDescription: |
-    Olares model application for ACE-Step 1.5 on a single 24 GiB NVIDIA GPU.
-    It serves the standard asynchronous Music API with XL-SFT and the 5Hz 4B
-    language model. The runtime serializes jobs and unloads the
-    language model before diffusion so four-minute generation has enough GPU
-    headroom. Models are downloaded once into Olares App Common storage; audio
-    and API temporary files persist in App Data.
+    ACE-Step Music XL-SFT generates songs with vocals or instrumental music from text descriptions and lyrics. It provides the ACE-Step 1.5 XL-SFT model and a 4B language model to compatible Olares music applications.
 
-    Model Console is the only public and Router-facing endpoint. It downloads and
-    verifies all three pinned repositories, reports download/loading/ready state,
-    exposes the model card, and proxies `/v1/music/generations` and
-    `/v1/music/formats`. ACE-Step's native `/format_input`, `/release_task`,
-    `/query_result`, and file paths remain internal.
+    **Key features**
 
-  developer: ace-step
-  website: https://acemusic.ai/
+    - Draft song descriptions and lyrics from a short idea.
+    - Generate music with controls for style, tempo, key, and vocal language.
+    - Regenerate a selected section of existing audio.
+    - Provide lyric timing for newly generated vocal songs.
+
+    This app requires Olares 1.12.7 or later and is configured for an NVIDIA GPU with 24 GiB of memory on an amd64 system. Open Model Console to download the models and check their status, then use a compatible music application to create songs.
+
+  developer: ACE-Step
+  website: https://huggingface.co/ACE-Step/acestep-v15-xl-sft
   sourceCode: https://github.com/ace-step/ACE-Step-1.5
   submitter: Olares
   locale:
@@ -186,7 +82,7 @@ spec:
   doc: https://github.com/ace-step/ACE-Step-1.5
   license:
     - text: MIT License
-      url: https://github.com/ace-step/ACE-Step-1.5?tab=MIT-1-ov-file
+      url: https://github.com/ace-step/ACE-Step-1.5/blob/main/LICENSE
 
   accelerator:
   # nvidia — discrete GPU; GPU memory via nvidia.com/gpumem. amd64 only.
