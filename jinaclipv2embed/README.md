@@ -26,18 +26,19 @@ OpenAI-compatible endpoints:
 
 ## Accelerator → image mapping
 
-| Mode | Docker image | `MODEL_ID` | `EMBED_DEVICE` | HF subdir |
+| Mode | Docker image | `MODEL_ID` | `ACCELERATOR` | HF subdir |
 |------|--------------|------------|----------------|-----------|
-| `intel` | `beclab/embed-server:v0.1.2-ov-intel` | `jina-clip-v2-split-ov` | `igpu` | `openvino/` |
-| `cpu` | `beclab/embed-server:v0.1.2-onnx-cpu` | `jina-clip-v2-split-onnx` | `cpu` | `onnx/` |
-| `nvidia` | `beclab/embed-server:v0.1.2-onnx-cuda12` or `*-cuda13` | `jina-clip-v2-split-onnx` | `cuda` | `onnx/` |
-| `nvidia-gb10` | `beclab/embed-server:v0.1.2-onnx-cuda13-gb10-arm64` | `jina-clip-v2-split-onnx` | `cuda` | `onnx/` |
+| `intel` | `beclab/embed-server:v0.2.1-ov-intel` | `jina-clip-v2-split` | `intel` | `openvino/` |
+| `intel-gpu` | `beclab/embed-server:v0.2.1-ov-intel` | `jina-clip-v2-split` | `intel-gpu` | `openvino/` |
+| `cpu` | `beclab/embed-server:v0.2.1-onnx-cpu` | `jina-clip-v2-split` | `cpu` | `onnx/` |
+| `nvidia` | `beclab/embed-server:v0.2.1-onnx-cuda12` or `*-cuda13` | `jina-clip-v2-split` | `nvidia` | `onnx/` |
+| `nvidia-gb10` | `beclab/embed-server:v0.2.1-onnx-cuda13-gb10-arm64` | `jina-clip-v2-split` | `nvidia-gb10` | `onnx/` |
 
 ## Model source (llm-init)
 
 Unified repo: https://huggingface.co/beclab/jina-clip-v2-split
 
-- Intel: `hf://beclab/jina-clip-v2-split --revision main --exclude onnx/** --subdir openvino`
+- Intel 核显/独显: `hf://beclab/jina-clip-v2-split --revision main --exclude onnx/** --subdir openvino`
 - Others: `hf://beclab/jina-clip-v2-split --revision main --exclude openvino/** --subdir onnx`
 
 `MODEL_NAME=jina-clip-v2` (logical id for `/v1/models` and proxy rewrite).
@@ -46,12 +47,12 @@ Unified repo: https://huggingface.co/beclab/jina-clip-v2-split
 
 | Component | Image |
 |-----------|-------|
-| embed-server | `beclab/embed-server:v0.1.2-*` |
-| llm-init | `beclab/llm-init:v1.3.5` |
+| embed-server | `beclab/embed-server:v0.2.1-*` |
+| llm-init | `beclab/llm-init:v1.7.21` |
 
 ## Device mounts
 
-- **intel:** `/dev/dri`, `/sys/class/drm` (+ privileged)
+- **intel / intel-gpu:** `/dev/dri`, `/sys/class/drm` (+ privileged)
 - **nvidia / nvidia-gb10:** Olares `gpu-inject` annotation
 
 ## Local integration test
@@ -78,3 +79,24 @@ Summary: embed-server RAM ~**2.8 GiB** (OpenVINO) / ~**2.2 GiB** host RAM (NVIDI
 ```bash
 curl -s http://<pod>:8080/v1/capabilities | jq '{configured_device_kind, inference_backend, cpu_fallback}'
 ```
+
+## v0.2.1 migration (Chart 1.0.15)
+
+Engine configuration uses `MODEL_ID=jina-clip-v2-split` on every backend and
+`ACCELERATOR` from the Olares compute selection. Do not pass `EMBED_DEVICE` or
+legacy suffixed model IDs to the new engine. The public API model name remains
+`jina-clip-v2`. Backend assets are selected from the matching `openvino/` or
+`onnx/` subdirectory; no extra format environment variable is required.
+
+`intel` requires an integrated Intel GPU; `intel-gpu` requires a discrete Intel
+GPU. They do not fall back to the other GPU type or CPU. The discrete mode uses
+Olares GPU injection and 10240Mi / 12288Mi allocation annotations, matching its
+manifest. This is an initial allocation, not a measured Intel dGPU peak guarantee.
+The existing Jina host-memory and NVIDIA/GB10 budgets are preserved; Gemma's
+smaller budgets are not suitable evidence for this dual-tower model.
+
+`ENGINE_KIND=clipembed`, the `clipembed` service alias, `MODEL_SUPPORTS` image
+capability, entrances, cache and run-state paths are preserved. Upgrade image and
+configuration together; roll both back together if necessary. Local lint and
+render checks do not prove model loading on physical hardware. Validate both text
+and image inference via llm-init on each target before declaring deployment tested.
