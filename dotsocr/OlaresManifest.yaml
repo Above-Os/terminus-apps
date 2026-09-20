@@ -3,13 +3,16 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: dotsocr
-  icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
-  description: "dots.ocr document OCR (GGUF Q8) via llm-init + OCRAdapter + llama.cpp (CUDA)"
+  icon: "https://avatars.githubusercontent.com/u/211634691?v=4&s=256"
+  description: "Multilingual document text recognition with layout understanding"
   appid: dotsocr
   title: dots.ocr
-  version: '1.0.15'
+  version: '1.0.16'
   categories:
     - AI
+    - models
+  tags:
+    - ocr
 sharedEntrances:
   - name: dotsocr
     host: sharedentrances-api
@@ -17,20 +20,20 @@ sharedEntrances:
     title: dots.ocr API
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    icon: "https://avatars.githubusercontent.com/u/211634691?v=4&s=256"
 entrances:
   - name: ocrclient
     port: 8090
     host: download-svc
     title: dots.ocr
-    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    icon: "https://avatars.githubusercontent.com/u/211634691?v=4&s=256"
     openMethod: window
     authLevel: internal
   - name: ocrapi
     port: 8090
     host: download-svc
     title: dots.ocr API
-    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    icon: "https://avatars.githubusercontent.com/u/211634691?v=4&s=256"
     invisible: true
     openMethod: window
     authLevel: internal
@@ -45,47 +48,27 @@ spec:
   onlyAdmin: true
   versionName: 'ggml-org/dots.ocr-GGUF:Q8_0'
   fullDescription: |
-    **dots.ocr** multilingual document OCR, served as GGUF **Q8** on CUDA via llama.cpp.
+    dots.ocr extracts text from document images and PDF pages while interpreting page layout and reading order. Its multilingual model recognizes text, tables, and formulas to help turn document pages into reusable content.
 
-    **Stack** (same topology as llm-init `deploy/compose/ocr.yml`)
-    ```
-    Client → llm-init:8090 → ocradapter:8080 → llamacpp:8081
-                                └─ Olares middleware Redis
-    ```
-    - **llm-init** (`ENGINE_KIND=ocr`, `MODEL_MODE=ocr`): downloads Q8 weights, progress UI, proxies `/v1/ocr*` and `/v1/models`.
-    - **OCRAdapter**: async OCR jobs (Redis queue); pipeline `dots`.
-    - **llama.cpp** (CUDA): vision VLM with mmproj.
-
-    **Model (Q8 only)**
-    Source: [ggml-org/dots.ocr-GGUF](https://huggingface.co/ggml-org/dots.ocr-GGUF)
-    llm-init downloads **only** (comma dual-source, one `--include` each):
-    - `dots.ocr-Q8_0.gguf` (~1.8 GiB) — main
-    - `mmproj-dots.ocr-Q8_0.gguf` (~1.3 GiB) — extra
-    F16 blobs in the same repo are **not** downloaded.
-
-    **Accelerator**
-    CUDA only (`nvidia` / `nvidia-gb10`). No CPU / Intel mode.
-
-    **Sizing** (local resource profile, png + pdf page1)
-    - Peak VRAM ~9.1 GiB → request **11Gi** GPU memory
-    - Stack RAM ~0.55 GiB peak (plus download headroom on llm-init)
-
-  upgradeDescription: |
-    v1.0.15: Model Console (llm-init) updated to v1.7.21.
-
-    v1.0.0: initial — dots.ocr Q8 via llm-init + OCRAdapter + llama.cpp CUDA; Olares Redis middleware.
-
-  developer: rednote-hilab / ggml-org
-  website: https://huggingface.co/ggml-org/dots.ocr-GGUF
-  sourceCode: https://huggingface.co/rednote-hilab/dots.ocr
+    This app provides the Q8 version of dots.ocr to compatible Olares applications. It requires a supported NVIDIA GPU. Complex layouts, tables, and formulas may need manual review.
+  developer: rednote-hilab
+  website: https://huggingface.co/dots-studio/dots.ocr
+  sourceCode: https://github.com/studio-dots-ai/dots.ocr
+  doc: https://github.com/studio-dots-ai/dots.ocr#readme
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
   license:
     - text: MIT
-      url: https://huggingface.co/ggml-org/dots.ocr-GGUF
-
+      url: https://github.com/studio-dots-ai/dots.ocr/blob/master/LICENSE
+    - text: dots.ocr License Agreement
+      url: https://github.com/studio-dots-ai/dots.ocr/blob/master/dots.ocr%20LICENSE%20AGREEMENT
   accelerator:
     # Sum ≈ llamacpp + llm-init + ocradapter. GPU from Q8 peak ~9.1Gi → 11Gi.
     - mode: nvidia
