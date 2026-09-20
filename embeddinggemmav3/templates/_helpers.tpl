@@ -27,7 +27,7 @@
 {{- $gpuType -}}
 {{- end -}}
 
-{{- define "embeddinggemmav3.embedTag" -}}hw-bfaa3cc{{- end -}}
+{{- define "embeddinggemmav3.embedTag" -}}v0.2.1{{- end -}}
 {{- define "embeddinggemmav3.llmInitTag" -}}v1.7.21{{- end -}}
 {{- define "embeddinggemmav3.unifiedRepo" -}}beclab/embeddinggemma-300m{{- end -}}
 {{- define "embeddinggemmav3.modelRevision" -}}main{{- end -}}
