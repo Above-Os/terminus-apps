@@ -1,0 +1,19 @@
+metadata:
+  description: "Un modèle vision-langage Qwen3.6 servi avec FreeToken"
+  title: Qwen3.6-35B-A3B (FreeToken)
+
+spec:
+  fullDescription: |
+    **Configuration prédéfinie**
+
+    - Modèle : `nvidia/Qwen3.6-35B-A3B-NVFP4` (environ 23.5 GB, téléchargé une seule fois dans `appCommon/huggingface`)
+    - Contexte : 128K tokens par requête (natif 262,144 ; limité pour que le cache tienne dans `23Gi` de mémoire GPU)
+    - Capacités : raisonnement, outils, vision
+    - Concurrence : une requête en cours à la fois
+    - Arguments du moteur : `--moe-strategy auto --expert-load serial --max-seq-len-override 131072 --kv-reserve-tokens 131072 --max-prefill-length 8192 --max-running-requests 1`
+    - Mémoire GPU : `23Gi` ; mémoire hôte du moteur request `24Gi`, limit `32Gi` (les poids des experts restent en RAM hôte)
+    - GPU : NVIDIA, CUDA 13 (pilote R580 ou plus récent)
+
+    Cette application sert le checkpoint avec FreeToken, un moteur FlashML pour les modèles Mixture-of-Experts sur un GPU NVIDIA local. FreeToken conserve les poids des experts en mémoire hôte, met en cache un jeu d'experts actif sur le GPU, convertit le checkpoint en FTW dans `appCache/freetoken-ftw` au premier démarrage pour le réutiliser ensuite, et fournit des API compatibles OpenAI et Anthropic. Voir [FreeToken](https://github.com/FlashML-org/FreeToken).
+
+    Qwen3.6-35B-A3B est un modèle Mixture-of-Experts vision-langage de la série Qwen d'Alibaba, avec 35 milliards de paramètres au total et environ 3 milliards actifs par token. Il accepte le texte et les images et prend en charge le raisonnement et l'appel d'outils. Ce préréglage utilise la quantification NVFP4 4-bit de NVIDIA. Voir la [fiche du modèle Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) et le [checkpoint NVFP4](https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4).
