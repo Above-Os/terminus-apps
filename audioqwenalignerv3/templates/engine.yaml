@@ -1,8 +1,7 @@
-{{- /* Qwen ASR engine: one baked image serves stt / stt_stream / align off a single load; this only sizes the GPU. */ -}}
+{{- /* Qwen Forced Aligner: NVIDIA uses qwen-asr in-process; Intel uses OpenVINO (one image, iGPU + Arc). */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
-{{- /* MODEL_SUPPORTS: bare capability names; llm-init and the engine both take supports_* keys. */ -}}
 {{- $supportsKeys := list -}}
 {{- range $tok := splitList "," ($oe.MODEL_SUPPORTS | default "align") -}}
 {{- $tok = trim $tok -}}
@@ -11,13 +10,11 @@
 {{- end -}}
 {{- end -}}
 {{- $supportsRaw := join "," $supportsKeys -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen:v1.1.21" -}}
 {{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
 {{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
 {{- $memRequest := trim ($oe.MEMORY_REQUEST | default "2Gi") -}}
 {{- $cpuLimit := trim ($oe.CPU_LIMIT | default "4") -}}
 {{- $memLimit := trim ($oe.MEMORY_LIMIT | default "8Gi") -}}
-{{- /* GPU is OPTIONAL (REQUIRED_GPU_MEMORY = "" or "0" => CPU-only). */ -}}
 {{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "4Gi") -}}
 {{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
 {{- $gpuMiB := "" -}}
@@ -25,7 +22,10 @@
 {{- if not $gpuType -}}
 {{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
 {{- end -}}
+{{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
+{{- /* gb10 only: intel iGPU keeps MEMORY_LIMIT (not REQUIRED_GPU_MEMORY) so CUDA GPU tags stay 4Gi. */ -}}
 {{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.23" "docker.io/beclab/audio-qwen:v1.1.23" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if $unifiedMem -}}
@@ -33,7 +33,7 @@
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
 {{- end -}}
-{{- /* Engine-native flags in llm-init's one channel; unset means the image decides. */ -}}
+{{- /* ENGINE_ARGS is the user box only. --device is inferred from the install card. */ -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
@@ -50,7 +50,7 @@ metadata:
   annotations:
     audio.bytetrade.io/model: "{{ $modelName }}"
     audio.bytetrade.io/supports: "{{ $supportsRaw }}"
-{{- if $wantGpu }}
+{{- if and $wantGpu (not $isIntel) }}
     applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
 {{- end }}
 spec:
@@ -84,6 +84,20 @@ spec:
           configMap:
             name: audio-wrappers
             defaultMode: 0555
+{{- if $isIntel }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+{{- end }}
       containers:
         - name: {{ $cname }}
           image: "{{ $engineImage }}"
@@ -104,6 +118,8 @@ spec:
               value: "{{ $oe.LOG_LEVEL | default "info" }}"
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
+            - name: OLARES_GPU_MODE
+              value: "{{ $gpuType }}"
 {{- if $engineArgs }}
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
@@ -139,7 +155,6 @@ spec:
           ports:
             - name: http
               containerPort: {{ $enginePort }}
-          # No readinessProbe (like llamacpp): Ready at start so the app runs while the model downloads; llm-init gates /v1/*.
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
@@ -151,18 +166,36 @@ spec:
             - name: wrappers
               mountPath: /wrappers
               readOnly: true
+{{- if $isIntel }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and $wantGpu (not $unifiedMem) }}
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+{{- if eq $gpuType "intel-gpu" }}
+              gpu.intel.com/xe: "1"
+{{- else if eq $gpuType "intel" }}
+              gpu.intel.com/i915: "1"
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and $wantGpu (not $unifiedMem) }}
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+{{- if eq $gpuType "intel-gpu" }}
+              gpu.intel.com/xe: "1"
+{{- else if eq $gpuType "intel" }}
+              gpu.intel.com/i915: "1"
 {{- end }}
 ---
 apiVersion: v1

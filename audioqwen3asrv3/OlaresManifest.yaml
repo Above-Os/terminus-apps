@@ -7,7 +7,7 @@ metadata:
   description: A multilingual speech recognition model for recorded and live audio
   appid: audioqwen3asrv3
   title: Qwen3-ASR 1.7B
-  version: '1.0.21'
+  version: '1.0.22'
   categories:
     - AI
     - models
@@ -84,6 +84,26 @@ spec:
       limitedDisk: 200Gi
       limitedMemory: "16Gi"
       requiredMemory: "12544Mi"
+    # Intel iGPU: unified memory. Engine 16Gi (MEMORY_LIMIT) + llm-init 4Gi,
+    # same host envelope as intel-gpu. No GPU-memory field.
+    - mode: intel
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "16640Mi"
+    # Intel Arc: discrete, same envelope as nvidia. GPU-memory field is for the installer;
+    # the pod mounts /dev/dri and asks gpu.intel.com/xe (not i915 — that is the iGPU).
+    - mode: intel-gpu
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "12Gi"
+      limitedGPUMemory: "12Gi"
 
   supportArch:
     - amd64
@@ -191,6 +211,10 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    # No default: nvidia/gb10 → audio-qwen:v1.1.23; intel/intel-gpu → audio-qwen-ov:v1.1.23.
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
+      docker.io/beclab/audio-qwen:v1.1.23; intel and intel-gpu use
+      docker.io/beclab/audio-qwen-ov:v1.1.23. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
@@ -198,7 +222,7 @@ envs:
     applyOnChange: true
     # Left blank on purpose: `--max-model-len` depends on the card, which a static default cannot express.
     description: "Engine-native flags (llm-init ENGINE_ARGS). Left empty, the chart uses
-      \"--max-model-len 8192 --enforce-eager --batch-max-spans 32 --repetition-detection\",
+      \"--max-model-len 8192 --enforce-eager --repetition-detection\",
       and 3072 instead of 8192 on a gb10, whose unified memory leaves a smaller KV budget after
       the encoder. Whatever is here REPLACES that whole list, so carry the flags over when adding one."
   - envName: HF_ENDPOINT

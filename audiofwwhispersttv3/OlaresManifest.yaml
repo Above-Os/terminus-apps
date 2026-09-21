@@ -7,7 +7,7 @@ metadata:
   description: A local speech recognition model for multilingual audio transcription
   appid: audiofwwhispersttv3
   title: Whisper Large V3 (FW)
-  version: '1.0.17'
+  version: '1.0.18'
   categories:
     - AI
     - models
@@ -85,6 +85,24 @@ spec:
       limitedDisk: 80Gi
       limitedMemory: "12Gi"
       requiredMemory: "8448Mi"
+    # Intel iGPU: unified memory, same envelope as gb10. No GPU-memory field.
+    - mode: intel
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 80Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "8448Mi"
+    # Intel Arc: discrete, same envelope as nvidia. Pod mounts /dev/dri and asks xe.
+    - mode: intel-gpu
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 80Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "8Gi"
+      limitedGPUMemory: "8Gi"
 
   supportArch:
     - amd64
@@ -190,6 +208,7 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use docker.io/beclab/audio-fasterwhisper:v1.1.23; intel and intel-gpu use docker.io/beclab/audio-whisper-ov:v1.1.23. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
@@ -197,8 +216,9 @@ envs:
     applyOnChange: true
     # No default: the built-in depends on whether the deployment was given a card.
     description: "Engine-native flags (llm-init ENGINE_ARGS), e.g. --compute-type int8 --beam-size 5.
-      Given no GPU and left empty, the chart adds --device cpu; anything here REPLACES that whole
-      list. Dropping it is harmless — --device defaults to auto, which resolves to CPU anyway."
+      Filling this REPLACES the whole list. Given no GPU on nvidia/nvidia-gb10 and left empty,
+      the chart adds --device cpu. intel and intel-gpu never get that — the engine fills
+      --device GPU and refuses CPU."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
