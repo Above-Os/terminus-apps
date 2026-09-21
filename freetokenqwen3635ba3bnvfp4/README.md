@@ -1,5 +1,9 @@
 # FreeToken Qwen3.6 NVFP4 chart
 
+`templates/wrappers.yaml` 的 ConfigMap 直接包含 `freetoken.sh`、
+`freetoken-healthcheck.py` 和 `prepare-ftw.py`，统一挂载到 `/llm-init/wrappers`。
+编辑该模板即可修改脚本，chart 不再使用独立的 `files/*.py` 文件。
+
 ## 启动和健康检查
 
 FreeToken 的 `/v1/models` 只表示模型已登记；`/health` 在加载或出错时也会返回
