@@ -4,6 +4,12 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.1: 增加启动、就绪和存活探针，模型真正可推理后才接入流量。
+      健康检查脚本随 chart 下发，无需重新构建镜像；
+      修复 maintenance=failed 仍通过存活检查的问题，并输出探针失败原因。
+      首次启动通过官方 ft checkpoint 转换并持久化 FTW，后续启动复用；
+      将 PyTorch CPU 线程数设为 4，减少专家权重打包时的线程争用。
+
     v1.0.0: 首个版本。基于 llama.cpp GGUF 预设（llamacppqwen3635ba3bggufv3
       v1.0.24）改写，改了三处：引擎换成 FreeToken 0.1.3（CUDA 13），
       权重换成 NVIDIA 的 NVFP4 检查点（不再是 GGUF 量化），专家权重按
@@ -49,7 +55,7 @@ spec:
     | `nvidia`  | GPU (CUDA) | 使用 `23Gi` 显存；专家权重从主机内存流式换入 |
 
     **工作流程说明**
-    首先，Model Console 下载并准备模型，然后 FreeToken 在模型准备好后启动服务。这两个部分独立运行但共享文件与进度信息。
+    Model Console 下载模型后，引擎先执行一次 `ft checkpoint`，将转换结果保存到 `appCache/freetoken-ftw`，再启动服务。后续启动直接复用 FTW，跳过专家权重重新打包。转换需要额外磁盘空间，约为另一份模型的大小。只有健康检查确认模型已可推理，Kubernetes 才会向引擎转发流量；首次下载和转换的启动等待上限为 24 小时。
 
     **技术栈说明**
     - **FreeToken**：运行模型，提供 OpenAI 与 Anthropic 接口（集群内端口 30000）

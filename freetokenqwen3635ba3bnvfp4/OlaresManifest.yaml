@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.6-35B-A3B (NVFP4) served with FreeToken."
   appid: freetokenqwen3635ba3bnvfp4
   title: Qwen3.6-35B-A3B (FreeToken)
-  version: '1.0.0'
+  version: '1.0.1'
   categories:
   - AI
   - models
@@ -38,6 +38,13 @@ spec:
   onlyAdmin: true
   versionName: 'nvidia/Qwen3.6-35B-A3B-NVFP4'
   upgradeDescription: |
+    v1.0.1: Gate engine traffic on model readiness, allow long first starts,
+      and monitor liveness using a JSON-aware healthcheck shipped in the chart.
+      Reject maintenance=failed in the liveness probe and include state details
+      in probe failures. Convert the downloaded checkpoint to persistent FTW
+      before the first serve; reuse complete compatible conversions on subsequent starts. Limit
+      PyTorch CPU threads to 4 to avoid oversubscription during expert packing.
+
     v1.0.0: First release. Derived from the llama.cpp GGUF preset
       (llamacppqwen3635ba3bggufv3 v1.0.24), with three things changed:
       the engine is FreeToken 0.1.3 (CUDA 13) instead of llama.cpp, the
@@ -90,7 +97,7 @@ spec:
     | `nvidia`  | GPU (CUDA) | `23Gi` GPU memory; experts stream from host RAM                 |
 
     **How It Works**
-    First, Model Console downloads the model and gets it ready, then FreeToken starts serving it. These two parts run separately but share files and progress info.
+    Model Console downloads the model. Before serving, the engine runs `ft checkpoint` once and stores the result in `appCache/freetoken-ftw`. Subsequent starts reuse the FTW checkpoint and skip expert repacking. Conversion needs additional disk space (roughly another model copy). Kubernetes only routes traffic to the engine after its healthcheck reports that the model is serving; the first download/conversion has a 24-hour startup budget.
 
     **Stack**
     - **FreeToken**: runs the model and serves the OpenAI and Anthropic APIs (port 30000 in-cluster)
