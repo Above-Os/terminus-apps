@@ -14,6 +14,10 @@ metadata:
   labels:
     io.kompose.service: freetoken
 data:
+  freetoken-healthcheck.py: |
+{{ .Files.Get "files/freetoken-healthcheck.py" | indent 4 }}
+  prepare-ftw.py: |
+{{ .Files.Get "files/prepare-ftw.py" | indent 4 }}
   freetoken.sh: |
     #!/bin/sh
     set -eu
@@ -102,8 +106,7 @@ data:
         # from the model card instead (its sglang /server_info probe will log a
         # fallback warning, which is expected here).
         # shellcheck disable=SC2086
-        exec "$FT_BIN" serve \
-            --model "$MODEL_PATH" \
+        exec /opt/venv/bin/python /llm-init/wrappers/prepare-ftw.py "$FT_BIN" "$MODEL_PATH" \
             --served-model-name "${MODEL_NAME:-llm-init-model}" \
             --host 0.0.0.0 \
             --port "${FREETOKEN_PORT:-30000}" \
