@@ -1,73 +1,19 @@
 metadata:
-  description: "Qwen3.6-35B-A3B (NVFP4) served with FreeToken."
+  description: "A Qwen3.6 vision-language model served with FreeToken"
   title: Qwen3.6-35B-A3B (FreeToken)
 
 spec:
-  upgradeDescription: |
-    v1.0.1: Gate engine traffic on model readiness, allow long first starts,
-      and monitor liveness using a JSON-aware healthcheck shipped in the chart.
-      Reject maintenance=failed in the liveness probe and include state details
-      in probe failures. Convert the downloaded checkpoint to persistent FTW
-      before the first serve; reuse complete compatible conversions on subsequent starts. Limit
-      PyTorch CPU threads to 4 to avoid oversubscription during expert packing.
-
-    v1.0.0: First release. Derived from the llama.cpp GGUF preset
-      (llamacppqwen3635ba3bggufv3 v1.0.24), with three things changed:
-      the engine is FreeToken 0.1.3 (CUDA 13) instead of llama.cpp, the
-      weights are NVIDIA's NVFP4 checkpoint instead of a GGUF quant, and
-      the experts live in host RAM under FreeToken's offload strategy
-      rather than being offloaded to the GPU whole.
-
-      Three consequences worth reading before installing:
-
-      - Host RAM, not just VRAM. `--moe-strategy auto` resolves to
-        `offload` on this MoE checkpoint: the NVFP4 expert banks (21.8Gi
-        measured) stay in host memory for the life of the process and
-        stream over PCIe into an LRU cache on the card. The engine
-        container therefore reserves 24Gi and may grow to 32Gi, where the
-        GGUF preset reserved 6Gi.
-      - The preset pins `--expert-load serial`. FreeToken's default
-        (`auto`) reads the expert banks in parallel, which needs the banks
-        plus a whole-shard buffer on top (the largest NVFP4 shard is
-        9.3Gi), and it sizes that read against free host RAM -- a number
-        that inside a container describes the node, not the cgroup. On a
-        node with 84Gi free it takes the parallel path and the 32Gi
-        container is OOMKilled about 25 seconds in, right after "Loading
-        experts". `serial` is the bounded, reclaimable read.
-      - amd64 only. The FreeToken image is built for x86_64 CUDA 13,
-        so there is no `nvidia-gb10` (DGX Spark) mode here and the
-        driver must be recent enough for CUDA 13 (R580+).
   fullDescription: |
-    **Model Overview**
-    Qwen3.6-35B-A3B is a Mixture-of-Experts vision-language model from the Qwen series (Alibaba), with 35B total parameters and about 3B active per token. This app serves NVIDIA's `nvidia/Qwen3.6-35B-A3B-NVFP4` checkpoint — the same model quantized to NVFP4 with TensorRT Model Optimizer — through FreeToken, a CUDA serving runtime built for exactly this shape of model: a small active path plus a large bank of experts that does not have to fit in VRAM.
+    **Preset configuration**
 
-    **Preset Configuration**
-    - Model: `nvidia/Qwen3.6-35B-A3B-NVFP4` (safetensors, ~23.5 GB downloaded once into the shared cache)
+    - Model: `nvidia/Qwen3.6-35B-A3B-NVFP4` (about 23.5 GB, downloaded once into `appCommon/huggingface`)
+    - Context: 128K tokens per request (native 262,144; capped so the cache fits in `23Gi` of GPU memory)
     - Capabilities: thinking, tools, vision
+    - Concurrency: one running request at a time
     - Engine args: `--moe-strategy auto --expert-load serial --max-seq-len-override 131072 --kv-reserve-tokens 131072 --max-prefill-length 8192 --max-running-requests 1`
-    - Required GPU memory: `23Gi`; engine host memory request `24Gi`, limit `32Gi` (the expert banks live in host RAM, not on the card)
+    - GPU memory: `23Gi`; engine host memory request `24Gi`, limit `32Gi` (expert weights stay in host RAM)
+    - GPU: NVIDIA, CUDA 13 (driver R580 or later)
 
-    **What the engine args mean**
-    - `--moe-strategy auto` — FreeToken picks the MoE placement. On this checkpoint that is `offload`: experts stay in host RAM, an LRU slice of them is cached on the GPU, and misses stream over PCIe. (Run `ft bench bw` once inside the container and `auto` can upgrade to `hybrid`; the profile it writes to `~/.cache/freetoken/benchbw/` survives restarts, that directory is a mounted volume.)
-    - `--max-seq-len-override 131072` — 128K tokens per request. The checkpoint itself declares 256K positions; capping it at 128K keeps the KV pool inside a 24GB card.
-    - `--expert-load serial` — how the expert banks are read into host RAM at startup. `auto` would read them in parallel, which is faster but needs the banks (21.8Gi) plus a whole-shard buffer on top, and it decides that against *free host RAM* — a number that inside a container describes the node, not the cgroup. That is how a 32Gi container got OOMKilled on a node with 84Gi free. `serial` is the bounded read.
-    - `--max-prefill-length 8192` — chunked-prefill chunk size. Long prompts are prefilled in 8192-token chunks rather than one allocation.
-    - `--kv-reserve-tokens 131072` — floor the KV pool at 128K tokens *before* the expert cache claims free VRAM. Without it the expert cache fills the card first and leaves only the 8192-token default, which is what a 128K request would actually hit.
-    - `--max-running-requests 1` — one request at a time, so that single request owns the whole KV pool and everything left over goes to the expert cache. Model Console and Router read this number off the card and queue accordingly.
+    This app serves the checkpoint with FreeToken, a FlashML engine for Mixture-of-Experts models on a local NVIDIA GPU. FreeToken keeps expert weights in host memory, caches a working set on the GPU, converts the checkpoint to FTW in `appCache/freetoken-ftw` on first start for later reuse, and provides OpenAI- and Anthropic-compatible APIs. See [FreeToken](https://github.com/FlashML-org/FreeToken).
 
-    Everything else resolves from the checkpoint and the card: attention backend, NVFP4 kernels, expert-cache size, CUDA-graph batch size, and the tool-call and reasoning parsers. The vision encoder is built by default (`--text-model-only` skips it and gives its VRAM to the KV and expert pools).
-
-    **Accelerator modes**
-    | Mode      | Device     | Details                                                        |
-    |-----------|------------|----------------------------------------------------------------|
-    | `nvidia`  | GPU (CUDA) | `23Gi` GPU memory; experts stream from host RAM                 |
-
-    **How It Works**
-    Model Console downloads the model. Before serving, the engine runs `ft checkpoint` once and stores the result in `appCache/freetoken-ftw`. Subsequent starts reuse the FTW checkpoint and skip expert repacking. Conversion needs additional disk space (roughly another model copy). Kubernetes only routes traffic to the engine after its healthcheck reports that the model is serving; the first download/conversion has a 24-hour startup budget.
-
-    **Stack**
-    - **FreeToken**: runs the model and serves the OpenAI and Anthropic APIs (port 30000 in-cluster)
-    - **Model Console**: downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to the engine.
-
-    **Model Storage**
-    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
+    Qwen3.6-35B-A3B is a vision-language Mixture-of-Experts model from Alibaba's Qwen series, with 35 billion parameters in total and about 3 billion active per token. It accepts text and images and supports thinking and tool calling. This preset uses NVIDIA's 4-bit NVFP4 quantization. See the [Qwen3.6-35B-A3B model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) and the [NVFP4 checkpoint](https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4).
