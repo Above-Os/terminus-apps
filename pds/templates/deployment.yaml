@@ -9,7 +9,7 @@ metadata:
   labels:
     io.kompose.service: pds
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.pds.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: pds
@@ -20,28 +20,71 @@ spec:
       labels:
         io.kompose.service: pds
     spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
       initContainers:
-      - name: init-chmod-pds
+      - name: migrate-appcache-to-appdata
+        image: "docker.io/beclab/busybox:1.37"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            SOURCE=/old-data
+            DEST=/new-data
+            MARKER="${DEST}/.migration_from_appcache_done"
+
+            if [ -f "$MARKER" ]; then
+              echo "[migrate] marker present, skip."
+              exit 0
+            fi
+
+            if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_done$' || true)" ]; then
+              echo "[migrate] appData already has data, skip."
+              echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              exit 0
+            fi
+
+            if [ -n "$(ls -A "$SOURCE" 2>/dev/null || true)" ]; then
+              echo "[migrate] copying appCache/pds -> appData/pds..."
+              cp -a "$SOURCE"/. "$DEST"/
+              echo "migrated from appCache at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+              echo "[migrate] done; legacy appCache left intact for rollback."
+            else
+              echo "[migrate] no legacy data, fresh install."
+              echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+            fi
+        volumeMounts:
+          - name: pdsdata-legacy
+            mountPath: /old-data
+            readOnly: true
+          - name: pdsdata
+            mountPath: /new-data
+      - name: init-permissions
         image: "docker.io/beclab/aboveos-busybox:1.37.0"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
         command:
           - sh
           - '-c'
           - |
-            mkdir -p /app-data-root/pds /app-data-root/blocks
-            chown -R 0:0 /app-data-root || true
-            chmod -R 777 /app-data-root || true
-        resources: {}
+            set -e
+            mkdir -p /app-data-root /app-data-root/blocks
+            chown 1000:1000 /app-data-root /app-data-root/blocks
         volumeMounts:
           - name: pdsdata
             mountPath: /app-data-root
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
-        imagePullPolicy: IfNotPresent
-        securityContext:
-          runAsUser: 0
       containers:
       - name: pds
-        image: "docker.io/beclab/bluesky-social-pds:0.4.204"
+        image: "docker.io/beclab/bluesky-social-pds:0.4.5027"
+        imagePullPolicy: IfNotPresent
         ports:
           - containerPort: {{ .Values.port | default 3000 }}
             protocol: TCP
@@ -89,11 +132,17 @@ spec:
           requests:
             cpu: 100m
             memory: 512Mi
+        startupProbe:
+          httpGet:
+            path: /xrpc/_health
+            port: {{ .Values.port | default 3000 }}
+          failureThreshold: 30
+          periodSeconds: 5
+          timeoutSeconds: 5
         readinessProbe:
           httpGet:
             path: /xrpc/_health
             port: {{ .Values.port | default 3000 }}
-          initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
           successThreshold: 1
@@ -102,7 +151,6 @@ spec:
           httpGet:
             path: /xrpc/_health
             port: {{ .Values.port | default 3000 }}
-          initialDelaySeconds: 30
           periodSeconds: 30
           timeoutSeconds: 5
           successThreshold: 1
@@ -112,21 +160,16 @@ spec:
           name: pdsdata
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
-        imagePullPolicy: IfNotPresent
       restartPolicy: Always
       volumes:
       - hostPath:
-          {{- if .Values.sysVersion }}
-            {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
-          path: '{{ .Values.userspace.appCache }}/pds'
-            {{- else }}
-          path: '{{ .Values.userspace.appCache }}/pds/pds'
-            {{- end }}
-          {{- else }}
-          path: '{{ .Values.userspace.appCache }}/pds/pds'
-          {{- end }}
+          path: '{{ .Values.userspace.appData }}/pds'
           type: DirectoryOrCreate
         name: pdsdata
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/pds'
+          type: DirectoryOrCreate
+        name: pdsdata-legacy
 ---
 apiVersion: v1
 kind: Service

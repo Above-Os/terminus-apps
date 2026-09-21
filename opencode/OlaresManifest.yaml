@@ -1,22 +1,30 @@
-olaresManifest.version: '0.11.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  opencode: 1
+  terminal: 1
 metadata:
   name: opencode
   icon: https://app.cdn.olares.com/appstore/opencode/icon.png
   description: The open source AI coding agent
   appid: opencode
   title: OpenCode
-  version: '1.0.12'
+  version: '1.0.27'
   categories:
   - Developer Tools
   - Productivity_v112
+  - agents
+  tags:
+  - coding
 permission:
   appData: true
   appCache: true
   userData:
   - Home
 spec:
-  versionName: '1.14.19'
+  versionName: '1.18.31'
   promoteImage:
   - https://app.cdn.olares.com/appstore/opencode/1.webp
   - https://app.cdn.olares.com/appstore/opencode/2.webp
@@ -32,32 +40,15 @@ spec:
     - Any editor provides terminal interfaces, desktop applications, and IDE extensions
 
     Usage:
-    - Open the app and use the Web UI directly in your browser.
+    - Open the app and use the Web UI in your browser.
+    - On first open, click Add Project and choose workspace (your Code directory at /home/opencode/workspace). The browser remembers this project for later visits (OpenCode Web stores opened projects in localStorage).
     - Configure your LLM provider and API keys in the Web UI.
     - Your code workspace is mounted at /home/opencode/workspace (linked to your Home/Code directory).
   upgradeDescription: |
-    Config changes:
-    - Add built-in oh-my-openagent (OMO) plugin
-    - Add Terminal entrance with auto-start TUI
-    
-    Upgrade OpenCode version to 1.14.19
+    Upgrade OpenCode to v1.18.31 (beclab/opencode:1.18.31.1). Keep nginx health checks local. Bind the Docker API to loopback with explicit TLS settings and allow initialization before startup checks.
+    Release notes: https://github.com/anomalyco/opencode/releases/tag/v1.18.31
 
-    What's Changed (v1.14.19):
-    Core
-    - Prevented compiled binaries from failing on startup because of a circular session schema dependency.
-    - Renamed the compaction setting to preserve_recent_tokens for the budget that keeps recent turns verbatim.
-    - Preserved concurrent edits to the same file instead of letting parallel edits overwrite each other.
-    - Fixed managed installs on Windows and added bundled ripgrep support for Windows ARM64.
-    - Added NVIDIA as a built-in provider option, including connection docs and required attribution headers. (@anniesurla)
-    - Kept recent conversation turns verbatim during session compaction so follow-up work keeps more local context.
-    - Fell back to summarizing the full conversation when preserved recent turns include too much media to fit safely.
-
-    Desktop:
-    - Reduced loading flicker when opening projects and bringing prompt controls online.
-    - Added a separate terminal font setting and bundled JetBrainsMono Nerd Font Mono.
-
-    Full release notes: https://github.com/anomalyco/opencode/releases/tag/v1.14.19
-
+    Upstream highlights (v1.18.19–v1.18.31): improved Qwen/OpenAI-compatible provider compatibility; more reliable network retries and streaming with five-minute default header/chunk timeouts; restored ACP session options and reasoning boundaries; Azure CLI / Microsoft Entra ID sign-in and Cloudflare AI Gateway routing improvements.
   developer: Anomaly
   website: https://opencode.ai/
   sourceCode: https://github.com/anomalyco/opencode
@@ -65,16 +56,21 @@ spec:
   locale:
   - en-US
   - zh-CN
+  - de-DE
+  - es-ES
+  - it-IT
+  - fr-FR
+  - ja-JP
   doc: https://opencode.ai/docs
   license:
   - text: MIT
     url: https://github.com/anomalyco/opencode/blob/dev/LICENSE
-  requiredMemory: 1792Mi
-  limitedMemory: 6Gi
+  requiredMemory: 2304Mi
+  limitedMemory: 24Gi
   requiredDisk: 5Gi
-  limitedDisk: 15Gi
-  requiredCpu: 0.3
-  limitedCpu: 5
+  limitedDisk: 50Gi
+  requiredCpu: 0.5
+  limitedCpu: 13
   supportArch:
   - amd64
   - arm64
@@ -91,8 +87,29 @@ envs:
     applyOnChange: true
     type: string
     editable: true
-    default: "3.17.4"
-    description: "Exact semver of oh-my-opencode (OMO) to install, e.g. '3.17.4'."
+    default: "4.8.1"
+    description: "Exact semver of oh-my-opencode (OMO) to install, e.g. '4.8.1'."
+  - envName: ENABLE_DIND
+    required: false
+    applyOnChange: true
+    type: bool
+    editable: true
+    default: "true"
+    description: "Run a privileged Docker-in-Docker sidecar so `docker`, `docker compose` and `docker buildx` work in the terminal (via DOCKER_HOST=tcp://localhost:2375). Uses extra CPU/RAM/disk under app data. Disable if your environment forbids privileged containers."
+  - envName: OPENCODE_SERVER_PASSWORD
+    required: false
+    applyOnChange: true
+    type: password
+    editable: true
+    default: ""
+    description: "Optional OpenCode server basic-auth password (default empty = off). When set, opening the Web UI prompts for HTTP basic auth (username from OPENCODE_SERVER_USERNAME). Olares entrance auth still applies first."
+  - envName: OPENCODE_SERVER_USERNAME
+    required: false
+    applyOnChange: true
+    type: string
+    editable: true
+    default: "opencode"
+    description: "OpenCode server basic-auth username used only when OPENCODE_SERVER_PASSWORD is set. Default: opencode."
 options:
   apiTimeout: 0
   allowedOutboundPorts:
@@ -101,7 +118,7 @@ options:
   dependencies:
   - name: olares
     type: system
-    version: '>=1.12.3-0'
+    version: '>=1.12.6-0'
 entrances:
 - name: opencode
   port: 8080

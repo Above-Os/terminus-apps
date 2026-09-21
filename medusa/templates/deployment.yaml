@@ -1,39 +1,7 @@
 apiVersion: v1
 data:
   nginx.conf: |
-    server {
-
-      listen 8080;
-
-      absolute_redirect off;
-
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
-
-      proxy_connect_timeout 30s;
-      proxy_send_timeout 60s;
-      proxy_read_timeout 300s;
-      proxy_set_header host $host;
-      proxy_set_header x-forwarded-host $http_host;
-      proxy_http_version 1.1;
-      proxy_set_header upgrade $http_upgrade;
-      proxy_set_header connection "upgrade";
-
-      location = / {
-        return 302 /app/;
-      }
-
-      location / {
-        proxy_hide_header Access-Control-Allow-Origin;
-        proxy_hide_header Access-Control-Allow-Methods;
-        proxy_hide_header Access-Control-Allow-Headers;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods GET,POST,PUT,DELETE,OPTIONS;
-
-        proxy_pass http://localhost:9000;
-      }
-    }
-
+{{ include "medusa.nginx.conf" . | indent 4 }}
 kind: ConfigMap
 metadata:
   name: nginx-config
@@ -47,7 +15,7 @@ metadata:
   labels:
     app: medusa
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.medusa.replicaCount }}
   selector:
     matchLabels:
       app: medusa
@@ -57,16 +25,24 @@ spec:
     metadata:
       labels:
         app: medusa
+      annotations:
+        checksum/nginx-config: {{ include "medusa.nginx.conf" . | sha256sum }}
     spec:
       containers:
         - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          image: "docker.io/openresty/openresty:1.29.2.5-bookworm-fat"
+          command:
+            - /usr/local/openresty/bin/openresty
+          args:
+            - -g
+            - "daemon off; pid /tmp/nginx.pid;"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+
           ports:
             - containerPort: 8080
               protocol: TCP
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
           resources:
             requests:
               cpu: 10m
@@ -76,11 +52,10 @@ spec:
               memory: 128Mi
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
+              mountPath: /etc/nginx/conf.d/default.conf
               subPath: nginx.conf
-            - name: nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
-              subPath: nginx.conf
+            - name: nginx-runtime
+              mountPath: /var/run/openresty
         - image: "beclab/aby913-medusa:2.12.5"
           name: medusa
           command:
@@ -112,13 +87,27 @@ spec:
             - name: REDIS_URL
               value: "redis://{{ .Values.redis.host }}:6379"
             - name: DATABASE_URL
-              value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:5432/{{ .Values.postgres.databases.medusa }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DATABASE_URL
             - name: DB_NAME
               value: "{{ .Values.postgres.databases.medusa }}"
             - name: JWT_SECRET
-              value: "supersecret"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: JWT_SECRET
             - name: COOKIE_SECRET
-              value: "supersecret"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: COOKIE_SECRET
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: ADMIN_PASSWORD
             - name: STORE_CORS
               value: "http://localhost:8000,https://docs.medusajs.com"
             - name: ADMIN_CORS
@@ -181,7 +170,10 @@ spec:
             - name: PG_USER
               value: "{{ .Values.postgres.username }}"
             - name: PGPASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: PGPASSWORD
             - name: PG_DB
               value: "{{ .Values.postgres.databases.medusa }}"
           ports:
@@ -212,6 +204,8 @@ spec:
             items:
               - key: nginx.conf
                 path: nginx.conf
+        - name: nginx-runtime
+          emptyDir: {}
       restartPolicy: Always
 
 ---

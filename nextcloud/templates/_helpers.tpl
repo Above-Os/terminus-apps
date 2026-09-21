@@ -5,8 +5,16 @@ Referenced by nginx-configmap.yaml; checksum in Deployment triggers rollout on c
 {{- define "nextcloud.nginx.conf" -}}
 server {
     listen 8080;
-    access_log /opt/bitnami/openresty/nginx/logs/access.log;
-    error_log /opt/bitnami/openresty/nginx/logs/error.log;
+    access_log /dev/stdout;
+    error_log /dev/stderr;
+
+    client_body_temp_path /tmp/client_body;
+    proxy_temp_path /tmp/proxy;
+    fastcgi_temp_path /tmp/fastcgi;
+    uwsgi_temp_path /tmp/uwsgi;
+    scgi_temp_path /tmp/scgi;
+
+    client_max_body_size 512m;
 
     proxy_connect_timeout 30s;
     proxy_send_timeout 60s;

@@ -1,0 +1,202 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: ollamamuseglimmer30bdflashv3
+  icon: https://app.cdn.olares.com/appstore/ollamamuseglimmer30bdflashv3/icon.png
+  description: A local AI model for text, image understanding, and tasks that use tools
+  appid: ollamamuseglimmer30bdflashv3
+  title: Muse Glimmer 30B DFlash
+  version: '1.0.13'
+  categories:
+    - AI
+    - models
+  tags:
+  - llm
+sharedEntrances:
+  - name: ollamamuseglimmer30bdflashv3
+    host: sharedentrances-api
+    port: 0
+    title: Muse Glimmer 30B DFlash
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/ollamamuseglimmer30bdflashv3/icon.png
+entrances:
+  - name: ollamaclient
+    port: 8090
+    host: download-svc
+    title: Muse Glimmer 30B DFlash
+    icon: https://app.cdn.olares.com/appstore/ollamamuseglimmer30bdflashv3/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  ollamamuseglimmer30bdflashv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'muse-glimmer:30b-q4_K_M-dflash'
+  fullDescription: |
+    Muse Glimmer 30B is a model from Meta that takes text and images as input and generates text responses. It supports reasoning, coding assistance, and tasks that use tools. This app runs the model locally with Ollama and includes DFlash, a companion model that proposes text for the main model to check, helping speed up generation.
+
+    **Key features**
+
+    - Respond to text prompts and questions about images, including screenshots, charts, and documents.
+    - Use thinking and tool calling in compatible applications that provide tools.
+    - Work through tasks that require multiple steps.
+    - Use DFlash to accelerate text generation; speed depends on hardware and the request.
+
+    **Using the model on Olares**
+
+    Model Console downloads and manages `muse-glimmer:30b-q4_K_M-dflash` for compatible Olares applications. The default context window is 128K tokens, which limits how much conversation and other input the model can process at once.
+
+    [Muse Glimmer model information](https://huggingface.co/meta-models/Muse-Glimmer-30B)
+
+  developer: Meta
+  website: https://ollama.com/library/muse-glimmer
+  sourceCode: https://huggingface.co/meta-models/Muse-Glimmer-30B
+  doc: https://ollama.com/library/muse-glimmer:30b-q4_K_M-dflash
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  license:
+    - text: Apache-2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0
+  accelerator:
+    - mode: nvidia
+      limitedCpu: "15360m"
+      requiredCpu: "1300m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "30Gi"
+      requiredMemory: "7Gi"
+      requiredGPUMemory: "22Gi"
+      limitedGPUMemory: "24Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "15360m"
+      requiredCpu: "1300m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "28Gi"
+      requiredMemory: "24Gi"
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  # appCache holds the shared RUN_DIR handoff dir
+  # (<appCache>/llm-init-run/<release>), same as the llamacpp charts.
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "ollama://muse-glimmer:30b-q4_K_M-dflash"
+    description: "Fixed to ollama://muse-glimmer:30b-q4_K_M-dflash (main model + DFlash drafter)."
+    regex: "^ollama://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "muse-glimmer:30b-q4_K_M-dflash"
+    description: "OpenAI alias. Fixed to muse-glimmer:30b-q4_K_M-dflash."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+  - envName: ENGINE_ARGS
+    required: true
+    default: "OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=131072 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1"
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Ollama daemon env. DFlash draft count is in the Ollama Modelfile (draft_num_predict=3), not here."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: OLLAMA_CPU_REQUEST
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_REQUEST
+    required: true
+    default: "6Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_CPU_LIMIT
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_LIMIT
+    required: true
+    default: "28Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "22Gi"
+    description: "GPU memory for ~20GB tag (main + DFlash drafter) plus 128K KV headroom."
+    regex: "^[0-9]+(Gi|Mi)?$"

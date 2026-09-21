@@ -15,20 +15,26 @@
 # Build & push:
 #   docker buildx build \
 #     --platform linux/amd64,linux/arm64 \
-#     -t beclab/harveyff-claudecode-base:0.2.0 \
+#     -t beclab/harveyff-claudecode-base:0.5.8 \
 #     --push .
 # syntax=docker/dockerfile:1.7
 
+# Debian/Ubuntu mirrors can briefly serve InRelease metadata that is "not valid yet"
+# during sync; relax validity checks and retry update (see apt exit 100 on bookworm-security).
 # ---- Stage 1: olares-cli binary + Olares skills (Claude Code layout) ----
 # @olares/cli postinstall downloads the Go binary; copy vendor binary (not JS
 # wrapper) so the full verb set is available. skills CLI needs git to clone.
 FROM node:24-bookworm-slim AS olares-assets
-ARG OLARES_CLI_NPM_VERSION=1.12.5-cli.8
+ARG OLARES_CLI_NPM_VERSION=1.12.7-cli.0
 
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      git ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    for i in 1 2 3 4 5; do \
+      apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update && break; \
+      sleep $((i * 5)); \
+    done; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      git ca-certificates; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @olares/cli@${OLARES_CLI_NPM_VERSION} \
  && install -D "$(npm root -g)/@olares/cli/vendor/olares-cli" /out/bin/olares-cli \
@@ -48,15 +54,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+RUN set -eux; \
+    for i in 1 2 3 4 5; do \
+      apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update && break; \
+      sleep $((i * 5)); \
+    done; \
+    apt-get install -y --no-install-recommends ca-certificates curl \
  && mkdir -p -m 755 /etc/apt/keyrings \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
- && apt-get update \
+ && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -91,8 +101,6 @@ RUN apt-get update \
         python3-pip \
         python3-venv \
         pipx \
-        nodejs \
-        npm \
         golang-go \
         rustc \
         cargo \
@@ -174,6 +182,8 @@ RUN apt-get update \
         expect \
         aria2 \
         httpie \
+        certbot \
+        python3-certbot \
  && ln -sfn "/usr/lib/jvm/java-21-openjdk-$(dpkg --print-architecture)" /usr/lib/jvm/java-21-openjdk-current \
  && rm -rf /var/lib/apt/lists/* \
  && locale-gen C.UTF-8 \
@@ -182,6 +192,14 @@ RUN apt-get update \
  && useradd --create-home --uid 1000 --shell /bin/bash claude \
  && mkdir -p /opt/data \
  && chown -R 1000:1000 /opt/data
+
+# Node 20 LTS via NodeSource. Ubuntu 24.04's nodejs is v18.19.1, which is
+# too old for some CLIs (e.g. @larksuite/cli needs node >= 20.12.0). This
+# ships node + npm under /usr/local, replacing the distro packages above.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && node --version && npm --version
 
 COPY --from=olares-assets /out/bin/olares-cli /usr/local/bin/olares-cli
 RUN chmod 755 /usr/local/bin/olares-cli \
@@ -200,6 +218,8 @@ ENV HOME=/opt/data \
     PATH=/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     TERM=xterm-256color \
     DISABLE_AUTOUPDATER=1 \
-    PIP_BREAK_SYSTEM_PACKAGES=1
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    NPM_CONFIG_PREFIX=/opt/data/.local \
+    NPM_CONFIG_CACHE=/opt/data/.npm
 
 CMD ["bash"]

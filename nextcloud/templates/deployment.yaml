@@ -1,8 +1,7 @@
 ﻿{{- $nextcloudDomainENV := split "," .Values.domain.nextcloud -}}
 {{- $nextcloudDomain := index $nextcloudDomainENV "_0" -}}
-{{- $firstPart := regexReplaceAll "^([^.]+).*" $nextcloudDomain "${1}" -}}
-{{- $remainingParts := regexReplaceAll "^[^.]+(.*)" $nextcloudDomain "${1}" -}}
-{{- $localDomain := printf "%s.local%s" $firstPart $remainingParts -}}
+{{- $entrancePrefix := index (splitList "." $nextcloudDomain) 0 -}}
+{{- $localDomain := printf "%s.%s.olares.local" $entrancePrefix .Values.bfl.username -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -12,7 +11,7 @@ metadata:
   labels:
     app: nextcloud
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.nextcloud.replicaCount }}
   selector:
     matchLabels:
       app: nextcloud
@@ -22,12 +21,86 @@ spec:
     metadata:
       labels:
         app: nextcloud
+      annotations:
+        checksum/olares-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsUser: 0
+      initContainers:
+        # subPath file mount creates config/ as root; www-data must own it to write config.php
+        - name: init-config-permissions
+          image: "docker.io/beclab/harveyff-nextcloud:31.0.14.1"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "{{ .Values.postgres.databases.nextcloud }}"
+            - name: POSTGRES_USER
+              value: "{{ .Values.postgres.username }}"
+            - name: POSTGRES_HOST
+              value: "{{ .Values.postgres.host }}"
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /var/www/html/config /var/www/html/data
+              chown 1000:1000 /var/www/html/config /var/www/html/data
+              if [ ! -f /var/www/html/config/config.php ]; then
+                table_count="$(php -r '
+                  $dsn = "pgsql:host=" . getenv("POSTGRES_HOST") . ";dbname=" . getenv("POSTGRES_DB");
+                  $pdo = new PDO($dsn, getenv("POSTGRES_USER"), getenv("POSTGRES_PASSWORD"));
+                  echo $pdo->query("SELECT count(*) FROM pg_tables WHERE schemaname = '\''public'\''")->fetchColumn();
+                ')"
+                if [ "$table_count" != "0" ]; then
+                  echo >&2 "config.php is missing, but PostgreSQL contains $table_count public tables; refusing destructive automatic recovery"
+                  exit 1
+                fi
+
+                cp /usr/src/nextcloud/config/CAN_INSTALL /var/www/html/config/CAN_INSTALL
+                for f in /usr/src/nextcloud/config/*.php; do
+                  b=$(basename "$f")
+                  case "$b" in
+                    autoconfig.php|config.sample.php) continue ;;
+                  esac
+                  if [ ! -e "/var/www/html/config/$b" ]; then
+                    cp "$f" "/var/www/html/config/$b"
+                  fi
+                done
+                chown 1000:1000 /var/www/html/config /var/www/html/config/CAN_INSTALL
+                for f in /var/www/html/config/*.php; do
+                  [ -f "$f" ] || continue
+                  chown 1000:1000 "$f"
+                done
+
+                # A failed 1.0.23+ fresh install leaves the copied version.php
+                # behind even though PostgreSQL is empty. Remove only that
+                # false installation marker and the fallback SQLite files so
+                # the official entrypoint performs maintenance:install again.
+                rm -f /var/www/html/version.php
+                rm -f /var/www/html/data/owncloud.db \
+                      /var/www/html/data/owncloud.db-shm \
+                      /var/www/html/data/owncloud.db-wal
+              fi
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/www/html
       containers:
         - name: nextcloud
-          image: "docker.io/beclab/aboveos-zhangdangfang-nextcloud:31.0.4.2"
+          image: "docker.io/beclab/harveyff-nextcloud:31.0.14.1"
           env:
             - name: PUID
               value: "1000"
@@ -36,7 +109,10 @@ spec:
             - name: TZ
               value: "Etc/UTC"
             - name: POSTGRES_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: "{{ .Values.postgres.databases.nextcloud }}"
             - name: POSTGRES_USER
@@ -50,13 +126,16 @@ spec:
             - name: NEXTCLOUD_ADMIN_USER
               value: "{{ .Values.olaresEnv.NEXTCLOUD_ADMIN_USER }}"
             - name: NEXTCLOUD_ADMIN_PASSWORD
-              value: "{{ .Values.olaresEnv.NEXTCLOUD_ADMIN_PASSWORD }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: NEXTCLOUD_ADMIN_PASSWORD
             - name: NEXTCLOUD_TRUSTED_DOMAINS
-              value: "{{$nextcloudDomain}} {{$localDomain}}"
+              value: "{{ $nextcloudDomain }} {{ $localDomain }} localhost"
 {{/*            - name: APACHE_DISABLE_REWRITE_IP*/}}
 {{/*              value: "1"*/}}
             - name: TRUSTED_PROXIES
-              value: "127.0.0.1"
+              value: "10.0.0.0/8 172.16.0.0/12 127.0.0.1"
             - name: OVERWRITECLIURL
               value: "https://{{$nextcloudDomain}}"
             - name: OVERWRITEPROTOCOL
@@ -87,6 +166,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/www/html
+            - name: config-env
+              mountPath: /var/www/html/config/zz-olares.config.php
+              subPath: zz-olares.config.php
             - name: external-storage
               mountPath: /external_storage
             - name: home-storage
@@ -95,9 +177,10 @@ spec:
         - name: config-env
           configMap:
             name: nextcloud-config
+            defaultMode: 0444
             items:
-              - key: config.php
-                path: config.php
+              - key: zz-olares.config.php
+                path: zz-olares.config.php
         - name: data
           hostPath:
             path: "{{ .Values.userspace.appData }}/nextcloud/data"

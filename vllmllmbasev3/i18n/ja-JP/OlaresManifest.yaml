@@ -1,0 +1,72 @@
+metadata:
+  title: vLLM Engine Base
+  description: 汎用 vLLM エンジンベース。インストール時に env で任意の HuggingFace Safetensors モデルを選択
+spec:
+  upgradeDescription: |
+    v1.2.45: Model Console（llm-init）を v1.7.21 に更新しました。
+
+    v1.2.44: NVIDIA エンジンイメージを vLLM v0.29.0 に更新しました（`v0.27.1` -> `v0.29.0`、Spark / GB10 が使う `-aarch64` タグを含む）。ROCm は `v0.28.0`、Intel XPU は `0.21.0-ubuntu24.04-20260805` のままです。
+
+    **vLLM v0.29.0（2026-09-09）**
+    - Model Runner V2 が全モデルの既定になり、KV キャッシュ自動サイズ決定のための CUDA グラフメモリプロファイリング、バッチシャーディングされたサンプリング（ステップごとの logits メモリを 1/TP に削減）、prompt embeds、padded FULL cudagraph ディスパッチが追加されました。Model Runner V1 は非推奨で、v0.32 での削除が予定されています。
+    - Mamba のプレフィックスキャッシュがプリフィル内部チェックポイントに対応し、TTFT が 9%-25% 改善します。
+    - 新モデル: Hy4-preview、Qwen3.8-Flash-Next、GraniteSWA / GraniteMoeSWA、NemotronH_Omni_Reasoning_V3、Kimi K3 NVFP4。
+    - 投機的デコード: リクエスト単位の受理率統計（`--per-request-spec-decode-metrics`）、logprobs に対応した適応検証、SM100 スパース MLA。
+    - 既定値の変更: TP CUDA グループで FlashInfer all-reduce が既定で有効（`VLLM_ALLREDUCE_USE_FLASHINFER=0` で無効化）、プレフィックスキャッシュの `NONE_HASH` が決定的に、`--max-num-queued-reqs` / `--max-num-queued-tokens` による受付制御を追加。
+    - 破壊的変更: 非推奨だったモデルアーキテクチャ 10 種と PyAV 動画デコーダーを削除。`python -m vllm.entrypoints.openai.api_server` は非推奨となり `vllm serve` を使用します。
+
+    **vLLM v0.28.0（2026-08-26）**
+    - 既定値の変更: `max_num_batched_tokens` を 8192 -> 16384 に引き上げ、Mamba 系モデルでプレフィックスキャッシュを既定で有効化、Blackwell の CUDA グラフキャプチャ既定値を 1024 に引き上げ。
+    - Model Runner V2 の成熟: E/P/D 分離、重みオフロード、エンコーダー CUDA グラフ、`thinking_token_budget`。
+    - 階層型 KV キャッシュオフロード: ディスクへのオフロードと階層メトリクスを追加。
+    - Kimi-K3 / DeepSeek V4 の大規模な性能改善（カーネル、デコードコンテキスト並列、投機的デコード）。
+    - 新モデル: Muse Glimmer、Ling 3.0 Flash、Dots3 NOTE、Interns2mobius。
+    - 破壊的変更: bitsandbytes を外部プラグイン化、Transformers を 5.15.0 に更新、`calculate_kv_scales` と `override_attention_dtype` を削除。
+
+    v1.2.43: Model Console を llm-init v1.7.19 にアップグレードしました。
+
+    ROCm による AMD ディスクリート GPU（`amd-gpu`）対応を追加。Chart 1.2.36：Spark 方式の GPU メモリバジェット。
+
+    **変更点**
+    - AMD ディスクリートカード向けの新しいアクセラレータモード `amd-gpu`（Radeon AI PRO R9700 / gfx1201 およびその他の ROCm GPU）
+    - `amd-gpu` のエンジンイメージ：`vllm/vllm-openai-rocm:v0.28.0`
+    - NVIDIA CUDA は `vllm/vllm-openai:v0.27.1` を維持し、Spark は aarch64 タグを維持
+    - RDNA4 のデフォルト：AITER C++/ASM は無効、Triton FlashAttention は有効、シングル GPU（`--tensor-parallel-size 1`）
+
+    詳細なリリースノート：
+    https://github.com/vllm-project/vllm/releases
+
+  fullDescription: |
+    **重要なお知らせ**
+    このアプリはテンプレートであり、単体では使用できません。使用するには、以下の環境変数を設定して特定のモデルを接続してください。
+
+    **環境変数セットアップガイド**
+    - `MODEL_SOURCE`: `hf://<repo>`。モデルをダウンロードする HuggingFace ソース。例: `hf://Qwen/Qwen3.5-2B`。`.safetensors` 重みファイルを含むリポジトリを使用。必要に応じて `--include <file>` または `--revision <sha>` を付与。
+    - `MODEL_NAME`: `owner/repo`。モデル名 — `MODEL_SOURCE` の `hf://` 以降の文字列。例: `Qwen/Qwen3.5-2B`。OpenAI エイリアスおよび vLLM `--model` としても使用。
+    - `MODEL_MODE`: `chat` または `embedding`。会話モデルは `chat`；embedding の場合チャートが自動で `--task embed` を追加。
+    - `MODEL_SUPPORTS`: モデル能力オプション（Vision / Tools / Thinking / None）。モデルが対応するものを選択。
+    - `ENGINE_ARGS`: `--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。追加の vLLM CLI フラグ。複数の `--key value` はスペース区切り。`amd-gpu`（RDNA4 / R9700）では `--attention-backend ROCM_ATTN` を優先し、`--tensor-parallel-size 1` を維持します。`--kv-cache-dtype fp8` はデフォルトで使用しないでください。参照： https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/.
+    - `LOG_LEVEL`: `debug`、`info`、`warn`、または `error`。llm-init コンテナのログレベル。
+    - `VLLM_REQUIRED_GPU_MEMORY`: `8Gi`、`8192`、または `8192Mi`。必要なモデルメモリ。`nvidia` では `nvidia.com/gpumem` を設定；`nvidia-gb10` では gpu-inject 用に Pod メモリをサイズ調整；`amd-gpu` と `intel-gpu` では Pod アノテーション `gpu.bytetrade.io/required-gpu-memory` でディスクリート VRAM クォータを宣言。
+
+    **動作の仕組み**
+    まず `llm-init` がモデルをダウンロードして準備し、準備が整うと vLLM がモデルの提供を開始します。両コンテナは同一 Pod で動作し、モデルディレクトリと readiness センチネルを共有します。
+
+    **スタック**
+    - **vLLM**（ポート 8000）: モデルを実行し API リクエストを提供
+    - **llm-init**（ポート 8090）: モデルをダウンロードし進捗を表示し、vLLM へプロキシする OpenAI API を提供
+
+    **アクセラレータモード**
+    | Mode           | Device            | Details                                                              |
+    |----------------|-------------------|----------------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | `VLLM_REQUIRED_GPU_MEMORY` を設定；ENGINE_ARGS で `--gpu-memory-utilization` を調整 |
+    | `nvidia-gb10`  | GPU (Spark)       | `nvidia` と同様；`--gpu-memory-utilization` は ENGINE_ARGS から（自動リマップなし） |
+    | `amd-gpu`      | GPU (ROCm)        | AMD ディスクリート GPU（例：Radeon AI PRO R9700 / gfx1201）。イメージ `vllm/vllm-openai-rocm:v0.28.0`。`--attention-backend ROCM_ATTN` と `--tensor-parallel-size 1` を使用。|
+
+    **モデルストレージ**
+    すべてのモデルファイルは `appCommon/huggingface` の共有フォルダに保存され、`/cache/hf/hub` としてマウントされます。同様のアプリはすべてこの場所をモデルに使います。
+
+    **リソースのヒント**
+    - CPU・RAM・GPU はチャートに基づき自動構成；ディスク設定は固定。
+    - 大規模モデルでは vLLM のモデル読み込みに数分かかることがあります。準備完了までアプリを Running のままにしてください。
+    - 高並行ワークロードでは vLLM の PagedAttention が高いスループットを発揮；`ENGINE_ARGS` で `--max-num-batched-tokens` と `--gpu-memory-utilization` を調整してください。

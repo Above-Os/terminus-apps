@@ -1,0 +1,178 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+metadata:
+  name: source
+  description: Market Source
+  icon: https://app.cdn.olares.com/appstore/sonarr/icon.png
+  appid: source
+  version: "1.0.2"
+  title: Makret Source
+  categories:
+    - developer
+  tags:
+    - marketing
+permission:
+  appData: true
+  appCache: true
+spec:
+  versionName: "1.0.0"
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/sonarr/1.webp
+    - https://app.cdn.olares.com/appstore/sonarr/2.webp
+    - https://app.cdn.olares.com/appstore/sonarr/3.webp
+  fullDescription: |
+    Market Source lets you use your own GitHub repository as an app source.
+
+    #### Add a custom source to Market
+
+    After installing Market Source, add it to the Market application:
+
+    1. Open **Market** in Olares and go to **My Olares → Settings**.
+    2. Click **Add source**.
+    3. In the Market Source application's **Market Source API** Entrance, copy the value of **Endpoint** and enter it as the source URL.
+    4. If the source needs to be accessed from outside the cluster, change the **Authentication level** of the **Market Source API** Entrance to **Public** before adding it.
+
+    The **Market Source API** Entrance is used as the custom source URL. The **Market Source GitBot** Entrance is used separately for receiving GitHub Webhook events.
+
+    #### Before installation
+
+    Please complete the following preparation:
+
+    1. Create a GitHub repository to store your app source files. The repository can be public or private.
+    2. Create a GitHub Personal Access Token. A fine-grained token is recommended. Grant it access to the repository with **Contents: Read-only** and **Pull requests: Read and write** permissions, so GitBot can read the repository and perform PR-related operations such as posting comments and adding labels.
+    3. During installation, provide the repository URL, branch name, GitHub account name, and token.
+
+    The repository URL must be the complete HTTPS Git URL in this format:
+
+    `https://github.com/<account>/<repository>.git`
+
+    Example:
+
+    `https://github.com/example-org/app-source.git`
+
+    Do not enter the repository's web page URL without the `.git` suffix. The token is required even for a public repository because GitBot performs authenticated GitHub API operations.
+
+    Keep the token private and do not commit it to the repository.
+
+    #### GitHub Webhook
+
+    To let GitHub send pull request events to GitBot:
+
+    1. In Olares Desktop, open **Settings → Applications**, find **Market Source**, open **Entrances**, find **Market Source GitBot**, and change its **Authentication level** to **Public**.
+    2. Copy the **Market Source GitBot** Entrance URL.
+    3. In your GitHub repository, open **Settings → Webhooks → Add webhook** and paste the Entrance URL into **Payload URL**.
+    4. Set **Content type** to `application/json`.
+    5. Enter the same value configured during Market Source installation as `GITHUB_WEBHOOK_SECRET` in GitHub's **Secret** field.
+    6. Select the required events, including **Pull requests**, and enable **Active**.
+
+    `GITHUB_WEBHOOK_SECRET` is different from `GITHUB_TOKEN`. Keep it private and do not commit it to the repository.
+  upgradeDescription: |
+    Market Source
+  developer: Olares
+  website: https://sonarr.tv/
+  sourceCode: https://github.com/Sonarr/Sonarr
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://wiki.servarr.com/sonarr
+  legal:
+    - text: Security policy
+      url: https://github.com/Sonarr/Sonarr/security/policy
+  license:
+    - text: GPL-3.0
+      url: https://github.com/Sonarr/Sonarr/blob/develop/LICENSE.md
+  requiredMemory: 1Gi
+  limitedMemory: 4Gi
+  requiredDisk: 2G
+  limitedDisk: 5G
+  requiredCpu: 1
+  limitedCpu: 4
+  supportArch:
+    - amd64
+    - arm64
+options:
+  dependencies:
+    - name: olares
+      type: system
+      version: ">=1.12.7-0"
+entrances:
+  - name: source
+    host: source
+    port: 80
+    title: Market Source Admin
+    icon: https://app.cdn.olares.com/appstore/sonarr/icon.png
+    openMethod: window
+    authLevel: internal
+  - name: source-api
+    host: source-api-svc
+    port: 8080
+    title: Market Source API
+    icon: https://app.cdn.olares.com/appstore/firecrawl/icon.png
+    openMethod: window
+    authLevel: internal
+    invisible: true
+  - name: source-gitbot
+    host: source-gitbot-svc
+    port: 8085
+    title: Market Source GitBot
+    icon: https://app.cdn.olares.com/appstore/firecrawl/icon.png
+    openMethod: window
+    authLevel: internal
+    invisible: true
+middleware:
+  redis:
+    namespace: source
+  postgres:
+    username: source
+    password: source
+    databases:
+      - name: source
+envs:
+  - envName: LOGIN_USERNAME
+    required: true
+    type: email
+    editable: false
+  - envName: LOGIN_PASSWORD
+    required: true
+    type: password
+    editable: false
+    description: "Password must be at least 6 characters"
+    regex: "^[A-Za-z0-9@#.]{6,12}$"
+  - envName: GITHUB_ADDR
+    required: true
+    type: url
+    editable: false
+    applyOnChange: false
+    description: "GitHub repository URL. Example: https://github.com/user/repo.git"
+  - envName: GITHUB_BRANCH
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    description: "Branch name to deploy from. Example: main, master, develop, or release."
+  - envName: GITHUB_TOKEN
+    required: true
+    type: password
+    editable: false
+    applyOnChange: false
+    description: "A valid GitHub personal access token required for gitbot. For fine-grained tokens, grant read-only Contents permission and read/write Pull requests permission for the target repository."
+  - envName: GITHUB_ACCOUNT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    description: "GitHub account name that owns the repository. Example: user."
+  - envName: GITHUB_WEBHOOK_SECRET
+    required: true
+    type: password
+    editable: false
+    applyOnChange: false
+    description: "Shared secret used to authenticate GitHub webhook requests. Set it to the same long, random value configured in the GitHub webhook's Secret field. This is not a GitHub access token."
+workloadReplicas:
+  sourceapi: 1
+  sourceadmin: 1
+  sourceserver: 1
+  sourcegitbot: 1
+  sourceofficial: 1

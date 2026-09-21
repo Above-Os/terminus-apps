@@ -135,19 +135,28 @@ spec:
         - name: DB_HOST
           value: "{{ .Values.postgres.host }}"
         - name: DB_PWD
-          value: "{{ .Values.postgres.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: DB_PWD
         - name: REDIS_SERVER_PORT
           value: "{{ .Values.redis.port }}"
         - name: REDIS_SERVER_HOST
           value: "{{ .Values.redis.host }}"
         - name: REDIS_SERVER_PASS
-          value: "{{ .Values.redis.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: REDIS_SERVER_PASS
         - name: WOPI_ENABLED
           value: "true"
         - name: JWT_ENABLED
           value: "true"
         - name: JWT_SECRET
-          value: "{{ $coauthoring_secret }}"
+          valueFrom:
+            secretKeyRef:
+              name: office-secret
+              key: coauthoring-secret
         image: beclab/onlyoffice-documentserver:9.2.0
         imagePullPolicy: IfNotPresent
         name: onlyofficeshare
@@ -155,6 +164,11 @@ spec:
           runAsUser: 0
         ports:
         - containerPort: 80
+        volumeMounts:
+        - mountPath: /var/lib/onlyoffice
+          name: ds-cache
+        - mountPath: /var/log/onlyoffice
+          name: ds-logs
         resources:
           limits:
             cpu: "2.5"
@@ -164,6 +178,14 @@ spec:
             memory: 1.5Gi
       restartPolicy: Always
       volumes:
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/lib'
+          type: DirectoryOrCreate
+        name: ds-cache
+      - hostPath:
+          path: '{{ .Values.userspace.appCache }}/logs'
+          type: DirectoryOrCreate
+        name: ds-logs
       - name: config
         configMap:
           name: config2
@@ -226,7 +248,10 @@ spec:
           - containerPort: 3030
         env:
           - name: JWT_SECRET
-            value: "{{ $coauthoring_secret }}"
+            valueFrom:
+              secretKeyRef:
+                name: office-secret
+                key: coauthoring-secret
         resources:
           limits:
             cpu: "0.1"

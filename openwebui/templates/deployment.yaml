@@ -1,7 +1,6 @@
 {{- $appDomainENV := split "," .Values.domain.openwebui -}}
 {{- $appDomain := index $appDomainENV "_0" -}}
 {{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $appDomain "$1" -}}
-{{- $isNewVersion := and .Values.sysVersion (semverCompare ">=1.12.3-0" (toString .Values.sysVersion)) -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $persistSecretKey := true -}}
 {{- if hasKey $oe "ENABLE_WEBUI_SECRET_KEY_PERSIST" -}}
@@ -30,7 +29,7 @@ metadata:
   labels:
     io.kompose.service: openwebui
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.openwebui.replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -108,8 +107,34 @@ spec:
               mountPath: /data
 {{- end }}
       containers:
+        # Sidecar: fill missing user Settings→Interface keys with false after signup.
+        # Looping (not init) so registration after pod start is still covered.
+        # Failures are logged only — never blocks Open WebUI.
+        - name: seed-task-auto-gen
+          image: 'docker.io/library/python:3.14.6-alpine3.23'
+          command: ['python', '/scripts/seed_task_auto_gen.py', '--loop']
+          env:
+            - name: WEBUI_DB_PATH
+              value: /data/webui.db
+            - name: SEED_INTERVAL_SEC
+              value: "60"
+            - name: SEED_IDLE_INTERVAL_SEC
+              value: "300"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: appdata
+              mountPath: /data
+            - name: seed-scripts
+              mountPath: /scripts
+              readOnly: true
         - name: openwebui
-          image: 'docker.io/openwebui/open-webui:0.9.6'
+          image: 'docker.io/openwebui/open-webui:0.11.3'
           ports:
             - containerPort: 8080
 
@@ -143,33 +168,50 @@ spec:
             - name: HF_HUB_OFFLINE
               value: "0"
             - name: HF_ENDPOINT
-              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_SERVICE }}"
+              value: "{{ .Values.olaresEnv.HF_ENDPOINT }}"
+            {{- if .Values.olaresEnv.HF_TOKEN }}
             - name: HF_TOKEN
-              value: "{{ .Values.olaresEnv.OLARES_USER_HUGGINGFACE_TOKEN }}"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+            {{- end }}
 {{- else }}
             - name: HF_HUB_OFFLINE
               value: "1"
 {{- end }}
             - name: ENABLE_WEBUI_DB_BACKUP
               value: {{ index $oe "ENABLE_WEBUI_DB_BACKUP" | default "false" | toString | quote }}
-            - name: OLLAMA_BASE_URL
-              {{- if $isNewVersion }}
-              value: "http://d54536a50.shared.{{ $topDomain }}"
-              {{- else }}
-              value: "http://ollama.ollama-{{ .Values.admin }}:11434"
-              {{- end }}
             - name: CORS_ALLOW_ORIGIN
               value: "*"
             - name: USER_AGENT
-              value: "OpenWebUI/0.9.6"
+              value: "OpenWebUI/0.11.3"
             - name: WEBSOCKET_EVENT_CALLER_TIMEOUT
               value: "600"
             - name: RAG_EMBEDDING_ENGINE
               value: "ollama"
-
+            # Keep SQLite; wait out knowledge-ingest writers instead of failing heartbeats.
+            - name: DATABASE_ENABLE_SQLITE_WAL
+              value: "true"
+            - name: DATABASE_SQLITE_PRAGMA_BUSY_TIMEOUT
+              value: "30000"
+            - name: ENABLE_ORJSON
+              value: "true"
+            - name: THREAD_POOL_SIZE
+              value: "256"
+            - name: DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
+              value: "300"
+            - name: ENABLE_BASE_MODELS_CACHE
+              value: "true"
+            - name: MODELS_CACHE_TTL
+              value: "300"
+            - name: CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE
+              value: "7"
+            - name: WEBSOCKET_HEARTBEAT_INTERVAL
+              value: "60"
           resources:
             limits:
-              cpu: "2"
+              cpu: "4"
 {{- if and .Values.olaresEnv (eq (lower (toString .Values.olaresEnv.HF_HUB_OFFLINE)) "false") }}
               memory: 8Gi
 {{- else }}
@@ -182,14 +224,12 @@ spec:
           volumeMounts:
             - name: appdata
               mountPath: /app/backend/data
-            - name: hf-cache
-              mountPath: /app/backend/data/cache
 
       volumes:
-        - name: hf-cache
-          hostPath:
-            path: "{{ .Values.userspace.userData }}/Huggingface/{{ .Release.Name }}"
-            type: DirectoryOrCreate
+        - name: seed-scripts
+          configMap:
+            name: openwebui-seed-scripts
+            defaultMode: 0555
         - name: appdata
           hostPath:
             path: "{{ .Values.userspace.appData }}/data"

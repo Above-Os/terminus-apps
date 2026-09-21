@@ -20,12 +20,9 @@ data:
       source: lldap
       admin_names: []
       lldap:
-        readonly_url: "http://lldap-service.os-platform:17171"
-        nats_url: "nats://{{ .Values.nats.host }}:{{ .Values.nats.port }}"
-        nats_user: "{{ .Values.nats.username }}"
-        nats_pass: "{{ .Values.nats.password }}"
-        durable: ""
-        resync_seconds: 0
+        readonly_url: "http://lldap-provider-svc.os-framework:28080"
+      kubeconfig: ""
+      kube_context: ""
     database:
       host: "{{ .Values.postgres.host }}"
       port: "{{ .Values.postgres.port }}"
@@ -42,14 +39,14 @@ data:
     olares:
       market:
         mock: false
-        base_url: http://appstore-svc.os-framework:81
+        base_url: http://market-provider-svc.os-framework:28080
         mock_base_url:
-      user_directory:
-        source: crd # crd | http | mock
-        base_url: ""
+        token_namespace: "{{ .Release.Namespace }}"
+        token_sa: default
       provider_sync:
         enabled: true
-        market_url: http://appstore-svc.os-framework:81
+        market_url: http://market-provider-svc.os-framework:28080
+        owner: "{{ .Values.bfl.username }}"
         interval: 30s
         failure_threshold: 5
     provider:
@@ -67,7 +64,7 @@ data:
     crypto:
       encryption_key: ""
     events:
-      enabled: true
-      nats_url: "nats://{{ .Values.nats.host }}:{{ .Values.nats.port }}"
+      enabled: false
+      nats_url: ""
       subject_prefix: "olares.llm-gateway"
       buffer_size: 1024

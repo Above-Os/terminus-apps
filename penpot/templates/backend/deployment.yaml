@@ -10,7 +10,7 @@ metadata:
   labels:
     app: penpot-backend
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.penpot.replicaCount }}
   selector:
     matchLabels:
       app: penpot-backend
@@ -38,7 +38,7 @@ spec:
             runAsUser: 0
       containers:
         - name: penpot-backend
-          image: "penpotapp/backend:2.14.4"
+          image: "penpotapp/backend:2.17"
           resources:
             requests:
               cpu: 10m
@@ -56,13 +56,16 @@ spec:
               protocol: TCP
           env:
             - name: PENPOT_FLAGS
-              value: "enable-registration enable-login-with-password disable-email-verification enable-smtp enable-prepl-server enable-secure-session-cookies"
+              value: "enable-registration enable-login-with-password disable-email-verification enable-smtp enable-prepl-server enable-secure-session-cookies enable-mcp"
             - name: PENPOT_DATABASE_URI
               value: "postgresql://{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.penpot }}"
             - name: PENPOT_DATABASE_USERNAME
               value: "{{ .Values.postgres.username }}"
             - name: PENPOT_DATABASE_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-secret
+                  key: PENPOT_DATABASE_PASSWORD
             - name: PENPOT_REDIS_URI
               value: "redis://penpot-redis:6379/0"
             - name: PENPOT_ASSETS_STORAGE_BACKEND
@@ -78,6 +81,11 @@ spec:
                 secretKeyRef:
                   name: penpot-secret
                   key: penpot-secret
+            - name: PENPOT_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-secret
+                  key: PENPOT_SMTP_PASSWORD
           envFrom:
             - configMapRef:
                 name: smtp-config
@@ -85,12 +93,4 @@ spec:
         - name: data-assets
           hostPath:
             type: DirectoryOrCreate
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: '{{ .Values.userspace.appData }}/data/assets'
-              {{- else }}
-            path: '{{ .Values.userspace.appData }}/penpot/data/assets'
-              {{- end }}
-            {{- else }}
-            path: '{{ .Values.userspace.appData }}/penpot/data/assets'
-            {{- end }}            

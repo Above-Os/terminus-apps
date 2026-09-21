@@ -1,17 +1,25 @@
----
-olaresManifest.version: '0.11.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  claudecode: 1
+  terminal: 1
 metadata:
   name: claudecode
   icon: https://app.cdn.olares.com/appstore/claudecode/icon.png
   description: Anthropic's official agentic coding CLI that lives in your terminal
   appid: claudecode
   title: Claude Code
-  version: 0.1.6
+  version: 0.1.23
   categories:
   - Developer Tools
   - Productivity_v112
-  - Utilities
+  - agents
+  tags:
+  - coding
+  - framework  
+
 entrances:
 - name: terminal
   host: terminal
@@ -21,7 +29,7 @@ entrances:
   openMethod: window
   authLevel: internal
 spec:
-  versionName: '2.1.161'
+  versionName: '2.1.229'
   fullDescription: |
     **Overview**
     Claude Code is Anthropic's official agentic coding tool that lives in your terminal. It understands your codebase, executes routine tasks through natural language, and helps you move fast while staying in flow.
@@ -33,6 +41,7 @@ spec:
     - Works with a Claude Pro/Max subscription (OAuth) or a Console API key; also supports Amazon Bedrock and Google Vertex AI.
     - Workspace image ships common language runtimes and build toolchains (Python, Node.js, Go, Rust, OpenJDK 21, Ruby, PHP, Lua) plus database clients (PostgreSQL, MySQL/MariaDB, Redis), git-lfs, protobuf compiler, Gradle, tmux, dig/ss/nc, shellcheck, clang-format/tidy, graphviz, and extra -dev headers (libpq, MySQL client, curl, ICU, LDAP) so agents can run typical dev commands without root.
     - Optional Docker-in-Docker sidecar (`ENABLE_DIND`, default on): run `docker build`, `docker compose`, and containerized dev stacks from the terminal.
+    - `certbot` (Let's Encrypt) is pre-installed in the workspace image; init installs a `~/.local/bin/certbot` wrapper and seeds `/opt/data/.config/letsencrypt/cli.ini` so uid 1000 can run `certbot` without manual flags (same pattern as opencode / clawdbot).
 
     **First-time Setup**
     Open the `Claude Code CLI` entrance and run `claude` to launch the OAuth login flow, or set `ANTHROPIC_API_KEY` in the app environment variables and restart.
@@ -49,27 +58,13 @@ spec:
     These vars are conditionally injected: blank strings and `false` toggles are *not* placed into the container env, so Claude Code sees them as truly unset (which is required — it treats `CLAUDE_CODE_USE_*` by presence, not value).
 
   upgradeDescription: |
-    Terminal upgraded to `beclab/terminal:v0.0.11`: file upload support — paste
-    screenshots, drag-and-drop files, or click the upload button to send files
-    into the terminal session.
+    **v0.1.16**
 
-    Workspace memory raised (limit 16Gi -> 24Gi, request 256Mi -> 2Gi) to reduce
-    out-of-memory crashes during heavy agent/build sessions.
+    **Claude Code CLI**
+    - Pin install version from **2.1.226** to **2.1.229** (latest channel; `init-install-claude` uses chart `appVersion`).
 
-    Base image `beclab/harveyff-claudecode-base` upgraded to 0.5.3.
-
-    New:
-    - Built-in `olares-cli` (vendor binary, full command set) on PATH.
-    - Olares skill pack (cluster, dashboard, files, market, settings, shared)
-      copied into `~/.claude/skills` at pod start via `init-skills`, so the agent
-      can operate Olares without manual setup.
-    - Expanded toolbox: `gh`, `ping`/`lsof`, `lrzsz` (sz/rz), `tree`, `nano`,
-      `tcpdump`, `traceroute`, `httpie`, `aria2`, and common debug/network tools.
-
-    Skills note: `init-skills` only refreshes directories that match the built-in
-    Olares pack (same folder names). Your other skills under `~/.claude/skills` are
-    left untouched. If you edited an Olares skill in place, those changes are
-    overwritten on the next pod restart when the directory name matches.
+    **Base image (`beclab/harveyff-claudecode-base:0.5.8`, was 0.5.7)**
+    - Baked `@olares/cli` upgraded to **1.12.7-cli.0** (from 1.12.6-cli.2).
 
   developer: Anthropic
   website: https://code.claude.com
@@ -78,6 +73,11 @@ spec:
   locale:
   - en-US
   - zh-CN
+  - de-DE
+  - es-ES
+  - it-IT
+  - fr-FR
+  - ja-JP
   doc: https://code.claude.com/docs
   license:
   - text: Claude Code License
@@ -95,82 +95,83 @@ permission:
   appData: true
   appCache: true
   userData:
-    - Home
+  - Home
+  externalData: true
 options:
   allowMultipleInstall: true
   apiTimeout: 0
   dependencies:
   - name: olares
     type: system
-    version: '>=1.12.5-0'
+    version: '>=1.12.6-0'
 envs:
-  - envName: ANTHROPIC_API_KEY
-    type: password
-    required: false
-    applyOnChange: true
-    editable: true
-    default: ""
-    description: "Anthropic API key. Leave empty for OAuth login (Claude Pro/Max subscription) or when routing to an Anthropic-compatible gateway (e.g. Ollama) via ANTHROPIC_AUTH_TOKEN."
-  - envName: ANTHROPIC_AUTH_TOKEN
-    type: password
-    required: false
-    applyOnChange: true
-    editable: true
-    default: ""
-    description: "Bearer token sent as `Authorization: Bearer ...` to the Anthropic-compatible API. For Ollama set this to `ollama` and leave ANTHROPIC_API_KEY blank."
-  - envName: ANTHROPIC_BASE_URL
-    type: url
-    required: false
-    applyOnChange: true
-    editable: true
-    default: ""
-    description: "Custom Anthropic-compatible API endpoint (e.g. https://your-shared-domain for an Olares-hosted Ollama proxy). Leave empty to use Anthropic's official endpoint."
-  - envName: ANTHROPIC_MODEL
-    type: string
-    required: false
-    applyOnChange: true
-    editable: true
-    default: ""
-    description: "Default model to use when running `claude` without --model (e.g. qwen3-coder:30b for an Ollama backend). Leave empty to let Claude Code prompt or use its own default."
-  - envName: CLAUDE_CODE_USE_BEDROCK
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Route through Amazon Bedrock instead of the Anthropic API. Leave false unless you specifically want Bedrock — Claude Code treats this var by presence, the chart only injects it when true."
-  - envName: CLAUDE_CODE_USE_VERTEX
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Route through Google Vertex AI instead of the Anthropic API. Leave false unless you specifically want Vertex — Claude Code treats this var by presence, the chart only injects it when true."
-  - envName: CLAUDE_CODE_USE_FOUNDRY
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Route through Azure AI Foundry instead of the Anthropic API. Leave false unless you specifically want Foundry — Claude Code treats this var by presence, the chart only injects it when true."
-  - envName: ENABLE_DIND
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "true"
-    description: "Run a privileged Docker-in-Docker sidecar in the pod. Exposes docker CLI in the terminal via DOCKER_HOST=tcp://localhost:2375 (uses extra CPU/RAM/disk under app data). Disable if your environment forbids privileged containers"
-  - envName: ALLOW_HOME_DIR_ACCESS
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Allow Claude Code to read/write the Olares Home directory"
-  - envName: ALLOW_EXTERNAL_DIR_ACCESS
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Allow Claude Code to read/write the Olares External directory"
+- envName: ANTHROPIC_API_KEY
+  type: password
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Anthropic API key. Leave empty for OAuth login (Claude Pro/Max subscription) or when routing to an Anthropic-compatible gateway (e.g. Ollama) via ANTHROPIC_AUTH_TOKEN."
+- envName: ANTHROPIC_AUTH_TOKEN
+  type: password
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Bearer token sent as `Authorization: Bearer ...` to the Anthropic-compatible API. For Ollama set this to `ollama` and leave ANTHROPIC_API_KEY blank."
+- envName: ANTHROPIC_BASE_URL
+  type: url
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Custom Anthropic-compatible API endpoint (e.g. https://your-shared-domain for an Olares-hosted Ollama proxy). Leave empty to use Anthropic's official endpoint."
+- envName: ANTHROPIC_MODEL
+  type: string
+  required: false
+  applyOnChange: true
+  editable: true
+  default: ""
+  description: "Default model to use when running `claude` without --model (e.g. qwen3-coder:30b for an Ollama backend). Leave empty to let Claude Code prompt or use its own default."
+- envName: CLAUDE_CODE_USE_BEDROCK
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Route through Amazon Bedrock instead of the Anthropic API. Leave false unless you specifically want Bedrock — Claude Code treats this var by presence, the chart only injects it when true."
+- envName: CLAUDE_CODE_USE_VERTEX
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Route through Google Vertex AI instead of the Anthropic API. Leave false unless you specifically want Vertex — Claude Code treats this var by presence, the chart only injects it when true."
+- envName: CLAUDE_CODE_USE_FOUNDRY
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Route through Azure AI Foundry instead of the Anthropic API. Leave false unless you specifically want Foundry — Claude Code treats this var by presence, the chart only injects it when true."
+- envName: ENABLE_DIND
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "true"
+  description: "Run a privileged Docker-in-Docker sidecar in the pod. Exposes docker CLI in the terminal via DOCKER_HOST=tcp://localhost:2375 (uses extra CPU/RAM/disk under app data). Disable if your environment forbids privileged containers"
+- envName: ALLOW_HOME_DIR_ACCESS
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Allow Claude Code to read/write the Olares Home directory"
+- envName: ALLOW_EXTERNAL_DIR_ACCESS
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Allow Claude Code to read/write the Olares External directory"

@@ -1,47 +1,83 @@
 metadata:
-  title: vLLM LLM 基座 (llm-init)
-  description: "通用 vLLM + llm-init 基座；安装时通过环境变量指定任意 HF 模型"
+  description: "通用 vLLM 引擎基座。在安装时通过环境变量选择任意 HuggingFace Safetensors 模型。"
+  title: vLLM 引擎基座
 
 spec:
-  fullDescription: |
-    **重要说明**
-    这是一个集群共享应用，也是一个**通用基座**：它不绑定任何具体模型。要服务哪个
-    模型完全由安装时的环境变量决定，因此同一套 Helm chart 可服务 vLLM 支持的任意
-    Hugging Face 模型。
-
-    **工作方式**
-    llm-init sidecar 下载配置的 HF 模型，写出就绪 sentinel 与模型路径，并暴露 OpenAI
-    兼容的 `/v1/*` 接口以及统一的 `/api/progress`、`/healthz` 面板。vLLM 容器等待
-    sentinel 后加载模型。两个容器在**同一个 Pod** 内，共享模型目录与 sentinel。
-
-    **技术栈**
-    - **vLLM**（`vllm/vllm-openai`，8000）：GPU 推理、OpenAI 服务。
-    - **llm-init**（`beclab/llm-init`，8090）：HF 下载、OpenAI `/v1/*`、进度面板；
-      代理 Pod 内的 vLLM 服务。
-
-    **模型存储（App Common）**
-    HF 模型写入**跨应用共享**的 App Common 目录 `appCommon/huggingface`，挂到固定容器
-    路径 `/cache/hf/hub`（单节点在 SSD，多节点在 JuiceFS），所有 HF 应用共用同一目录、
-    统一视角管理；标准 `models--owner--repo/snapshots/<sha>/` 布局按 digest 去重。
-    llm-init 读写缓存，vLLM 引擎只读挂载。
-
-    **安装时参数（按模型设置）**
-    - `MODEL_SOURCE` —— `hf://<repo>`（`--include` / `--revision` 可选）。
-    - `MODEL_NAME` —— HF `owner/repo`，用于 vLLM `--model` 与 `--served-model-name`
-      （须与 `MODEL_SOURCE` 中的仓库一致，如 `Qwen/Qwen3-0.6B`）。
-    - `MODEL_MODE` —— `chat` 或 `embedding`。
-    - `MODEL_SUPPORTS` —— `supports_*` 能力位 CSV（无则留空）。
-    - `ENGINE_ARGS` —— vLLM CLI 参数，如 `--max-model-len 8192 --gpu-memory-utilization 0.9`（留空用默认）。
-    - `LOG_LEVEL` —— `debug | info | warn | error`。
-    - `HF_ENDPOINT` / `HF_TOKEN` —— HF 镜像 / 私有库 token（公开库可留空）。
-    - `VLLM_CPU_*` / `VLLM_MEMORY_*` —— vLLM Pod CPU/内存（按 clone 固定）。
-    - `VLLM_REQUIRED_GPU_MEMORY` —— 模型内存配额（安装时必填）。NVIDIA 独显
-      注入裸 MiB 整数的 `nvidia.com/gpumem`（支持 8Gi/8192/8192Mi）；Spark 注入 Pod `memory`。
-
-    **资源说明**
-    manifest `accelerator` CPU/内存/GPU 为 `-1`（从渲染 chart 自动汇总）。
-
   upgradeDescription: |
-    通用 vLLM + llm-init 基座（llm-init v1.1.0，vllm/vllm-openai:v0.22.0）。
-    加载任意 HF 模型；模型身份、来源与调参均为安装时环境变量。
-    模型存于跨应用共享的 App Common 目录 appCommon/huggingface。
+    v1.2.45: Model Console（llm-init）版本更新为 v1.7.21。
+
+    v1.2.44: NVIDIA 引擎镜像升级到 vLLM v0.29.0（`v0.27.1` -> `v0.29.0`，含 Spark / GB10 使用的 `-aarch64` 标签）。ROCm 仍为 `v0.28.0`；Intel XPU 仍为 `0.21.0-ubuntu24.04-20260805`。
+
+    **vLLM v0.29.0（2026-09-09）**
+    - Model Runner V2 成为所有模型的默认执行器，新增 KV 缓存自动分配所需的 CUDA Graph 显存分析、批分片采样（单步 logits 显存降为 1/TP）、prompt embeds 以及 padded FULL cudagraph 调度。Model Runner V1 已弃用，计划在 v0.32 移除。
+    - Mamba 前缀缓存引入预填充内部检查点：TTFT 提升 9%-25%。
+    - 新增模型：Hy4-preview、Qwen3.8-Flash-Next、GraniteSWA / GraniteMoeSWA、NemotronH_Omni_Reasoning_V3、Kimi K3 NVFP4。
+    - 投机解码：按请求统计接受率（`--per-request-spec-decode-metrics`）、支持 logprobs 的自适应校验、SM100 稀疏 MLA。
+    - 默认值变更：TP CUDA 组默认启用 FlashInfer all-reduce（可用 `VLLM_ALLREDUCE_USE_FLASHINFER=0` 关闭）、前缀缓存 `NONE_HASH` 改为确定性、新增 `--max-num-queued-reqs` / `--max-num-queued-tokens` 准入控制。
+    - 破坏性变更：移除十个已弃用的模型架构与 PyAV 视频解码后端；`python -m vllm.entrypoints.openai.api_server` 弃用，改用 `vllm serve`。
+
+    **vLLM v0.28.0（2026-08-26）**
+    - 默认值变更：`max_num_batched_tokens` 由 8192 提升到 16384；Mamba 类模型默认开启前缀缓存；Blackwell CUDA Graph 捕获上限提升到 1024。
+    - Model Runner V2 完善：E/P/D 分离部署、权重卸载、编码器 CUDA Graph、`thinking_token_budget`。
+    - 分层 KV 缓存卸载：支持卸载到磁盘，并新增分层指标。
+    - Kimi-K3 / DeepSeek V4 的大规模性能优化，覆盖算子、解码上下文并行与投机解码。
+    - 新增模型：Muse Glimmer、Ling 3.0 Flash、Dots3 NOTE、Interns2mobius。
+    - 破坏性变更：bitsandbytes 迁出为独立插件；Transformers 升级到 5.15.0；移除 `calculate_kv_scales` 与 `override_attention_dtype`。
+
+    v1.2.43: Model Console 升级到 llm-init v1.7.19。
+
+    Chart 1.2.39 — 让 `amd-gpu` / `intel-gpu` 的显存配额可被解析。
+    这两种模式改为下发 `gpu.bytetrade.io/*-gpu-memory` pod annotation，
+    修复其 `requiredGPUMemory: "-1"` 被解析为 0、导致恢复时显卡被移出自身算力绑定的问题。
+    NVIDIA 与 Spark 路径不变。
+
+    Chart 1.2.37 — 新增 Intel 独显 XPU（`intel-gpu`），并升级 llm-init。
+    Intel 引擎镜像：`intel/vllm:0.21.0-ubuntu24.04-20260805`。
+    llm-init：`v1.5.0` → `v1.7.1`。
+    NVIDIA / Spark / `amd-gpu` 路径不变。
+
+    Chart 1.2.36 — 新增 AMD 独显（`amd-gpu` / ROCm）。
+
+    **更新内容**
+    - 新增加速器模式 `amd-gpu`，面向 AMD 独显（如 Radeon AI PRO R9700 / gfx1201）
+    - `amd-gpu` 引擎镜像：`vllm/vllm-openai-rocm:v0.28.0`
+    - NVIDIA CUDA 仍为 `vllm/vllm-openai:v0.27.1`；Spark 仍为 aarch64 标签
+    - RDNA4 默认：关闭 AITER C++/ASM，启用 Triton FlashAttention，单卡（`--tensor-parallel-size 1`）
+
+    详细发布说明请访问：
+    https://github.com/vllm-project/vllm/releases
+  fullDescription: |
+    **重要提示**  
+    此应用是一个模板，不能单独使用。请按下方环境变量设置模型后，方可使用本应用提供模型服务。
+
+    **环境变量设置指南**
+    - `MODEL_SOURCE`：`hf://<仓库>`。HuggingFace 模型下载源，例如 `hf://Qwen/Qwen3.5-2B`。请选择包含 `.safetensors` 权重文件的仓库。可选追加 `--include <文件>` 或 `--revision <sha>`。
+    - `MODEL_NAME`：`owner/repo`。模型名称，取 `MODEL_SOURCE` 中 `hf://` 之后的字符串，例如 `Qwen/Qwen3.5-2B`。此项也作为 OpenAI 别名和 vLLM `--model` 参数。
+    - `MODEL_MODE`：`chat` 或 `embedding`。对话模型选 `chat`；向量模型选 embedding 时，图表会自动添加 `--task embed`。
+    - `MODEL_SUPPORTS`：模型能力选项（Vision / Tools / Thinking / None）。请选择您的模型支持的功能。
+    - `ENGINE_ARGS`：`--max-model-len 65536 --gpu-memory-utilization 0.9 --tensor-parallel-size 1 --max-num-batched-tokens 8192 --enable-prefix-caching --kv-cache-dtype fp8`。vLLM 额外 CLI 参数，多个 `--key value` 之间用空格分隔。`amd-gpu`（RDNA4 / R9700）请加 `--attention-backend ROCM_ATTN` 并保持 `--tensor-parallel-size 1`，不要默认加 `--kv-cache-dtype fp8`。`intel-gpu`（Arc / XPU）可先用 `--dtype half --enforce-eager --block-size 64 --gpu-memory-utilization 0.95 --max-model-len 32768 --language-model-only`。详见 https://docs.vllm.ai/en/v0.17.0/configuration/engine_args/。
+    - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。llm-init 容器的日志等级。
+    - `VLLM_REQUIRED_GPU_MEMORY`：`8Gi`、`8192` 或 `8192Mi`。模型所需显存。`nvidia` 下设置 `nvidia.com/gpumem`；`nvidia-gb10` 下设置 pod 内存供 gpu-inject 切分；`amd-gpu` 与 `intel-gpu` 下通过 pod annotation `gpu.bytetrade.io/required-gpu-memory` 声明独立显存配额。
+
+    **工作流程说明**
+    首先，`llm-init` 下载并准备模型，然后 vLLM 在模型准备好后启动服务。两个容器运行在同一 Pod 内，共享模型目录与就绪 sentinel。
+
+    **技术栈说明**
+    - **vLLM**（8000 端口）：运行模型并通过 API 提供服务
+    - **llm-init**（8090 端口）：下载模型、展示进度，并通过 OpenAI API 代理到 vLLM
+
+    **加速器模式**
+    | 模式           | 设备             | 说明                                                         |
+    |----------------|------------------|--------------------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)       | 需设置 `VLLM_REQUIRED_GPU_MEMORY`；可在 ENGINE_ARGS 中调整 `--gpu-memory-utilization` |
+    | `nvidia-gb10`  | GPU (Spark)      | 与 `nvidia` 相同；`--gpu-memory-utilization` 由 ENGINE_ARGS 指定（不自动换算） |
+    | `amd-gpu`      | GPU (ROCm)       | AMD 独显（如 Radeon AI PRO R9700 / gfx1201）。镜像 `vllm/vllm-openai-rocm:v0.28.0`。请使用 `--attention-backend ROCM_ATTN` 且 `--tensor-parallel-size 1`。 |
+    | `intel-gpu`    | GPU (XPU)        | Intel Arc 独显（如 Arc Pro B70）。镜像 `intel/vllm:0.21.0-ubuntu24.04-20260805`。建议 `--dtype half --enforce-eager --block-size 64`。 |
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。
+
+    **资源建议**
+    - CPU、内存和 GPU 数量随图表自动配置，磁盘配额为固定
+    - vLLM 加载大模型可能需要数分钟，请保持应用 Running 直至就绪
+    - 高并发场景下，vLLM 的 PagedAttention 可提供出色吞吐；可在 `ENGINE_ARGS` 中调整 `--max-num-batched-tokens` 和 `--gpu-memory-utilization`

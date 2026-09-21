@@ -6,9 +6,14 @@ metadata:
 data:
   nginx.conf: |
     server {
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path /tmp/proxy;
+      fastcgi_temp_path /tmp/fastcgi;
+      uwsgi_temp_path /tmp/uwsgi;
+      scgi_temp_path /tmp/scgi;
         listen 8080;
-        access_log /opt/bitnami/openresty/nginx/logs/access.log;
-        error_log /opt/bitnami/openresty/nginx/logs/error.log;
+        access_log /dev/stdout;
+        error_log /dev/stderr;
 
         client_max_body_size 100M;
 
@@ -122,7 +127,7 @@ metadata:
   labels:
     io.kompose.service: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.deerflowv2.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: {{ .Release.Name }}
@@ -156,28 +161,32 @@ spec:
             items:
               - key: nginx.conf
                 path: nginx.conf
+        - name: nginx-runtime
+          emptyDir: {}
       containers:
         - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          image: "docker.io/openresty/openresty:1.29.2.5-bookworm-fat"
+          command:
+            - /usr/local/openresty/bin/openresty
+          args:
+            - -g
+            - "daemon off; pid /tmp/nginx.pid;"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+
           ports:
             - containerPort: 8080
               protocol: TCP
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080)
-                  [ $http_code -ge 200 ] && [ $http_code -lt 500 ]
-            initialDelaySeconds: 10
-            timeoutSeconds: 10
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
             periodSeconds: 5
             successThreshold: 1
-            failureThreshold: 240
+            failureThreshold: 30
           resources:
             limits:
               cpu: 500m
@@ -187,11 +196,10 @@ spec:
               memory: 64Mi
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
+              mountPath: /etc/nginx/conf.d/default.conf
               subPath: nginx.conf
-            - name: nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
-              subPath: nginx.conf
+            - name: nginx-runtime
+              mountPath: /var/run/openresty
 ---
 apiVersion: v1
 kind: Service

@@ -1,15 +1,23 @@
-olaresManifest.version: "0.11.0"
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  litellm: 1
+  litellmingress: 1
 metadata:
   name: litellm
   icon: https://app.cdn.olares.com/appstore/litellm/icon.png
   description: Call 100+ LLMs in OpenAI format
   appid: litellm
   title: LiteLLM
-  version: "1.0.11"
+  version: "1.0.21"
   categories:
-    - Utilities_v112
-    - Utilities
+  - Utilities_v112
+  - models
+  tags:
+  - gateway
+
 spec:
   versionName: "1.83.3"
   featuredImage: https://app.cdn.olares.com/appstore/litellm/1.webp
@@ -31,6 +39,14 @@ spec:
     - Multi-tenant: Support for multiple users and teams
 
   upgradeDescription: |
+
+    Run the official OpenResty entrance as UID/GID 1000 with writable runtime paths.
+    Switch the reverse-proxy image from Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) to the official OpenResty image `openresty/openresty:1.29.2.5-bookworm-fat`.
+
+    Align nginx config mounts and log paths with the official image layout (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`), and drop Bitnami-specific `OPENRESTY_CONF_FILE` wiring.
+
+    v1.0.14: Move `DATABASE_URL`, `UI_PASSWORD`, and `SMTP_PASSWORD` into Secret (`secretKeyRef`).
+
     Upgrade to [v1.83.3-stable](https://github.com/BerriAI/litellm/releases/tag/v1.83.3-stable) (from v1.81.4).
 
     Security:
@@ -65,6 +81,11 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
   doc: https://docs.litellm.ai
   license:
     - text: MIT
@@ -85,7 +106,7 @@ options:
   apiTimeout: 0
   dependencies:
     - name: olares
-      version: ">=1.12.3-0"
+      version: '>=1.12.6-0'
       type: system
 entrances:
   - name: litellmui

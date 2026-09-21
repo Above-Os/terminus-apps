@@ -8,7 +8,7 @@ metadata:
   name: blinko
   namespace: '{{ .Release.Namespace }}'
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.blinko.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: blinko
@@ -30,12 +30,18 @@ spec:
         - name: TZ
           value: Etc/UTC
         - name: DATABASE_URL
-          value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.blinko }}"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: DATABASE_URL
         - name: NODE_ENV
           value: production
         - name: NEXTAUTH_SECRET
-          value: ""
-        image: "docker.io/beclab/blinkospace-blinko:1.8.0"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: NEXTAUTH_SECRET
+        image: "docker.io/blinkospace/blinko:1.8.7"
         name: blinko
         ports:
         - name: blinko

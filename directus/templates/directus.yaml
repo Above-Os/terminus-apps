@@ -7,7 +7,7 @@ metadata:
   name: directus
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.directus.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: directus
@@ -20,7 +20,38 @@ spec:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: directus
     spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
       initContainers:
+        - name: init-permissions
+          image: "docker.io/beclab/aboveos-busybox:1.37.0"
+          command:
+            - sh
+            - -c
+            - |
+              for d in /directus/uploads /directus/extensions /directus/database /directus/templates; do
+                mkdir -p "$d" && chown 1000:1000 "$d"
+              done
+          securityContext:
+            runAsUser: 0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /directus/uploads
+              name: uploads
+            - mountPath: /directus/extensions
+              name: extensions
+            - mountPath: /directus/database
+              name: database
+            - mountPath: /directus/templates
+              name: templates
         - name: wait-postgres
           image: "docker.io/beclab/wait-for:0.1.0"
           args: ["-it", "{{ .Values.postgres.host }}:5432"]
@@ -45,12 +76,26 @@ spec:
               value: '8055'
             - name: PUBLIC_URL
               value: 'https://directus.example.com'
+            - name: STORAGE_LOCATIONS
+              value: 'local'
+            - name: STORAGE_LOCAL_DRIVER
+              value: 'local'
+            - name: STORAGE_LOCAL_ROOT
+              value: '/directus/uploads'
+            - name: IP_TRUST_PROXY
+              value: 'true'
             - name: SECRET
-              value: '{{ .Values.olaresEnv.SECRET }}'
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: SECRET
             - name: ADMIN_EMAIL
               value: '{{ .Values.olaresEnv.ADMIN_EMAIL }}'
             - name: ADMIN_PASSWORD
-              value: '{{ .Values.olaresEnv.ADMIN_PASSWORD }}'
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: ADMIN_PASSWORD
             - name: WEBSOCKETS_ENABLED
               value: 'true'
             - name: DB_CLIENT
@@ -62,7 +107,10 @@ spec:
             - name: DB_USER
               value: '{{ .Values.postgres.username }}'
             - name: DB_PASSWORD
-              value: '{{ .Values.postgres.password }}'
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DB_PASSWORD
             - name: DB_DATABASE
               value: '{{ .Values.postgres.databases.directus }}'
             - name: CACHE_ENABLED
@@ -74,7 +122,7 @@ spec:
             - name: REDIS
               value: 'redis://directus-redis:6379/0'
 
-          image: "docker.io/beclab/directus-directus:11.14.0"
+          image: "docker.io/directus/directus:12.3.1"
           name: directus
           resources:
             requests:

@@ -1,8 +1,9 @@
+{{- if gt (int .Values.workloads.affine.replicaCount) 0 }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: affine-migration
+  name: affine-migration-{{ .Release.Revision }}
   namespace: '{{ .Release.Namespace }}'
   labels:
     app: affine-migration
@@ -13,6 +14,9 @@ spec:
     metadata:
       labels:
         app: affine-migration
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
       restartPolicy: OnFailure
       initContainers:
@@ -38,11 +42,14 @@ spec:
         imagePullPolicy: IfNotPresent
       containers:
       - name: affine-migration
-        image: "beclab/toeverything-affine:0.25.7"
+        image: "beclab/toeverything-affine:0.27.2"
         command: ['sh', '-c', 'set -e && echo "Starting migration..." && ls -la ./scripts/ && node ./scripts/self-host-predeploy.js && echo "Migration completed successfully"']
         env:
         - name: DATABASE_URL
-          value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.affine }}"
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: DATABASE_URL
         - name: REDIS_SERVER_HOST
           value: "redis-svc"
         - name: AFFINE_INDEXER_ENABLED
@@ -70,4 +77,5 @@ spec:
           {{- end }}
           type: DirectoryOrCreate
         name: config
+{{- end }}
 

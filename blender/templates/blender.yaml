@@ -1,0 +1,169 @@
+{{- $gpuObj := .Values.GPU | default dict }}
+{{- $gpuType := .Values.gpu | default ($gpuObj.Type) | default "cpu" }}
+{{- $isIgpuMode := or (eq $gpuType "intel") (eq $gpuType "amd") }}
+{{- $isNvidiaMode := eq $gpuType "nvidia" }}
+{{- $isGpuMode := or $isIgpuMode $isNvidiaMode }}
+{{- $env := .Values.olaresEnv | default dict }}
+{{- $width := $env.STREAM_WIDTH | default "1920" }}
+{{- $height := $env.STREAM_HEIGHT | default "1080" }}
+{{- $maxFps := $env.STREAM_MAX_FPS | default "30" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blender
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: blender
+  {{- if $isGpuMode }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+  {{- end }}
+spec:
+  replicas: {{ .Values.workloads.blender.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      io.kompose.service: blender
+  template:
+    metadata:
+      labels:
+        io.kompose.service: blender
+    spec:
+      enableServiceLinks: false
+      {{- if $isGpuMode }}
+      securityContext:
+        supplementalGroups:
+          - 44
+          - 994
+      {{- end }}
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /config && chown 1000:1000 /config
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      containers:
+        - name: blender
+          image: docker.io/linuxserver/blender:5.2.2
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+            - name: TITLE
+              value: Blender
+            - name: START_DOCKER
+              value: "false"
+            # Zero-copy VAAPI encoding only exists in Wayland mode; X11 GPU
+            # acceleration is no longer maintained upstream.
+            - name: PIXELFLUX_WAYLAND
+              value: "true"
+            # Without a usable VAAPI device the H.264 stream is encoded on the
+            # CPU, so the frame size and rate are the cost drivers. A client's
+            # HiDPI display otherwise negotiates ~4K here.
+            - name: SELKIES_MANUAL_WIDTH
+              value: {{ $width | quote }}
+            - name: SELKIES_MANUAL_HEIGHT
+              value: {{ $height | quote }}
+            - name: SELKIES_FRAMERATE
+              value: "8-{{ $maxFps }}"
+            - name: SELKIES_SECOND_SCREEN
+              value: "false"
+            {{- if $isIgpuMode }}
+            # Match jellyfin: do not hardcode /dev/dri paths. gpu-inject on
+            # Olares 1.12.7+ mounts the Intel render node; AUTO_GPU then
+            # points Selkies at that device for VAAPI.
+            - name: LIBVA_DRIVER_NAME
+              value: iHD
+            {{- else if $isNvidiaMode }}
+            # HAMi injects the NVIDIA device; leave AUTO_GPU on so Selkies
+            # picks NVENC / Zink instead of the Intel render node.
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: all
+            {{- else }}
+            - name: AUTO_GPU
+              value: "false"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+            - containerPort: 3001
+            - containerPort: 8082
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 2Gi
+            limits:
+              cpu: "12"
+              memory: 8Gi
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 6
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: userdata
+              mountPath: /config/Home
+            - name: dshm
+              mountPath: /dev/shm
+      restartPolicy: Always
+      volumes:
+        - name: config
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.appData }}/config
+        - name: userdata
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.userspace.userData }}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blender
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: blender
+spec:
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+    - name: https
+      port: 3001
+      targetPort: 3001
+  selector:
+    io.kompose.service: blender

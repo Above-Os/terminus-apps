@@ -13,7 +13,7 @@ spec:
     matchLabels:
       app.kubernetes.io/name: nginx
       app.kubernetes.io/instance: mastodon
-  replicas: 1
+  replicas: {{ .Values.workloads.mastodon.replicaCount }}
   strategy:
     type: Recreate
   template:
@@ -23,6 +23,8 @@ spec:
         helm.sh/chart: mastodon-0.1.2
         app.kubernetes.io/instance: mastodon
         app.kubernetes.io/managed-by: Helm
+      annotations:
+        checksum/nginx-config: {{ include (print $.Template.BasePath "/nginx/configmap.yaml") . | sha256sum }}
     spec:
       priorityClassName: ""
       affinity:

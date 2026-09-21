@@ -1,15 +1,24 @@
-olaresManifest.version: '0.11.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  owncastproxy: 1
+  owncast: 1
 metadata:
   name: owncast
   description: A free and open source live video and web chat server for use with existing popular broadcasting software.
   icon: https://app.cdn.olares.com/appstore/owncast/icon.png
   appid: owncast
-  version: '1.0.9'
+  version: '1.0.23'
   title: Owncast
   categories:
   - Creativity
-  - Utilities
+  - homelab
+  - workspace
+  tags:
+  - live-streaming
+
 entrances:
 - name: owncast
   port: 8080
@@ -31,7 +40,25 @@ permission:
   userData:
   - Home
 spec:
-  versionName: '0.2.3'
+  upgradeDescription: |
+    Run the official OpenResty entrance as UID/GID 1000 with writable runtime paths.
+    Upstream release: [Owncast 0.3.0](https://github.com/owncast/owncast/releases/tag/v0.3.0)
+
+    **What's changed**
+
+    - Featured streams can show other Owncast servers that are live after both sides accept.
+    - Admin includes a plugins section to browse and install plugins with per-plugin permissions.
+    - Autoplay can stay off, play with audio when the browser allows it, or play muted with an unmute control.
+    - The player's lower-latency option is available again and stays off by default.
+
+    Default admin login is still `/admin` with `admin` / `abc123`. Change it after first login.
+
+    **Olares deployment changes**
+
+    - Upgrading from an older Owncast on this app recreates stream temp, log, HLS cache, and metrics directories so the new process can start.
+
+  versionName: '0.3.0'
+  runAsUser: true
   featuredImage: https://app.cdn.olares.com/appstore/owncast/1.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/owncast/1.webp
@@ -67,6 +94,11 @@ spec:
   locale:
   - en-US
   - zh-CN
+  - de-DE
+  - es-ES
+  - it-IT
+  - fr-FR
+  - ja-JP
   doc: https://owncast.online/docs/
   license:
   - text: MIT License
@@ -89,7 +121,7 @@ options:
   dependencies:
   - name: olares
     type: system
-    version: '>=1.11.0-0'
+    version: '>=1.12.6-0'
   policies:
     - uriRegex: ^/(admin)(/.*)?(\?.*)?$
       level: system

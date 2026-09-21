@@ -1,0 +1,223 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacppqwopus3627v2mtpq4kmv3
+  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwop.png
+  description: A coding and reasoning model served with llama.cpp
+  appid: llamacppqwopus3627v2mtpq4kmv3
+  title: Qwopus3.6-27B MTP (llama.cpp)
+  version: '1.0.21'
+  categories:
+  - AI
+  - models
+  tags:
+  - llm
+sharedEntrances:
+  - name: llamacppqwopus3627v2mtpq4kmv3
+    host: sharedentrances-api
+    port: 0
+    title: Qwopus3.6-27B MTP
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwop.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: Qwopus3.6 MTP
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwop.png
+    openMethod: window
+    authLevel: internal
+#   llamacppqwopus3627v2mtpq4kmv3 ? engine Deployment (== appid / Release.Name)
+#   llminit                          ? llm-init / entrance Deployment
+workloadReplicas:
+  llamacppqwopus3627v2mtpq4kmv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M'
+  upgradeDescription: |
+    v1.0.21: Model Console (llm-init) updated to v1.7.21.
+
+    Model Console is updated to llm-init v1.7.19.
+
+    This console downloads the model, shows progress, and provides the OpenAI-compatible API.
+  fullDescription: |
+    Qwopus3.6-27B-v2 is a community fine-tune of Qwen3.6-27B for coding, math, DevOps work, and strict structured output. Multi-Token Prediction (MTP) lets the model draft more than one token per step, which can raise generation speed. This app serves the text-only `Q4_K_M` GGUF build from `Jackrong/Qwopus3.6-27B-v2-MTP-GGUF` with llama.cpp. The preset supports thinking and tool calling, and it does not include vision.
+
+    **Key features**
+
+    - Generate code, math, and DevOps-style answers.
+    - Use thinking and tool calling.
+    - Draft multiple tokens per step with built-in MTP heads.
+    - Make the model available to compatible Olares applications.
+
+    A compatible NVIDIA GPU with at least `23Gi` of GPU memory is required. If a 128K context runs out of GPU memory, lower the `-c` value in `ENGINE_ARGS`.
+
+    For model details, see the [Qwopus3.6-27B-v2-MTP GGUF page](https://huggingface.co/Jackrong/Qwopus3.6-27B-v2-MTP-GGUF).
+
+  developer: Jackrong
+  website: https://huggingface.co/Jackrong/Qwopus3.6-27B-v2-MTP-GGUF
+  sourceCode: https://huggingface.co/Jackrong/Qwopus3.6-27B-v2-MTP-GGUF
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/Jackrong/Qwopus3.6-27B-v2-MTP-GGUF
+
+  accelerator:
+    #   nvidia       ? discrete GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  ? Spark UMA; pod memory -> gpu-inject (no manifest gpumem)
+    - mode: nvidia
+      limitedCpu: 15360m
+      requiredCpu: 500m
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # Engine MEMORY_REQUEST 6Gi + llm-init <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+      limitedMemory: "32Gi"
+      requiredMemory: "7Gi"
+      requiredGPUMemory: 23Gi
+      limitedGPUMemory: 24Gi
+    - mode: nvidia-gb10
+      limitedCpu: 15360m
+      requiredCpu: 500m
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # Unified memory: model ~23Gi + process/system + llm-init headroom
+      limitedMemory: 48Gi
+      requiredMemory: 32Gi
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE        # example: hf://Jackrong/Qwopus3.6-27B-v2-MTP-GGUF --include Qwopus3.6-27B-v2-MTP-Q4_K_M.gguf
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://Jackrong/Qwopus3.6-27B-v2-MTP-GGUF --include Qwopus3.6-27B-v2-MTP-Q4_K_M.gguf"
+    description:  "Example: hf://unsloth/Qwen3-0.6B-GGUF --include Qwen3-0.6B-Q4_K_M.gguf. The source to download your model. For models with split files, only include the first part; for vision-language models, add the projector with a comma, like `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`."
+    regex: "^hf://"
+  - envName: MODEL_NAME          # example: Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M (-hf repo:quant)
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "Jackrong/Qwopus3.6-27B-v2-MTP-GGUF:Q4_K_M"
+    description:  "Example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M. The name of your model in `owner/repo:quant` format"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description:  "The model capabilities. Pick what your model supports, if no extra capabilities, pick None."
+  - envName: ENGINE_ARGS         # example: -c 8192 -ngl all -fa on
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2"
+    description: "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options; use `-ngl all` for full GPU offload. You can also use values like `LLAMA_ARG_*=val`."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST # sum with llm-init <= requiredMemory 7Gi
+    required: true
+    default: "6Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT # 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+    required: true
+    default: "30Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "23Gi"
+    description:  "GPU memory required for this preset. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"

@@ -17,3 +17,9 @@
 {{- int $g -}}
 {{- end -}}
 {{- end -}}
+{{- /* sglangllmbasev3.engineArgs: pass ENGINE_ARGS through unchanged.
+       Usage: {{ include "sglangllmbasev3.engineArgs" (dict "Args" $engineArgs) }} */ -}}
+{{- define "sglangllmbasev3.engineArgs" -}}
+{{- $in := . -}}
+{{- trim ($in.Args | default "") -}}
+{{- end -}}

@@ -13,6 +13,7 @@ spec:
     - Works with a Claude Pro/Max subscription (OAuth) or a Console API key; also supports Amazon Bedrock and Google Vertex AI.
     - Workspace image ships common language runtimes and build toolchains (Python, Node.js, Go, Rust, OpenJDK 21, Ruby, PHP, Lua) plus database clients (PostgreSQL, MySQL/MariaDB, Redis), git-lfs, protobuf compiler, Gradle, tmux, dig/ss/nc, shellcheck, clang-format/tidy, graphviz, and extra -dev headers (libpq, MySQL client, curl, ICU, LDAP) so agents can run typical dev commands without root.
     - Optional DinD (`ENABLE_DIND`, default on): `docker` / `docker compose` in the terminal (privileged sidecar).
+    - `certbot` (Let's Encrypt) is pre-installed in the image; init seeds `cli.ini` and a `~/.local/bin/certbot` wrapper for uid 1000 (opencode / clawdbot pattern).
 
     **First-time Setup**
     Open the `Claude Code CLI` entrance and run `claude` to launch the OAuth login flow, or set `ANTHROPIC_API_KEY` in the app environment variables and restart.
@@ -28,24 +29,10 @@ spec:
 
     These vars are conditionally injected: blank strings and `false` toggles are *not* placed into the container env, so Claude Code sees them as truly unset (which is required — it treats `CLAUDE_CODE_USE_*` by presence, not value).
   upgradeDescription: |
-    Terminal upgraded to `beclab/terminal:v0.0.11`: file upload support — paste
-    screenshots, drag-and-drop files, or click the upload button to send files
-    into the terminal session.
+    **v0.1.16**
 
-    Workspace memory raised (limit 16Gi -> 24Gi, request 256Mi -> 2Gi) to reduce
-    out-of-memory crashes during heavy agent/build sessions.
+    **Claude Code CLI**
+    - Pin install version from **2.1.226** to **2.1.229** (latest channel; `init-install-claude` uses chart `appVersion`).
 
-    Base image `beclab/harveyff-claudecode-base` upgraded to 0.5.3.
-
-    New:
-    - Built-in `olares-cli` (vendor binary, full command set) on PATH.
-    - Olares skill pack (cluster, dashboard, files, market, settings, shared)
-      copied into `~/.claude/skills` at pod start via `init-skills`, so the agent
-      can operate Olares without manual setup.
-    - Expanded toolbox: `gh`, `ping`/`lsof`, `lrzsz` (sz/rz), `tree`, `nano`,
-      `tcpdump`, `traceroute`, `httpie`, `aria2`, and common debug/network tools.
-
-    Skills note: `init-skills` only refreshes directories that match the built-in
-    Olares pack (same folder names). Your other skills under `~/.claude/skills` are
-    left untouched. If you edited an Olares skill in place, those changes are
-    overwritten on the next pod restart when the directory name matches.
+    **Base image (`beclab/harveyff-claudecode-base:0.5.8`, was 0.5.7)**
+    - Baked `@olares/cli` upgraded to **1.12.7-cli.0** (from 1.12.6-cli.2).

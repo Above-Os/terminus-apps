@@ -2,6 +2,10 @@
   # 1) First deploy: init-chmod-data creates .openclaw dir, copies openclaw.json from ConfigMap when missing, sets ownership.
   # 2) Runtime: app reads/writes openclaw.json on app-data-config; changes persist across restarts.
   # 3) Helm upgrade: init only copies default when file is missing; never overwrites.
+{{- $openclawImage := "beclab/openclaw-openclaw:2026.9.4" -}}
+{{- $brewBaseImage := "beclab/harveyff-openclaw-brew-base:2026.9.2-cli" -}}
+{{- $brewBinPath := "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/linuxbrew/.linuxbrew/opt/unzip/bin" -}}
+{{- $containerPath := printf "%s:/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" $brewBinPath -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -11,7 +15,7 @@ metadata:
   name: "{{ .Release.Name }}"
   namespace: "{{ .Release.Namespace }}"
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.clawdbot.replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: clawdbot
@@ -30,7 +34,7 @@ spec:
 
       initContainers:
         - name: init-install-brew
-          image: "beclab/harveyff-openclaw-brew-base:2026.5.29-cli"
+          image: "{{ $brewBaseImage }}"
           securityContext:
             runAsUser: 0
           command: ["/bin/bash", "-c"]
@@ -45,6 +49,18 @@ spec:
                 echo "[init-brew] done"
               fi
               chown -R 1000:1000 /home/linuxbrew
+              # Homebrew 4.x tap trust: upstream skills (camsnap, nano-pdf, …) use steipete/tap.
+              export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+              export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+              export HOMEBREW_NO_AUTO_UPDATE=1
+              if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+                su linuxbrew -s /bin/bash -c \
+                  'export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"; \
+                   export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew; \
+                   export HOMEBREW_NO_AUTO_UPDATE=1; \
+                   brew trust steipete/tap 2>/dev/null || true'
+                echo "[init-brew] steipete/tap trust seeded (idempotent)"
+              fi
           resources: {}
           volumeMounts:
             - mountPath: /home/linuxbrew
@@ -78,6 +94,21 @@ spec:
               else
                 echo "openclaw.json already exists, skipping (upgrade-safe)"
               fi
+              # certbot (brew-base): non-root defaults under $HOME=/home/node; Olares TLS needs RSA.
+              mkdir -p /home/node/.config/letsencrypt \
+                       /home/node/letsencrypt/config \
+                       /home/node/letsencrypt/work \
+                       /home/node/letsencrypt/logs
+              if [ ! -f /home/node/.config/letsencrypt/cli.ini ]; then
+                printf '%s\n' \
+                  '# Olares clawdbot: certbot paths for non-root use.' \
+                  'config-dir = /home/node/letsencrypt/config' \
+                  'work-dir = /home/node/letsencrypt/work' \
+                  'logs-dir = /home/node/letsencrypt/logs' \
+                  'key-type = rsa' \
+                  > /home/node/.config/letsencrypt/cli.ini
+                echo "[init-chmod-data] seeded certbot cli.ini under /home/node/.config/letsencrypt"
+              fi
               chown -R ${OPENCLAW_UID}:${OPENCLAW_GID} /home/node/.openclaw || true
               chown -R ${OPENCLAW_UID}:${OPENCLAW_GID} /home/node || true
               chmod -R 700 /home/node/.openclaw || true
@@ -104,7 +135,7 @@ spec:
         # user/bundled skills are never touched; skipped if the image has no
         # /skills-staging.
         - name: init-skills
-          image: "beclab/harveyff-openclaw-brew-base:2026.5.29-cli"
+          image: "{{ $brewBaseImage }}"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -131,6 +162,94 @@ spec:
               name: app-data-config
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
+        # 8.2 refuses to boot when leftover 7.x workspace/session files exist.
+        # Do not run `openclaw doctor --fix` here: in a container it cannot
+        # finish service maintenance, and --fix also disables unused skills
+        # (including the Olares skill pack). Clearing the existence-gate
+        # leftovers is enough for Gateway to reach Ready.
+        - name: init-migrate-workspace
+          image: "{{ $openclawImage }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set +e
+              state="${OPENCLAW_STATE_DIR:-/home/node/.openclaw}"
+              need=0
+              for f in \
+                "$state/workspace/openclaw-workspace-state.json" \
+                "$state/workspace/.openclaw-workspace-state.json" \
+                "$state/exec-approvals.json"
+              do
+                if [ -e "$f" ]; then
+                  echo "[init-migrate] leftover: $f"
+                  need=1
+                fi
+              done
+              for f in "$state"/agents/*/sessions/sessions.json; do
+                if [ -f "$f" ]; then
+                  echo "[init-migrate] leftover: $f"
+                  need=1
+                fi
+              done
+              for f in "$state"/workspace-attestations/*.attested; do
+                if [ -f "$f" ]; then
+                  echo "[init-migrate] leftover: $f"
+                  need=1
+                fi
+              done
+              if [ "$need" = "0" ]; then
+                echo "[init-migrate] no leftover 7.x setup files; skip"
+                exit 0
+              fi
+              rm -f "$state/workspace/openclaw-workspace-state.json" \
+                    "$state/workspace/.openclaw-workspace-state.json" \
+                    "$state/exec-approvals.json"
+              rm -f "$state"/workspace-attestations/*.attested 2>/dev/null || true
+              for f in "$state"/agents/*/sessions/sessions.json; do
+                if [ -f "$f" ]; then
+                  mv -f "$f" "${f}.pre-8.2"
+                  echo "[init-migrate] renamed leftover $f -> ${f}.pre-8.2 so Gateway can start"
+                fi
+              done
+              echo "[init-migrate] cleared leftover 7.x setup files (no doctor --fix)"
+              exit 0
+          env:
+            - name: HOME
+              value: /home/node
+            - name: OPENCLAW_HOME
+              value: /home/node
+            - name: OPENCLAW_STATE_DIR
+              value: /home/node/.openclaw
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: /home/node/.openclaw/workspace
+          resources: {}
+          volumeMounts:
+            - mountPath: /home/node/.openclaw
+              name: app-data-config
+            - mountPath: /home/node
+              name: app-data-node
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        # Offline, narrowly scoped migration; does not run doctor --fix or edit config.
+        - name: init-sqlite-session-index
+          image: "{{ $openclawImage }}"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: ["/usr/local/bin/node", "/migration/migrate-session-index.cjs"]
+          env:
+            - name: OPENCLAW_STATE_DIR
+              value: /home/node/.openclaw
+          volumeMounts:
+            - name: app-data-config
+              mountPath: /home/node/.openclaw
+            - name: sqlite-migration
+              mountPath: /migration
+              readOnly: true
         - name: init-docker-cli
           image: "docker.io/beclab/docker:29.3.0-dind"
           command: ["cp", "/usr/local/bin/docker", "/docker-cli/docker"]
@@ -144,9 +263,9 @@ spec:
         # Gateway crashes do NOT affect this container, so users can always
         # `kubectl exec` in to fix config / inspect logs even when gateway
         # is broken. Mirrors the openclaw-cli service from docker-compose.
-        - image: "beclab/openclaw-openclaw:2026.6.5"
+        - image: "{{ $openclawImage }}"
           name: clawdbot
-          command: ["sleep", "infinity"]
+          command: ["/bin/bash", "-c", ". /usr/local/bin/openclaw-env-compat.sh; exec sleep infinity"]
           env:
             - name: HOME
               value: /home/node
@@ -163,7 +282,15 @@ spec:
             - name: DOCKER_HOST
               value: "tcp://localhost:2375"
             - name: PATH
-              value: "/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin"
+              value: "{{ $containerPath }}"
+            - name: OPENCLAW_HOME
+              value: /home/node
+            - name: OPENCLAW_STATE_DIR
+              value: /home/node/.openclaw
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: /home/node/.openclaw/workspace
+            - name: OPENCLAW_ENV_COMPAT_KEEP_LEGACY
+              value: "1"
             - name: CUSTOM_API_KEY
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
@@ -215,6 +342,10 @@ spec:
               name: gateway-ipc
               subPath: restart-gateway
               readOnly: true
+            - mountPath: /usr/local/bin/openclaw-env-compat.sh
+              name: gateway-ipc
+              subPath: openclaw-env-compat.sh
+              readOnly: true
             - mountPath: /usr/local/bin/docker
               name: docker-cli-bin
               subPath: docker
@@ -243,7 +374,7 @@ spec:
         # no kubelet event, ~3s downtime). The same sentinel also
         # short-circuits the 30s post-crash backoff so operators can
         # immediately retry after fixing a bad config.
-        - image: "beclab/openclaw-openclaw:2026.6.5"
+        - image: "{{ $openclawImage }}"
           name: gateway
           command: ["/bin/bash", "/usr/local/bin/gateway-entrypoint.sh"]
           ports:
@@ -268,8 +399,18 @@ spec:
             # config wipe in openclaw issue #79947.
             - name: OPENCLAW_SYSTEMD_UNIT
               value: "openclaw-gateway.service"
+            - name: OPENCLAW_HOME
+              value: /home/node
+            - name: OPENCLAW_STATE_DIR
+              value: /home/node/.openclaw
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: /home/node/.openclaw/workspace
+            - name: OPENCLAW_ENV_COMPAT_UNSET_LEGACY
+              value: "1"
+            - name: OPENCLAW_ENV_COMPAT_KEEP_LEGACY
+              value: "0"
             - name: PATH
-              value: "/home/node/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin"
+              value: "{{ $containerPath }}"
             - name: CUSTOM_API_KEY
               value: "YOUR_CUSTOM_API_KEY"
             - name: OLLAMA_API_KEY
@@ -289,9 +430,11 @@ spec:
             periodSeconds: 5
             failureThreshold: 60
           readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 18789
+            exec:
+              command:
+                - /usr/local/bin/node
+                - -e
+                - const fs=require("fs"); let token=""; try { const cfg=JSON.parse(fs.readFileSync("/home/node/.openclaw/openclaw.json","utf8")); token=cfg?.gateway?.auth?.token||""; } catch {} fetch("http://127.0.0.1:18789/readyz",{headers:token?{Authorization:"Bearer "+token}:{}}).then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 5
@@ -317,6 +460,10 @@ spec:
             - mountPath: /usr/local/bin/gateway-entrypoint.sh
               name: gateway-ipc
               subPath: gateway-entrypoint.sh
+              readOnly: true
+            - mountPath: /usr/local/bin/openclaw-env-compat.sh
+              name: gateway-ipc
+              subPath: openclaw-env-compat.sh
               readOnly: true
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
             - mountPath: /home/userdata/home/
@@ -351,7 +498,7 @@ spec:
               DOCKERD_PID=$!
               until docker info >/dev/null 2>&1; do sleep 1; done
               echo "[dind] dockerd ready, pre-pulling sandbox image..."
-              docker pull beclab/harveyff-openclaw-sandbox-common:2026.5.27 && echo "[dind] sandbox image ready" || echo "[dind] sandbox image pull failed" &
+              docker pull beclab/harveyff-openclaw-sandbox-common:2026.7.29 && echo "[dind] sandbox image ready" || echo "[dind] sandbox image pull failed" &
               wait $DOCKERD_PID
           ports:
             - containerPort: 2375
@@ -398,6 +545,9 @@ spec:
             {{- end }}              
       restartPolicy: Always
       volumes:
+        - name: sqlite-migration
+          configMap:
+            name: clawdbot-sqlite-migration
         - hostPath:
             path: "{{ .Values.userspace.appData }}/config"
             type: DirectoryOrCreate
@@ -458,7 +608,7 @@ metadata:
   namespace: "{{ .Release.Namespace }}"
 spec:
   ports:
-    - name: "18789"
+    - name: gateway
       port: 18789
       targetPort: 18789
     # gog OAuth callback (workspace container); ingress nginx proxies location = /oauth2/callback here.

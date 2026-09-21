@@ -1,0 +1,210 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: ollamagemma426bv3
+  icon: https://app.cdn.olares.com/appstore/llm/ollama/gemma.png
+  description: A local AI model for text generation, coding, and image understanding
+  appid: ollamagemma426bv3
+  title: Gemma 4 26B (Ollama)
+  version: '1.0.18'
+  categories:
+  - AI
+  - models
+  tags:
+  - llm
+sharedEntrances:
+  - name: ollamagemma426bv3
+    host: sharedentrances-api
+    port: 0
+    title: Gemma 4 26B
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/ollama/gemma.png
+entrances:
+  - name: ollamaclient
+    port: 8090
+    host: download-svc
+    title: Gemma 4 26B
+    icon: https://app.cdn.olares.com/appstore/llm/ollama/gemma.png
+    openMethod: window
+    authLevel: internal
+#   ollamagemma426bv3 — engine Deployment (== appid / Release.Name)
+#   llminit          — llm-init / entrance Deployment
+workloadReplicas:
+  ollamagemma426bv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'gemma4:26b'
+  fullDescription: |
+    Gemma 4 26B A4B is a model from Google DeepMind that takes text and images as input and generates text responses. This app runs the model locally with Ollama for conversations, coding assistance, and questions about images.
+
+    **Key features**
+
+    - Generate and summarize text, answer questions, and assist with code.
+    - Interpret images and respond to prompts that combine text and images.
+    - Use a thinking mode for reasoning tasks.
+    - Support tool calling in compatible applications that provide tools.
+
+    **Using the model on Olares**
+
+    The app downloads `gemma4:26b` from the Ollama library. Model Console shows download progress and manages the model for use by compatible Olares applications. The default context window is 128K tokens, which limits how much conversation and other input the model can process at once.
+
+    [Gemma 4 documentation](https://ai.google.dev/gemma/docs/core/model_card_4)
+
+  developer: Google DeepMind
+  website: https://ai.google.dev/gemma
+  sourceCode: https://huggingface.co/google/gemma-4-26B-A4B-it
+  doc: https://ai.google.dev/gemma/docs/core/model_card_4
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  license:
+    - text: Apache-2.0
+      url: https://ai.google.dev/gemma/apache_2
+
+  accelerator:
+    #   nvidia       — discrete GPU; OLLAMA_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    - mode: nvidia
+      limitedCpu: "15360m"
+      requiredCpu: "1300m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # Engine MEMORY_REQUEST 6Gi + llm-init <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+      limitedMemory: "32Gi"
+      requiredMemory: "7Gi"
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "24Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "15360m"
+      requiredCpu: "1300m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "45Gi"
+      requiredMemory: "30Gi"
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  # appCache holds the shared RUN_DIR handoff dir
+  # (<appCache>/llm-init-run/<release>), same as the llamacpp charts.
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE        # example: ollama://qwen3.5:2b
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "ollama://gemma4:26b"
+    description: "Example: ollama://qwen3.5:2b. The Ollama library source to pull your model. Use `ollama://<model>:<tag>` format. Browse models at https://ollama.com/library."
+    regex: "^ollama://"
+  - envName: MODEL_NAME          # example: qwen3.5:2b
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "gemma4:26b"
+    description: "Example: qwen3.5:2b. The name of your model — use the string after `ollama://` in MODEL_SOURCE. This is also used as the OpenAI alias."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "The model capabilities. Pick what your model supports; check ollama.com/library for details. If no extra capabilities, pick None."
+  - envName: ENGINE_ARGS         # example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1
+    required: true
+    default: "OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=131072 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1"
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 .... KEEP_ALIVE is ollama-daemon-only (chart default -1, forever in VRAM)."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: OLLAMA_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_REQUEST # sum with llm-init <= requiredMemory 7Gi
+    required: true
+    default: "6Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_LIMIT # 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+    required: true
+    default: "30Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "23Gi"
+    description: "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"

@@ -1,0 +1,314 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+
+metadata:
+  name: audiospeakrsdiarv3
+  appid: audiospeakrsdiarv3
+  title: Speakrs Diarization
+  description: A local service that labels speakers and marks when they speak in recordings
+  icon: https://app.cdn.olares.com/appstore/audioengines/avencera/icon.png
+  version: "0.0.41"
+  categories:
+    - AI
+    - models
+  tags:
+    - speaker-diarization
+    - audio
+
+spec:
+  versionName: "0.0.41"
+  onlyAdmin: true
+  developer: Avencera
+  website: https://avencera.com
+  sourceCode: https://github.com/avencera/speakrs
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  doc: https://docs.rs/speakrs
+  license:
+    - text: Apache-2.0
+      url: https://github.com/avencera/speakrs/blob/master/LICENSE
+  upgradeDescription: |
+    v0.0.41: Deploys audio-engines v1.1.22 so the opt-in score-aware exclusive mode and its compact per-segment evidence are present in the running service. Existing clients keep the legacy method by default.
+  fullDescription: |
+    Speakrs Diarization processes recordings locally to mark when each speaker talks. It groups speech segments under anonymous speaker labels, without identifying people by name. Compatible Olares applications can use these results to distinguish speakers in a recording.
+
+    **Key features**
+
+    - Detect speech and changes between speakers.
+    - Assign consistent anonymous speaker labels across a recording.
+    - On NVIDIA installations, choose between accuracy-focused and faster processing; the faster mode can reduce accuracy.
+
+    **Before you install**
+
+    Choose CPU, NVIDIA GPU, or Intel GPU processing at installation. NVIDIA GPUs must use the Turing architecture or newer. Intel installations require a working Intel GPU and do not automatically fall back to the CPU. To use CPU processing instead, reinstall with the CPU compute mode.
+
+    [Speakrs documentation](https://docs.rs/speakrs)
+  supportArch:
+    - amd64
+    - arm64
+  accelerator:
+    - mode: nvidia
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3Gi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 3Gi
+      limitedGPUMemory: 3Gi
+
+    - mode: nvidia-gb10
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3328Mi
+      limitedMemory: 7Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+
+    - mode: cpu
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3328Mi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+
+    - mode: intel
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 10Gi
+      limitedMemory: 16Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+
+    - mode: intel-gpu
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "1"
+      limitedCpu: "5"
+      requiredMemory: 3Gi
+      limitedMemory: 12Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 3Gi
+      limitedGPUMemory: 3Gi
+
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: hf://avencera/speakrs-models --exclude *.mlmodelc/*
+    regex: ^hf://
+    description: "HuggingFace source llm-init downloads into the shared cache. Public
+      repository: no access form and no connected HuggingFace account are needed. The
+      --exclude drops the Apple-only CoreML trees, which are useless on a CUDA box."
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: speakrs/speakrs-community-1
+    description: "Model id advertised to clients; must match the engine /v1/models id.
+      It does not encode EXECUTION_MODE -- one application serves whichever mode is set,
+      so read that setting to know what a run used."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: audio
+    options:
+      - title: Audio
+        value: audio
+    description: "Model family this application belongs to."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: diar
+    multiSelect: true
+    splitter: ","
+    options:
+      - title: Diarization (who spoke when)
+        value: diar
+    description: "Capabilities this app exposes."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "1Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6Gi"
+    description: "Engine container memory ceiling. It bounds how long a clip this engine can
+      accept: see ENGINE_ARGS --max-audio-seconds."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "3Gi"
+    description: "GPU memory this app reserves on a shared card. Measured, not derived: the
+      engine holds 1474 MiB and does not grow during inference -- the batch sizes are fixed by
+      the exported ONNX graphs, so the arena is allocated when the sessions are built and a
+      40-minute recording costs the same as a 40-second one. 3Gi is roughly twice that, which
+      covers the part that varies by card and driver without claiming more than it needs -- on
+      a shared card every GiB named here is a GiB nothing else can use."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: EXECUTION_MODE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: auto
+    options:
+      - title: Match the compute mode (auto)
+        value: auto
+      - title: Accurate (cuda)
+        value: cuda
+      - title: Fast (cuda-fast)
+        value: cuda-fast
+      - title: CPU (cpu)
+        value: cpu
+      - title: Intel GPU (openvino)
+        value: openvino
+    description: "Accuracy against speed. `auto`, the default, follows the compute mode chosen
+      at install: a CPU install runs `cpu`, an Intel install runs `openvino`, an NVIDIA install
+      runs `cuda`. It exists because the
+      platform supplies this setting's default on every install, including the validation pass
+      the store makes for each compute mode a manifest declares -- so without a value that means
+      \"whatever fits\", a CPU install carries a CUDA mode it cannot run and there is no way to
+      tell that apart from an installer who asked for one. An NVIDIA install is the only one
+      where this setting decides anything: `cuda`, `cuda-fast` and `cpu` all run there, while
+      `openvino` does not and falls back to `cuda`. On a CPU or an Intel install the engine runs
+      the mode that fits the hardware whatever is selected here, because the platform also
+      re-sends the value it remembers from an earlier install, and a chart cannot tell that
+      from a deliberate choice. Choosing `cpu` on an NVIDIA install does not give the card
+      back: the reservation is made by the compute mode when the app is installed, so it is
+      still held while the engine runs on the processor.
+      `cuda` matches pyannote's accuracy and runs about
+      1.8x faster than it. `cuda-fast` runs about 3.6x faster by stepping the segmentation
+      window 2s instead of 1s, and costs 0.3-1.0 DER points. That trade is offered on NVIDIA
+      only: there is no fast variant of the CPU or Intel modes, so on those the speed this
+      setting can buy is none -- the cost is speaker confusion
+      and grows with how densely speakers overlap, so it is small on clean single-speaker-at-
+      a-time audio and around a point on far-field meetings. Changing this restarts the engine
+      and reloads the model. The first request after any restart costs about 50
+      seconds whatever the clip, reproduced across two restarts on the machine this was measured
+      on; later requests take a second. The cause was not established and no other GPU was
+      tested. Send a warm-up request after switching, or the next real caller pays it."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: info
+    options:
+      - title: Debug
+        value: debug
+      - title: Info
+        value: info
+      - title: Warn
+        value: warn
+      - title: Error
+        value: error
+    description: "Log verbosity of the engine and llm-init."
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine-native flags (llm-init ENGINE_ARGS), space separated, e.g.
+      --clustering-threshold 0.65 --exclusive. Diarization tuning: --clustering-threshold
+      (default 0.6) raises or lowers how readily two voices are called one person;
+      --min-duration-off SECONDS fills pauses shorter than it; --min-duration-on SECONDS
+      drops speech bursts shorter than it; --exclusive returns non-overlapping turns by
+      default. A caller may override those four per request. --max-audio-seconds (default
+      14400, four hours) caps clip length; this engine holds the whole clip in memory, so
+      raising it past what MEMORY_LIMIT covers turns a long upload into an OOM kill. On an
+      Intel install, --openvino-batching off runs segmentation one window at a time instead of
+      through the batched model prepared at startup; it is there for measuring, about 4x
+      slower on integrated graphics, and on is the default. The
+      execution mode is NOT set here -- it has its own setting above. A flag this engine does
+      not take is ignored with a warning in the log, not an error."
+
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+
+sharedEntrances:
+  - name: audiospeakrsdiarv3api
+    host: sharedentrances-api
+    port: 0
+    title: Speakrs Diarization
+    icon: https://app.cdn.olares.com/appstore/audioengines/avencera/icon.png
+    invisible: true
+    authLevel: internal
+
+entrances:
+  - name: audiospeakrsdiarv3
+    host: download-svc
+    port: 8090
+    title: Speakrs Diarization
+    icon: https://app.cdn.olares.com/appstore/audioengines/avencera/icon.png
+    authLevel: internal
+    openMethod: window
+
+options:
+  templateOnly: false
+  LLMGatewaySupported: true
+  shared: true
+  apiTimeout: 0
+  dependencies:
+    - name: olares
+      version: ">=1.12.7-0"
+      type: system
+
+workloadReplicas:
+  audiospeakrsdiarv3: 1
+  llminit: 1

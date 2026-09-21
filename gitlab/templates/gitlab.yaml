@@ -40,6 +40,8 @@
 {{- if and .Values.runner .Values.runner.ciServerUrl -}}
 {{- $runnerCiServerUrl = .Values.runner.ciServerUrl -}}
 {{- end -}}
+{{- /* Per-install IngressClass: Namespace is the primary uniqueness boundary; Name included for Olares allowMultipleInstall lint. */ -}}
+{{- $ingressClassName := printf "gitlab-nginx-%s-%s" .Release.Namespace .Release.Name -}}
 {{- $workhorseTrusted := concat $trustedProxies (list "127.0.0.1/32") -}}
 ---
 # Source: gitlab/charts/gitlab/charts/gitaly/templates/pdb.yaml
@@ -3768,6 +3770,7 @@ metadata:
     release: "gitlab"
     heritage: "Helm"
 spec:
+  replicas: {{ (index .Values.workloads "gitlab-gitlab-runner").replicaCount }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
@@ -3897,7 +3900,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-gitlab-exporter").replicaCount }}
   selector:
     matchLabels:
       app: gitlab-exporter
@@ -4151,7 +4154,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-gitlab-shell").replicaCount }}
   selector:
     matchLabels:
       app: gitlab-shell
@@ -4383,7 +4386,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-kas").replicaCount }}
   selector:
     matchLabels:
       app: kas
@@ -4603,7 +4606,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-sidekiq-all-in-1-v2").replicaCount }}
   selector:
     matchLabels:
       app: sidekiq
@@ -4999,7 +5002,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-toolbox").replicaCount }}
   selector:
     matchLabels:
       app: toolbox
@@ -5350,7 +5353,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-webservice-default").replicaCount }}
   selector:
     matchLabels:
       app: webservice
@@ -5879,6 +5882,7 @@ metadata:
   annotations:
     
 spec:
+  replicas: {{ (index .Values.workloads "gitlab-minio").replicaCount }}
   selector:
     matchLabels:
       app: minio
@@ -6007,7 +6011,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     component: "controller"
     app.kubernetes.io/component: controller
-  name: gitlab
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   annotations:
 spec:
@@ -6016,7 +6020,7 @@ spec:
       app: nginx-ingress
       release: gitlab
       component: "controller"
-  replicas: 1
+  replicas: {{ .Values.workloads.gitlab.replicaCount }}
   revisionHistoryLimit: 10
   minReadySeconds: 0
   template:
@@ -6053,7 +6057,7 @@ spec:
             - --publish-service=$(POD_NAMESPACE)/gitlab-nginx-ingress-controller
             - --election-id=ingress-controller-leader
             - --controller-class=k8s.io/ingress-nginx
-            - --ingress-class=gitlab-nginx
+            - --ingress-class={{ $ingressClassName }}
             - --configmap=$(POD_NAMESPACE)/gitlab-nginx-ingress-controller
             - --tcp-services-configmap={{ .Release.Namespace }}/gitlab-nginx-ingress-tcp
             - --watch-namespace=$(POD_NAMESPACE)
@@ -6147,7 +6151,7 @@ metadata:
   annotations:
     
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-registry").replicaCount }}
   selector:
     matchLabels:
       app: registry
@@ -6384,7 +6388,7 @@ spec:
       release: gitlab
       
   serviceName: gitlab-gitaly
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-gitaly").replicaCount }}
   podManagementPolicy: Parallel
   template:
     metadata:
@@ -6631,7 +6635,7 @@ metadata:
     helm.sh/chart: postgresql-13.4.4
     app.kubernetes.io/component: primary
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-postgresql").replicaCount }}
   serviceName: gitlab-postgresql-hl
   updateStrategy:
     rollingUpdate: {}
@@ -6884,7 +6888,7 @@ metadata:
     helm.sh/chart: redis-18.19.4
     app.kubernetes.io/component: master
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "gitlab-redis-master").replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/instance: gitlab
@@ -7118,17 +7122,17 @@ spec:
             storage: "8Gi"
 ---
 # Source: gitlab/charts/gitlab/charts/migrations/templates/job.yaml
+{{- if gt (int (index .Values.workloads "gitlab-webservice-default").replicaCount) 0 }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gitlab-migrations-1
+  name: gitlab-migrations-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: migrations
     chart: migrations-9.10.1
     release: gitlab
     heritage: Helm
-    
 spec:
   ttlSecondsAfterFinished: 100
   activeDeadlineSeconds: 3600
@@ -7140,10 +7144,10 @@ spec:
         chart: migrations-9.10.1
         release: gitlab
         heritage: Helm
-        
-        
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
-      
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
@@ -7366,19 +7370,20 @@ spec:
           sources:
           - secret:
               name: gitlab-wildcard-tls-ca
+{{- end }}
 ---
 # Source: gitlab/charts/minio/templates/create-buckets-job.yaml
+{{- if gt (int (index .Values.workloads "gitlab-minio").replicaCount) 0 }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gitlab-minio-create-buckets-1
+  name: gitlab-minio-create-buckets-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: minio
     chart: minio-0.4.3
     release: gitlab
     heritage: Helm
-    
 spec:
   ttlSecondsAfterFinished: 100
   activeDeadlineSeconds: 600
@@ -7390,20 +7395,17 @@ spec:
         chart: minio-0.4.3
         release: gitlab
         heritage: Helm
-        
-        
-
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
       automountServiceAccountToken: false
       restartPolicy: OnFailure
-      
-      
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
-      
       volumes:
         - name: minio-configuration
           projected:
@@ -7436,6 +7438,7 @@ spec:
         resources:
           requests:
             cpu: 50m
+{{- end }}
 ---
 # Source: gitlab/charts/nginx-ingress/templates/controller-ingressclass.yaml
 apiVersion: networking.k8s.io/v1
@@ -7453,7 +7456,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     component: "controller"
     app.kubernetes.io/component: controller
-  name: "gitlab-nginx"
+  name: gitlab-nginx-{{ .Release.Namespace }}-{{ .Release.Name }}
 spec:
   controller: k8s.io/ingress-nginx
 ---
@@ -7470,7 +7473,7 @@ metadata:
     heritage: Helm
     
   annotations:
-    kubernetes.io/ingress.class: "gitlab-nginx"
+    kubernetes.io/ingress.class: {{ $ingressClassName | quote }}
     kubernetes.io/ingress.provider: "nginx"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/custom-http-errors: ""
@@ -7487,7 +7490,7 @@ metadata:
       proxy_set_header X-Forwarded-Host {{ $kasDomain }};
 
 spec:
-  ingressClassName: gitlab-nginx
+  ingressClassName: {{ $ingressClassName }}
   rules:
     - host: {{ $kasDomain }}
       http:
@@ -7525,7 +7528,7 @@ metadata:
     gitlab.com/webservice-name: default
     
   annotations:
-    kubernetes.io/ingress.class: "gitlab-nginx"
+    kubernetes.io/ingress.class: {{ $ingressClassName | quote }}
     kubernetes.io/ingress.provider: "nginx"
     
     nginx.ingress.kubernetes.io/proxy-body-size: "512m"
@@ -7545,7 +7548,7 @@ metadata:
       proxy_set_header X-Forwarded-Port 443;
       proxy_set_header X-Forwarded-Host {{ $gitlabDomain }};
 spec:
-  ingressClassName: gitlab-nginx
+  ingressClassName: {{ $ingressClassName }}
   rules:
     - host: {{ $gitlabDomain }}
       http:
@@ -7575,7 +7578,7 @@ metadata:
     heritage: Helm
     
   annotations:
-    kubernetes.io/ingress.class: "gitlab-nginx"
+    kubernetes.io/ingress.class: {{ $ingressClassName | quote }}
     kubernetes.io/ingress.provider: "nginx"
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
@@ -7583,7 +7586,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     
 spec:
-  ingressClassName: gitlab-nginx
+  ingressClassName: {{ $ingressClassName }}
   rules:
     - host: {{ $minioDomain }}
       http:
@@ -7613,7 +7616,7 @@ metadata:
     heritage: Helm
     
   annotations:
-    kubernetes.io/ingress.class: "gitlab-nginx"
+    kubernetes.io/ingress.class: {{ $ingressClassName | quote }}
     kubernetes.io/ingress.provider: "nginx"
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
@@ -7621,7 +7624,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     
 spec:
-  ingressClassName: gitlab-nginx
+  ingressClassName: {{ $ingressClassName }}
   rules:
     - host: {{ $registryDomain }}
       http:
@@ -7754,9 +7757,10 @@ data:
     
     # Initial root password (prefer external value from Olares)
     {{- if .Values.olaresEnv.GITLAB_INITIAL_ROOT_PASSWORD }}
-    generate_secret_if_needed "gitlab-gitlab-initial-root-password" --from-literal="password"="{{ .Values.olaresEnv.GITLAB_INITIAL_ROOT_PASSWORD }}"
+    # Pass the value through base64 so password characters cannot alter this shell script.
+    generate_secret_if_needed "gitlab-gitlab-initial-root-password" --from-literal="password"="$(printf '%s' '{{ .Values.olaresEnv.GITLAB_INITIAL_ROOT_PASSWORD | b64enc }}' | base64 -d)"
     {{- else if .Values.GITLAB_INITIAL_ROOT_PASSWORD }}
-    generate_secret_if_needed "gitlab-gitlab-initial-root-password" --from-literal="password"="{{ .Values.GITLAB_INITIAL_ROOT_PASSWORD }}"
+    generate_secret_if_needed "gitlab-gitlab-initial-root-password" --from-literal="password"="$(printf '%s' '{{ .Values.GITLAB_INITIAL_ROOT_PASSWORD | b64enc }}' | base64 -d)"
     {{- else }}
     generate_secret_if_needed "gitlab-gitlab-initial-root-password" --from-literal="password"=$(gen_random 'a-zA-Z0-9' 64)
     {{- end }}
@@ -8094,7 +8098,6 @@ metadata:
     chart: gitlab-9.10.1
     release: gitlab
     heritage: Helm
-    
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
@@ -8107,12 +8110,11 @@ spec:
         chart: gitlab-9.10.1
         release: gitlab
         heritage: Helm
-        
-        
+        gateway.olares.io/shared-caller-outbound: "false"
       annotations:
+        # One-shot hook Jobs must not receive persistent mesh sidecars.
+        linkerd.io/inject: disabled
     spec:
-      
-      
       securityContext:
         runAsUser: 65534
         fsGroup: 65534
@@ -8157,7 +8159,6 @@ metadata:
     chart: gitlab-9.10.1
     release: gitlab
     heritage: Helm
-    
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
@@ -8170,12 +8171,11 @@ spec:
         chart: gitlab-9.10.1
         release: gitlab
         heritage: Helm
-        
-        
+        gateway.olares.io/shared-caller-outbound: "false"
       annotations:
+        # One-shot hook Jobs must not receive persistent mesh sidecars.
+        linkerd.io/inject: disabled
     spec:
-      
-      
       securityContext:
         runAsUser: 65534
         fsGroup: 65534
@@ -8262,7 +8262,6 @@ metadata:
     chart: gitlab-9.10.1
     release: gitlab
     heritage: Helm
-    
   annotations:
     "helm.sh/hook": pre-upgrade
     "helm.sh/hook-weight": "-10"
@@ -8277,12 +8276,11 @@ spec:
         chart: gitlab-9.10.1
         release: gitlab
         heritage: Helm
-        
-        
-
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        # One-shot hook Jobs must not receive persistent mesh sidecars.
+        linkerd.io/inject: disabled
     spec:
-      
-      
       securityContext:
         runAsUser: 65534
         fsGroup: 65534

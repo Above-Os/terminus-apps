@@ -1,0 +1,63 @@
+metadata:
+  description: "使用 llama.cpp 运行 Qwen3.6-35B-A3B（GGUF UD-IQ4_XS）模型。"
+  title: Qwen3.6-35B-A3B (llama.cpp)
+
+spec:
+  upgradeDescription: |
+    v1.0.24: Model Console（llm-init）版本更新为 v1.7.21。
+
+    v1.0.23: Model Console 升级到 llm-init v1.7.19。
+
+    v1.0.16: llm-init v1.6.1 —— 闸门与容量读数改为跟随 ENGINE_ARGS，不再沿用进程
+      启动时读到的那一份。本预设的默认行为不变，但改卡的两个方向现在都生效：加上
+      -np 并配 -no-kvu 后每个槽位有自己的份额，闸门会退出，不再为引擎已经在管的
+      池子白付两跳 tokenize；反过来也一样。无论哪个方向，卡上报的窗口与槽位数都
+      来自重新拉起的引擎实际解析出的值。在此之前只有重启应用才能做到这件事。
+
+    v1.0.15: llm-init v1.6.0 —— 本预设没写 -np，而 llama.cpp 在这种情况下的默认值
+      是 4 个槽位共用一个 KV 池，不是 llm-init 以前上报的单槽。所以 Router 宣称的
+      并发是错的，而且四个槽位每一个都能申请到整个 131072 token 的池子。现在请求会
+      先预留池子空间再转发，池子满了就等，等不到返回 503 kv_budget_exhausted，
+      而不是让池子在解码中途耗尽——那会把当时所有正在生成的请求一起打掉。同时也
+      开始读引擎自己的 /props，窗口和槽位数来自它实际解析出的值，而非参数的推断。
+
+    v1.0.13: 下调 NVIDIA 主机内存预留，方便 1.12.6 时间分片节点安装（引擎 request 21Gi→6Gi，应用 requiredMemory 22Gi→7Gi）。显存配额不变。
+
+    v1.0.9: bump llama.cpp to `server-cuda12-b10068`; HF_TOKEN via Secret + OLARES_SYSTEM_HUGGINGFACE_*.
+
+    v1.0.8: Move `HF_TOKEN` into Kubernetes Secret (`secretKeyRef`); map HF env from `OLARES_SYSTEM_HUGGINGFACE_*`.
+
+    v1.0.7: LLAMACPP_MEMORY_LIMIT 30Gi; llm-init limit 2Gi; limitedMemory 32Gi (30+2).
+    v1.0.6: nvidia host memory — requiredMemory 22Gi, LLAMACPP_MEMORY_REQUEST 21Gi, LLAMACPP_MEMORY_LIMIT 26Gi, limitedMemory 30Gi.
+    v1.0.5: nvidia host memory — requiredMemory 16Gi, LLAMACPP_MEMORY_REQUEST 15Gi, LLAMACPP_MEMORY_LIMIT 19Gi, limitedMemory 26Gi.
+    v1.0.4: bump llama.cpp to server-cuda12-b10068.
+    v1.0.4: bump llm-init to v1.3.1.
+    v1.0.4: align nvidia requiredMemory=12Gi and LLAMACPP_MEMORY_REQUEST=11Gi (qwopus pattern).
+  fullDescription: |
+    **模型简介**
+    Qwen3.6-35B-A3B 是阿里巴巴 Qwen 系列的 MoE 视觉语言模型，总参数量 35B、每次激活约 3B。内置视觉编码器，支持超长上下文，开箱即用支持思考、工具调用与视觉能力。本应用通过 llama.cpp 运行 `unsloth/Qwen3.6-35B-A3B-GGUF` 的 `UD-IQ4_XS` GGUF 量化版本。
+
+    适合需要长上下文与视觉理解的多模态工作负载。Qwen3.6 35B 系列原生支持扩展上下文窗口，并配备视觉编码器以处理图文任务。
+
+    **预设配置**
+    - 模型：`unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS`（含 `mmproj-F16.gguf` 视觉投影文件）
+    - 能力：思考、工具、视觉
+    - 引擎参数：`-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0`（128K 上下文、全量 GPU 卸载、KV 缓存量化为 q8_0）
+    - 所需显存：`23Gi`
+
+    **加速器模式**
+    | 模式           | 设备             | 说明                                        |
+    |----------------|------------------|---------------------------------------------|
+    | `nvidia`       | GPU (CUDA)       | 使用 `23Gi` 显存，`-ngl all` 完全利用 GPU   |
+    | `nvidia-gb10`  | GPU (Spark)      | 类似上方，但显存由 pod 管理                  |
+    
+    **工作流程说明**
+    首先，Model Console 下载并准备模型，然后 `llama.cpp` 在模型准备好后启动服务。这两个部分独立运行但共享文件与进度信息。
+
+    **技术栈说明**
+    - **llama.cpp**：运行模型并通过 8081 端口提供 API 服务
+    - **Model Console**：下载模型，展示进度，并通过 8090 端口提供 OpenAI API，代理到 `llamacpp`
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。
+

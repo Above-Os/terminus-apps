@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/part-of: mastodon
     app.kubernetes.io/component: sidekiq
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "mastodon-sidekiq").replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -70,7 +70,7 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: mastodon
-          image: "docker.io/beclab/linuxserver-mastodon:4.5.4"
+          image: "docker.io/linuxserver/mastodon:4.7.1"
           imagePullPolicy: IfNotPresent
           resources:
             requests:
@@ -80,16 +80,9 @@ spec:
               cpu: 500m
               memory: 1Gi
           securityContext:
-            # LinuxServer.io image requires root permissions to write to certain directories
             allowPrivilegeEscalation: true
-            # capabilities:
-            #   drop:
-            #   - ALL
             privileged: false
             readOnlyRootFilesystem: false
-            runAsGroup: 0
-            runAsNonRoot: false
-            runAsUser: 0
             seLinuxOptions: {}
             seccompProfile:
               type: RuntimeDefault
@@ -112,10 +105,16 @@ spec:
             - name: NODE_ENV
               value: "production"
             - name: MASTODON_DATABASE_PASSWORD
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: MASTODON_DATABASE_PASSWORD
 
             - name: DB_PASS
-              value: "{{ .Values.postgres.password }}"
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: DB_PASS
             - name: MASTODON_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -128,9 +127,15 @@ spec:
                   key: "redis-password"
             {{- if .Values.storage.s3Enabled }}
             - name: MASTODON_AWS_ACCESS_KEY_ID
-              value: {{ .Values.minio.username }}
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: MASTODON_AWS_ACCESS_KEY_ID
             - name: MASTODON_AWS_SECRET_ACCESS_KEY
-              value: {{ .Values.minio.password }}
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: MASTODON_AWS_SECRET_ACCESS_KEY
             {{- end }}
             # SMTP configuration - extracted to env for special scenario needs
             {{- if .Values.olaresEnv.SMTP_SERVER }}
@@ -145,9 +150,12 @@ spec:
             - name: SMTP_LOGIN
               value: "{{ .Values.olaresEnv.SMTP_LOGIN }}"
             {{- end }}
-            {{- if .Values.olaresEnv.SMTP_PASSWORD }}
+{{- if .Values.olaresEnv.SMTP_PASSWORD }}
             - name: SMTP_PASSWORD
-              value: "{{ .Values.olaresEnv.SMTP_PASSWORD }}"
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: SMTP_PASSWORD
             {{- end }}
             {{- if .Values.olaresEnv.SMTP_FROM_ADDRESS }}
             - name: SMTP_FROM_ADDRESS
@@ -254,13 +262,5 @@ spec:
             name: mastodon-initializers
         - name: system-data
           hostPath:
-            {{- if .Values.sysVersion }}
-              {{- if semverCompare ">=1.12.3-0" (toString .Values.sysVersion) }}
             path: '{{ .Values.userspace.appData }}/mastodon/system'
-              {{- else }}
-            path: '{{ .Values.userspace.appData }}/mastodon/mastodon/system'
-              {{- end }}
-            {{- else }}
-            path: '{{ .Values.userspace.appData }}/mastodon/mastodon/system'
-            {{- end }}
             type: DirectoryOrCreate

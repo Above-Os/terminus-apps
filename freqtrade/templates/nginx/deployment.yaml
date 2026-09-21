@@ -1,4 +1,3 @@
----
 # Gateway: one port 8080. FreqUI at /, Spot /api-spot/, Futures /api-future/, Backtest webserver /api-backtest/
 apiVersion: v1
 data:
@@ -6,8 +5,8 @@ data:
     server {
       listen 8080;
       server_name _;
-      access_log /opt/bitnami/openresty/nginx/logs/access.log;
-      error_log /opt/bitnami/openresty/nginx/logs/error.log;
+      access_log /usr/local/openresty/nginx/logs/access.log;
+      error_log /usr/local/openresty/nginx/logs/error.log;
 
       proxy_connect_timeout 30s;
       proxy_send_timeout 60s;
@@ -55,7 +54,7 @@ metadata:
   name: freqtrade-gateway
   namespace: "{{ .Release.Namespace }}"
 spec:
-  replicas: 1
+  replicas: {{ (index .Values.workloads "freqtrade-gateway").replicaCount }}
   selector:
     matchLabels:
       io.kompose.service: freqtrade-gateway
@@ -76,12 +75,9 @@ spec:
                 path: nginx.conf
       containers:
         - name: nginx
-          image: "docker.io/beclab/aboveos-bitnami-openresty:1.25.3-2"
+          image: "docker.io/openresty/openresty:1.29.2.5-bookworm-fat"
           ports:
             - containerPort: 8080
-          env:
-            - name: OPENRESTY_CONF_FILE
-              value: /etc/nginx/nginx.conf
           startupProbe:
             tcpSocket:
               port: 8080
@@ -104,10 +100,7 @@ spec:
               memory: 256Mi
           volumeMounts:
             - name: nginx-config
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
-            - name: nginx-config
-              mountPath: /opt/bitnami/openresty/nginx/conf/server_blocks/nginx.conf
+              mountPath: /etc/nginx/conf.d/default.conf
               subPath: nginx.conf
       restartPolicy: Always
 status: {}

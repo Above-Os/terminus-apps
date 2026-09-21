@@ -1,10 +1,18 @@
 {{- /* ENGINE_ARGS is the v1.1.0 daemon-tuning surface: a KEY=VALUE list of
        OLLAMA_* env that the ollama.sh wrapper exports before `ollama serve`.
-       Clone-configurable via olaresEnv.ENGINE_ARGS (e.g.
-       OLLAMA_KEEP_ALIVE=-1 pins the model in VRAM).
-       Must stay in sync with the same block in templates/llm-init.yaml. */ -}}
+       Clone-configurable via olaresEnv.ENGINE_ARGS; chart defaults
+       OLLAMA_KEEP_ALIVE=-1 when omitted.
+       llm-init uses engineArgsForLlminit (same user args, no KEEP_ALIVE). */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $engineArgs := include "ollamallmbasev3.engineArgs" (dict "Args" ($oe.ENGINE_ARGS | default "")) -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelMode := $oe.MODEL_MODE | default "chat" -}}
 {{- /* CPU/RAM via olaresEnv (manifest defaults); accelerator -1 sums rendered
        workloads. Defaults: 200m/2Gi req, 6/35Gi lim (+ llm-init 200m/256Mi). */ -}}
 {{- $cpuRequest := trim ($oe.OLLAMA_CPU_REQUEST | default "200m") -}}
@@ -12,20 +20,17 @@
 {{- $cpuLimit := trim ($oe.OLLAMA_CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.OLLAMA_MEMORY_LIMIT | default "35Gi") -}}
 {{- /* Per-instance model memory quota. nvidia.com/gpumem needs a BARE MiB int;
-       Spark unified memory reuses the same value as pod memory ("<MiB>Mi"). */ -}}
+       Spark unified memory reuses the same value as pod memory ("<MiB>Mi").
+       */ -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.OLLAMA_REQUIRED_GPU_MEMORY | default "4096") -}}
-{{- /* Olares injects .Values.gpu / .Values.GPU.Type at install (SelectedGpuType).
-       Discrete NVIDIA: OLLAMA_REQUIRED_GPU_MEMORY -> nvidia.com/gpumem (Mi).
-       Spark (nvidia-gb10) unified memory: same env -> pod memory r/l. */ -}}
-{{- $gpuType := .Values.gpu | default "" -}}
-{{- if not $gpuType -}}
-{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
-{{- end -}}
-{{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
+{{- /* Shared RUN_DIR host path. Same convention as llamacppllmbasev3:
+       appCache (run/scratch state, not user data), namespaced per release.
+       Declared in both templates -- helm renders each file on its own. */ -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # Ollama daemon Pod (single container) so the Olares
 # applications.app.bytetrade.io/gpu-inject annotation cleanly targets just
@@ -71,8 +76,12 @@ spec:
           hostPath:
             path: "{{ .Values.userspace.appCommon }}/ollama"
             type: DirectoryOrCreate
-        # CUDA JIT compile cache lives alongside the models under appCommon/ollama
-        # (appCache is not available for this hostPath mount).
+        # CUDA JIT compile cache, kept under appCommon/ollama beside the blobs
+        # on purpose: appCommon is shared across every ollama app, so one JIT
+        # cache serves all of them, and purging the model store drops the
+        # matching cache with it. appCache is granted (the RUN_DIR handoff
+        # below uses it) but is per-app -- moving this there would fragment
+        # that sharing and orphan every existing install's warm cache.
         - name: cuda-compute-cache
           hostPath:
             path: "{{ .Values.userspace.appCommon }}/ollama/.nv"
@@ -81,9 +90,19 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+        # Shared RUN_DIR, read-only on this side: the handoff is one-way, no
+        # wrapper ever writes back. This is what carries the model card's
+        # engine_args and the engine_restart generation the wrapper polls, plus
+        # the common.sh llm-init publishes on every boot. Same hostPath the
+        # llminit Deployment mounts read-write (templates/llm-init.yaml), which
+        # is also where the init container that chowns it lives.
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
       containers:
         - name: ollama
-          image: docker.io/ollama/ollama:0.30.0
+          image: docker.io/ollama/ollama:0.33.1
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/ollama.sh"]
           env:
@@ -91,6 +110,21 @@ spec:
               value: ollama
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            # Source the helpers llm-init publishes into RUN_DIR instead of a
+            # copy inlined in this chart: supervise_engine ships with the
+            # llm-init image (>= v1.5.0), so a fix to it arrives with an image
+            # bump. The ConfigMap carries no fallback copy -- pinning llm-init
+            # below v1.5.0 would leave the wrapper waiting for this file.
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_MODE
+              value: "{{ $modelMode }}"
+            - name: OLLAMA_PRELOAD
+              value: "true"
             - name: OLLAMA_HOST
               value: "0.0.0.0:11434"
             - name: OLLAMA_NOPRUNE
@@ -131,7 +165,15 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
           resources:
+            # nvidia.com/gpumem is the per-instance GPU memory quota read by the
+            # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
+            # It's a non-overcommittable extended resource, so it must be in BOTH
+            # requests and limits with the same value. Dropped on gb10 (unified
+            # memory uses pod memory instead).
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
@@ -141,6 +183,9 @@ spec:
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
+{{- if not $unifiedMem }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

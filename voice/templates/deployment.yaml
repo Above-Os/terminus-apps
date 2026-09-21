@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: voice
+spec:
+  replicas: {{ .Values.workloads.voice.replicaCount }}
+  selector:
+    matchLabels:
+      app: voice
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: voice
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        # Olares grants appData without transferring ownership, and kubelet
+        # creates a missing hostPath as root.
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for d in /data /data/media; do
+                mkdir -p "$d" && chown 1000:1000 "$d"
+              done
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+      containers:
+        - name: voice
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8430
+          env:
+            - name: VOICE_ADDR
+              value: ":8430"
+            - name: VOICE_DATA_DIR
+              value: /data
+            - name: ROUTER_BASE_URL
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+            - name: OLARES_APP_ID
+              value: "voice"
+            - name: POSTGRES_HOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.databases.voice | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-app
+                  key: DB_PASSWORD
+            - name: TZ
+              value: Etc/UTC
+          # /healthz includes Router, which must not restart a healthy app.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: app-data
+              mountPath: /data
+      volumes:
+        - name: app-data
+          hostPath:
+            path: {{ .Values.userspace.appData }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: voice
+spec:
+  selector:
+    app: voice
+  ports:
+    - name: http
+      port: 8430
+      targetPort: 8430
+      protocol: TCP

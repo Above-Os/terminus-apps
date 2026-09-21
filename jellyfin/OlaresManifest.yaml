@@ -1,15 +1,25 @@
-olaresManifest.version: '0.13.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  jellyfin: 1
+
 metadata:
   name: jellyfin
   description: The Free Software Media System
   icon: https://app.cdn.olares.com/appstore/jellyfin/icon.png
   appid: jellyfin
-  version: '1.0.16'
+  version: '1.0.35'
   title: Jellyfin
   categories:
   - Fun
-  - Entertainment
+  - homelab
+  tags:
+  - home-theater
+  - media-management
+  - smart-home
+
 permission:
   appData: true
   appCache: true
@@ -17,7 +27,7 @@ permission:
   userData:
   - Home
 spec:
-  versionName: '10.11.6'
+  versionName: '12.1'
   featuredImage: https://app.cdn.olares.com/appstore/jellyfin/promote_image_1v2.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/jellyfin/promote_image_1v2.webp
@@ -52,35 +62,14 @@ spec:
     The project relies entirely on contributions from volunteers. Want to help out? There's lots of ways to do so, and you don't even have to code!
 
   upgradeDescription: |
-    Upgrade Jellyfin Server to 10.11.6
+    This release supports choosing an **accelerator mode** at install time (**cpu**, **intel**, or **amd**). If you need hardware transcoding and your current install does not use the right mode, **uninstall and reinstall** Jellyfin. When uninstalling, **do not** enable delete application data — your libraries, settings, and configuration will remain for the new install.
+    On Olares **12.6**, install **cpu** and enable **ENABLE_HW_ACCEL** for integrated-GPU transcoding. On Olares **12.7+**, choose **intel** or **amd** at install for gpu-inject hardware transcoding.
 
-    We are pleased to announce the latest stable release of Jellyfin, version 10.11.6!
+    On a host with both an integrated GPU and a discrete NVIDIA card, hardware transcoding now keeps only the bound integrated render node visible, so QSV no longer fails initializing against the NVIDIA device.
 
-    This minor release brings several bugfixes to improve your Jellyfin experience. As always, please ensure you take a full backup before upgrading!
+    **Jellyfin 12.1** is a maintenance release with performance refinements and bug fixes: improved nested-folder handling and media entry resolution, library monitoring and subtitle processing updates, database optimizations, Quick Connect user selection in the web UI, Jellyfin SDK 1.0.0, and Safari indicator color fixes. Upgrades migrate legacy root-owned config to the application user and normalize empty encoder presets to **auto**. Back up configuration and data before upgrading.
 
-    General Changes (20)
-    Prioritize better matches on search [PR #15983], by @Shadowghost
-    Fix artist display order [PR #15816], by @theguymadmax
-    Restore weekly refresh for library folder images [PR #16046], by @theguymadmax
-    Be more strict about PersonType assignment [PR #15872], by @Shadowghost
-    Fix birthplace not saving correctly [PR #16020], by @theguymadmax
-    Trim music artist names [PR #15808], by @theguymadmax
-    Add mblink creation logic to library update endpoint [PR #15965], by @Collin-Swish
-    Fix watched state not kept on Media replace/rename [PR #15899], by @MarcoCoreDuo
-    Skip hidden directories and .ignore paths in library monitoring [PR #16029], by @theguymadmax
-    Revert "always sort season by index number" [PR #15950], by @theguymadmax
-    Fix crash when plugin repository has an invalid URL [PR #15961], by @theguymadmax
-    Fix tag inheritance for Continue Watching queries [PR #15931], by @theguymadmax
-    Fix playlist item de-duplication [PR #15858], by @Collin-Swish
-    Prefer US rating on fallback [PR #15793], by @Shadowghost
-    Fix missing H.264 and AV1 SDR fallbacks in HLS playlist [PR #15833], by @nyanmisaka
-    Add CultureDto cache [PR #15826], by @cvium
-    Fix the use of HWA in unsupported H.264 Hi422P/Hi444PP [PR #15819], by @nyanmisaka
-    Enforce more strict webm check [PR #15807], by @gnattu
-    Fix video lacking SAR and DAR are marked as anamorphic [PR #15834], by @nyanmisaka
-    Use hvc1 codectag for Dolby Vision 8.4 [PR #15835], by @gnattu
-
-    View full release note at https://github.com/jellyfin/jellyfin/releases/tag/v10.11.6
+    View full release note at https://github.com/jellyfin/jellyfin/releases/tag/v12.1
 
   developer: Jellyfin
   website: https://jellyfin.org/
@@ -89,12 +78,33 @@ spec:
   locale:
   - en-US
   - zh-CN
-  requiredMemory: 256Mi
-  limitedMemory: 4Gi
-  requiredDisk: 128Mi
-  limitedDisk: 10Gi
-  requiredCpu: 0.1
-  limitedCpu: 4
+  - de-DE
+  - es-ES
+  - it-IT
+  - fr-FR
+  - ja-JP
+  accelerator:
+  - mode: cpu
+    requiredCpu: "0.1"
+    limitedCpu: "4"
+    requiredMemory: 256Mi
+    limitedMemory: 4Gi
+    requiredDisk: 128Mi
+    limitedDisk: 10Gi
+  - mode: intel
+    requiredCpu: "0.1"
+    limitedCpu: "4"
+    requiredMemory: 256Mi
+    limitedMemory: 4Gi
+    requiredDisk: 128Mi
+    limitedDisk: 10Gi
+  - mode: amd
+    requiredCpu: "0.1"
+    limitedCpu: "4"
+    requiredMemory: 256Mi
+    limitedMemory: 4Gi
+    requiredDisk: 128Mi
+    limitedDisk: 10Gi
   doc: https://jellyfin.org/docs/
   legal:
   - text: Community Standards
@@ -117,7 +127,33 @@ options:
   dependencies:
   - name: olares
     type: system
-    version: '>=1.12.1-0'
+    version: '>=1.12.6-0'
+envs:
+  - envName: ENABLE_HW_ACCEL
+    type: bool
+    default: 'false'
+    required: false
+    editable: true
+    applyOnChange: true
+    description: |
+      **Olares 12.6 only.** Enable Intel/AMD iGPU hw transcoding on **cpu** install: mounts /dev/dri, supplementalGroups, privileged. On Olares **12.7+**, install with **intel** or **amd** accelerator instead — this env is ignored when gpu-inject is active.
+      Host must expose /dev/dri. Set VIDEO_GID and RENDER_GID from the host if not on Olares One.
+  - envName: VIDEO_GID
+    type: int
+    default: '44'
+    required: false
+    editable: true
+    applyOnChange: true
+    description: |
+      **Olares 12.6 legacy path only** (when ENABLE_HW_ACCEL=true). GID of the host "video" group for /dev/dri/card*. Run `getent group video` on the host.
+  - envName: RENDER_GID
+    type: int
+    default: '994'
+    required: false
+    editable: true
+    applyOnChange: true
+    description: |
+      **Olares 12.6 legacy path only** (when ENABLE_HW_ACCEL=true). GID of the host "render" group for /dev/dri/renderD*. Run `getent group render` on the host.
 entrances:
 - name: jellyfin-svc
   port: 8096
@@ -133,9 +169,3 @@ overlayGateway:
     workload: jellyfin
     description: "Access Jellyfin using IP address in LAN"
     protocol: tcp
-
-provider:
-- name: jellyfin-svc
-  entrance: jellyfin-svc
-  paths: ["/*"]
-  verbs: ["*"]

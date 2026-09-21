@@ -1,5 +1,5 @@
 ---
-olaresManifest.version: '0.10.0'
+olaresManifest.version: '0.11.0'
 olaresManifest.type: app
 apiVersion: 'v2'
 metadata:
@@ -7,12 +7,12 @@ metadata:
   description: FastAPI service on top of WhisperX
   icon: https://app.cdn.olares.com/appstore/whisperwebui/icon.png
   appid: whisperservicev2
-  version: '1.0.4'
+  version: '1.0.14'
   title: Whisper API
   categories:
   - AI
   - Utilities_v112
-  - Utilities
+
 sharedEntrances:
 - name: whisperservicev2
   title: Whisper API
@@ -62,6 +62,9 @@ spec:
     - Basic health check (/health): Simple service status check
     - Liveness probe (/health/live): Verifies if application is running
     - Readiness probe (/health/ready): Checks if application is ready to accept requests (includes database connectivity check)    
+  upgradeDescription: |
+    Add the Helm release revision to the download Job name so upgrades do not patch its immutable pod template.
+    Replace the Bitnami OpenResty proxy with official OpenResty and run it as UID/GID 1000 with writable runtime paths.
   developer: pavelzbornik
   website: https://github.com/pavelzbornik/whisperX-FastAPI
   sourceCode: https://github.com/pavelzbornik/whisperX-FastAPI
@@ -69,6 +72,11 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
   doc: https://github.com/pavelzbornik/whisperX-FastAPI
   license:
     - text: MIT License
@@ -102,7 +110,7 @@ options:
   dependencies:
     - name: olares
       type: system
-      version: '>=1.12.3-0'
+      version: '>=1.12.3-0,<1.12.6'
   {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
   {{- else }}
     - name: whisperservicev2
@@ -120,13 +128,13 @@ options:
   {{- end }}
 envs:
 {{- if and .Values.admin .Values.bfl.username (eq .Values.admin .Values.bfl.username) }}
-  - envName: HF_TOKEN
+  - envName: OLARES_USER_HUGGINGFACE_TOKEN
     required: true
     applyOnChange: true
     valueFrom:
       envName: OLARES_USER_HUGGINGFACE_TOKEN
 {{- end }}
-  - envName: HF_ENDPOINT
+  - envName: OLARES_USER_HUGGINGFACE_SERVICE
     required: true
     applyOnChange: true
     valueFrom:

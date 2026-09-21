@@ -1,4 +1,3 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,7 +6,7 @@ metadata:
   labels:
     app: teable
 spec:
-  replicas: 1
+  replicas: {{ .Values.workloads.teable.replicaCount }}
   selector:
     matchLabels:
       app: teable
@@ -18,7 +17,60 @@ spec:
       labels:
         app: teable
     spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
       initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # Old images left upload directories owned by root. Replacing
+              # plugin files requires write permission on their parent directory.
+              for relative in . uploads uploads/public uploads/private \
+                uploads/public/plugin uploads/public/avatar uploads/public/form \
+                uploads/public/oauth uploads/public/logo uploads/public/template \
+                uploads/public/chat-data-visualization-code uploads/public/space-avatar \
+                uploads/private/table uploads/private/import uploads/private/export-base \
+                uploads/private/comment uploads/private/app uploads/private/chat-file \
+                uploads/private/automation uploads/private/record-history \
+                uploads/private/record-removal uploads/private/artifact \
+                uploads/private/workflow-run uploads/private/audit-log; do
+                directory="/app/.assets/$relative"
+                if [ -L "$directory" ]; then
+                  echo "Refusing upload directory symlink: $directory" >&2
+                  exit 1
+                fi
+                mkdir -p "$directory"
+                case "$(stat -c '%A' "$directory")" in
+                  drwx*) ;;
+                  *) chmod u+rwx "$directory" ;;
+                esac
+                if [ "$(stat -c '%u:%g' "$directory")" != '1000:1000' ]; then
+                  chown 1000:1000 "$directory"
+                fi
+              done
+              mkdir -p /app/.temporary
+              chown 1000:1000 /app/.temporary
+              touch /swagger/openapi.json
+              chown 1000:1000 /swagger/openapi.json
+              chown 1000:1000 /next-cache
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: /app/.assets
+              name: teable-data
+              subPath: teable
+            - mountPath: /app/.temporary
+              name: teable-tmp
+            - mountPath: /swagger
+              name: swagger-write
+            - mountPath: /next-cache
+              name: next-cache
+          imagePullPolicy: IfNotPresent
         - name: check-ready
           image: "docker.io/beclab/wait-for:0.1.0"
           args:
@@ -31,24 +83,25 @@ spec:
           imagePullPolicy: IfNotPresent
       containers:
         - name: teable
-          image: "docker.io/beclab/teableio-teable:3077582aef94c87199dade566f2459ef264f26bb"
+          image: "docker.io/teableio/teable:release.2026-09-11T07-36-49Z.3059"
           imagePullPolicy: IfNotPresent
           env:
-            - name: PGID
-              value: "1000"
-            - name: PUID
-              value: "1000"
             - name: TZ
               value: Etc/UTC
-            - name: DISPLAY
-              value: ":0"
+            - name: COREPACK_ENABLE_DOWNLOAD_PROMPT
+              value: "0"
+            - name: COREPACK_NPM_REGISTRY
+              value: "https://registry.npmmirror.com"
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: teable
                   key: app-password
             - name: PRISMA_DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.teable }}?schema=public"
+              valueFrom:
+                secretKeyRef:
+                  name: teable
+                  key: PRISMA_DATABASE_URL
             - name: BACKEND_CACHE_REDIS_URI
               value: "redis://teable-redis:6379/0"
           envFrom:
@@ -67,7 +120,7 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /
+              path: /health
               port: 3000
             initialDelaySeconds: 120
             periodSeconds: 20
@@ -75,7 +128,7 @@ spec:
             failureThreshold: 6
           readinessProbe:
             httpGet:
-              path: /
+              path: /health
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 15
@@ -85,7 +138,20 @@ spec:
             - mountPath: /app/.assets
               name: teable-data
               subPath: teable
+            - mountPath: /app/.temporary
+              name: teable-tmp
+            - mountPath: /app/enterprise/backend-ee/dist/openapi.json
+              name: swagger-write
+              subPath: openapi.json
+            - mountPath: /app/enterprise/app-ee/.next/cache
+              name: next-cache
       volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: swagger-write
+          emptyDir: {}
+        - name: teable-tmp
+          emptyDir: {}
         - name: teable-data
           hostPath:
             type: DirectoryOrCreate
@@ -98,11 +164,12 @@ spec:
             {{- else }}
             path: '{{ .Values.userspace.appData }}/teable'
             {{- end }}
+{{- if gt (int .Values.workloads.teable.replicaCount) 0 }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: teable-db-migrate
+  name: teable-db-migrate-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: teable
@@ -111,26 +178,39 @@ spec:
   ttlSecondsAfterFinished: 100
   backoffLimit: 3
   template:
+    metadata:
+      labels:
+        app: teable
+        component: db-migrate
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
       containers:
         - name: teable-db-migrate
-          image: "docker.io/beclab/teableio-teable-db-migrate:3077582aef94c87199dade566f2459ef264f26bb"
+          image: "docker.io/teableio/teable:release.2026-09-11T07-36-49Z.3059"
+          args:
+            - migrate-only
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
           env:
-            - name: PGID
-              value: "1000"
-            - name: PUID
-              value: "1000"
             - name: TZ
               value: Etc/UTC
-            - name: DISPLAY
-              value: ":0"
+            - name: COREPACK_ENABLE_DOWNLOAD_PROMPT
+              value: "0"
+            - name: COREPACK_NPM_REGISTRY
+              value: "https://registry.npmmirror.com"
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: teable
                   key: app-password
             - name: PRISMA_DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.teable }}?schema=public"
+              valueFrom:
+                secretKeyRef:
+                  name: teable
+                  key: PRISMA_DATABASE_URL
           resources:
             requests:
               cpu: 300m
@@ -139,6 +219,7 @@ spec:
               cpu: 500m
               memory: 500Mi
       restartPolicy: Never
+{{- end }}
 
 ---
 apiVersion: v1

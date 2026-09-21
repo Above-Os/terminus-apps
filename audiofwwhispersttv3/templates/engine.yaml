@@ -1,0 +1,221 @@
+{{- /* Whisper STT: NVIDIA uses Faster-Whisper; Intel uses OpenVINO WhisperPipeline.
+       One chart, four accelerator modes. One MODEL_SOURCE (openai/whisper-large-v3). */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ($oe.MODEL_SUPPORTS | default "stt") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $supportsRaw := join "," $supportsKeys -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.MEMORY_REQUEST | default "2Gi") -}}
+{{- $cpuLimit := trim ($oe.CPU_LIMIT | default "4") -}}
+{{- $memLimit := trim ($oe.MEMORY_LIMIT | default "12Gi") -}}
+{{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "8Gi") -}}
+{{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
+{{- $gpuMiB := "" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
+{{- /* iGPU and gb10 are unified memory. intel-gpu (Arc) is discrete. */ -}}
+{{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
+{{- /* ENGINE_IMAGE has no manifest default: filling one would pin every mode to the same image. */ -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-whisper-ov:v1.1.23" "docker.io/beclab/audio-fasterwhisper:v1.1.23" $isIntel) -}}
+{{- if $wantGpu -}}
+{{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
+{{- if $unifiedMem -}}
+{{- $memRequest = printf "%sMi" $gpuMiB -}}
+{{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- end -}}
+{{- end -}}
+{{- /* ENGINE_ARGS is whole-string replace. --device cpu is only for a NVIDIA CPU clone.
+       Intel refuses CPU; the engine fills --device GPU. */ -}}
+{{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
+{{- if and (eq $engineArgs "") (not $wantGpu) (not $isIntel) -}}
+{{- $engineArgs = "--device cpu" -}}
+{{- end -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+{{- if and $wantGpu (not $isIntel) }}
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+{{- end }}
+spec:
+  replicas: {{ .Values.workloads.audiofwwhispersttv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+            defaultMode: 0555
+{{- if $isIntel }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+{{- end }}
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/fasterwhisper.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: audio
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: ENGINE_PORT
+              value: "{{ $enginePort }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+            - name: OLARES_GPU_MODE
+              value: "{{ $gpuType }}"
+{{- if $engineArgs }}
+            - name: ENGINE_ARGS
+              value: "{{ $engineArgs }}"
+{{- end }}
+{{- if $wantGpu }}
+            - name: REQUIRED_GPU_MEMORY
+              value: "{{ $gpuRaw }}"
+{{- end }}
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+{{- if $wantGpu }}
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+{{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+{{- if $isIntel }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+{{- if eq $gpuType "intel-gpu" }}
+              gpu.intel.com/xe: "1"
+{{- else if eq $gpuType "intel" }}
+              gpu.intel.com/i915: "1"
+{{- end }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+{{- if eq $gpuType "intel-gpu" }}
+              gpu.intel.com/xe: "1"
+{{- else if eq $gpuType "intel" }}
+              gpu.intel.com/i915: "1"
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP

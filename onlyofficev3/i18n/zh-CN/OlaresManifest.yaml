@@ -1,6 +1,6 @@
 metadata:
   description: 运行您的私有 Office
-  title: OnlyOffice V3 for test
+  title: OnlyOffice
 spec:
   fullDescription: |
     ONLYOFFICE Docs 是一款免费的在线协作办公套件，包含文本、电子表格和演示文稿的查看器和编辑器，以及表单和 PDF 工具。它完全兼容包含 docx、.xlsx、.pptx 在内的 Office Open XML 格式，并支持实时协作编辑。
@@ -22,6 +22,12 @@ spec:
     **Spell-checking**
 
   upgradeDescription: |
+    将 OpenResty 反向代理上传限制提升为 `client_max_body_size 100m`，避免文档上传因默认 1m 限制返回 HTTP 413。nginx ConfigMap 变更时通过 `checksum/nginx-config` 滚动重建 `onlyofficeproxy`（`subPath` 挂载不会随 ConfigMap 原地更新）。
+
+    将反向代理镜像从 Bitnami OpenResty（`beclab/aboveos-bitnami-openresty:1.25.3-2`）切换为官方 OpenResty 镜像 `openresty/openresty:1.29.2.5-bookworm-fat`。
+
+    同步调整 nginx 配置挂载与日志路径以匹配官方镜像布局（`/etc/nginx/conf.d/default.conf`、`/usr/local/openresty/nginx/logs/...`），并移除 Bitnami 专用的 `OPENRESTY_CONF_FILE` 配置。
+
     已将 ONLYOFFICE 迁移至 apiVersion v3 共享应用模式（onlyofficev2 → onlyofficev3）。
 
     **变更内容**

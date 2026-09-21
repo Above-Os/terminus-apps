@@ -1,21 +1,37 @@
 ---
-olaresManifest.version: "0.10.0"
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  mastodon-sidekiq: 1
+  mastodon-streaming: 1
+  mastodon-web: 1
+  mastodon: 1
+  mastodon-elasticsearch-coordinating: 1
+  mastodon-elasticsearch-data: 1
+  mastodon-elasticsearch-ingest: 1
+  mastodon-elasticsearch-master: 1
+  mastodon-redis-master: 1
 metadata:
   name: mastodon
   description: Your self-hosted, globally interconnected microblogging community
   icon: https://app.cdn.olares.com/appstore/mastodon/icon.png
   appid: mastodon
-  version: "1.0.14"
+  version: '1.0.25'
   title: Mastodon
   categories:
-    - Fun
-    - Social Network
+  - Fun
+  - homelab
+  tags:
+  - lifestyle
+  - social-network
+
 permission:
   appData: true
   appCache: true
 spec:
-  versionName: "4.5.4"
+  versionName: "4.7.1"
   featuredImage: https://app.cdn.olares.com/appstore/mastodon/promote_image_1v2.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/mastodon/promote_image_1v2.webp
@@ -45,21 +61,32 @@ spec:
     - Mastodon acts as an OAuth2 provider, so 3rd party apps can use the REST and Streaming APIs. This results in a rich app ecosystem with a lot of choices!
 
   upgradeDescription: |
-    **Upgrade to 4.5.4**
+    Add the Helm release revision to the initialization Job name so upgrades do not patch its immutable pod template.
+    Upstream release: [Mastodon 4.7.1](https://github.com/mastodon/mastodon/releases/tag/v4.7.1)
 
-    This release includes security fixes and bug fixes. Assets will be automatically recompiled during upgrade.
+    **Breaking change**
 
-    **Important:** If upgrading from a version before 4.5.2, please review the 4.5.0 release notes for additional migration steps.
+    - Users who have not signed in since Mastodon 4.3 will be logged out.
+    - Database migrations from 4.5 can take a long time on large instances. Keep a database backup before upgrading.
+    - If you are upgrading from 4.5, also review the [4.6.0](https://github.com/mastodon/mastodon/releases/tag/v4.6.0) and [4.7.0](https://github.com/mastodon/mastodon/releases/tag/v4.7.0) notes.
 
-    **Changes:**
-    * Security: Fix information leak in private post error handling
-    * Fix YouTube embeds, quoted polls, duplicate conversations, and various UI improvements
+    **What's changed**
 
-    **Upgrade Steps:**
-    1. Ensure database backups are in place
-    2. Restart all Mastodon services (assets will be recompiled automatically)
+    - Remote accounts that change handles are renamed instead of duplicated.
+    - Outgoing posts with a preview card include a Link attachment.
+    - Admin includes hashtag audit logs and a search field on IP blocks.
 
-    Full release notes: https://github.com/mastodon/mastodon/releases/tag/v4.5.4
+    **Fixes**
+
+    - Password authentication bypass in 2FA for LDAP, PAM, and SSO accounts.
+    - Denial of service when processing pathological JSON-LD activities.
+    - Disabled staff accounts could still use the admin API.
+
+    **Olares deployment changes**
+
+    - Opening the app homepage through the Olares entrance no longer returns 500.
+    - Real-time streaming is enabled. It was previously turned off.
+    - The streaming health URL no longer redirects to a broken `https:/…` location.
 
   developer: Mastodon gGmbH
   website: https://joinmastodon.org/
@@ -68,6 +95,11 @@ spec:
   locale:
     - en-US
     - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
   requiredMemory: 8842Mi
   limitedMemory: 22Gi
   requiredDisk: 128Mi
@@ -100,7 +132,7 @@ options:
   dependencies:
     - name: olares
       type: system
-      version: ">=1.12.3-0"
+      version: '>=1.12.6-0'
     - name: minio
       type: middleware
       version: ">=1.0.0-0"

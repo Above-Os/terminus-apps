@@ -1,0 +1,92 @@
+{{- $githubURL := default "" .Values.olaresEnv.GITHUB_ADDR | trim -}}
+{{- $reconcileRepo := "" -}}
+{{- if $githubURL -}}
+{{- $githubPrefix := "https://github.com/" -}}
+{{- if not (hasPrefix $githubPrefix $githubURL) -}}
+{{- fail "olaresEnv.GITHUB_ADDR must be https://github.com/<owner>/<repo>.git" -}}
+{{- end -}}
+{{- $reconcileRepo = trimSuffix ".git" (trimPrefix $githubPrefix $githubURL) -}}
+{{- if not (regexMatch "^[^/]+/[^/]+$" $reconcileRepo) -}}
+{{- fail "olaresEnv.GITHUB_ADDR must identify exactly one GitHub owner/repository" -}}
+{{- end -}}
+{{- end -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-gitbot
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-gitbot
+spec:
+  replicas: {{ .Values.workloads.sourcegitbot.replicaCount }}
+  selector:
+    matchLabels:
+      app: source-gitbot
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-gitbot
+    spec:
+      containers:
+        - name: source-gitbot
+          image: aboveos/appstore-gitbot:v2.0.18
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PRICE_FILE_USERS
+              value: "{{ .Values.olaresEnv.GITHUB_ACCOUNT }}"
+            - name: OLARES_SUBMITTER_USERS
+              value: "{{ .Values.olaresEnv.GITHUB_ACCOUNT }}"
+            - name: REVIEWERS
+              value: "{{ .Values.olaresEnv.GITHUB_ACCOUNT }}"
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: INTERNAL_API_TOKEN
+            - name: OFFICIAL_BASE_URL
+              value: http://source-official-svc:8086
+            - name: ADMINV2_BASE_URL
+              value: http://source:4003
+            - name: GITHUB_TOKEN
+              value: "{{ .Values.olaresEnv.GITHUB_TOKEN }}"
+            - name: GITHUB_WEBHOOK_SECRET
+              value: "{{ .Values.olaresEnv.GITHUB_WEBHOOK_SECRET }}"
+            - name: GIT_BRANCH
+              value: "{{ .Values.olaresEnv.GITHUB_BRANCH }}"
+            {{- if $reconcileRepo }}
+            - name: RECONCILE_REPOS
+              value: {{ $reconcileRepo | quote }}
+            {{- end }}
+            - name: PG_DSN
+              value: postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.source }}
+          ports:
+            - containerPort: 8085
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-gitbot-svc
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: source-gitbot
+spec:
+  type: ClusterIP
+  selector:
+    app: source-gitbot
+  ports:
+    - name: http
+      port: 8085
+      targetPort: 8085
+      protocol: TCP

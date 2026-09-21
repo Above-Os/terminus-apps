@@ -1,16 +1,26 @@
-olaresManifest.version: '0.11.0'
+olaresManifest.version: '0.12.0'
 olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  clawdbot: 1
+  clawdbotingress: 1
+  terminal: 1
 metadata:
   name: clawdbot
   icon: https://app.cdn.olares.com/appstore/clawdbot/icon.png
   description: Personal AI Assistant with Multi-channel Inbox Support
   appid: clawdbot
   title: OpenClaw
-  version: 1.0.8
+  version: 1.0.38
   categories:
   - Productivity_v112
   - Developer Tools
-  - Utilities
+  - agents
+  tags:
+  - framework
+  - personal-assistant
+  
 entrances:
 - name: terminal
   port: 80
@@ -25,8 +35,15 @@ entrances:
   icon: https://app.cdn.olares.com/appstore/clawdbot/icon.png
   title: Control UI
   openMethod: window
+- name: gateway
+  host: clawdbot
+  port: 18789
+  title: OpenClaw Gateway
+  icon: https://app.cdn.olares.com/appstore/clawdbot/icon.png
+  invisible: true
+  authLevel: internal
 spec:
-  versionName: '2026.6.5'
+  versionName: '2026.9.1'
   promoteImage:
   - https://app.cdn.olares.com/appstore/clawdbot/1.webp
   - https://app.cdn.olares.com/appstore/clawdbot/2.webp
@@ -57,18 +74,12 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — onboarding-driven setup with bundled/managed/workspace skills.
 
   upgradeDescription: |
-    OpenClaw upgraded to 2026.6.5
-    **Highlights**
-    - **Channel reply safety was improved**: QQBot now strips model reasoning / thinking scaffolding before native delivery, preventing raw `<thinking>` content from leaking into user-facing channel replies.
-    - **MCP tool-result compatibility was strengthened**: MCP outputs such as `resource_link`, `resource`, `audio`, malformed images, and future non-text / non-image blocks are coerced at the materialization boundary, reducing Anthropic 400 errors and preventing poisoned session history.
-    - **Anthropic and agent recovery became more reliable**: extended-thinking sessions now recover after prompt-cache expiry or Gateway restarts because stream-start events wait for `message_start`, allowing pre-generation signature errors to trigger the existing retry path.
-    - **Search and provider support expanded**: Parallel is now bundled as a `web_search` provider, with `PARALLEL_API_KEY` discovery, guarded endpoint handling, cache-safe session IDs, onboarding picker support, and documentation.
-    - **Google Vertex and provider-model resolution were fixed**: Google Vertex ADC users regain static catalog rows and runtime model resolution, while single-provider cooldown recovery, memory adapter checks, model visibility, and catalog metadata are more reliable.
-    - **Channels, auth, and plugin state became more durable**: Matrix adds voice-note preflight and thread-aware reads / replies; auth profiles now live in SQLite; official npm plugin install records retain trusted pins; prerelease fallback checks avoid carrying stale integrity values.
-    - **Gateway, macOS, and upgrade paths are safer**: macOS node mode no longer silently reconnects away from a healthy direct Gateway session; legacy cron JSON stores migrate during doctor preflight; WhatsApp startup waits are bounded and disabled accounts are torn down on config reload.
-    - **Release, CI, and E2E validation were tightened**: the project moved to `YYYY.M.PATCH` monthly patch numbering and strengthened Docker, Playwright, plugin lifecycle, QA Lab, provider, cron, session, sandbox, and Gateway validation boundaries.
+    Update OpenClaw to 2026.9.4. Improves Gateway responsiveness and update recovery. This upgrade crosses 2026.9.3 breaking changes to Node requirements, plugin SDKs and agent-owned Workshop skills. Back up configuration, credentials, sessions and workspaces before upgrading; review third-party plugin compatibility. Existing configuration must be retained.
 
-    For detailed release notes, please see: https://github.com/openclaw/openclaw/releases/tag/v2026.6.5
+    Automatically backs up and creates the missing SQLite session index for schema v19 before startup, preserving conversations and model settings.
+
+    Release notes: https://github.com/openclaw/openclaw/releases/tag/v2026.9.4
+    Breaking changes: https://github.com/openclaw/openclaw/releases/tag/v2026.9.3
 
   developer: Peter Steinberger
   website: https://openclaw.ai/
@@ -77,6 +88,11 @@ spec:
   locale:
   - en-US
   - zh-CN
+  - de-DE
+  - es-ES
+  - it-IT
+  - fr-FR
+  - ja-JP
   doc: https://docs.openclaw.ai/start/getting-started
   license:
   - text: MIT
@@ -94,33 +110,34 @@ permission:
   appData: true
   appCache: true
   userData:
-    - Home  
+  - Home
+  externalData: true
 options:
   allowMultipleInstall: true
   apiTimeout: 0
   dependencies:
   - name: olares
     type: system
-    version: '>=1.12.5-0'
+    version: '>=1.12.6-0'
 envs:
-  - envName: ALLOW_HOME_DIR_ACCESS
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Allow OpenClaw to access Home directory on Olares"
-  - envName: ALLOW_EXTERNAL_DIR_ACCESS
-    type: bool
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "false"
-    description: "Allow OpenClaw to access External directory on Olares"
-  - envName: GOG_KEYRING_PASSWORD
-    type: password
-    required: false
-    applyOnChange: true
-    editable: true
-    default: "olares"
-    description: "Passphrase for the gog CLI keyring. You will need to re-authenticate after changing this value."
+- envName: ALLOW_HOME_DIR_ACCESS
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Allow OpenClaw to access Home directory on Olares"
+- envName: ALLOW_EXTERNAL_DIR_ACCESS
+  type: bool
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "false"
+  description: "Allow OpenClaw to access External directory on Olares"
+- envName: GOG_KEYRING_PASSWORD
+  type: password
+  required: false
+  applyOnChange: true
+  editable: true
+  default: "olares"
+  description: "Passphrase for the gog CLI keyring. You will need to re-authenticate after changing this value."
