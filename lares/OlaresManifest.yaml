@@ -5,49 +5,47 @@ metadata:
   name: lares
   appid: lares
   title: Lares
-  description: An AI assistant for managing Olares and researching the web
+  description: Chat on Olares, wired to Router
   icon: https://app.cdn.olares.com/appstore/lares/icon_new.png
-  version: 0.26.26
+  version: 0.26.27
   categories:
-    - agents
-  tags:
-    - framework
-    - personal-assistant
+    - Utilities_v112
+    - AI
 spec:
-  versionName: "0.26.26"
+  versionName: "0.26.27"
   runAsUser: true
   fullDescription: |
-    Lares is the official AI assistant for Olares. Describe a goal in plain language to manage apps, files, and your system. With Router and a connected AI model, Lares plans the steps and uses tools to carry out tasks on your device through conversation.
+    Lares is a chat app on Olares.
+    It talks to Olares Router for LLM access.
 
-    **Key features**
+    **Highlights**
+    - Three-column chat UI with the Lares product profile
+    - Zero-config Router auth via in-cluster app identity (`x-caller-appid`)
+    - Bundled client plugins (voice input, web search) when enabled in the build
+    - Optional Docker-in-Docker sidecar (`ENABLE_DIND`, default on) so the agent can run `docker` against a pod-local daemon
 
-    - Handle everyday requests and tasks that need several steps in one conversation.
-    - Use the AI models and tools configured in Router.
-    - Control what Lares can do with Read Only, Write, or Full Access permissions.
-    - Research public web content with configured search and page-reading tools, then combine the findings into summaries with source links.
+    **Requirements**
+    - Olares >= 1.12.7
+    - Router app installed and running (`router` dependency)
+    - Arch: amd64, arm64
 
-    **Before you start**
-
-    Lares requires Olares 1.12.7 or later, Router, and a connected AI model. Select a model and confirm the permission level before starting a task.
-
-    For web research, configure and enable the tools in Router. To use web search, also select a default search service in Lares settings. Tools that only read web pages are called when you ask Lares to read a specific URL.
-
+    **Getting started**
+    1. Install Lares from Market (test source: `market.test`).
+    2. Ensure Router is installed.
+    3. Open the Lares entrance and start a chat.
   upgradeDescription: |
-    ## Lares 0.26.26
+    **Lares 0.26.27**
 
-    - Fixes 0.26.25, which could not start because its application code and
-      base-image dependencies were out of sync.
-    - Router console links now follow the user's configured Olares domain.
-  developer: Olares
+    - Hot reload is a runtime switch (flag file + pod restart). The chart no
+      longer carries an install-time hotReload value, so you can turn it on
+      without reinstalling.
+    - FlowStudio file paths still resolve when Router nests outputs under
+      `response`.
+  developer: luolong
   submitter: Olares
   locale:
     - en-US
     - zh-CN
-    - fr-FR
-    - de-DE
-    - ja-JP
-    - it-IT
-    - es-ES
   requiredCpu: 400m
   limitedCpu: "6"
   requiredMemory: 768Mi
@@ -84,7 +82,6 @@ options:
     - name: router
       version: '>=1.0.0'
       type: application
-      mandatory: true
 workloadReplicas:
   lares: 1
 envs:
