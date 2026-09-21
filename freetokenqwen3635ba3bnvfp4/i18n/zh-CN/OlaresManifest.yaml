@@ -1,0 +1,59 @@
+metadata:
+  description: "使用 FreeToken 运行 Qwen3.6-35B-A3B（NVFP4）模型。"
+  title: Qwen3.6-35B-A3B (FreeToken)
+
+spec:
+  upgradeDescription: |
+    v1.0.0: 首个版本。基于 llama.cpp GGUF 预设（llamacppqwen3635ba3bggufv3
+      v1.0.24）改写，改了三处：引擎换成 FreeToken 0.1.3（CUDA 13），
+      权重换成 NVIDIA 的 NVFP4 检查点（不再是 GGUF 量化），专家权重按
+      FreeToken 的 offload 策略常驻主机内存，而不是整体放进显存。
+
+      安装前值得先读三条：
+
+      - 吃的是主机内存，不只是显存。`--moe-strategy auto` 在这个 MoE 检查点上
+        会解析成 `offload`：NVFP4 专家 bank（实测 21.8Gi）在进程整个生命周期里
+        常驻主机内存，通过 PCIe 流式换入显存中的 LRU 缓存。所以引擎容器预留
+        24Gi、上限 32Gi，而 GGUF 预设只预留 6Gi。
+      - 预设固定使用 `--expert-load serial`。FreeToken 的默认值 `auto` 走并行
+        读，需要 bank 之外再加一份整片缓冲（NVFP4 最大分片 9.3Gi），而且它是按
+        主机空闲内存判断的——这个读数在容器里描述的是节点，不是 cgroup。节点
+        空着 84Gi 时它就会选并行读，32Gi 的容器在约 25 秒后、刚打完
+        "Loading experts" 就被 OOMKilled。`serial` 是有界、可回收的那条路径。
+      - 仅支持 amd64。FreeToken 镜像是 x86_64 CUDA 13 构建，因此这里没有
+        `nvidia-gb10`（DGX Spark）模式，且驱动需要满足 CUDA 13 的要求
+        （R580 及以上）。
+  fullDescription: |
+    **模型简介**
+    Qwen3.6-35B-A3B 是阿里巴巴 Qwen 系列的 MoE 视觉语言模型，总参数量 35B、每次激活约 3B。本应用通过 FreeToken 运行 NVIDIA 的 `nvidia/Qwen3.6-35B-A3B-NVFP4` 检查点——即用 TensorRT Model Optimizer 量化成 NVFP4 的同一模型。FreeToken 是一套 CUDA 推理运行时，正是为这种形态的模型设计的：激活路径很小，而庞大的专家权重不必全部塞进显存。
+
+    **预设配置**
+    - 模型：`nvidia/Qwen3.6-35B-A3B-NVFP4`（safetensors，约 23.5 GB，只下载一次到共享缓存）
+    - 能力：思考、工具、视觉
+    - 引擎参数：`--moe-strategy auto --expert-load serial --max-seq-len-override 131072 --kv-reserve-tokens 131072 --max-prefill-length 8192 --max-running-requests 1`
+    - 所需显存：`23Gi`；引擎主机内存 request `24Gi`、limit `32Gi`（专家 bank 常驻在主机内存，不在显卡上）
+
+    **引擎参数的含义**
+    - `--moe-strategy auto` —— 由 FreeToken 自行选择 MoE 放置策略。在这个检查点上结果是 `offload`：专家权重留在主机内存，显存里放一份 LRU 缓存，未命中时经 PCIe 流式取用。（在容器里跑一次 `ft bench bw`，`auto` 还能升级成 `hybrid`；它写到 `~/.cache/freetoken/benchbw/` 的档案会保留下来，该目录是挂载卷。）
+    - `--max-seq-len-override 131072` —— 单次请求 128K 上下文。检查点本身声明 256K 位置，压到 128K 是为了让 KV 池能放进 24GB 显卡。
+    - `--expert-load serial` —— 启动时把专家 bank 读进主机内存的方式。`auto` 会走并行读，更快，但需要 bank（21.8Gi）之外再加一份整片缓冲；而且它是按**主机空闲内存**判断的——这个数字在容器里描述的是节点，不是 cgroup。所以节点还空着 84Gi 时，32Gi 的容器照样被 OOMKilled。`serial` 是有界的那条路径。
+    - `--max-prefill-length 8192` —— chunked prefill 的分块大小，长 prompt 按 8192 token 一块预填充，而不是一次性分配。
+    - `--kv-reserve-tokens 131072` —— 在专家缓存占满空闲显存之前，先给 KV 池保底 128K token。不加这一条，专家缓存会先把显存吃满，只留下默认的 8192 token，128K 的请求就会撞上这个上限。
+    - `--max-running-requests 1` —— 同一时刻只跑一个请求，这样这个请求独占整个 KV 池，剩下的显存全部给专家缓存。Model Console 与 Router 会从模型卡上读到这个数字并据此排队。
+
+    其余参数都由检查点和显卡自行解析：注意力后端、NVFP4 算子、专家缓存大小、CUDA Graph 批大小，以及工具调用与思考内容的解析器。视觉编码器默认构建（加 `--text-model-only` 可跳过，把这部分显存让给 KV 池和专家缓存）。
+
+    **加速器模式**
+    | 模式      | 设备       | 说明                                        |
+    |-----------|------------|---------------------------------------------|
+    | `nvidia`  | GPU (CUDA) | 使用 `23Gi` 显存；专家权重从主机内存流式换入 |
+
+    **工作流程说明**
+    首先，Model Console 下载并准备模型，然后 FreeToken 在模型准备好后启动服务。这两个部分独立运行但共享文件与进度信息。
+
+    **技术栈说明**
+    - **FreeToken**：运行模型，提供 OpenAI 与 Anthropic 接口（集群内端口 30000）
+    - **Model Console**：下载模型，展示进度，并通过 8090 端口提供 OpenAI API，代理到引擎
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。
