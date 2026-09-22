@@ -2,8 +2,11 @@
 
 Chat on Olares, wired to Router.
 
-Current app version: **0.26.27** — `version` and `appVersion` in `Chart.yaml`, the
-manifest version, and the image tag in `values.yaml` move together.
+Current chart version: **0.26.28** — `version` in `Chart.yaml` matches the
+manifest version.
+
+Current app version: **0.26.27** — `appVersion` in `Chart.yaml`, the manifest's
+`spec.versionName`, and the image tag in `values.yaml` match the application release.
 
 ## Chart ownership (test / public index)
 
