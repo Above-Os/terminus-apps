@@ -9,7 +9,7 @@ metadata:
   description: The all-in-one AI workflow production app for Olares.
   # Public direct URL required by Market; source icons/icon.png — sync flowstudio-assets when changing.
   icon: https://raw.githubusercontent.com/ffkijjkokok/flowstudio-assets/main/icon.png
-  version: 0.3.66
+  version: 0.3.69
   categories:
   - Creativity
   - AI
@@ -34,7 +34,7 @@ sharedEntrances:
   authLevel: internal
 
 spec:
-  versionName: "0.3.66"
+  versionName: "0.3.69"
   onlyAdmin: true
   runAsUser: true
   fullDescription: |
@@ -59,10 +59,10 @@ spec:
     - An NVIDIA GPU, bound when installing or resuming the app
     - Free VRAM >= 6 GiB for lite image templates
   upgradeDescription: |
-    **FlowStudio 0.3.66**
+    **FlowStudio 0.3.69**
 
-    - Router-backed generations belong to the logged-in user forwarded by
-      Lares (`x-bfl-user` / `remote-user`), not the shared chart owner.
+    - Plaza and create-scene image recs lead with FastH3 T2V/I2V, MiniMax H3 Ref2V + Seamless Chain, then Qwen Image 2.1 T2I/Edit.
+    - NVIDIA engine image is 1.0.8; Hugging Face endpoint/token come from Olares system env.
   developer: luolong
   website: https://github.com/beclab/flowstudio
   sourceCode: https://github.com/beclab/flowstudio
@@ -133,9 +133,8 @@ workloadReplicas:
   flowstudio: 1
   flowstudioengine: 0
 
-# Declarations only — no template reads these. Market lifts them out of the
-# rendered envs block so Router can file the app under a capability domain
-# before anything is installed; every model application is category AI.
+# MODEL_*：Market / Router 能力声明（模板不读）。
+# HF_*：valueFrom 系统 Hugging Face，deployment 注入 .Values.olaresEnv。
 envs:
 - envName: MODEL_MODE
   required: true
@@ -155,3 +154,15 @@ envs:
   default: ""
   multiSelect: true
   splitter: ","
+# Same mapping as llama.cpp Model Console: cluster Hugging Face proxy/token
+# → HF_ENDPOINT / HF_TOKEN. Templates must inject .Values.olaresEnv themselves.
+- envName: HF_ENDPOINT
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+- envName: HF_TOKEN
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
