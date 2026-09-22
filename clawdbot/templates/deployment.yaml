@@ -250,6 +250,24 @@ spec:
             - name: sqlite-migration
               mountPath: /migration
               readOnly: true
+        # Offline migration: complete before any Gateway/CLI writer starts.
+        - name: init-sqlite-agent-schema
+          image: "{{ $openclawImage }}"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: ["/usr/local/bin/node", "/migration/migrate-agent-schema.mjs"]
+          env:
+            - name: HOME
+              value: /home/node
+            - name: OPENCLAW_STATE_DIR
+              value: /home/node/.openclaw
+          volumeMounts:
+            - name: app-data-config
+              mountPath: /home/node/.openclaw
+            - name: sqlite-migration
+              mountPath: /migration
+              readOnly: true
         - name: init-docker-cli
           image: "docker.io/beclab/docker:29.3.0-dind"
           command: ["cp", "/usr/local/bin/docker", "/docker-cli/docker"]
