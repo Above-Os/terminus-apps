@@ -24,12 +24,12 @@
        card. Match complete old presets rather than individual flags,
        which would also catch a hand-tuned -np 12. Keep $preset byte-identical
        to ENGINE_ARGS.default in OlaresManifest.yaml.
-       First release — no superseded presets to migrate yet.
+       Migrate only the exact previous default; preserve custom arguments.
        Usage: {{ include "llamacppbonsai227bgguf.presetArgs" ($oe.ENGINE_ARGS | default "") }} */ -}}
 {{- define "llamacppbonsai227bgguf.presetArgs" -}}
 {{- $args := trim (. | default "") -}}
-{{- $preset := "-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified" -}}
-{{- if eq $args "" -}}
+{{- $preset := "-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128" -}}
+{{- if or (eq $args "") (eq $args "-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified") -}}
 {{- $preset -}}
 {{- else -}}
 {{- $args -}}

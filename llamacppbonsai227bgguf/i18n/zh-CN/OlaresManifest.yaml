@@ -4,6 +4,9 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.2：GPU 配额提升至 15Gi；单槽位 98,304 token 上下文，Q8_0 K/V 缓存，batch 512 / ubatch 128。
+    引擎内存上限提高到 24Gi，保留 GPU 驱逐至主机内存的余量。
+
     v1.0.0：首个版本。PrismML llama.cpp 分支 `prism-b10709-9a9394a`（CUDA 12.8），llm-init v1.7.21。
     prism-ml/Ternary-Bonsai-2-27B-gguf PQ2_0 + mmproj-Q8_0，32K 上下文（-c 32768），GPU 配额 12Gi。
   fullDescription: |
@@ -22,15 +25,17 @@ spec:
     **预设配置**
     - 模型：`prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0`（7.21 GB，含视觉投影器 `mmproj-Q8_0`）
     - 能力：思考、工具调用、视觉
-    - 引擎参数：`-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified`（32K 共享上下文池，2 个槽位）
-    - 所需 GPU 显存：`12Gi`
+    - 引擎参数：`-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128`（98,304 token，即 96 Ki token；单槽位，Q8_0 KV 缓存）
+    - 所需 GPU 显存：`15Gi`
+    - 上下文预算包含输入、图像 token、思考和输出；单次请求独占一个槽位。
+    - Q8_0 KV 缓存估算约 3.19Gi；15Gi 为目标配额，长上下文及视觉峰值需在目标 GPU 实测。
     - 模型卡推荐的采样参数：思考模式 `temp 1.0 / top_p 0.95 / top_k 20`；
       指令模式 `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
 
     **加速器模式**
     | 模式      | 设备       | 说明                                     |
     |-----------|------------|------------------------------------------|
-    | `nvidia`  | GPU (CUDA) | 占用 `12Gi` 显存；`-ngl all` 全量卸载到 GPU |
+    | `nvidia`  | GPU (CUDA) | 占用 `15Gi` 显存；`-ngl all` 全量卸载到 GPU |
 
     仅支持 amd64：PrismML 分支没有发布 linux-arm64 的 CUDA 构建，因此不支持 DGX Spark（`nvidia-gb10`）。
 
