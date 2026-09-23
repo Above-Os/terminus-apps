@@ -12,12 +12,19 @@
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "200m") -}}
 {{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "4Gi") -}}
 {{- $cpuLimit := trim ($oe.LLAMACPP_CPU_LIMIT | default "6") -}}
-{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "21Gi") -}}
+{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "24Gi") -}}
+{{- /* Upgrade persisted, non-editable resource defaults together with the preset. */ -}}
+{{- if eq $memLimit "21Gi" -}}
+{{- $memLimit = "24Gi" -}}
+{{- end -}}
 {{- $engineArgs = include "llamacppbonsai227bgguf.engineArgs" (dict "Args" $engineArgs) -}}
 {{- /* nvidia.com/gpumem needs a BARE MiB int. This app is amd64/CUDA only —
        the PrismML fork publishes no linux-arm64 CUDA build — so there is no
        nvidia-gb10 (Spark unified memory) branch here. */ -}}
-{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "4096") -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "15Gi") -}}
+{{- if eq $gpuMiB "12288" -}}
+{{- $gpuMiB = "15360" -}}
+{{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
 # llama.cpp engine Deployment. wrappers/llamacpp.sh blocks on the sentinel

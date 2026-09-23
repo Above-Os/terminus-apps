@@ -4,6 +4,9 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.2: 15Gi GPU quota; one 98,304-token slot, Q8_0 K/V cache, batch 512 / ubatch 128.
+    Raise engine host-memory limit to 24Gi to retain GPU eviction headroom.
+
     v1.0.0: first release. PrismML llama.cpp fork `prism-b10709-9a9394a` (CUDA 12.8), llm-init v1.7.21.
     prism-ml/Ternary-Bonsai-2-27B-gguf PQ2_0 + mmproj-Q8_0, 32K context (-c 32768), GPU quota 12Gi.
   fullDescription: |
@@ -24,15 +27,17 @@ spec:
     **Preset Configuration**
     - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with `mmproj-Q8_0` projector for vision)
     - Capabilities: thinking, tools, vision
-    - Engine args: `-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified` (32K shared pool, 2 slots)
-    - Required GPU memory: `12Gi`
+    - Engine args: `-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (98,304 tokens / 96 Ki tokens, 1 slot; Q8_0 KV cache)
+    - Required GPU memory: `15Gi`
+    - Context includes input, image tokens, reasoning and output; one active request at a time.
+    - Estimated Q8_0 KV cache: 3.19Gi; long-context and vision peaks require validation on the target GPU.
     - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
       instruct `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
 
     **Accelerator modes**
     | Mode      | Device     | Details                                         |
     |-----------|------------|-------------------------------------------------|
-    | `nvidia`  | GPU (CUDA) | Uses `12Gi` GPU memory; `-ngl all` for full GPU |
+    | `nvidia`  | GPU (CUDA) | Uses `15Gi` GPU memory; `-ngl all` for full GPU |
 
     amd64 only: the PrismML fork publishes no linux-arm64 CUDA build, so DGX Spark
     (`nvidia-gb10`) is not supported.
