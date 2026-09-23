@@ -31,14 +31,15 @@
        same engine limit as Arc. intel-gpu (Arc) is discrete. */ -}}
 {{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
 {{- /* ENGINE_IMAGE has no manifest default: filling one would pin every mode to the same image. */ -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.23" "docker.io/beclab/audio-qwen:v1.1.23" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.24" "docker.io/beclab/audio-qwen:v1.1.24" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if and $unifiedMem (eq $gpuType "nvidia-gb10") -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- else if and $unifiedMem (eq $gpuType "intel") -}}
-{{- $memRequest = $memLimit -}}
+{{- /* iGPU request is not the 16Gi limit. 6Gi + llm-init 256Mi = requiredMemory 6400Mi. */ -}}
+{{- $memRequest = "6Gi" -}}
 {{- end -}}
 {{- end -}}
 {{- /* Engine-native flags in llm-init's one channel; the engine derives its GPU share from the
@@ -67,7 +68,7 @@ metadata:
   annotations:
     audio.bytetrade.io/model: "{{ $modelName }}"
     audio.bytetrade.io/supports: "{{ $supportsRaw }}"
-{{- if and $wantGpu (not $isIntel) }}
+{{- if or $isIntel $wantGpu }}
     applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
 {{- end }}
 spec:
