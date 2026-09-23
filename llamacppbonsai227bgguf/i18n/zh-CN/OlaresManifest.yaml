@@ -1,0 +1,46 @@
+metadata:
+  description: "Ternary Bonsai 2 27B（GGUF PQ2_0），由 PrismML 的 llama.cpp 分支提供服务。"
+  title: Bonsai 2 27B (llama.cpp)
+
+spec:
+  upgradeDescription: |
+    v1.0.0：首个版本。PrismML llama.cpp 分支 `prism-b10709-9a9394a`（CUDA 12.8），llm-init v1.7.21。
+    prism-ml/Ternary-Bonsai-2-27B-gguf PQ2_0 + mmproj-Q8_0，32K 上下文（-c 32768），GPU 配额 12Gi。
+  fullDescription: |
+    **模型简介**
+    Ternary Bonsai 2 27B 是 PrismML 发布的三值权重（{-1, 0, +1}）视觉语言模型，参数量 27.36B，
+    基于 Qwen3.8-27B 改造为混合注意力架构（约 75% 线性注意力 + 25% 全注意力）。
+    支持思考、工具调用和图像/视频理解，上下文窗口 262K。
+    本应用提供 `prism-ml/Ternary-Bonsai-2-27B-gguf` 的 `PQ2_0` GGUF 构建。
+
+    **为什么需要分支版引擎**
+    官方 llama.cpp 无法运行这些文件：它会把 `PQ2_0` / `PTQ1_0` 判为未知类型而拒绝加载，
+    并且会静默地把 `Q2_0` 读进来输出乱码——因为它没有 Hadamard 激活变换的运行时。
+    因此本应用使用 PrismML 分支（[PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp)），
+    其中包含三值混合注意力的 CUDA 内核。`-fa on` 是必需的：它启用权重旋转基所依赖的 Hadamard 激活变换。
+
+    **预设配置**
+    - 模型：`prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0`（7.21 GB，含视觉投影器 `mmproj-Q8_0`）
+    - 能力：思考、工具调用、视觉
+    - 引擎参数：`-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified`（32K 共享上下文池，2 个槽位）
+    - 所需 GPU 显存：`12Gi`
+    - 模型卡推荐的采样参数：思考模式 `temp 1.0 / top_p 0.95 / top_k 20`；
+      指令模式 `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
+
+    **加速器模式**
+    | 模式      | 设备       | 说明                                     |
+    |-----------|------------|------------------------------------------|
+    | `nvidia`  | GPU (CUDA) | 占用 `12Gi` 显存；`-ngl all` 全量卸载到 GPU |
+
+    仅支持 amd64：PrismML 分支没有发布 linux-arm64 的 CUDA 构建，因此不支持 DGX Spark（`nvidia-gb10`）。
+
+    **工作方式**
+    Model Console 先下载并准备好模型，就绪后 `llama.cpp` 再启动并提供服务。
+    两者是独立的工作负载，通过共享文件和进度信息协作。
+
+    **技术栈**
+    - **llama.cpp**（PrismML `prism-b10709-9a9394a`，CUDA 12.8）：运行模型并提供 API（端口 8081）
+    - **Model Console**：下载模型、展示进度，并在端口 8090 提供 OpenAI 兼容 API，反向代理到 `llamacpp`。
+
+    **模型存储**
+    所有模型文件保存在共享目录 `appCommon/huggingface`，挂载为 `/cache/hf/hub`。同类应用共用该位置。

@@ -1,0 +1,50 @@
+metadata:
+  description: "Ternary Bonsai 2 27B (GGUF PQ2_0) served with the PrismML llama.cpp fork."
+  title: Bonsai 2 27B (llama.cpp)
+
+spec:
+  upgradeDescription: |
+    v1.0.0: first release. PrismML llama.cpp fork `prism-b10709-9a9394a` (CUDA 12.8), llm-init v1.7.21.
+    prism-ml/Ternary-Bonsai-2-27B-gguf PQ2_0 + mmproj-Q8_0, 32K context (-c 32768), GPU quota 12Gi.
+  fullDescription: |
+    **Model Overview**
+    Ternary Bonsai 2 27B is a ternary-weight ({-1, 0, +1}) build of a 27.36B vision-language model
+    from PrismML, derived from Qwen3.8-27B with hybrid attention (~75% linear, ~25% full attention).
+    It supports thinking, tool-calling, and image/video understanding, with a 262K context window.
+    This app serves the `PQ2_0` GGUF from `prism-ml/Ternary-Bonsai-2-27B-gguf`.
+
+    **Why a forked engine**
+    Stock llama.cpp cannot run these files: it rejects `PQ2_0` / `PTQ1_0` as unknown types, and it
+    loads `Q2_0` without any warning and produces garbage, because it has no Hadamard activation
+    runtime. This app therefore ships the PrismML fork
+    ([PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp)), which carries the ternary
+    hybrid-attention CUDA kernels. `-fa on` is required — it enables the Hadamard activation
+    transforms the weight rotation basis depends on.
+
+    **Preset Configuration**
+    - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with `mmproj-Q8_0` projector for vision)
+    - Capabilities: thinking, tools, vision
+    - Engine args: `-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified` (32K shared pool, 2 slots)
+    - Required GPU memory: `12Gi`
+    - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
+      instruct `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
+
+    **Accelerator modes**
+    | Mode      | Device     | Details                                         |
+    |-----------|------------|-------------------------------------------------|
+    | `nvidia`  | GPU (CUDA) | Uses `12Gi` GPU memory; `-ngl all` for full GPU |
+
+    amd64 only: the PrismML fork publishes no linux-arm64 CUDA build, so DGX Spark
+    (`nvidia-gb10`) is not supported.
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the
+    model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp** (PrismML `prism-b10709-9a9394a`, CUDA 12.8): Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+    All similar apps use this location for models.

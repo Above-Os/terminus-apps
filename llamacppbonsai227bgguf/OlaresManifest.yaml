@@ -1,0 +1,267 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacppbonsai227bgguf
+  # TODO: upload a 256x256 icon to the Olares CDN before submitting.
+  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/bonsai.png
+  description: "Ternary Bonsai 2 27B (GGUF PQ2_0) served with the PrismML llama.cpp fork."
+  appid: llamacppbonsai227bgguf
+  title: Bonsai 2 27B (llama.cpp)
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+    - llm
+sharedEntrances:
+  - name: llamacppbonsai227bgguf
+    host: sharedentrances-api
+    port: 0
+    title: Ternary Bonsai 2 27B
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/bonsai.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: Ternary Bonsai 2 27B
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/bonsai.png
+    openMethod: window
+    authLevel: internal
+#   llamacppbonsai227bgguf — engine Deployment (== appid / Release.Name)
+#   llminit                — llm-init / entrance Deployment
+workloadReplicas:
+  llamacppbonsai227bgguf: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0'
+  upgradeDescription: |
+    v1.0.0: first release. PrismML llama.cpp fork `prism-b10709-9a9394a` (CUDA 12.8), llm-init v1.7.21.
+    prism-ml/Ternary-Bonsai-2-27B-gguf PQ2_0 + mmproj-Q8_0, 32K context (-c 32768), GPU quota 12Gi.
+
+    Serves the ternary-quantized Bonsai 2 27B GGUF (`qwen35` architecture) with vision projector.
+  fullDescription: |
+    **Model Overview**
+    Ternary Bonsai 2 27B is a ternary-weight ({-1, 0, +1}) build of a 27.36B vision-language model
+    from PrismML, derived from Qwen3.8-27B with hybrid attention (~75% linear, ~25% full attention).
+    It supports thinking, tool-calling, and image/video understanding, with a 262K context window.
+    This app serves the `PQ2_0` GGUF from `prism-ml/Ternary-Bonsai-2-27B-gguf`.
+
+    **Why a forked engine**
+    Stock llama.cpp cannot run these files: it rejects `PQ2_0` / `PTQ1_0` as unknown types, and it
+    loads `Q2_0` without any warning and produces garbage, because it has no Hadamard activation
+    runtime. This app therefore ships the PrismML fork
+    ([PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp)), which carries the ternary
+    hybrid-attention CUDA kernels. `-fa on` is required — it enables the Hadamard activation
+    transforms the weight rotation basis depends on.
+
+    **Preset Configuration**
+    - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with `mmproj-Q8_0` projector for vision)
+    - Capabilities: thinking, tools, vision
+    - Engine args: `-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified` (32K shared pool, 2 slots)
+    - Required GPU memory: `12Gi`
+    - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
+      instruct `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
+
+    **Accelerator modes**
+    | Mode      | Device     | Details                                         |
+    |-----------|------------|-------------------------------------------------|
+    | `nvidia`  | GPU (CUDA) | Uses `12Gi` GPU memory; `-ngl all` for full GPU |
+
+    amd64 only: the PrismML fork publishes no linux-arm64 CUDA build, so DGX Spark
+    (`nvidia-gb10`) is not supported. The CUDA 12.8 build ships native cubins for
+    sm_86 / sm_89 / sm_120 and PTX for sm_50 through sm_90.
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the
+    model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp** (PrismML `prism-b10709-9a9394a`, CUDA 12.8): Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
+    All similar apps use this location for models.
+
+  developer: PrismML
+  website: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
+  sourceCode: https://github.com/PrismML-Eng/llama.cpp
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
+
+  accelerator:
+    #   nvidia — discrete GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
+    - mode: nvidia
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # MEMORY_LIMIT 21Gi = anon under 1Gi + the 12Gi gpumem that mode-2 eviction
+      # spills into host RAM as unreclaimable UVM pages + GGUF page cache headroom.
+      # Engine MEMORY_REQUEST 4Gi + llm-init 256Mi <= requiredMemory 5Gi;
+      # MEMORY_LIMIT 21Gi + llm-init 2Gi <= limitedMemory 23Gi.
+      limitedMemory: "23Gi"
+      requiredMemory: "5Gi"
+      requiredGPUMemory: "12Gi"
+      limitedGPUMemory: "12Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://prism-ml/Ternary-Bonsai-2-27B-gguf --include Ternary-Bonsai-2-27B-PQ2_0.gguf,hf://prism-ml/Ternary-Bonsai-2-27B-gguf --include Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+    description:  "Example: hf://unsloth/Qwen3-0.6B-GGUF --include Qwen3-0.6B-Q4_K_M.gguf. The source to download your model. For models with split files, only include the first part; for vision-language models, add the projector with a comma, like `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0"
+    description:  "Example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M. The name of your model in `owner/repo:quant` format"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description:  "The model capabilities. Pick what your model supports, if no extra capabilities, pick None."
+  # Not editable: which levels exist is a fact of this model and this chat
+  # template, not a preference. The template raises on anything outside
+  # low / medium / xhigh, so an extra level would turn into a failed
+  # request for whichever client read the levels off the model card.
+  - envName: MODEL_REASONING_EFFORT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "low,medium,xhigh"
+    description:  "The reasoning_effort levels this model accepts, published on the model card so clients can read them instead of guessing."
+  # The level llama.cpp's template already uses when a request carries no
+  # reasoning_effort. It is published, never injected: nothing in the chain
+  # writes it into a request, so it has to match the engine's real default.
+  - envName: MODEL_REASONING_EFFORT_DEFAULT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "xhigh"
+    description:  "The level this model uses when a request does not ask for one."
+  # `-fa on` is required by the ternary kernels (Hadamard activation transforms).
+  # No `-kvu`: that short alias does not exist in prism-b10709 — the fork has
+  # `--kv-unified` / `-no-kvu`, and unified KV is only the default when the slot
+  # count is auto, which `-np 2` overrides. No `--spec-type draft-mtp`: the flag
+  # exists but this ternary re-architecture does not carry an MTP head.
+  - envName: ENGINE_ARGS
+    required: true
+    default: "-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified"
+    type: string
+    editable: true
+    applyOnChange: true
+    description:  "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options, to fully use GPU, add `-ngl all`. You can also use values like `LLAMA_ARG_*=val`."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST
+    required: true
+    default: "4Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT
+    required: true
+    default: "21Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "15Gi"
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB."
+    regex: "^[0-9]+(Gi|Mi)?$"
