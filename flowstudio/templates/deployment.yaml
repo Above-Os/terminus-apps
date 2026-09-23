@@ -30,7 +30,12 @@ spec:
         image: docker.io/beclab/aboveos-busybox:1.37.0
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /appdata/userData && chown 1000:1000 /appdata/userData"]
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /appdata/userData /appdata/devsrc
+          chown 1000:1000 /appdata/userData /appdata/devsrc
         volumeMounts:
         - name: app-data
           mountPath: /appdata
@@ -56,39 +61,10 @@ spec:
         volumeMounts:
         - name: app-common
           mountPath: /data/appCommon
-      {{- if (default dict .Values.dev).hotReload }}
-      # Do not create via subPath first — kubelet would own it as root.
-      - name: fix-dev-perms
-        image: docker.io/beclab/aboveos-busybox:1.37.0
-        securityContext:
-          runAsUser: 0
-        env:
-        - name: DEV_SUBPATH
-          value: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" | quote }}
-        command: ["sh", "-c", "mkdir -p \"/appdata/$DEV_SUBPATH\" && chown -R 1000:1000 \"/appdata/$DEV_SUBPATH\""]
-        volumeMounts:
-        - name: app-data
-          mountPath: /appdata
-      - name: seed-dev-src
-        image: {{ coalesce .Values.appImage .Values.image }}
-        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
-        env:
-        - name: DEV_SUBPATH
-          value: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" | quote }}
-        command: ["sh", "-c", "d=/appdata/$DEV_SUBPATH; if [ ! -e \"$d/app/main.py\" ]; then cp -a /app/. \"$d/\" && echo seeded; else echo 'already populated'; fi"]
-        volumeMounts:
-        - name: app-data
-          mountPath: /appdata
-      {{- end }}
       containers:
       - name: flowstudio
         image: {{ coalesce .Values.appImage .Values.image }}
         imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
-        {{- if (default dict .Values.dev).hotReload }}
-        # Watch /app/app only — watching /app/static causes reload storms / OOM.
-        # --timeout-graceful-shutdown: force-exit if open work would hang reload.
-        command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/app", "--timeout-graceful-shutdown", "20"]
-        {{- end }}
         ports:
         - containerPort: 8080
         resources:
@@ -139,13 +115,8 @@ spec:
           value: {{ (default dict .Values.dynamicEngine).startupReap | default "preserve_active" | quote }}
         - name: ENGINE_OWNER_DEPLOYMENT_NAME
           value: flowstudio
-        {{- if (default dict .Values.dev).hotReload }}
-        - name: SHOW_TEST_WORKFLOW_TEMPLATES
-          value: "true"
-        {{- else }}
         - name: SHOW_TEST_WORKFLOW_TEMPLATES
           value: "false"
-        {{- end }}
         - name: APP_COMMON_HOST_PATH
           value: {{ .Values.userspace.appCommon | quote }}
         - name: APP_DATA_HOST_PATH
@@ -168,8 +139,17 @@ spec:
           value: {{ (default dict .Values.modelDownload).enabled | default true | quote }}
         - name: MODEL_REQUIRE_ALL_RESOLVED
           value: {{ (default dict .Values.modelDownload).requireAllResolved | default true | quote }}
+        {{- $oe := .Values.olaresEnv | default dict }}
+        {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" }}
+        {{- if $hfEndpoint }}
+        - name: HF_ENDPOINT
+          value: {{ $hfEndpoint | quote }}
+        {{- end }}
+        {{- $hfToken := $oe.HF_TOKEN | default ((default dict .Values.modelDownload).hfToken | default "") }}
+        {{- if $hfToken }}
         - name: HF_TOKEN
-          value: {{ (default dict .Values.modelDownload).hfToken | default "" | quote }}
+          value: {{ $hfToken | quote }}
+        {{- end }}
         - name: CIVITAI_TOKEN
           value: {{ (default dict .Values.modelDownload).civitaiToken | default "" | quote }}
         - name: NETWORK_REGION
@@ -186,16 +166,16 @@ spec:
           value: "https://{{ .Values.domain.flowstudio }}"
         - name: CORS_ORIGINS
           value: "https://{{ .Values.domain.flowstudio }}"
+        - name: FLOWSTUDIO_DEV_OVERLAY
+          value: /devsrc
         volumeMounts:
         - name: app-data
           mountPath: /data/appData
         - name: app-common
           mountPath: /data/appCommon
-        {{- if (default dict .Values.dev).hotReload }}
         - name: app-data
-          mountPath: /app
-          subPath: {{ (default dict .Values.dev).sourceSubPath | default "dev/app" }}
-        {{- end }}
+          mountPath: /devsrc
+          subPath: devsrc
         # Mesh intercepts podIP:8080 (Linkerd inbound 100ms). TCP to the
         # Service port is a false Ready. Probe loopback so Ready = uvicorn.
         startupProbe:
@@ -204,9 +184,9 @@ spec:
             - python
             - -c
             - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2)
-          periodSeconds: 2
+          periodSeconds: 5
           timeoutSeconds: 3
-          failureThreshold: 30
+          failureThreshold: 60
         readinessProbe:
           exec:
             command:
