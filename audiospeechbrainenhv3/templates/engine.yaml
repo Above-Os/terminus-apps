@@ -24,7 +24,7 @@
 {{- end -}}
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
 {{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-enhance-ov:v1.1.23" "docker.io/beclab/audio-pyannote:v1.1.23" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-enhance-ov:v1.1.24" "docker.io/beclab/audio-pyannote:v1.1.24" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if and $unifiedMem (eq $gpuType "nvidia-gb10") -}}
@@ -48,7 +48,7 @@ metadata:
   annotations:
     audio.bytetrade.io/model: "{{ $modelName }}"
     audio.bytetrade.io/supports: "{{ $supportsRaw }}"
-{{- if and $wantGpu (not $isIntel) }}
+{{- if or $isIntel $wantGpu }}
     applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
 {{- end }}
 spec:

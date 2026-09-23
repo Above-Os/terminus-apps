@@ -24,7 +24,7 @@
 {{- end -}}
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
 {{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-whisper-ov:v1.1.23" "docker.io/beclab/audio-fasterwhisper:v1.1.23" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-whisper-ov:v1.1.24" "docker.io/beclab/audio-fasterwhisper:v1.1.24" $isIntel) -}}
 {{- $memLimit := trim ($oe.MEMORY_LIMIT | default "") -}}
 {{- if eq $memLimit "" -}}
 {{- $memLimit = ternary "16Gi" "10Gi" $isIntel -}}
@@ -55,7 +55,7 @@ metadata:
   annotations:
     audio.bytetrade.io/model: "{{ $modelName }}"
     audio.bytetrade.io/supports: "{{ $supportsRaw }}"
-{{- if and $wantGpu (not $isIntel) }}
+{{- if or $isIntel $wantGpu }}
     applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
 {{- end }}
 spec:
