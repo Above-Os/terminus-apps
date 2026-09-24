@@ -73,9 +73,9 @@ docker.io/leamon2code/prismml-llama.cpp:server-cuda12.8-prism-b10709
 {{- define "llamacppbonsai227bgguf.presetArgs" -}}
 {{- $root := .Root -}}
 {{- $args := trim (.Args | default "") -}}
-{{- $nvidiaPreset := "-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128" -}}
+{{- $nvidiaPreset := "-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128" -}}
 {{- $cpuPreset := "-c 131072 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8" -}}
-{{- $known := list "" "-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified" "-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128" "-c 32768 -ngl all -fa on --jinja -np 1 --kv-unified -b 512 -ub 128" "-c 32768 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8" $nvidiaPreset $cpuPreset -}}
+{{- $known := list "" "-c 32768 -ngl all -fa on --jinja -np 2 --kv-unified" "-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128" "-c 32768 -ngl all -fa on --jinja -np 1 --kv-unified -b 512 -ub 128" "-c 32768 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8" "-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128" $nvidiaPreset $cpuPreset -}}
 {{- $preset := $nvidiaPreset -}}
 {{- if eq (include "llamacppbonsai227bgguf.isCpu" $root) "true" -}}
 {{- $preset = $cpuPreset -}}
