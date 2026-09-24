@@ -28,8 +28,8 @@ Copy follows the upstream README's free/open-source positioning and the
 observed export controls. Both images use the same top-text/bottom-image layout.
 
 - Icon: https://cdn.olares.com/images/2026/09/ab76a2eb1f91773844b5d97728d0f22d.png
-- Editor: https://cdn.olares.com/images/2026/09/499e2f54339f5605a908eabca162ba74.png
-- Export: https://cdn.olares.com/images/2026/09/368150b942f17ca45a5996783d3e9b04.png
+- Editor: https://cdn.olares.com/images/2026/09/568f58a50c106148c3dd06a9477898f6.png
+- Export: https://cdn.olares.com/images/2026/09/37cd0feac499ca36a7397bc2d54995f4.png
 
 ## Scope
 
@@ -46,3 +46,8 @@ and was uploaded to Local Sources / Upload, then upgraded successfully to
 Post-upgrade `tests/smoke.py` confirmed GUI HTTP 200, health, authenticated API,
 MCP tool discovery, desktop restoration, and HTTP 401 without a bearer token.
 All three CDN URLs returned HTTP 200 with image/png content type.
+
+Listing images were recaptured after review at the native 1280x720 desktop
+size with JPEG stream quality 100. The editor uses Full preview resolution.
+The export image shows a larger crop of the real settings panel at 125% UI
+scale; only screenshot presentation changed. Final assets remain 1440x900.
