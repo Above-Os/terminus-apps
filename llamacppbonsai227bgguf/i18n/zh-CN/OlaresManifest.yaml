@@ -4,6 +4,10 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.5：CPU 和 NVIDIA 默认上下文统一为 131072 token。CPU 保留 f16 K/V 和单槽位，
+    引擎内存预留设为 16Gi、上限设为 20Gi；旧 CPU 默认参数自动迁移，自定义参数保留。
+    内存预算为估算，128K CPU 推理性能和峰值占用仍需目标机器验证。
+
     v1.0.4：非 NVIDIA 这条路改用 CPU 构建，不再用 Vulkan —— Vulkan 镜像在目标机器上起不来，
     而上游声明支持的后端本来就是 CUDA / Metal / CPU。模式 `intel` 替换为 `cpu`：与 nvidia
     共用同一个 PQ2_0 文件（CPU 后端对 PQ2_0 有重排后的 GEMM 通路，对 PTQ1_0 只有逐向量点积），
@@ -34,11 +38,11 @@ spec:
     - 模型：`prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0`（7.21 GB，含视觉投影器 `mmproj-Q8_0`）—— 两种模式共用同一个文件
     - 能力：思考、工具调用、视觉
     - 引擎参数（nvidia）：`-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128`（128 Ki token；单槽位，Q8_0 K/V）
-    - 引擎参数（cpu）：`-c 32768 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8`（32 Ki token；单槽位，f16 K/V；`-t` 与容器 CPU limit 对齐）
+    - 引擎参数（cpu）：`-c 131072 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8`（128 Ki token；单槽位，f16 K/V；`-t` 与容器 CPU limit 对齐）
     - 所需 GPU 显存：nvidia 模式 `15Gi`；cpu 模式不占用显存
     - 上下文预算包含输入、图像 token、思考和输出；单次请求独占一个槽位。
     - nvidia：128 Ki 上下文下 Q8_0 K/V 约 4.25Gi，24Gi 显卡实测常驻 12.75Gi，占 15Gi 配额。
-    - cpu：PQ2_0 6.72Gi + mmproj 0.59Gi + 32 Ki 的 f16 K/V 2.13Gi，全部占用主机内存。
+    - cpu：PQ2_0 6.72Gi + mmproj 0.59Gi + 128 Ki 的 f16 K/V 估算约 8–8.5Gi，全部占用主机内存。
     - 模型卡推荐的采样参数：思考模式 `temp 1.0 / top_p 0.95 / top_k 20`；
       指令模式 `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
 
@@ -46,7 +50,7 @@ spec:
     | 模式     | 设备                | 说明                                              |
     |----------|---------------------|---------------------------------------------------|
     | `nvidia` | NVIDIA 独显（CUDA） | `15Gi` 显存配额，128 Ki 上下文，Q8_0 K/V，`-ngl all` |
-    | `cpu`    | 无加速器            | 8 核 / 20Gi 主机内存，32 Ki 上下文，f16 K/V，固定 `-t` |
+    | `cpu`    | 无加速器            | 8 核 / 20Gi 主机内存，128 Ki 上下文，f16 K/V，固定 `-t` |
 
     模式只决定镜像；两种模式用同一个 PQ2_0 文件，切换模式不会重新下载。PQ2_0 也是 CPU 上
     的正确选择：CPU 后端对它有重排后的 GEMM 通路（`ggml_gemm_pq2_0_4x8_q8_0`），对 PTQ1_0

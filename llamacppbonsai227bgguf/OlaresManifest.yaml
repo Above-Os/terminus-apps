@@ -7,7 +7,7 @@ metadata:
   description: "Ternary Bonsai 2 27B (GGUF PQ2_0) served with the PrismML llama.cpp fork."
   appid: llamacppbonsai227bgguf
   title: Bonsai 2 27B (llama.cpp)
-  version: '1.0.4'
+  version: '1.0.5'
   categories:
     - AI
     - models
@@ -38,6 +38,11 @@ spec:
   onlyAdmin: true
   versionName: 'prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0'
   upgradeDescription: |
+    v1.0.5: align CPU and NVIDIA default context lengths at 131072 tokens. CPU keeps
+    f16 K/V and one slot, with a 16Gi engine memory request and a 20Gi limit.
+    Migrate the previous CPU preset while preserving custom arguments. Memory is
+    budgeted from estimates; CPU throughput and peak usage at 128K need target testing.
+
     v1.0.4: the non-NVIDIA path is the CPU build, not Vulkan — the Vulkan image does not
     come up on the target hardware, and CUDA / Metal / CPU are the backends upstream
     actually claims. Mode `intel` is replaced by mode `cpu`: same PQ2_0 file as nvidia
@@ -74,11 +79,11 @@ spec:
     - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with the `mmproj-Q8_0` projector for vision) — the same file in both modes
     - Capabilities: thinking, tools, vision
     - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens, 1 slot; Q8_0 K/V)
-    - Engine args (cpu): `-c 32768 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8` (32 Ki tokens, 1 slot; f16 K/V; `-t` matches the container CPU limit)
+    - Engine args (cpu): `-c 131072 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8` (128 Ki tokens, 1 slot; f16 K/V; `-t` matches the container CPU limit)
     - Required GPU memory: `15Gi` on nvidia; none in cpu mode
     - Context includes input, image tokens, reasoning and output; one active request at a time.
     - nvidia: Q8_0 K/V at 128 Ki is 4.25Gi; measured resident set on a 24Gi card is 12.75Gi of the 15Gi quota.
-    - cpu: PQ2_0 6.72Gi + mmproj 0.59Gi + f16 K/V at 32 Ki 2.13Gi, all out of host RAM.
+    - cpu: PQ2_0 6.72Gi + mmproj 0.59Gi + estimated f16 K/V at 128 Ki approximately 8–8.5Gi, all out of host RAM.
     - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
       instruct `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
 
@@ -86,7 +91,7 @@ spec:
     | Mode     | Device                | Details                                                      |
     |----------|-----------------------|--------------------------------------------------------------|
     | `nvidia` | discrete NVIDIA, CUDA | `15Gi` GPU-memory quota, 128 Ki context, Q8_0 K/V, `-ngl all` |
-    | `cpu`    | no accelerator        | 8 cores / 20Gi host RAM, 32 Ki context, f16 K/V, pinned `-t`  |
+    | `cpu`    | no accelerator        | 8 cores / 20Gi host RAM, 128 Ki context, f16 K/V, pinned `-t`  |
 
     The mode picks the engine image; both serve the same PQ2_0 file, so switching modes
     downloads nothing. PQ2_0 is also the right packing for CPU: the CPU backend carries a
@@ -151,11 +156,11 @@ spec:
       requiredCpu: "2200m"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # Engine MEMORY_REQUEST 8Gi + llm-init 256Mi <= requiredMemory 9Gi;
+      # Engine MEMORY_REQUEST 16Gi + llm-init 256Mi <= requiredMemory 17Gi;
       # engine limit 20Gi + llm-init 2Gi <= limitedMemory 22Gi.
-      # 8Gi reserves model weights; the 20Gi limit also covers K/V and buffers.
+      # Reserve weights and 128K f16 K/V, with additional buffer headroom in the limit.
       limitedMemory: "22Gi"
-      requiredMemory: "9Gi"
+      requiredMemory: "17Gi"
 
   supportArch:
     - amd64
