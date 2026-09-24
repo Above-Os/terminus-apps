@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -eu
+mkdir -p /config/Projects /config/.config /config/.local/share
+mkdir -p /config/Desktop
+if [ ! -e /config/Desktop/Concat ]; then
+    ln -s /config/Projects /config/Desktop/Concat
+fi
+if [ ! -e /config/Movies ]; then
+    ln -s /config/Projects /config/Movies
+fi
+cd /config/Projects
+api_pid=""
+gui_pid=""
+cleanup() {
+    [ -z "$gui_pid" ] || kill "$gui_pid" 2>/dev/null || true
+    [ -z "$api_pid" ] || kill "$api_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+if [ -f /opt/concat-api/server.py ]; then
+    python3 /opt/concat-api/server.py >> /config/concat-api.log 2>&1 &
+    api_pid=$!
+fi
+# Keep diagnostics in the persistent home and allow reopening after a close.
+while true; do
+    if [ -n "$api_pid" ] && ! kill -0 "$api_pid" 2>/dev/null; then
+        exit 1
+    fi
+    if [ -f /config/.concat-api-editing ]; then
+        sleep 1
+        continue
+    fi
+    /opt/concat/concat >> /config/concat-console.log 2>&1 &
+    gui_pid=$!
+    wait "$gui_pid" || true
+    gui_pid=""
+    sleep 2
+done
