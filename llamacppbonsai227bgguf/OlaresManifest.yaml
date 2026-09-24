@@ -7,7 +7,7 @@ metadata:
   description: "Ternary Bonsai 2 27B (GGUF PQ2_0) served with the PrismML llama.cpp fork."
   appid: llamacppbonsai227bgguf
   title: Bonsai 2 27B (llama.cpp)
-  version: '1.0.5'
+  version: '1.0.6'
   categories:
     - AI
     - models
@@ -38,6 +38,9 @@ spec:
   onlyAdmin: true
   versionName: 'prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0'
   upgradeDescription: |
+    v1.0.6: remove --kv-unified from the single-slot NVIDIA default; retain it on CPU.
+    Migrate the previous NVIDIA preset while preserving custom arguments.
+
     v1.0.5: align CPU and NVIDIA default context lengths at 131072 tokens. CPU keeps
     f16 K/V and one slot, with a 16Gi engine memory request and a 20Gi limit.
     Migrate the previous CPU preset while preserving custom arguments. Memory is
@@ -78,7 +81,7 @@ spec:
     **Preset Configuration**
     - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with the `mmproj-Q8_0` projector for vision) — the same file in both modes
     - Capabilities: thinking, tools, vision
-    - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens, 1 slot; Q8_0 K/V)
+    - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens, 1 slot; Q8_0 K/V)
     - Engine args (cpu): `-c 131072 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8` (128 Ki tokens, 1 slot; f16 K/V; `-t` matches the container CPU limit)
     - Required GPU memory: `15Gi` on nvidia; none in cpu mode
     - Context includes input, image tokens, reasoning and output; one active request at a time.
@@ -245,13 +248,11 @@ envs:
     default: "medium"
     description:  "The level this model uses when a request does not ask for one."
   # `-fa on` is required by the ternary kernels (Hadamard activation transforms).
-  # No `-kvu`: that short alias does not exist in prism-b10709 — the fork has
-  # `--kv-unified` / `-no-kvu`, and unified KV is only the default when the slot
-  # count is auto, which `-np 2` overrides. No `--spec-type draft-mtp`: the flag
-  # exists but this ternary re-architecture does not carry an MTP head.
+  # NVIDIA uses one slot without --kv-unified; the CPU preset retains it.
+  # No --spec-type draft-mtp: this ternary re-architecture has no MTP head.
   - envName: ENGINE_ARGS
     required: true
-    default: "-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128"
+    default: "-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128"
     type: string
     editable: true
     applyOnChange: true
