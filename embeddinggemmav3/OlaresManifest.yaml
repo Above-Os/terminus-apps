@@ -4,15 +4,15 @@ apiVersion: 'v3'
 metadata:
   name: embeddinggemmav3
   icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
-  description: "EmbeddingGemma-300M text embeddings via IREmbeddingServer (OpenVINO / ONNX)"
+  description: "A multilingual text embedding model for semantic search"
   appid: embeddinggemmav3
   title: EmbeddingGemma
-  version: '1.1.4'
+  version: '1.1.7'
   categories:
-  - AI
-  - models
+    - AI
+    - models
   tags:
-  - embedding
+    - embedding
 sharedEntrances:
   - name: embeddinggemmav3
     host: sharedentrances-api
@@ -43,52 +43,28 @@ workloadReplicas:
   embeddinggemmav3: 1
   llminit: 1
 spec:
-  upgradeDescription: |
-    v1.1.4: Model Console (llm-init) updated to v1.7.21.
-
   onlyAdmin: true
-  versionName: '0.1.0'
+  versionName: 'hw-bfaa3cc'
   fullDescription: |
-    **EmbeddingGemma-300M** text embedding service powered by IREmbeddingServer. Serves OpenAI-compatible `/v1/embeddings` and `/v1/models` on port 8080.
+    EmbeddingGemma turns text into numerical vectors that represent its meaning. Applications can compare these vectors to find related passages, group similar documents, or retrieve context for AI answers.
 
-    **Accelerator modes**
-    | Olares mode | Image | Backend | `EMBED_DEVICE` |
-    |-------------|-------|---------|----------------|
-    | `intel` | `embed-server:v0.1.0-ov-intel` | OpenVINO IR | `igpu` |
-    | `cpu` | `embed-server:v0.1.0-onnx-cpu` | ONNX CPU EP | `cpu` |
-    | `nvidia` | `embed-server:v0.1.0-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
-    | `nvidia-gb10` | `embed-server:v0.1.0-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
-
-    **Model download**
-    On first start, llm-init downloads from the unified Hugging Face repo into App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
-    - [beclab/embeddinggemma-300m](https://huggingface.co/beclab/embeddinggemma-300m)
-    - `intel` mode: `openvino/` subdirectory only
-    - All other modes: `onnx/` subdirectory only
-
-    **Device mounts**
-    - `intel`: `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
-    - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
-
-    **Stack**
-    - **embed-server** (`beclab/embed-server:v0.1.0`, port 8080): Rust embedding inference (internal; reached as `http://embed:8080`).
-    - **llm-init** (`beclab/llm-init:v1.3.5`, `ENGINE_KIND=embed`, port 8090): model download, progress UI, and OpenAI API proxy (`/v1/embeddings`, `/v1/models`).
-      Use **embedclient** for download UI; **embedapi** / shared entrance hit llm-init proxy on port 8090.
-
-  developer: beclab
-  website: https://huggingface.co/google/embeddinggemma-300m
+    This app makes Google's EmbeddingGemma-300M model available to compatible Olares applications. The model supports more than 100 languages and is intended for text embedding rather than generating answers.
+  developer: Google DeepMind
+  website: https://ai.google.dev/gemma/docs/embeddinggemma
+  sourceCode: https://huggingface.co/google/embeddinggemma-300m
+  doc: https://ai.google.dev/gemma/docs/embeddinggemma
   submitter: Olares
   locale:
     - en-US
     - zh-CN
-    - de-DE
-    - es-ES
-    - it-IT
     - fr-FR
+    - de-DE
     - ja-JP
+    - it-IT
+    - es-ES
   license:
-    - text: Gemma
-      url: https://huggingface.co/google/embeddinggemma-300m
-
+    - text: Gemma Terms of Use
+      url: https://ai.google.dev/gemma/terms
   accelerator:
     - mode: cpu
       requiredCpu: 400m
@@ -120,6 +96,16 @@ spec:
       limitedMemory: 5Gi
       requiredDisk: 3Gi
       limitedDisk: 50Gi
+
+    - mode: intel-gpu
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 3Gi
+      limitedMemory: 5Gi
+      requiredDisk: 3Gi
+      limitedDisk: 50Gi
+      requiredGPUMemory: 2048Mi
+      limitedGPUMemory: 4096Mi
 
   supportArch:
     - amd64

@@ -19,12 +19,13 @@ served by [IREmbeddingServer](https://github.com/beclab/IREmbeddingServer).
 
 ## Accelerator → image mapping
 
-| Mode | Docker image | `MODEL_ID` | `EMBED_DEVICE` | HF subdir |
+| Mode | Docker image | `MODEL_ID` | `ACCELERATOR` | HF subdir |
 |------|--------------|------------|----------------|-----------|
-| `intel` | `beclab/embed-server:v0.1.0-ov-intel` | `embeddinggemma-300m-ov` | `igpu` | `openvino/` |
-| `cpu` | `beclab/embed-server:v0.1.0-onnx-cpu` | `embeddinggemma-300m-onnx` | `cpu` | `onnx/` |
-| `nvidia` | `beclab/embed-server:v0.1.0-onnx-cuda12` or `*-cuda13` | `embeddinggemma-300m-onnx` | `cuda` | `onnx/` |
-| `nvidia-gb10` | `beclab/embed-server:v0.1.0-onnx-cuda13-gb10-arm64` | `embeddinggemma-300m-onnx` | `cuda` | `onnx/` |
+| `intel` | `beclab/embed-server:hw-bfaa3cc-ov-intel` | `embeddinggemma-300m` | `intel` | `openvino/` |
+| `intel-gpu` | `beclab/embed-server:hw-bfaa3cc-ov-intel` | `embeddinggemma-300m` | `intel-gpu` | `openvino/` |
+| `cpu` | `beclab/embed-server:hw-bfaa3cc-onnx-cpu` | `embeddinggemma-300m` | `cpu` | `onnx/` |
+| `nvidia` | `beclab/embed-server:hw-bfaa3cc-onnx-cuda12` or `*-cuda13` | `embeddinggemma-300m` | `nvidia` | `onnx/` |
+| `nvidia-gb10` | `beclab/embed-server:hw-bfaa3cc-onnx-cuda13-gb10-arm64` | `embeddinggemma-300m` | `nvidia-gb10` | `onnx/` |
 
 ## Model source (llm-init)
 
@@ -37,7 +38,7 @@ Unified repo: https://huggingface.co/beclab/embeddinggemma-300m
 
 | Component | Image |
 |-----------|-------|
-| embed-server | `beclab/embed-server:v0.1.0-*` |
+| embed-server | `beclab/embed-server:hw-bfaa3cc-*` |
 | llm-init | `beclab/llm-init:v1.3.5` |
 
 ## Device mounts
@@ -53,4 +54,23 @@ curl -s http://<pod>:8080/v1/capabilities | jq '{configured_device_kind, inferen
 
 ## Upgrade notes
 
-See [UPGRADE-v0.1.0.md](./UPGRADE-v0.1.0.md).
+See [UPGRADE-hw-bfaa3cc.md](./UPGRADE-hw-bfaa3cc.md).
+
+## Hardware contract migration (candidate)
+
+Engine candidate `hw-bfaa3cc` is paired with chart 1.1.5. This is a coordinated
+image/configuration migration: roll back both together. `ACCELERATOR` is mandatory,
+old `EMBED_DEVICE` / `EMBED_ALLOW_CPU_FALLBACK` settings and suffixed deployment IDs
+are rejected. Intel modes require the matching integrated/discrete device; they do
+not fall back to another type or CPU. Both download OpenVINO assets. Other modes
+use ONNX assets. Lower-case `gpu` overrides `GPU.Type`; unknown values fail rendering.
+
+Intel discrete mode uses GPU injection and 2048Mi required / 4096Mi limited GPU
+memory annotations. These are allocation settings, not a measured peak guarantee.
+HF cache and run-state paths are unchanged. llm-init remains v1.7.21.
+
+Release gate: the current candidate images were built for amd64. ARM64 CPU/CUDA
+and GB10 candidate artifacts have not been built/validated in this run; do not
+publish this candidate as an all-architecture release. Registry push and remote
+Olares acceptance must pass before rollout. Local lint/render success alone does
+not demonstrate that a device, image download, or model load works.

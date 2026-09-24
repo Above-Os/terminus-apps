@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: damoradar
+  namespace: '{{ .Release.Namespace }}'
+spec:
+  replicas: {{ .Values.workloads.damoradar.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: damoradar
+  template:
+    metadata:
+      labels:
+        app: damoradar
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          command: [sh, -c, 'mkdir -p /data /models/huggingface/damoradar; chown 1000:1000 /data /models/huggingface/damoradar']
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 25m
+              memory: 64Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: models
+              mountPath: /models
+        - name: fetch-model
+          image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
+          command: [python, /opt/service/prepare_assets.py]
+          env:
+            - name: RADAR_ASSETS
+              value: /models/huggingface/damoradar
+            - name: HF_HUB_CACHE
+              value: /models/huggingface
+            - name: HF_HOME
+              value: /models/huggingface
+            - name: HF_ENDPOINT
+              value: '{{ .Values.olaresEnv.HF_ENDPOINT }}'
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: damoradar-hf
+                  key: token
+          resources:
+            requests:
+              cpu: 25m
+              memory: 256Mi
+            limits:
+              cpu: '2'
+              memory: 2Gi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      containers:
+        - name: damoradar
+          image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: RADAR_ASSETS
+              value: /models/huggingface/damoradar
+            - name: MODEL_ROOT
+              value: /models/huggingface/damoradar/ckpt
+            - name: CONFIGS_ROOT
+              value: /models/huggingface/damoradar/ckpt
+            - name: HF_HUB_CACHE
+              value: /models/huggingface
+            - name: HF_HOME
+              value: /models/huggingface
+            - name: HF_HUB_OFFLINE
+              value: '1'
+            - name: TRANSFORMERS_OFFLINE
+              value: '1'
+          resources:
+            requests:
+              cpu: 25m
+              memory: 6Gi
+            limits:
+              cpu: '8'
+              memory: 40Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: models
+              mountPath: /models
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: data
+          hostPath:
+            path: '{{ .Values.userspace.appData }}'
+            type: DirectoryOrCreate
+        - name: models
+          hostPath:
+            path: '{{ .Values.userspace.appCommon }}'
+            type: DirectoryOrCreate
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi

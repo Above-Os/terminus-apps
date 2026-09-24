@@ -4,17 +4,20 @@ apiVersion: 'v3'
 metadata:
   name: jinaclipv2embed
   icon: https://app.cdn.olares.com/appstore/jinaclipv2/icon.png
-  description: "Jina CLIP v2 split text + image embeddings via IREmbeddingServer (OpenVINO / ONNX)"
+  description: "Multilingual text and image embeddings for semantic search"
   appid: jinaclipv2embed
-  title: Jina Clip V2 Embed
-  version: '1.0.12'
+  title: Jina CLIP v2
+  version: '1.0.15'
   categories:
     - AI
+    - models
+  tags:
+    - embedding
 sharedEntrances:
   - name: jinaclipv2embed
     host: sharedentrances-api
     port: 0
-    title: Jina Clip V2 Embed API
+    title: Jina CLIP v2 API
     invisible: true
     authLevel: internal
     icon: https://app.cdn.olares.com/appstore/jinaclipv2/icon.png
@@ -22,14 +25,14 @@ entrances:
   - name: clipclient
     port: 8090
     host: download-svc
-    title: Jina Clip V2 Embed
+    title: Jina CLIP v2
     icon: https://app.cdn.olares.com/appstore/jinaclipv2/icon.png
     openMethod: window
     authLevel: internal
   - name: clipapi
     port: 8090
     host: download-svc
-    title: Jina Clip V2 Embed API
+    title: Jina CLIP v2 API
     icon: https://app.cdn.olares.com/appstore/jinaclipv2/icon.png
     invisible: true
     openMethod: window
@@ -40,47 +43,30 @@ workloadReplicas:
   jinaclipv2embed: 1
   llminit: 1
 spec:
-  upgradeDescription: |
-    v1.0.12: Model Console (llm-init) updated to v1.7.21.
-
   onlyAdmin: true
   versionName: 'jina-clip-v2'
   fullDescription: |
-    **Jina CLIP v2 split** dual-tower embedding service powered by IREmbeddingServer. Serves OpenAI-compatible `/v1/embeddings` (text and image) and `/v1/models` on port 8080.
+    Jina CLIP v2 converts text and images into numerical vectors in a shared space. Compatible applications can use these vectors to find images from text descriptions or compare the meaning of text passages.
 
-    **Accelerator modes**
-    | Olares mode | Image | Backend | `EMBED_DEVICE` |
-    |-------------|-------|---------|----------------|
-    | `intel` | `embed-server:v0.1.2-ov-intel` | OpenVINO IR | `igpu` |
-    | `cpu` | `embed-server:v0.1.2-onnx-cpu` | ONNX CPU EP | `cpu` |
-    | `nvidia` | `embed-server:v0.1.2-onnx-cuda12/13` | ONNX CUDA EP | `cuda` |
-    | `nvidia-gb10` | `embed-server:v0.1.2-onnx-cuda13-gb10-arm64` | ONNX CUDA EP | `cuda` |
+    The model supports 89 languages for text input. This app provides its text and image embedding capabilities to compatible Olares applications.
 
-    **Model download**
-    On first start, llm-init downloads from the unified Hugging Face repo into App Common cache (`appCommon/huggingface` → `/cache/hf/hub`):
-    - [beclab/jina-clip-v2-split](https://huggingface.co/beclab/jina-clip-v2-split)
-    - `intel` mode: `openvino/` subdirectory only (~9GB)
-    - All other modes: `onnx/` subdirectory only
-
-    **Device mounts**
-    - `intel`: `/dev/dri`, `/sys/class/drm` for Intel iGPU stack
-    - `nvidia` / `nvidia-gb10`: GPU injection via Olares scheduler
-
-    **Stack**
-    - **embed-server** (`beclab/embed-server:v0.1.2`, port 8080): Rust CLIP inference (internal; reached as `http://clipembed:8080`).
-    - **llm-init** (`beclab/llm-init:v1.7.1`, `ENGINE_KIND=clipembed`, port 8090): model download, progress UI, and OpenAI API proxy (`/v1/embeddings`, `/v1/models`).
-      Use **clipclient** for download UI; **clipapi** / shared entrance hit llm-init proxy on port 8090.
-
+    Model weights are licensed for non-commercial use under CC BY-NC 4.0. Contact Jina AI for commercial licensing.
   developer: Jina AI
   website: https://jina.ai/
+  sourceCode: https://huggingface.co/jinaai/jina-clip-v2
+  doc: https://huggingface.co/jinaai/jina-clip-v2
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
   license:
-    - text: Apache-2.0
-      url: https://huggingface.co/beclab/jina-clip-v2-split
-
+    - text: CC BY-NC 4.0
+      url: https://creativecommons.org/licenses/by-nc/4.0/
   accelerator:
     # Olares upload validates Σ(all container limits) ≤ accelerator limits:
     #   embed-server 4 CPU / 6Gi (+ llm-init 1 CPU / 1Gi) → need limitedCpu≥5, limitedMemory≥7Gi
@@ -118,6 +104,17 @@ spec:
       requiredDisk: 5Gi
       limitedDisk: 50Gi
 
+    # Initial dGPU allocation; validate Jina CLIP peaks on target hardware.
+    - mode: intel-gpu
+      requiredCpu: 400m
+      limitedCpu: "5"
+      requiredMemory: 4Gi
+      limitedMemory: 8Gi
+      requiredDisk: 5Gi
+      limitedDisk: 50Gi
+      requiredGPUMemory: 10240Mi
+      limitedGPUMemory: 12288Mi
+
   supportArch:
     - amd64
     - arm64
@@ -132,7 +129,7 @@ options:
   shared: true
   dependencies:
     - name: olares
-      version: '>=1.12.6-0'
+      version: '>=1.12.7-0'
       type: system
 envs:
   - envName: MODEL_NAME
