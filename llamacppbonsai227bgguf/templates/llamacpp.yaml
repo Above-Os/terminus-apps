@@ -1,12 +1,9 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
+{{- $isCpu := eq (include "llamacppbonsai227bgguf.isCpu" .) "true" -}}
+{{- $engineImage := include "llamacppbonsai227bgguf.engineImage" . -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
-{{- $engineArgs := include "llamacppbonsai227bgguf.presetArgs" ($oe.ENGINE_ARGS | default "") -}}
-{{- /* MODEL_MODE=embedding -> auto-add llama.cpp's --embedding so it works out
-       of the box; skipped if the user already passed it in ENGINE_ARGS. */ -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
-{{- if and (eq $modelMode "embedding") (not (contains "--embedding" $engineArgs)) -}}
-{{- $engineArgs = trim (printf "%s --embedding" $engineArgs) -}}
-{{- end -}}
+{{- $engineArgs := include "llamacppbonsai227bgguf.engineArgs" . -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "200m") -}}
@@ -17,7 +14,20 @@
 {{- if eq $memLimit "21Gi" -}}
 {{- $memLimit = "24Gi" -}}
 {{- end -}}
-{{- $engineArgs = include "llamacppbonsai227bgguf.engineArgs" (dict "Args" $engineArgs) -}}
+{{- /* CPU mode holds everything in host RAM and counts it against this
+       container's limit: PQ2_0 6.72Gi + mmproj 0.59Gi + f16 K/V at 32 Ki
+       2.13Gi + buffers, so the request is the real floor rather than the 4Gi
+       the CUDA path needs (where the same bytes sit in the card). CPU is also
+       the compute here, not just the driver, so the core budget goes up and
+       the preset's -t is pinned to $cpuLimit. The LLAMACPP_* envs stay
+       CUDA-shaped — they are editable:false and drive nvidia.com/gpumem,
+       which CPU mode does not use. */ -}}
+{{- if $isCpu -}}
+{{- $cpuRequest = "2" -}}
+{{- $cpuLimit = "8" -}}
+{{- $memRequest = "8Gi" -}}
+{{- $memLimit = "20Gi" -}}
+{{- end -}}
 {{- /* nvidia.com/gpumem needs a BARE MiB int. This app is amd64/CUDA only —
        the PrismML fork publishes no linux-arm64 CUDA build — so there is no
        nvidia-gb10 (Spark unified memory) branch here. */ -}}
@@ -36,6 +46,11 @@
 # The image MUST be the PrismML fork: stock llama.cpp rejects PQ2_0/PTQ1_0 as
 # unknown types, and loads Q2_0 without warning and produces garbage, because
 # it has no Hadamard activation runtime.
+#
+# Two backends, picked from the accelerator mode app-service selected:
+#   nvidia -> CUDA 12.8 image, nvidia.com/gpumem quota via gpu-inject
+#   cpu    -> ubuntu-x64 image, no device, more cores and host RAM instead
+# Both serve the same PQ2_0 file out of the shared HF cache.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,8 +60,10 @@ metadata:
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: llamacpp
+{{- if not $isCpu }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "llamacpp"
+{{- end }}
 spec:
   replicas: {{ .Values.workloads.llamacppbonsai227bgguf.replicaCount }}
   selector:
@@ -76,7 +93,7 @@ spec:
             defaultMode: 0555
       containers:
         - name: llamacpp
-          image: docker.io/leamon2code/prismml-llama.cpp:server-cuda12.8-prism-b10709
+          image: "{{ $engineImage }}"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]
           env:
@@ -85,20 +102,20 @@ spec:
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
             - name: MODEL_NAME
-              value: "{{ $modelName }}"
+              value: {{ $modelName | quote }}
             - name: MODEL_MODE
-              value: "{{ $modelMode }}"
+              value: {{ $modelMode | quote }}
             - name: LLAMACPP_PORT
               value: "8081"
             - name: WAIT_TIMEOUT
               value: "3600"
             - name: ENGINE_ARGS
-              value: "{{ $engineArgs }}"
+              value: {{ $engineArgs | quote }}
             - name: HF_HUB_CACHE
               value: /cache/hf/hub
 {{- if $hfEndpoint }}
             - name: HF_ENDPOINT
-              value: "{{ $hfEndpoint }}"
+              value: {{ $hfEndpoint | quote }}
 {{- end }}
 {{- if $hfToken }}
             - name: HF_TOKEN
@@ -136,11 +153,15 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $isCpu }}
               nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
+{{- if not $isCpu }}
               nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

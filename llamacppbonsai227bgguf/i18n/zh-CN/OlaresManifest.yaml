@@ -4,6 +4,14 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.4：非 NVIDIA 这条路改用 CPU 构建，不再用 Vulkan —— Vulkan 镜像在目标机器上起不来，
+    而上游声明支持的后端本来就是 CUDA / Metal / CPU。模式 `intel` 替换为 `cpu`：与 nvidia
+    共用同一个 PQ2_0 文件（CPU 后端对 PQ2_0 有重排后的 GEMM 通路，对 PTQ1_0 只有逐向量点积），
+    不需要设备透传，不需要 privileged，改为 8 核 + 20Gi 主机内存，不占显存配额。
+
+    v1.0.3：nvidia 模式上下文由 98,304 提升到 131,072 token（128 Ki），显存配额仍为 15Gi。
+    24Gi 显卡实测常驻 12.75Gi（权重 + mmproj + Q8_0 K/V）。
+
     v1.0.2：GPU 配额提升至 15Gi；单槽位 98,304 token 上下文，Q8_0 K/V 缓存，batch 512 / ubatch 128。
     引擎内存上限提高到 24Gi，保留 GPU 驱逐至主机内存的余量。
 
@@ -23,19 +31,28 @@ spec:
     其中包含三值混合注意力的 CUDA 内核。`-fa on` 是必需的：它启用权重旋转基所依赖的 Hadamard 激活变换。
 
     **预设配置**
-    - 模型：`prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0`（7.21 GB，含视觉投影器 `mmproj-Q8_0`）
+    - 模型：`prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0`（7.21 GB，含视觉投影器 `mmproj-Q8_0`）—— 两种模式共用同一个文件
     - 能力：思考、工具调用、视觉
-    - 引擎参数：`-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128`（98,304 token，即 96 Ki token；单槽位，Q8_0 KV 缓存）
-    - 所需 GPU 显存：`15Gi`
+    - 引擎参数（nvidia）：`-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128`（128 Ki token；单槽位，Q8_0 K/V）
+    - 引擎参数（cpu）：`-c 32768 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8`（32 Ki token；单槽位，f16 K/V；`-t` 与容器 CPU limit 对齐）
+    - 所需 GPU 显存：nvidia 模式 `15Gi`；cpu 模式不占用显存
     - 上下文预算包含输入、图像 token、思考和输出；单次请求独占一个槽位。
-    - Q8_0 KV 缓存估算约 3.19Gi；15Gi 为目标配额，长上下文及视觉峰值需在目标 GPU 实测。
+    - nvidia：128 Ki 上下文下 Q8_0 K/V 约 4.25Gi，24Gi 显卡实测常驻 12.75Gi，占 15Gi 配额。
+    - cpu：PQ2_0 6.72Gi + mmproj 0.59Gi + 32 Ki 的 f16 K/V 2.13Gi，全部占用主机内存。
     - 模型卡推荐的采样参数：思考模式 `temp 1.0 / top_p 0.95 / top_k 20`；
       指令模式 `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
 
     **加速器模式**
-    | 模式      | 设备       | 说明                                     |
-    |-----------|------------|------------------------------------------|
-    | `nvidia`  | GPU (CUDA) | 占用 `15Gi` 显存；`-ngl all` 全量卸载到 GPU |
+    | 模式     | 设备                | 说明                                              |
+    |----------|---------------------|---------------------------------------------------|
+    | `nvidia` | NVIDIA 独显（CUDA） | `15Gi` 显存配额，128 Ki 上下文，Q8_0 K/V，`-ngl all` |
+    | `cpu`    | 无加速器            | 8 核 / 20Gi 主机内存，32 Ki 上下文，f16 K/V，固定 `-t` |
+
+    模式只决定镜像；两种模式用同一个 PQ2_0 文件，切换模式不会重新下载。PQ2_0 也是 CPU 上
+    的正确选择：CPU 后端对它有重排后的 GEMM 通路（`ggml_gemm_pq2_0_4x8_q8_0`），对 PTQ1_0
+    只有逐向量点积。没有核显模式 —— 分支确实发布了 Vulkan 构建，但它在目标机器上起不来，
+    所以核显机器走 CPU 路径。上游没有公布任何 CPU 吞吐数据；decode 是内存带宽瓶颈，定上下文
+    大小前先用 `llama-bench` 实测。
 
     仅支持 amd64：PrismML 分支没有发布 linux-arm64 的 CUDA 构建，因此不支持 DGX Spark（`nvidia-gb10`）。
 

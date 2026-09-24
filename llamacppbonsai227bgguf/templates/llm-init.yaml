@@ -6,6 +6,9 @@
        For VLM, append a comma-separated mmproj segment in MODEL_SOURCE.
        ENGINE_ARGS is a string of raw llama.cpp flags (wrappers/llamacpp.sh). */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
+{{- /* One packing for both modes: PQ2_0 is what the CUDA kernels want and the
+       only packing with a repacked GEMM path on CPU, so switching accelerator
+       mode re-uses the same file in the shared HF cache. */ -}}
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
@@ -44,14 +47,7 @@
        levels fail at boot rather than reaching a client as options. */ -}}
 {{- $reasoningEffort := $oe.MODEL_REASONING_EFFORT | default "" -}}
 {{- $reasoningEffortDefault := $oe.MODEL_REASONING_EFFORT_DEFAULT | default "" -}}
-{{- $engineArgs := include "llamacppbonsai227bgguf.presetArgs" ($oe.ENGINE_ARGS | default "") -}}
-{{- /* Keep ENGINE_ARGS symmetric with the engine Deployment: embedding
-       mode must seed --embedding onto the model card / handoff, or the
-       wrapper's file-preferred ENGINE_ARGS would drop the chart flag. */ -}}
-{{- if and (eq $modelMode "embedding") (not (contains "--embedding" $engineArgs)) -}}
-{{- $engineArgs = trim (printf "%s --embedding" $engineArgs) -}}
-{{- end -}}
-{{- $engineArgs = include "llamacppbonsai227bgguf.engineArgs" (dict "Args" $engineArgs) -}}
+{{- $engineArgs := include "llamacppbonsai227bgguf.engineArgs" . -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
@@ -118,28 +114,28 @@ spec:
             - name: ENGINE_KIND
               value: llamacpp
             - name: MODEL_NAME
-              value: "{{ $modelName }}"
+              value: {{ $modelName | quote }}
             - name: MODEL_SOURCE
-              value: "{{ $modelSource }}"
+              value: {{ $modelSource | quote }}
             - name: MODEL_MODE
-              value: "{{ $modelMode }}"
+              value: {{ $modelMode | quote }}
 {{- if $modelSupports }}
             - name: MODEL_SUPPORTS
-              value: "{{ $modelSupports }}"
+              value: {{ $modelSupports | quote }}
 {{- end }}
 {{- if $reasoningEffort }}
             - name: MODEL_REASONING_EFFORT
-              value: "{{ $reasoningEffort }}"
+              value: {{ $reasoningEffort | quote }}
 {{- end }}
 {{- if $reasoningEffortDefault }}
             - name: MODEL_REASONING_EFFORT_DEFAULT
-              value: "{{ $reasoningEffortDefault }}"
+              value: {{ $reasoningEffortDefault | quote }}
 {{- end }}
             - name: ENGINE_ARGS
-              value: "{{ $engineArgs }}"
+              value: {{ $engineArgs | quote }}
 {{- if $hfEndpoint }}
             - name: HF_ENDPOINT
-              value: "{{ $hfEndpoint }}"
+              value: {{ $hfEndpoint | quote }}
 {{- end }}
 {{- if $hfToken }}
             - name: HF_TOKEN
@@ -153,7 +149,7 @@ spec:
             - name: PORT
               value: "8090"
             - name: LOG_LEVEL
-              value: "{{ $logLevel }}"
+              value: {{ $logLevel | quote }}
             - name: LOG_FORMAT
               value: json
             - name: APP_URL
@@ -187,7 +183,7 @@ spec:
             limits:
               # LFS download (v1.2.4 default) streams each file to disk with a
               # bounded footprint, but `hf download` still runs a python
-              # subprocess in this cgroup; 4Gi gives the huggingface_hub CLI
+              # subprocess in this cgroup; 2Gi gives the huggingface_hub CLI
               # comfortable headroom on large sharded models.
               cpu: "1"
               memory: 2Gi

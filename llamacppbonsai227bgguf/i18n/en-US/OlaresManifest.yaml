@@ -4,6 +4,16 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.4: the non-NVIDIA path is the CPU build, not Vulkan — the Vulkan image does not
+    come up on the target hardware, and CUDA / Metal / CPU are the backends upstream
+    actually claims. Mode `intel` is replaced by mode `cpu`: same PQ2_0 file as nvidia
+    (the CPU backend has a repacked GEMM path for PQ2_0 and only a vector dot product for
+    PTQ1_0), no device passthrough, no privileged container, 8 cores and 20Gi of host RAM
+    instead of a GPU quota.
+
+    v1.0.3: context 98,304 -> 131,072 tokens (128 Ki) on nvidia, GPU quota unchanged at
+    15Gi. Measured on a 24Gi card: 12.75Gi resident (weights + mmproj + Q8_0 K/V).
+
     v1.0.2: 15Gi GPU quota; one 98,304-token slot, Q8_0 K/V cache, batch 512 / ubatch 128.
     Raise engine host-memory limit to 24Gi to retain GPU eviction headroom.
 
@@ -25,19 +35,30 @@ spec:
     transforms the weight rotation basis depends on.
 
     **Preset Configuration**
-    - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with `mmproj-Q8_0` projector for vision)
+    - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with the `mmproj-Q8_0` projector for vision) — the same file in both modes
     - Capabilities: thinking, tools, vision
-    - Engine args: `-c 98304 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (98,304 tokens / 96 Ki tokens, 1 slot; Q8_0 KV cache)
-    - Required GPU memory: `15Gi`
+    - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 1 --kv-unified -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens, 1 slot; Q8_0 K/V)
+    - Engine args (cpu): `-c 32768 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8` (32 Ki tokens, 1 slot; f16 K/V; `-t` matches the container CPU limit)
+    - Required GPU memory: `15Gi` on nvidia; none in cpu mode
     - Context includes input, image tokens, reasoning and output; one active request at a time.
-    - Estimated Q8_0 KV cache: 3.19Gi; long-context and vision peaks require validation on the target GPU.
+    - nvidia: Q8_0 K/V at 128 Ki is 4.25Gi; measured resident set on a 24Gi card is 12.75Gi of the 15Gi quota.
+    - cpu: PQ2_0 6.72Gi + mmproj 0.59Gi + f16 K/V at 32 Ki 2.13Gi, all out of host RAM.
     - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
       instruct `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
 
     **Accelerator modes**
-    | Mode      | Device     | Details                                         |
-    |-----------|------------|-------------------------------------------------|
-    | `nvidia`  | GPU (CUDA) | Uses `15Gi` GPU memory; `-ngl all` for full GPU |
+    | Mode     | Device                | Details                                                      |
+    |----------|-----------------------|--------------------------------------------------------------|
+    | `nvidia` | discrete NVIDIA, CUDA | `15Gi` GPU-memory quota, 128 Ki context, Q8_0 K/V, `-ngl all` |
+    | `cpu`    | no accelerator        | 8 cores / 20Gi host RAM, 32 Ki context, f16 K/V, pinned `-t`  |
+
+    The mode picks the engine image; both serve the same PQ2_0 file, so switching modes
+    downloads nothing. PQ2_0 is also the right packing for CPU: the CPU backend carries a
+    repacked GEMM path for it (`ggml_gemm_pq2_0_4x8_q8_0`) and only a vector dot product
+    for PTQ1_0. There is no integrated-GPU mode — the fork publishes a Vulkan build, but
+    it does not come up on the target hardware, so an Intel iGPU host runs the CPU path.
+    Upstream publishes no CPU throughput figures; decode is memory-bandwidth bound, so
+    measure with `llama-bench` before committing to a context size.
 
     amd64 only: the PrismML fork publishes no linux-arm64 CUDA build, so DGX Spark
     (`nvidia-gb10`) is not supported.
