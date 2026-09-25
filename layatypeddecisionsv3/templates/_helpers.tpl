@@ -1,6 +1,6 @@
 {{- define "layatypeddecisionsv3.engineImage" -}}
 {{- if eq (.Values.gpu | default "cpu") "nvidia" -}}
-docker.io/beclab/systemone-engine:v0.2.1-laya-cuda12.8-amd64
+docker.io/beclab/systemone-engine:v0.2.2-laya-cuda12.8-amd64
 {{- else -}}
 docker.io/beclab/systemone-engine:v0.1.0-laya-cpu-amd64
 {{- end -}}
