@@ -1,4 +1,6 @@
 {{- $runStatePath := include "layatypeddecisionsv3.runStatePath" . -}}
+{{- $gpuType := .Values.gpu | default "cpu" -}}
+{{- $isNvidia := eq $gpuType "nvidia" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +8,10 @@ metadata:
   namespace: '{{ .Release.Namespace }}'
   labels:
     io.kompose.service: systemone-engine
+{{- if $isNvidia }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "systemone-engine"
+{{- end }}
 spec:
   replicas: {{ .Values.workloads.layatypeddecisionsv3.replicaCount }}
   selector:
@@ -37,7 +43,7 @@ spec:
             - name: MODEL_REVISION
               value: '{{ include "layatypeddecisionsv3.modelRevision" . }}'
             - name: DEVICE
-              value: cpu
+              value: '{{ if $isNvidia }}cuda{{ else }}cpu{{ end }}'
             - name: SYSTEM_ONE_CONTEXT_SIZE
               value: "1024"
             - name: SYSTEM_ONE_MAX_CHOICE_OPTIONS
@@ -49,9 +55,15 @@ spec:
             - name: SYSTEM_ONE_DEFAULT_ELIGIBLE
               value: "false"
             - name: SYSTEM_ONE_MAX_CONCURRENCY
-              value: "1"
+              value: '{{ if $isNvidia }}100{{ else }}1{{ end }}'
             - name: SYSTEM_ONE_MAX_QUEUE
               value: "128"
+            - name: SYSTEM_ONE_BATCH_MAX_REQUESTS
+              value: '{{ if $isNvidia }}32{{ else }}1{{ end }}'
+            - name: SYSTEM_ONE_BATCH_MAX_ITEMS
+              value: '{{ if $isNvidia }}128{{ else }}256{{ end }}'
+            - name: SYSTEM_ONE_BATCH_WAIT_MS
+              value: '{{ if $isNvidia }}5{{ else }}0{{ end }}'
             - name: PORT
               value: "8000"
           ports:
@@ -80,9 +92,15 @@ spec:
             requests:
               cpu: "1"
               memory: 2Gi
+{{- if $isNvidia }}
+              nvidia.com/gpumem: 4096
+{{- end }}
             limits:
               cpu: "6"
               memory: 8Gi
+{{- if $isNvidia }}
+              nvidia.com/gpumem: 8192
+{{- end }}
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
@@ -120,4 +138,3 @@ spec:
       port: 8000
       targetPort: 8000
   type: ClusterIP
-

@@ -2,6 +2,7 @@
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $runStatePath := include "layatypeddecisionsv3.runStatePath" . -}}
+{{- $isNvidia := eq (.Values.gpu | default "cpu") "nvidia" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -74,7 +75,7 @@ spec:
             - name: SYSTEM_ONE_DEFAULT_ELIGIBLE
               value: "false"
             - name: ENGINE_MAX_CONCURRENCY
-              value: "1"
+              value: '{{ if $isNvidia }}100{{ else }}1{{ end }}'
             - name: RUN_DIR
               value: /run/llm-init
             - name: PORT
