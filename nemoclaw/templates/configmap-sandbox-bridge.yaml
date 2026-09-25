@@ -58,7 +58,7 @@ data:
     # models.providers.inference.baseUrl self-heal uses NEMOCLAW_ENDPOINT_URL
     # (the same value the operator typed in OlaresManifest, already validated
     # as reachable in deployment.yaml preflight [4/5]). Must be forwarded into
-    _NEM_EP="${NEMOCLAW_ENDPOINT_URL:-}"
+    _NEM_EP="${NEMOCLAW_SANDBOX_ENDPOINT_URL:-${NEMOCLAW_ENDPOINT_URL:-}}"
     # Single-quoted remote body: avoids the host re-parsing a double-quoted string (where backticks
     # in comments became command substitution and destroyed runuser / LAUNCH).
     docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
@@ -1889,7 +1889,7 @@ data:
     # after install already hits the reachable endpoint (not inference.local).
     if [ -n "${NEMOCLAW_ENDPOINT_URL:-}" ]; then
       docker exec "$CLUSTER_CTR" kubectl -n "$NS" exec "$SBX" -c agent -- \
-        env "NEMOCLAW_ENDPOINT_URL=${NEMOCLAW_ENDPOINT_URL}" \
+        env "NEMOCLAW_ENDPOINT_URL=${NEMOCLAW_SANDBOX_ENDPOINT_URL:-${NEMOCLAW_ENDPOINT_URL}}" \
         sh -c '[ -f /sandbox/.openclaw/openclaw.json ] && [ -f /sandbox/.nemoclaw/patch_inference_baseurl.py ] && python3 /sandbox/.nemoclaw/patch_inference_baseurl.py' \
         >>/var/log/nemoclaw-skill-env.log 2>&1 || true
     fi
