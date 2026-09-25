@@ -69,25 +69,10 @@ spec:
           ports:
             - name: http
               containerPort: 8000
-          startupProbe:
-            httpGet:
-              path: /healthz
-              port: 8000
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 360
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8000
-            periodSeconds: 5
-            timeoutSeconds: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8000
-            periodSeconds: 30
-            timeoutSeconds: 5
+          # Model readiness belongs to llm-init. This container starts as a
+          # supervisor that waits for llm-init's model_path sentinel, so probing
+          # the engine HTTP port here would incorrectly block app installation
+          # until every model byte is downloaded and loaded.
           resources:
             requests:
               cpu: "1"
