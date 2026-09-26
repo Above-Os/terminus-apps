@@ -1,4 +1,4 @@
-{{- define "levv1.engineImage" -}}docker.io/beclab/systemone-engine:v0.3.2-lev-cuda13-amd64{{- end -}}
+{{- define "levv1.engineImage" -}}docker.io/beclab/systemone-engine:v0.3.3-lev-cuda13-amd64{{- end -}}
 {{- define "levv1.llmInitImage" -}}docker.io/beclab/llm-init:v1.7.23{{- end -}}
 {{- define "levv1.modelName" -}}lev{{- end -}}
 {{- define "levv1.adapterRepo" -}}interfaze-ai/lev{{- end -}}
