@@ -5,7 +5,7 @@ docker.io/beclab/systemone-engine:v0.2.2-laya-cuda12.8-amd64
 docker.io/beclab/systemone-engine:v0.1.0-laya-cpu-amd64
 {{- end -}}
 {{- end -}}
-{{- define "layatypeddecisionsv3.llmInitImage" -}}docker.io/beclab/llm-init:system-one-b6a30bd-amd64{{- end -}}
+{{- define "layatypeddecisionsv3.llmInitImage" -}}docker.io/beclab/llm-init:v1.7.23{{- end -}}
 {{- define "layatypeddecisionsv3.modelName" -}}laya-typed-decisions{{- end -}}
 {{- define "layatypeddecisionsv3.modelRepo" -}}convaiinnovations/laya-typed-decisions{{- end -}}
 {{- define "layatypeddecisionsv3.modelRevision" -}}f9ab0b228f0fc0f14d873dbc99038f135c2da1b2{{- end -}}
