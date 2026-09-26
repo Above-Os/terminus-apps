@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: levv1-wrapper
+  namespace: '{{ .Release.Namespace }}'
+data:
+  start.sh: |
+    #!/bin/sh
+    set -eu
+    sentinel=/run/llm-init/model_path
+    until [ -s "$sentinel" ]; do
+      sleep 1
+    done
+    MODEL_SOURCE="$(sed -n '1p' "$sentinel")"
+    test -n "$MODEL_SOURCE"
+    export HF_HOME=/cache/hf
+    export HF_HUB_CACHE=/cache/hf/hub
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    exec lev serve --checkpoint "$MODEL_SOURCE" --model-cache /cache/hf/hub --host 0.0.0.0 --port "${PORT:-8000}"
