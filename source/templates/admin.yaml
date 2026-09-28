@@ -17,11 +17,19 @@ spec:
       labels:
         app: source
     spec:
+      serviceAccountName: default
       containers:
         - name: admin
-          image: aboveos/appstore-adminv2:v2.0.31
+          image: aboveos/appstore-adminv2:v2.1.3
           imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: appstore-adminv2-config
           env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: SOURCE_ID
               value: "market.source"
             - name: REDIS_HOST
@@ -46,18 +54,6 @@ spec:
                   key: INTERNAL_API_TOKEN
             - name: TRUSTED_PROXIES
               value: "10.0.0.0/8"
-            - name: AUTH_MODE
-              value: local
-            - name: BOOTSTRAP_ADMIN_EMAILS
-              valueFrom:
-                secretKeyRef:
-                  name: "{{ .Release.Name }}-secrets"
-                  key: LOGIN_USERNAME
-            - name: ADMIN_LOGIN_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: "{{ .Release.Name }}-secrets"
-                  key: LOGIN_PASSWORD
           ports:
             - containerPort: 4003
               protocol: TCP
@@ -69,7 +65,7 @@ spec:
               cpu: "1"
               memory: 1Gi
         - name: admin-frontend
-          image: aboveos/appstore-adminv2-frontend:v2.0.31
+          image: aboveos/appstore-adminv2-frontend:v2.1.3
           imagePullPolicy: IfNotPresent
           env:
             - name: ADMINV2_API_UPSTREAM
