@@ -816,15 +816,6 @@ spec:
                     continue
                   fi
                   # Pod Ready (= TUI works + WebUI relay can connect). Anything that takes
-                  ensure_brew_in_sandbox
-                  if ! gateway_listening; then
-                    sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1 | \
-                      while read -r ln; do echo "[chat-ui-bridge] $ln"; done
-                    if ! gateway_listening; then
-                      sleep 15
-                      continue
-                    fi
-                  fi
                   if [ ! -f /workspace/.nemoclaw-installed ]; then
                     sleep 10
                     continue
@@ -835,6 +826,15 @@ spec:
                     ensure_openclaw_version_in_sandbox || true
                     sleep 5
                     continue
+                  fi
+                  ensure_brew_in_sandbox
+                  if ! gateway_listening; then
+                    sh /opt/nemoclaw/sandbox-ensure-gateway.sh 2>&1 | \
+                      while read -r ln; do echo "[chat-ui-bridge] $ln"; done
+                    if ! gateway_listening; then
+                      sleep 15
+                      continue
+                    fi
                   fi
                   # Install model-route patches before exposing the application.
                   ensure_skill_env_installed
@@ -1858,7 +1858,7 @@ spec:
                 fi
               fi
               if [ -f /workspace/.nemoclaw-installed ]; then
-                echo "NemoClaw ready (onboard sentinel present; runtime openclaw ${NEMOCLAW_OPENCLAW_VERSION:-<build pin>})."
+                echo "NemoClaw onboarding complete; bridge readiness checks determine when entrances open."
               else
                 echo "WARN: NemoClaw gateway is up but onboard did NOT complete — /workspace/.nemoclaw-installed missing."
                 echo "WARN: Fix the [5b/5] error above, then run: kubectl exec -it deploy/nemoclaw -c nemoclaw -- nemoclaw onboard --resume"
