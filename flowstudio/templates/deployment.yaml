@@ -160,6 +160,8 @@ spec:
           value: {{ (default dict .Values.network).pipIndexUrl | default "" | quote }}
         - name: USER_DATA_DIR
           value: /data/appData/userData
+        - name: USERSPACE_ROOT
+          value: /userspaces
         - name: MODELS_DIR
           value: /data/appCommon/comfyui/model
         - name: PUBLIC_BASE_URL
@@ -173,6 +175,8 @@ spec:
           mountPath: /data/appData
         - name: app-common
           mountPath: /data/appCommon
+        - name: userspaces
+          mountPath: /userspaces
         - name: app-data
           mountPath: /devsrc
           subPath: devsrc
@@ -213,3 +217,9 @@ spec:
         hostPath:
           path: {{ .Values.userspace.appCommon }}
           type: DirectoryOrCreate
+      # 每个用户的 Home 在各自的 userspace PVC 下。shared app 的 appData
+      # 只挂集群所有者的 Data，写不出子用户的 Files。
+      - name: userspaces
+        hostPath:
+          path: {{ (.Values.rootPath | default "/olares") }}/rootfs/userspace
+          type: Directory
