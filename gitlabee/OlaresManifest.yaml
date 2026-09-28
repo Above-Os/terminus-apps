@@ -1,0 +1,176 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: "v3"
+
+workloadReplicas:
+  gitlabee-gitlab-runner: 1
+  gitlabee-gitlab-exporter: 1
+  gitlabee-gitlab-shell: 1
+  gitlabee-kas: 1
+  gitlabee-sidekiq-all-in-1-v2: 1
+  gitlabee-toolbox: 1
+  gitlabee-webservice-default: 1
+  gitlabee-minio: 1
+  gitlabee: 1
+  gitlabee-registry: 1
+  gitlabee-gitaly: 1
+  gitlabee-postgresql: 1
+  gitlabee-redis-master: 1
+metadata:
+  name: gitlabee
+  description: A web-based Git repository management tool.
+  icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+  appid: gitlabee
+  version: "1.0.0"
+  title: GitLab Enterprise Edition
+  categories:
+    - Developer Tools
+    - workspace
+    - developer
+  tags:
+    - coding
+    - collaboration
+
+entrances:
+  - name: gitlabee
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab Enterprise Edition
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    openMethod: window
+  - name: minio
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab MinIO
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    invisible: true
+  - name: kas
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab KAS
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    invisible: true
+  - name: registry
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab Registry
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    invisible: true
+  - name: smartcard
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab Smartcard
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    invisible: true
+  - name: pages
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab Pages
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    invisible: true
+  - name: projectspages
+    host: gitlabee-nginx-ingress-controller
+    port: 80
+    title: GitLab Projects Pages
+    icon: https://app.cdn.olares.com/appstore/gitlab/icon.png
+    authLevel: public
+    invisible: true
+permission:
+  appData: true
+  appCache: true
+middleware:
+  redis:
+    namespace: db0
+  postgres:
+    username: postgres
+    databases:
+      - name: gitlabee
+        distributed: true
+spec:
+  versionName: 18.10.1
+  featuredImage: https://app.cdn.olares.com/appstore/gitlab/promote_image_1v2.webp
+  promoteImage:
+    - https://app.cdn.olares.com/appstore/gitlab/promote_image_1v2.webp
+    - https://app.cdn.olares.com/appstore/gitlab/promote_image_2v2.webp
+    - https://app.cdn.olares.com/appstore/gitlab/promote_image_3v2.webp
+    - https://app.cdn.olares.com/appstore/gitlab/promote_image_4v2.webp
+  fullDescription: |
+    **IMPORTANT NOTE**
+    The default username for admin is `root`.
+
+    **OVERVIEW**
+    GitLab is an open source end-to-end software development platform with built-in version control, issue tracking, code review, CI/CD, and more. With GitLab, teams can easily handle code hosting, version control, issue tracking, continuous integration, and deployment.
+
+    **FEATURES**
+    Plan
+    - GitLab enables portfolio planning and management through epics, groups (programs) and milestones to organize and track progress.
+
+    Create
+    - With GitLab, You can create, view, and manage code and project data through powerful branching tools.
+
+    Verify
+    - GitLab's industry leading CI capabilities enables automated testing, Static Analysis Security Testing, Dynamic Analysis Security testing and code quality analysis to provide fast feedback to developers and testers.
+
+    Package
+    - The private, secure, container and package registry are built-in and preconfigured out-of-the box to work seamlessly with GitLab source code management and CI/CD pipelines.
+
+    Secure
+    - GitLab provides Static Application Security Testing (SAST), Dynamic Application Security Testing (DAST), Container Scanning, and Dependency Scanning to help you deliver secure applications along with license compliance.
+
+    Deploy
+    - With zero-touch Continuous Delivery (CD) built right into the pipeline, deployments can be automated to multiple environments like staging and production. With feature flags, built-in auditing/traceability, and on-demand environments, you'll be able to deliver faster and with more confidence than ever before.
+
+    Monitor
+    - Get feedback and the tools to help you reduce the severity and frequency of incidents so that you can release software frequently with confidence.
+
+    Govern
+    - GitLab helps users manage security vulnerabilities, policies, and compliance across their organization.
+
+  upgradeDescription: |
+    Add the Helm release revision to the migrations and MinIO bucket Job names so upgrades do not patch immutable pod templates.
+    Let the platform scale this app to zero. The gitlabee-runner and minio
+    Deployments declared no spec.replicas, so stopping the app never
+    terminated them.
+
+  developer: GitLab B.V.
+  website: https://www.gitlab.com/
+  sourceCode: https://gitlab.com/gitlab-org
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  doc: https://about.gitlab.com/resources/
+  requiredMemory: 8Gi
+  limitedMemory: 20Gi
+  requiredDisk: 512Mi
+  limitedDisk: 10Gi
+  requiredCpu: 2485m
+  limitedCpu: 12
+  supportArch:
+    - amd64
+options:
+  allowMultipleInstall: true
+  dependencies:
+    - name: olares
+      type: system
+      version: ">=1.12.6-0"
+envs:
+  - envName: GITLAB_INITIAL_ROOT_PASSWORD
+    required: true
+    type: password
+    editable: false
+    applyOnChange: false
+    description: |
+      Initial password for GitLab administrator (username is always root). GitLab requires 8–128 characters; rejects known breached passwords; must not contain predictable words (e.g. gitlab, devops) or parts of your name/username/email. For user root, do not use a password containing the substring "root". Olares enforces length 8–128, at least one lowercase, one uppercase, one digit, one non-alphanumeric character, and blocks substrings gitlab, devops, root (case-insensitive). Breached-password checks only run inside GitLab at install time.
+    regex: "^(?!.*[Gg][Ii][Tt][Ll][Aa][Bb])(?!.*[Dd][Ee][Vv][Oo][Pp][Ss])(?!.*[Rr][Oo][Oo][Tt])(?=.{8,128}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).+$"
