@@ -31,7 +31,7 @@
        same engine limit as Arc. intel-gpu (Arc) is discrete. */ -}}
 {{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
 {{- /* ENGINE_IMAGE has no manifest default: filling one would pin every mode to the same image. */ -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.27" "docker.io/beclab/audio-qwen:v1.1.27" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.28" "docker.io/beclab/audio-qwen:v1.1.28" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if and $unifiedMem (eq $gpuType "nvidia-gb10") -}}
@@ -45,13 +45,27 @@
 {{- /* Engine-native flags in llm-init's one channel; the engine derives its GPU share from the
        quota below. gb10 profiles a smaller KV budget after the encoder than a discrete slice, and
        graph capture is where startup has been seen to wedge holding the vGPU lock.
-       NO batching flag on purpose: the transcription engine sizes each call from what it measures
-       on this machine, and a span COUNT is not a measure of memory -- 32 spans can be 64 padded
-       seconds or 57,600. --batch-max-spans is still accepted as a ceiling for a deployment that
-       wants one; leaving it out is what turns the measurement on. */ -}}
+       A span count is not a measure of memory, so batching stays on and the engine sizes each
+       call, except on the integrated GPU (gpu type intel, not Arc) when the smallest node
+       reports under 48Gi: an empty box then adds --batch-max-spans 8 (at most eight spans
+       a call). Arc keeps its own 32Gi and is not memory-pressured, so it is not capped.
+       Unreadable memory leaves batching on. A filled ENGINE_ARGS replaces this whole string. */ -}}
+{{- $hostBytes := 0 -}}
+{{- range $n := (.Values.nodes | default list) -}}
+{{- /* api.NodeInfo is a struct. toJson uses its json tags (memory.total); dig misses nothing without aborting the render. */ -}}
+{{- $t := int (dig "memory" "total" 0 (fromJson (toJson $n))) -}}
+{{- if and (gt $t 0) (or (eq $hostBytes 0) (lt $t $hostBytes)) -}}
+{{- $hostBytes = $t -}}
+{{- end -}}
+{{- end -}}
+{{- /* Arc (intel-gpu) is discrete. The cap is the integrated part sharing host memory. */ -}}
+{{- $forceSerial := and (eq $gpuType "intel") (gt $hostBytes 0) (lt $hostBytes (mul 48 1073741824)) -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
 {{- if eq $engineArgs "" -}}
 {{- $engineArgs = printf "--max-model-len %s --enforce-eager --repetition-detection" (ternary "3072" "8192" (eq $gpuType "nvidia-gb10")) -}}
+{{- if $forceSerial -}}
+{{- $engineArgs = printf "%s --batch-max-spans 8" $engineArgs -}}
+{{- end -}}
 {{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}

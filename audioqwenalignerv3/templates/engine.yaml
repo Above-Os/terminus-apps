@@ -25,7 +25,7 @@
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
 {{- /* gb10 only: intel iGPU keeps MEMORY_LIMIT (not REQUIRED_GPU_MEMORY) so CUDA GPU tags stay 4Gi. */ -}}
 {{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.27" "docker.io/beclab/audio-qwen:v1.1.27" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.28" "docker.io/beclab/audio-qwen:v1.1.28" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if $unifiedMem -}}
@@ -33,8 +33,25 @@
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
 {{- end -}}
-{{- /* ENGINE_ARGS is the user box only. --device is inferred from the install card. */ -}}
+{{- /* ENGINE_ARGS is the user box. Empty, on the integrated GPU (gpu type intel, not Arc),
+       and under 48Gi of node memory forces one span a call. Arc keeps its own 32Gi and is
+       not memory-pressured, so batching stays on. At 48Gi or more, on any other mode, or when
+       the total cannot be read, an empty box leaves batching on.
+       A filled box replaces the whole string. --device is inferred from the install card. */ -}}
+{{- $hostBytes := 0 -}}
+{{- range $n := (.Values.nodes | default list) -}}
+{{- /* api.NodeInfo is a struct. toJson uses its json tags (memory.total); dig misses nothing without aborting the render. */ -}}
+{{- $t := int (dig "memory" "total" 0 (fromJson (toJson $n))) -}}
+{{- if and (gt $t 0) (or (eq $hostBytes 0) (lt $t $hostBytes)) -}}
+{{- $hostBytes = $t -}}
+{{- end -}}
+{{- end -}}
+{{- /* Arc (intel-gpu) is discrete. Serial is the integrated part sharing host memory. */ -}}
+{{- $forceSerial := and (eq $gpuType "intel") (gt $hostBytes 0) (lt $hostBytes (mul 48 1073741824)) -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
+{{- if and (eq $engineArgs "") $forceSerial -}}
+{{- $engineArgs = "--align-batch off" -}}
+{{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}

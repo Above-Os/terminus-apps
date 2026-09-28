@@ -7,7 +7,7 @@ metadata:
   description: A multilingual speech recognition model for recorded and live audio
   appid: audioqwen3asrv3
   title: Qwen3-ASR 1.7B
-  version: '1.0.28'
+  version: '1.0.29'
   categories:
     - AI
     - models
@@ -209,10 +209,10 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    # No default: nvidia/gb10 → audio-qwen:v1.1.27; intel/intel-gpu → audio-qwen-ov:v1.1.27.
+    # No default: nvidia/gb10 → audio-qwen:v1.1.28; intel/intel-gpu → audio-qwen-ov:v1.1.28.
     description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
-      docker.io/beclab/audio-qwen:v1.1.27; intel and intel-gpu use
-      docker.io/beclab/audio-qwen-ov:v1.1.27. Filling this REPLACES that choice for every mode."
+      docker.io/beclab/audio-qwen:v1.1.28; intel and intel-gpu use
+      docker.io/beclab/audio-qwen-ov:v1.1.28. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
@@ -222,7 +222,12 @@ envs:
     description: "Engine-native flags (llm-init ENGINE_ARGS). Left empty, the chart uses
       \"--max-model-len 8192 --enforce-eager --repetition-detection\",
       and 3072 instead of 8192 on a gb10, whose unified memory leaves a smaller KV budget after
-      the encoder. Whatever is here REPLACES that whole list, so carry the flags over when adding one."
+      the encoder. On the integrated GPU only (mode intel, not intel-gpu), when the smallest
+      node reports under 48Gi of memory, that empty value also gains --batch-max-spans 8, so
+      each call carries at most eight spans. Arc is discrete and is not capped. At 48Gi or more,
+      on any other mode, or when the total cannot be read, an empty box leaves batching sized
+      by the engine. Whatever is here
+      REPLACES that whole list, so carry the flags over when adding one."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
