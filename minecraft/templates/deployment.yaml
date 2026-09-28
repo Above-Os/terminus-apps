@@ -1,3 +1,16 @@
+{{- $env := .Values.olaresEnv | default dict -}}
+{{- $version := get $env "VERSION" | default "LATEST" -}}
+{{- $serverType := get $env "TYPE" | default "VANILLA" -}}
+{{- $java := "java25" -}}
+{{- if eq $version "1.20.1" -}}
+  {{- $java = "java17" -}}
+{{- else if eq $version "1.21.1" -}}
+  {{- $java = "java21" -}}
+{{- end -}}
+{{- $onlineMode := "true" -}}
+{{- if hasKey $env "ONLINE_MODE" -}}
+  {{- $onlineMode = (get $env "ONLINE_MODE" | toString | lower) -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -57,7 +70,7 @@ spec:
               mountPath: /data
       containers:
         - name: minecraft
-          image: docker.io/itzg/minecraft-server:java25
+          image: docker.io/itzg/minecraft-server:{{ $java }}
           imagePullPolicy: IfNotPresent
           stdin: true
           tty: true
@@ -71,9 +84,16 @@ spec:
             - name: EULA
               value: "TRUE"
             - name: TYPE
-              value: VANILLA
+              value: {{ $serverType | quote }}
+            {{- if eq $serverType "FORGE" }}
+            - name: FORGE_VERSION
+              value: {{ get $env "FORGE_VERSION" | default "recommended" | quote }}
+            {{- else if eq $serverType "FABRIC" }}
+            - name: FABRIC_LOADER_VERSION
+              value: {{ get $env "FABRIC_LOADER_VERSION" | default "latest" | quote }}
+            {{- end }}
             - name: VERSION
-              value: LATEST
+              value: {{ $version | quote }}
             - name: MEMORY
               value: 4G
             - name: UID
@@ -85,7 +105,9 @@ spec:
             - name: SKIP_SUDO
               value: "true"
             - name: ONLINE_MODE
-              value: "TRUE"
+              value: {{ $onlineMode | quote }}
+            - name: ENFORCE_SECURE_PROFILE
+              value: {{ $onlineMode | quote }}
             - name: MOTD
               value: Olares Minecraft
             - name: DIFFICULTY
