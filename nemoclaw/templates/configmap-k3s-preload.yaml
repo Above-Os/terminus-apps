@@ -154,7 +154,11 @@ data:
             with opener.open(url, timeout=3) as response:
                 if response.status != 200 or response.geturl() != url:
                     raise ValueError("Unexpected HTTP response")
-                return response.read(limit), response.headers.get_content_type()
+                # Drain the response before closing so the socat relay sees a clean EOF.
+                prefix = response.read(limit)
+                while response.read(65536):
+                    pass
+                return prefix, response.headers.get_content_type()
         health, _ = fetch("health", 4096)
         if json.loads(health).get("ok") is not True:
             raise ValueError("Gateway is not healthy")
@@ -175,4 +179,73 @@ data:
             check(sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:18790/")
         except Exception as error:
             print("WebUI not ready:", error, file=sys.stderr)
+            raise SystemExit(1)
+
+  check-model.py: |
+    """Verify the sandbox model route; optionally prove a reply through the live gateway."""
+    import json
+    import os
+    import subprocess
+    import sys
+    import uuid
+
+    def check(chat=False):
+        endpoint = os.environ.get("NEMOCLAW_SANDBOX_ENDPOINT_URL") or os.environ.get("NEMOCLAW_ENDPOINT_URL", "")
+        endpoint = endpoint.rstrip("/")
+        if not endpoint.endswith("/v1"):
+            endpoint += "/v1"
+        model = os.environ.get("NEMOCLAW_MODEL", "")
+        if not model or endpoint == "/v1":
+            raise ValueError("Model endpoint and model ID are required")
+        command = ["docker", "exec", os.environ.get("CLUSTER_CTR", "openshell-cluster-nemoclaw"),
+                   "kubectl", "-n", os.environ.get("NS", "openshell"), "exec",
+                   os.environ.get("SBX", "my-assistant"), "-c", "agent", "--"]
+        # Execute in the same agent network namespace used by the default gateway.
+        probe = """
+    import json, sys, urllib.request
+    from urllib.parse import urlsplit
+    expected, model = sys.argv[1:]
+    with open('/sandbox/.openclaw/openclaw.json') as f:
+        config = json.load(f)
+    provider = config.get('models', {}).get('providers', {}).get('inference', {})
+    endpoint = provider.get('baseUrl', '').rstrip('/')
+    if endpoint != expected or urlsplit(endpoint).hostname == 'inference.local':
+        raise SystemExit('Model route is not configured yet')
+    key = provider.get('apiKey', 'unused')
+    if not isinstance(key, str):
+        raise SystemExit('Model credential is not a string')
+    request = urllib.request.Request(endpoint + '/models', headers={'Authorization': 'Bearer ' + key})
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            models = json.load(response)
+        if not any(item.get('id') == model for item in models.get('data', [])):
+            raise ValueError('Configured model is absent from the endpoint')
+    except Exception as error:
+        raise SystemExit('Model endpoint check failed: ' + type(error).__name__)
+    print('Model route and model availability verified')
+    """
+        result = subprocess.run(command + ["python3", "-c", probe, endpoint, model],
+                                capture_output=True, text=True, timeout=20)
+        if result.returncode:
+            raise ValueError("Sandbox model route or endpoint check failed")
+        if chat:
+            result = subprocess.run(command + ["runuser", "-u", "sandbox", "--", "env", "HOME=/sandbox",
+                "openclaw", "agent", "--session-id", "readiness-" + str(uuid.uuid4()),
+                "--message", "Reply with only OK. Do not use tools.", "--thinking", "off",
+                "--timeout", "120", "--json"], capture_output=True, text=True, timeout=140)
+            if result.returncode:
+                raise ValueError("Gateway model reply check failed")
+            # Require the gateway envelope, not a local fallback result.
+            output = result.stdout
+            payload = json.loads(output[output.index("{"):])
+            if payload.get("status") != "ok" or not any(
+                    item.get("text", "").strip() for item in payload.get("result", {}).get("payloads", [])):
+                raise ValueError("Gateway did not produce a model reply")
+        print("Model route verified" + ("; gateway reply verified" if chat else ""))
+
+    if __name__ == "__main__":
+        try:
+            check("--chat" in sys.argv)
+        except Exception as error:
+            print("Model not ready:", error, file=sys.stderr)
             raise SystemExit(1)

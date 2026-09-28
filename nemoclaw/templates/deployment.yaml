@@ -836,6 +836,18 @@ spec:
                     sleep 5
                     continue
                   fi
+                  # Install model-route patches before exposing the application.
+                  ensure_skill_env_installed
+                  if ! sh /opt/nemoclaw/sandbox-ensure-gateway.sh; then
+                    rm -f /tmp/nemoclaw-webui-ready /workspace/.nemoclaw-cli-ready
+                    sleep 10
+                    continue
+                  fi
+                  if ! python3 /opt/nemoclaw/check-model.py --chat; then
+                    rm -f /tmp/nemoclaw-webui-ready /workspace/.nemoclaw-cli-ready
+                    sleep 10
+                    continue
+                  fi
                   start_relay_18790
                   if ! python3 /opt/nemoclaw/check-webui.py; then
                     rm -f /tmp/nemoclaw-webui-ready /workspace/.nemoclaw-cli-ready
@@ -846,12 +858,15 @@ spec:
                     mkdir -p /workspace 2>/dev/null || true
                     : > /workspace/.nemoclaw-cli-ready
                     : > /tmp/nemoclaw-webui-ready
-                    echo "[chat-ui-bridge] OpenClaw version, gateway, WebUI page and assets verified; Pod Ready"
+                    echo "[chat-ui-bridge] OpenClaw version, model route, gateway reply, WebUI page and assets verified; Pod Ready"
                   fi
                   start_relay_oauth
-                  ensure_skill_env_installed
                   ensure_gog_shim_in_sandbox || true
                   while pod_running && gateway_listening; do
+                    if ! python3 /opt/nemoclaw/check-model.py >/dev/null; then
+                      rm -f /tmp/nemoclaw-webui-ready /workspace/.nemoclaw-cli-ready
+                      break
+                    fi
                     if ! sh /opt/nemoclaw/pin-openclaw-in-sandbox.sh --check-only 2>/dev/null; then
                       rm -f /tmp/nemoclaw-webui-ready /workspace/.nemoclaw-cli-ready
                       ensure_openclaw_version_in_sandbox || true
@@ -2056,6 +2071,10 @@ spec:
             - name: patch-origins-script
               mountPath: /opt/nemoclaw/patch_inference_baseurl.py
               subPath: patch_inference_baseurl.py
+              readOnly: true
+            - name: k3s-preload-script
+              mountPath: /opt/nemoclaw/check-model.py
+              subPath: check-model.py
               readOnly: true
             - name: k3s-preload-script
               mountPath: /opt/nemoclaw/check-webui.py
