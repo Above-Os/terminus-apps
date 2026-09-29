@@ -18,7 +18,7 @@ spec:
     spec:
       enableServiceLinks: false
       {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
-      # 给 lifespan 停表与任务协程拆下留足时间。
+      # preStop 应用停止收尾（≤100s）与 SIGTERM 后的正常退出共用这段预算。
       terminationGracePeriodSeconds: 120
       serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
       {{- end }}
@@ -206,6 +206,16 @@ spec:
           periodSeconds: 20
           timeoutSeconds: 3
           failureThreshold: 3
+        {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+        # Olares 暂停只缩 chart 内 Deployment；fs-eng-* 的 owner 是本 Deployment，
+        # 暂停时它仍在，GC 不会回收引擎。preStop 让 API 判定 owner 是否为停止态
+        # （replicas=0 / 删除中），是则取消任务、中止初始化、暂停下载、回收引擎；
+        # 重启 / 驱逐 / 升级时不回收。uvicorn 热重载不触发 preStop。
+        lifecycle:
+          preStop:
+            exec:
+              command: ["python", "-m", "app.runtime.pod_stop_hook"]
+        {{- end }}
       volumes:
       - name: app-data
         hostPath:
