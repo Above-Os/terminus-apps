@@ -29,5 +29,5 @@ Tautulli stores configuration, history, and its database in `/config`.
 This chart uses the official Docker image:
 
 ```text
-tautulli/tautulli:v2.17.1
+tautulli/tautulli:v2.18.2
 ```
