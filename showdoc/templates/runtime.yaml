@@ -92,6 +92,22 @@ data:
           fastcgi_read_timeout 600;
         }
       }
+      # Dedicated MCP listener: no web UI, installer, uploads or generic API routing.
+      server {
+        listen 8081;
+        server_name _;
+        location = / { rewrite ^ /mcp.php last; }
+        location = /mcp.php {
+          include /etc/nginx/fastcgi_params;
+          fastcgi_param SCRIPT_FILENAME /var/www/html/mcp.php;
+          fastcgi_param HTTPS $forwarded_https;
+          fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+          fastcgi_pass 127.0.0.1:9000;
+          fastcgi_buffering off;
+          fastcgi_read_timeout 600;
+        }
+        location / { return 404; }
+      }
     }
   php-fpm.conf: |
     [global]

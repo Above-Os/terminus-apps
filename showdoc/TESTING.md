@@ -46,3 +46,11 @@ The legacy text attachment displayed a charset mismatch in the browser while ret
 External email/OAuth/AI integrations, exhaustive Mock API behavior and physical ARM64 hardware are not covered. Colleague smoke testing is pending. This draft does not publish to the formal market or authorize merging.
 
 Backups, database files, credentials, signed attachment URLs and test user data are excluded from this PR. Test applications and their Upload records are removed after evidence collection; Home data and local backups are retained.
+
+## Separate MCP entrance (follow-up)
+
+Mirrors Blender's hidden `authLevel: internal` entrance. `showdocmcp` is a dedicated Service on port 8081 with a separate nginx listener, routing only `/` and `/mcp.php` to the upstream MCP handler. Web UI, installer, uploads and generic API routes are not exposed through this listener. ShowDoc Bearer-token authentication remains required for tools. Request timeout is bounded at 600 seconds and FastCGI buffering is disabled for MCP.
+
+Reinstalled the preserved fresh-test dataset with test Chart 1.0.22. Deployment became healthy; Olares reported two entrances: private visible ShowDoc and internal invisible ShowDoc MCP. Service-level MCP initialize returned protocol 2024-11-05 and server showdoc-mcp 1.0.0. Missing and invalid tokens returned JSON-RPC -32001. Web, install, server and SQLite paths on the MCP listener returned 404. Nginx syntax and Chart security lint passed. Valid-token tool execution and access from an external MCP client were not tested in this follow-up. This is an internal entrance, not an anonymous public endpoint.
+
+Client URL: use the MCP entrance address supplied by Olares, ending in `/mcp.php` (root is also accepted); supply `Authorization: Bearer <ShowDoc token>`. Use a project-scoped read-only token when only retrieval is needed. Existing UI and generic Open API access remain on the original web entrance. No new token is embedded in the chart.
