@@ -2,6 +2,10 @@
 
 Date: 2026-10-01 (Asia/Shanghai)
 
+## Current draft: 0.0.4
+
+The draft restores the original `ghcr.io` image address with the same pinned digest and uses the 256×256 Olares default icon as a placeholder. Chart lint passes and the icon URL resolves with the expected dimensions. This revision has not been installed on the test device; runtime results below apply to 0.0.3 through the NJU cache.
+
 ## Passed on the test device
 
 - Repository fast-forwarded to upstream/main at `367b5366f` before adding the chart.

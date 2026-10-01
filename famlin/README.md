@@ -26,8 +26,8 @@ Back up the database and uploads together. Uninstalling the chart does not delet
 ## Packaging
 
 - Platform: Olares >= 1.12.6; amd64 only. Upstream's 0.7.0 image currently provides no arm64 image.
-- Image: `ghcr.nju.edu.cn/timvanonckelen/famlin:0.7.0@sha256:88670a0117919a69f64bca68986b1c718e24e0d7f283ffff109bf2912933f7d2`.
-- Registry transport: NJU GHCR cache. The image manifest digest is byte-identical to upstream GHCR; layers are content-addressed and verified by the runtime.
+- Image: `ghcr.io/timvanonckelen/famlin:0.7.0@sha256:88670a0117919a69f64bca68986b1c718e24e0d7f283ffff109bf2912933f7d2`.
+- Registry transport: original upstream GHCR. Chart 0.0.3 was tested using the NJU GHCR cache with the identical manifest digest; this draft restores GHCR as requested. Direct GHCR connectivity on the test device remains unverified after earlier pull failures.
 - Source revision: `3923743fc2b0d43280f6f9541edba389d2dec7a3`.
 - Effective UID/GID: 1000. The trusted permissions init container only prepares the exact directory roots, without recursive ownership changes.
 - One replica with Recreate strategy; upstream runs database migrations before starting the web/API process.
@@ -42,4 +42,4 @@ See `VALIDATION.md` for results on the deployment target. Do not infer productio
 
 - [Upstream source and MIT license](https://github.com/TimVanOnckelen/famlin/tree/v0.7.0)
 - [Upstream setup documentation](https://famlin.app/docs/server-setup)
-- The listing icon is the unchanged upstream mobile app icon from v0.7.0.
+- The listing temporarily uses the Olares default icon (256×256 WEBP).
