@@ -1,0 +1,247 @@
+# Agent Daemon on Olares.
+#
+# The container is deliberately the same shape as the Codex app's, because it is the same work:
+# UID 1000, HOME=/opt/data, everything that must survive a restart under the app-data volume. What
+# differs is who drives the CLI. There, a person types into a terminal entrance; here, agentd runs
+# it, records what it did, and answers a fleet.
+#
+#   - init-chmod-data (root): hostPath volumes land owned by root on first create, so the
+#     directories the non-root runtime writes to are made first and chowned.
+#   - init-install-codex (UID 1000): the official standalone installer into /opt/data/.local/bin,
+#     which is where AGENTD_AGENT_PATH points. Installed rather than baked so the CLI can be
+#     upgraded by a chart bump without rebuilding the daemon's image.
+#   - agentd: serves its own interface and API on 4477, reached through this app's entrance.
+#
+# The daemon is told what it has rather than looking: AGENTD_DEVICE_KIND=hosted makes the declared
+# CLI and the declared directories mandatory, and makes the daemon refuse to start if they and the
+# shape disagree. That refusal is the point of them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: agentd
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: {{ .Values.workloads.agentd.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: agentd
+  # Recreate, not RollingUpdate: two daemons on one state directory would both be recovering the
+  # same runs, and the SQLite file behind them is written by one process at a time.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: agentd
+    spec:
+      securityContext:
+        fsGroup: 1000
+
+      initContainers:
+        - name: init-chmod-data
+          image: "beclab/ubuntu:24.04"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /opt/data/.local/bin /opt/data/.codex /opt/data/.agentd \
+                       /opt/data/.install-state /opt/data/workspace
+              chown -R 1000:1000 /opt/data
+              echo "[init-chmod-data] /opt/data owned by 1000:1000"
+          resources: {}
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+
+        # The same installer the Codex app uses, for the same reason: it is the vendor's, it puts
+        # the whole standalone package in place rather than one binary, and a sentinel keyed to
+        # version and architecture keeps a restart from re-downloading it — or from reusing an
+        # amd64 binary on an arm64 node.
+        - name: init-install-codex
+          image: "{{ .Values.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /opt/data
+            - name: CODEX_HOME
+              value: /opt/data/.codex
+            - name: CODEX_VERSION
+              value: "{{ .Values.codex.version }}"
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              mkdir -p "$HOME/.install-state" "$HOME/.local/bin" "$HOME/.codex"
+
+              ARCH="$(uname -m)"
+              case "$ARCH" in
+                x86_64|amd64)  TARGET="x86_64-unknown-linux-musl" ;;
+                aarch64|arm64) TARGET="aarch64-unknown-linux-musl" ;;
+                *) echo "[init-install-codex] unsupported arch: $ARCH" >&2; exit 1 ;;
+              esac
+              SENTINEL="$HOME/.install-state/codex-standalone-${CODEX_VERSION}-${TARGET}"
+
+              if [ -x "$HOME/.local/bin/codex" ] && [ -f "$SENTINEL" ] \
+                 && "$HOME/.local/bin/codex" --version >/dev/null 2>&1; then
+                echo "[init-install-codex] cached $(cat "$SENTINEL") (${TARGET})"
+                exit 0
+              fi
+
+              INSTALLER="$(mktemp --suffix=.sh)"
+              trap 'rm -f "$INSTALLER"' EXIT
+              curl -fSL --retry 5 --retry-delay 3 https://chatgpt.com/codex/install.sh -o "$INSTALLER"
+              CODEX_INSTALL_DIR="$HOME/.local/bin" \
+              CODEX_HOME="$HOME/.codex" \
+              CODEX_NON_INTERACTIVE=1 \
+                bash "$INSTALLER" --release "${CODEX_VERSION}"
+
+              if [ ! -x "$HOME/.local/bin/codex" ]; then
+                echo "[init-install-codex] installer finished but no binary at $HOME/.local/bin/codex" >&2
+                exit 1
+              fi
+              date -u +%Y-%m-%dT%H:%M:%SZ > "$SENTINEL"
+              "$HOME/.local/bin/codex" --version
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+
+      containers:
+        - name: agentd
+          image: "{{ .Values.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          workingDir: /opt/data
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - /usr/local/bin/agentd
+            - serve
+            - -addr
+            - 0.0.0.0:4477
+          env:
+            - name: TZ
+              value: Etc/UTC
+            - name: HOME
+              value: /opt/data
+            - name: PATH
+              value: "/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            - name: CODEX_HOME
+              value: /opt/data/.codex
+            # The hosted shape, declared. The daemon refuses to start if these and
+            # AGENTD_DEVICE_KIND disagree, which is what stops a container from silently
+            # behaving like a laptop.
+            - name: AGENTD_DEVICE_KIND
+              value: hosted
+            - name: AGENTD_AGENT_PROVIDER
+              value: codex
+            - name: AGENTD_AGENT_PATH
+              value: /opt/data/.local/bin/codex
+            # Where the daemon's own state lives: run history and the tunnel credentials. On the
+            # app-data volume, because losing it loses everything this app has ever run.
+            - name: AGENTD_HOME
+              value: /opt/data/.agentd
+            # What agents may work in. The app's own workspace always; the Olares Home only when
+            # somebody turned that on, because what an agent may touch is a decision.
+            - name: AGENTD_WORKSPACE_DIRS
+              {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+              value: "/opt/data/workspace:/home/userdata/home"
+              {{- else }}
+              value: "/opt/data/workspace"
+              {{- end }}
+            {{- with .Values.olaresEnv.AGENTD_MAX_CONCURRENT }}
+            - name: AGENTD_MAX_CONCURRENT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: AGENTD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: AGENTD_TOKEN
+          ports:
+            - name: http
+              containerPort: 4477
+          # Probed from inside the container, with the token, because the API has no unauthenticated
+          # route and should not grow one for a probe's sake.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -fsS -H "X-Agentd-Token: $AGENTD_TOKEN" http://127.0.0.1:4477/api/health >/dev/null
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -fsS -H "X-Agentd-Token: $AGENTD_TOKEN" http://127.0.0.1:4477/api/health >/dev/null
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            limits:
+              cpu: "4"
+              memory: 8Gi
+            requests:
+              cpu: 250m
+              memory: 1Gi
+          volumeMounts:
+            - mountPath: /opt/data
+              name: app-data-home
+            {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+            - mountPath: /home/userdata/home/
+              name: olares-home-dir
+            {{- end }}
+
+      volumes:
+        - name: app-data-home
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/home"
+            type: DirectoryOrCreate
+        {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
+        - name: olares-home-dir
+          hostPath:
+            path: "{{ .Values.userspace.userData }}"
+            type: DirectoryOrCreate
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentd-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    io.kompose.service: agentd
+  ports:
+    - name: http
+      port: 4477
+      targetPort: 4477
+      protocol: TCP
