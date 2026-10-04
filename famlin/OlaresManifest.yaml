@@ -7,7 +7,7 @@ metadata:
   title: Famlin
   description: Self-hosted family photos, videos, and updates
   icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  version: 0.0.4
+  version: 0.0.5
   categories:
   - Lifestyle
   - homelab
@@ -17,7 +17,7 @@ entrances:
   port: 3000
   title: Famlin
   icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
-  authLevel: private
+  authLevel: internal
   openMethod: window
   windowPushState: true
 spec:
@@ -38,7 +38,7 @@ spec:
     - Optional linked albums from Immich or local image folders
 
     **Getting started on Olares**
-    Open `/admin/` to create the first administrator. Famlin manages its own accounts; Olares single sign-on is not configured. The entrance starts in Private mode to protect first-run setup. After creating an administrator, the owner can choose a Public entrance for relatives who only have Famlin accounts.
+    Open `/admin/` to create the first administrator. Famlin manages its own accounts; Olares single sign-on is not configured. The main entrance defaults to Internal and can be changed to Public in Olares Settings for relatives who only have Famlin accounts. Independent path policies require Olares authentication for `/admin`, `/api/admin`, and the administrator setup and registration endpoints, including when the main entrance is Public.
 
     Uploads are stored in `Home/Pictures/Famlin/uploads`. A separate `Home/Pictures/Famlin/library` directory is mounted read-only at `/media/library` for optional local albums. Configure that path in Famlin before using linked albums. Local folder albums currently support images, not videos or HEIC.
 
@@ -67,6 +67,12 @@ middleware:
     databases:
     - name: famlin
 options:
+  policies:
+  - uriRegex: '^/(admin|api/admin|api/auth/setup|api/auth/register)(/|$|[?])'
+    level: system
+    oneTime: false
+    validDuration: 3600s
+    entranceName: famlin
   apiTimeout: 600
   mobileSupported: true
   allowedOutboundPorts:

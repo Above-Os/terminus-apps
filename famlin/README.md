@@ -8,7 +8,7 @@ This chart ports upstream Famlin 0.7.0 without changing its account system or ad
 2. Complete Famlin's own onboarding to create an administrator.
 3. Create a group, add/invite members, and open `/` for the member feed.
 
-The entrance defaults to **Private** to protect the unclaimed first administrator. After completing onboarding, the owner may set the entrance to **Public** in Olares Settings for relatives who only have Famlin accounts. Public here removes the Olares gateway sign-in; Famlin still authenticates its own users. No OIDC, Olares account mapping, or preset administrator is included.
+The main entrance defaults to **Internal**. The owner may change it to **Public** in Olares Settings for relatives who only have Famlin accounts. A separate path policy keeps `/admin` (including subpaths), `/api/admin`, `/api/auth/setup`, and `/api/auth/register` behind Olares system authentication in either mode. Keep this sub-policy when changing the entrance level. The read-only `/api/auth/setup-status` and normal member login remain under the main entrance policy. Famlin still authenticates its own users after the Olares gateway check. No OIDC, Olares account mapping, or preset administrator is included.
 
 ## Upstream media access limitation
 

@@ -1,10 +1,17 @@
 # Validation status
 
-Date: 2026-10-01 (Asia/Shanghai)
+Date: 2026-10-04 (Asia/Shanghai)
 
-## Current draft: 0.0.4
+## Current draft: 0.0.5
 
-The draft restores the original `ghcr.io` image address with the same pinned digest and uses the 256×256 Olares default icon as a placeholder. Chart lint passes and the icon URL resolves with the expected dimensions. This revision has not been installed on the test device; runtime results below apply to 0.0.3 through the NJU cache.
+Chart 0.0.5 changes only Olares packaging and documentation: the main entrance defaults to Internal and a system-authentication sub-policy protects `/admin`, `/api/admin`, `/api/auth/setup`, and `/api/auth/register` (including subpaths). It keeps upstream Famlin 0.7.0 and its pinned GHCR image unchanged.
+
+- Chart lint and package/upload passed.
+- The same policy was applied to the existing test instance through Olares Settings. With the main entrance Public, anonymous `/` and `/health` returned 200, while `/admin`, `/admin/`, `/admin/users`, `/admin?x=1`, and `/api/admin/users` redirected to Olares authentication (302). Empty POST requests to `/api/auth/setup` and `/api/auth/register` were intercepted by the gateway (303); no accounts were created.
+- `/api/auth/setup-status` remained accessible (200), and an empty member-login POST reached Famlin validation (400), rather than the Olares login page.
+- Internal mode also protected the administrator paths from unauthenticated requests through the test network. The final live configuration is Internal with default policy `system` and the protected-path sub-policy retained.
+- Full 0.0.5 upgrade was attempted but blocked during image resolution by repeated GHCR TLS handshake and DNS timeouts. The operation was canceled; these entrance tests run against the existing 0.0.3 workload, not a completed 0.0.5 rollout. Fresh-install policy provisioning and direct GHCR deployment remain unverified.
+- The earlier 0.0.4 revision restored the original GHCR address and verified the 256×256 Olares placeholder icon. The functional results below remain from 0.0.3 through the byte-identical NJU cache.
 
 ## Passed on the test device
 
