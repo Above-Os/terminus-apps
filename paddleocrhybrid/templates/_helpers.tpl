@@ -27,11 +27,13 @@
 {{- end -}}
 {{- $gpuType -}}
 {{- end -}}
-{{- /* Select a CUDA image for NVIDIA/GB10 and a SYCL image for Intel dGPU. */ -}}
+{{- /* Select CUDA for NVIDIA/GB10, ROCm for AMD dGPU, and SYCL for Intel dGPU. */ -}}
 {{- define "paddleocrhybrid.llamacppImage" -}}
 {{- $gpuType := include "paddleocrhybrid.gpuType" . -}}
 {{- $images := .Values.engine.images | default dict -}}
-{{- if eq $gpuType "intel-gpu" -}}
+{{- if eq $gpuType "amd-gpu" -}}
+{{- $images.amdGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-rocm-b10731" -}}
+{{- else if eq $gpuType "intel-gpu" -}}
 {{- $images.intelGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-intel-b10752" -}}
 {{- else if eq $gpuType "nvidia-gb10" -}}
 {{- $images.nvidiaGb10 | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143" -}}
