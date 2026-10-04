@@ -2,7 +2,11 @@
 
 Date: 2026-10-04 (Asia/Shanghai)
 
-## Current chart: 0.0.6
+## Current chart: 0.0.7
+
+All app and entrance icon URLs, including en-US, use `https://app.cdn.olares.com/appstore/famlin/icon.png`; the URL returned a 256×256 PNG. Chart lint passed. The SMTP implementation was checked against upstream 0.7.0: settings are database-backed and configured in the admin UI. No automatic Olares SMTP import, environment mapping, bootstrap script, or application change is included. This icon/documentation revision has not been deployed; the test instance remains on 0.0.6-test.1.
+
+## Entrance validation: 0.0.6
 
 Chart 0.0.6 changes only Olares packaging and documentation: the main entrance defaults to Internal and a system-authentication sub-policy protects `/admin`, `/api/admin`, `/api/auth/setup`, and `/api/auth/register` (including subpaths). It keeps upstream Famlin 0.7.0 and its pinned GHCR image unchanged.
 

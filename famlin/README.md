@@ -14,6 +14,12 @@ The main entrance defaults to **Internal**. The owner may change it to **Public*
 
 In upstream 0.7.0, `canReadUpload` permits any authenticated user to read a bound, non-circle upload by its URL. Group feed filtering does not enforce the same group boundary on these files. Treat one instance as one trusted family; removing group membership does not revoke an existing account's access to known ordinary upload URLs. This port preserves upstream behavior and does not claim independent-family isolation. See [upstream implementation](https://github.com/TimVanOnckelen/famlin/blob/v0.7.0/backend/src/services/uploads.ts).
 
+## Email configuration
+
+Configure SMTP in Famlin's `/admin/` settings: SMTP host, port, username, password, sender address, and the email notifications switch. Upstream 0.7.0 stores these values in its database; it does not read `SMTP_*` environment variables. This chart does not synchronize Olares mailbox variables or add a startup script.
+
+Upstream uses implicit TLS on port 465 and Nodemailer's default STARTTLS negotiation on other ports (587 by default). The chart allows outbound ports 465 and 587. Famlin requires the SMTP host, username and password to create its mail transport. Actual mail delivery has not been tested.
+
 ## Storage
 
 - Files `Home/Pictures/Famlin/uploads` → `/app/uploads`: uploaded media and retained originals.
@@ -42,4 +48,4 @@ See `VALIDATION.md` for results on the deployment target. Do not infer productio
 
 - [Upstream source and MIT license](https://github.com/TimVanOnckelen/famlin/tree/v0.7.0)
 - [Upstream setup documentation](https://famlin.app/docs/server-setup)
-- The listing temporarily uses the Olares default icon (256×256 WEBP).
+- App and entrance icon: https://app.cdn.olares.com/appstore/famlin/icon.png (256×256 PNG).
