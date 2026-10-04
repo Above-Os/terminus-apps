@@ -27,7 +27,7 @@ Back up the database and uploads together. Uninstalling the chart does not delet
 
 - Platform: Olares >= 1.12.6; amd64 only. Upstream's 0.7.0 image currently provides no arm64 image.
 - Image: `ghcr.io/timvanonckelen/famlin:0.7.0@sha256:88670a0117919a69f64bca68986b1c718e24e0d7f283ffff109bf2912933f7d2`.
-- Registry transport: original upstream GHCR. Chart 0.0.3 was tested using the NJU GHCR cache with the identical manifest digest; this draft restores GHCR as requested. Direct GHCR connectivity on the test device remains unverified after earlier pull failures.
+- Registry transport: original upstream GHCR. Chart 0.0.3 was tested using the NJU GHCR cache with the identical manifest digest; this draft restores GHCR as requested. The 2026-10-04 direct GHCR upgrade attempt failed with TLS/DNS timeouts. The test instance uses a separate 0.0.6-test.1 package through the same NJU cache and pinned digest; the PR retains GHCR. See VALIDATION.md.
 - Source revision: `3923743fc2b0d43280f6f9541edba389d2dec7a3`.
 - Effective UID/GID: 1000. The trusted permissions init container only prepares the exact directory roots, without recursive ownership changes.
 - One replica with Recreate strategy; upstream runs database migrations before starting the web/API process.
