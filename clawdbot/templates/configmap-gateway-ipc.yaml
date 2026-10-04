@@ -104,6 +104,7 @@ data:
       # may still contain loopback and are intentionally not overwritten.
       /usr/local/bin/node dist/index.js gateway --bind lan --port 18789 &
       child=$!
+      printf '%s\n' "$child" > /tmp/openclaw-gateway.pid
 
       # Background watcher: polls the sentinel; on touch, kills the child
       # and records WHY (so the main loop picks the short delay).
@@ -123,6 +124,7 @@ data:
 
       wait "$child"
       rc=$?
+      rm -f /tmp/openclaw-gateway.pid
 
       kill "$watcher" 2>/dev/null || true
       wait "$watcher" 2>/dev/null || true
