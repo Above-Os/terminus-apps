@@ -1,0 +1,98 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+
+metadata:
+  name: ollamasharedv3
+  appid: ollamasharedv3
+  icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+  title: Ollama Shared
+  description: A shared Ollama daemon with persistent model storage and a web terminal.
+  version: '0.1.6'
+  categories:
+    - AI
+    - Utilities_v112
+
+entrances:
+  - name: terminal
+    host: terminal
+    port: 80
+    title: Ollama Terminal
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+    authLevel: private
+  - name: ollama
+    host: ollama
+    port: 11434
+    title: Ollama API
+    icon: https://app.cdn.olares.com/appstore/ollama/icon.png
+    openMethod: window
+    invisible: true
+    authLevel: internal
+
+workloadReplicas:
+  ollamasharedv3: 1
+  terminal: 1
+
+spec:
+  versionName: '0.33.1'
+  onlyAdmin: true
+  runAsUser: true
+  developer: Ollama
+  website: https://ollama.com/
+  sourceCode: https://github.com/ollama/ollama
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://github.com/ollama/ollama/tree/main/docs
+  license:
+    - text: MIT
+      url: https://github.com/ollama/ollama/blob/main/LICENSE
+  supportArch:
+    - amd64
+    - arm64
+  fullDescription: |
+    Ollama Shared runs one cluster-wide Ollama daemon with persistent private
+    application storage. Administrators can use the built-in terminal to pull,
+    list, inspect, and remove models.
+
+    This package is tuned to keep at most one model loaded at a time. The
+    recommended Q4_K_M models for Router and Lares switching tests are:
+
+    - `qwen3.8:27b-q4_K_M`
+    - `gemma4:12b-it-q4_K_M`
+
+    Applications in the cluster can reach the OpenAI-compatible endpoint at
+    `http://ollama.ollamasharedv3-shared.svc.cluster.local:11434/v1`.
+  accelerator:
+    - mode: nvidia
+      requiredCpu: 200m
+      limitedCpu: 5000m
+      requiredMemory: 5Gi
+      limitedMemory: 40Gi
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      requiredGPUMemory: 23Gi
+      limitedGPUMemory: 24Gi
+    - mode: nvidia-gb10
+      requiredCpu: 200m
+      limitedCpu: 5000m
+      requiredMemory: 33Gi
+      limitedMemory: 40Gi
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+
+permission:
+  appData: true
+
+options:
+  shared: true
+  apiTimeout: 0
+  allowedOutboundPorts:
+    - 80
+    - 443
+  dependencies:
+    - name: olares
+      type: system
+      version: '>=1.12.7-0'
