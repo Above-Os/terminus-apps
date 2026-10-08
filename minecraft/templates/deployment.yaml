@@ -19,6 +19,13 @@
 {{- if eq $allowCheats "true" -}}
   {{- $opPermissionLevel = "2" -}}
 {{- end -}}
+{{- $maxPlayers := "8" -}}
+{{- if hasKey $env "MAX_PLAYERS" -}}
+  {{- $rawMaxPlayers := get $env "MAX_PLAYERS" | toString -}}
+  {{- if regexMatch "^([1-9]|[1-9][0-9]|100)$" $rawMaxPlayers -}}
+    {{- $maxPlayers = $rawMaxPlayers -}}
+  {{- end -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -148,7 +155,7 @@ spec:
             - name: MODE
               value: survival
             - name: MAX_PLAYERS
-              value: "8"
+              value: {{ $maxPlayers | quote }}
             - name: VIEW_DISTANCE
               value: "10"
             - name: USE_AIKAR_FLAGS
