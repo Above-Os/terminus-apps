@@ -1,0 +1,133 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+workloadReplicas:
+  hindsight: 1
+  hindsight-control-plane: 1
+
+metadata:
+  name: hindsight
+  appid: hindsight
+  title: Hindsight
+  description: Open-source agent memory. The control plane and API run as separate services over a PostgreSQL bank.
+  icon: https://raw.githubusercontent.com/harveyff/terminus-apps/d510148d6ed681d65fd2ad579bc34dd495c70a9a/hindsight/assets/icon.png
+  version: 0.0.13
+  categories:
+  - Developer Tools
+  - developer
+
+entrances:
+- name: hindsight
+  host: hindsight-control-plane
+  port: 9999
+  title: Hindsight
+  icon: https://raw.githubusercontent.com/harveyff/terminus-apps/d510148d6ed681d65fd2ad579bc34dd495c70a9a/hindsight/assets/icon.png
+  authLevel: private
+  openMethod: window
+- name: api
+  host: hindsight
+  port: 8888
+  title: Hindsight API
+  icon: https://raw.githubusercontent.com/harveyff/terminus-apps/d510148d6ed681d65fd2ad579bc34dd495c70a9a/hindsight/assets/icon.png
+  authLevel: internal
+  invisible: true
+
+spec:
+  developer: Vectorize
+  website: https://hindsight.vectorize.io/
+  sourceCode: https://github.com/vectorize-io/hindsight
+  submitter: harveyff
+  locale:
+  - en
+  featuredImage: https://raw.githubusercontent.com/harveyff/terminus-apps/d510148d6ed681d65fd2ad579bc34dd495c70a9a/hindsight/assets/1.png
+  promoteImage:
+  - https://raw.githubusercontent.com/harveyff/terminus-apps/d510148d6ed681d65fd2ad579bc34dd495c70a9a/hindsight/assets/1.png
+  - https://raw.githubusercontent.com/harveyff/terminus-apps/d510148d6ed681d65fd2ad579bc34dd495c70a9a/hindsight/assets/2.png
+  fullDescription: |
+    Hindsight is an open-source, self-hosted memory service for AI agents.
+    Retain experiences, recall relevant facts and reflect over stored memories
+    to produce responses grounded in previous context.
+
+    Organize memories into banks and inspect them through the web control plane.
+    Connect Hermes or another compatible client through the Hindsight API.
+    PostgreSQL with pgvector stores the memory data on your Olares device.
+
+    Before use, configure a chat model and an embedding model in Olares Router,
+    or supply an OpenAI-compatible endpoint that serves both model types.
+    The package uses default-chat and default-embedding by default. Supply an
+    API key if your endpoint requires authentication. Model inference is
+    provided by that endpoint; this package does not bundle model weights.
+
+    The API entrance is internal by default. Configure its access policy for
+    your agent before connecting. Use a dedicated memory bank for each agent
+    or project. Retain and reflect speed depends on your configured models;
+    background memory processing also consumes model capacity.
+
+    This package runs Hindsight 0.6.2 with separate API and control-plane
+    services, supports amd64 and arm64, and sends one text per embedding request.
+  versionName: 0.6.2
+  runAsUser: true
+  supportArch:
+  - amd64
+  - arm64
+  accelerator:
+  - mode: cpu
+    requiredCpu: "1"
+    limitedCpu: "2"
+    requiredMemory: 2Gi
+    limitedMemory: 4Gi
+    requiredDisk: 1Gi
+    limitedDisk: 5Gi
+
+middleware:
+  postgres:
+    username: hindsight
+    databases:
+    - name: hindsight
+      extensions:
+      - vector
+
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
+  - name: postgres
+    type: middleware
+    version: '>=14.0.0-0'
+    mandatory: true
+  - name: router
+    type: application
+    version: '>=1.0.0-0'
+    mandatory: true
+
+envs:
+- envName: HINDSIGHT_API_LLM_API_KEY
+  type: password
+  required: false
+  editable: true
+  applyOnChange: true
+  description: API key for the LLM and embeddings. Use a Router key, or a provider key when the base URL is not Router.
+- envName: HINDSIGHT_API_LLM_BASE_URL
+  type: string
+  required: false
+  editable: true
+  applyOnChange: true
+  default: http://3a77b15d.shared.olares.com/v1
+  description: OpenAI-compatible base URL. Use Router's shared entrance hostname; the router-shared Service is not reachable from other apps.
+- envName: HINDSIGHT_API_LLM_MODEL
+  type: string
+  required: false
+  editable: true
+  applyOnChange: true
+  default: default-chat
+  description: Chat model name. default-chat follows Router's default chat route.
+- envName: HINDSIGHT_API_EMBEDDINGS_MODEL
+  type: string
+  required: false
+  editable: true
+  applyOnChange: true
+  default: default-embedding
+  description: Embedding model name on the same base URL.
