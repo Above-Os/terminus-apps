@@ -24,6 +24,7 @@ data:
     import os
     from pathlib import Path
     import tempfile
+    import shutil
 
 
     HTTP_STORE = Path(
@@ -101,12 +102,69 @@ data:
         try:
             payload = json.loads(HTTP_STORE.read_text(encoding="utf-8"))
             data = payload["data"]
-            stable = data["stable"]
+            if not isinstance(payload, dict) or not isinstance(data, dict):
+                raise TypeError("HTTP store and data must be objects")
+            if payload.get("key") != "http" or payload.get("version") not in (1, 2):
+                raise ValueError("unsupported HTTP store key or version")
+            stable = data.get("stable")
             pending = data.get("pending")
-        except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
             raise SystemExit(
                 f"[http-bootstrap] refusing to modify invalid HTTP store: {error}"
             ) from error
+
+        if stable is None:
+            # Older or incomplete stores can lack the stable slot. Preserve
+            # their exact bytes before rebuilding only the HTTP configuration.
+            from homeassistant.components.http.config import HTTP_STORAGE_SCHEMA
+
+            candidate = None
+            if isinstance(pending, dict) and pending.get("error") in (None, "not_promoted"):
+                candidate = pending
+            elif payload["version"] == 1:
+                candidate = data
+            recovered = desired_stable()
+            if candidate is not None:
+                try:
+                    settings = {
+                        key: value for key, value in candidate.items()
+                        if key not in ("created_at", "error", "error_message")
+                    }
+                    recovered.update(HTTP_STORAGE_SCHEMA(settings))
+                except Exception as error:
+                    print(f"[http-bootstrap] unusable recovery candidate: {error}")
+                    recovered = desired_stable()
+            # The chart's nginx upstream requires port 8123 and HTTP. Keep
+            # other validated user settings, but restore the Olares transport.
+            recovered["server_port"] = 8123
+            recovered["use_x_forwarded_for"] = True
+            recovered["trusted_proxies"] = list(dict.fromkeys(
+                recovered.get("trusted_proxies", []) + TRUSTED_PROXIES
+            ))
+            for key in ("server_host", "ssl_certificate", "ssl_key", "ssl_peer_certificate"):
+                recovered.pop(key, None)
+            recovered["created_at"] = datetime.now(UTC).isoformat()
+            recovered["error"] = None
+            recovered["error_message"] = None
+            backup = HTTP_STORE.with_name("http.before-stable-repair")
+            if not backup.exists():
+                with HTTP_STORE.open("rb") as source, backup.open("xb") as target:
+                    os.chmod(backup, 0o600)
+                    shutil.copyfileobj(source, target)
+                    target.flush()
+                    os.fsync(target.fileno())
+            payload.update(version=2, minor_version=2)
+            payload["data"] = {
+                "stable": recovered,
+                "pending": None,
+                "yaml_migration_done": True,
+            }
+            write_store(payload)
+            print("[http-bootstrap] recovered missing stable HTTP configuration")
+            return
+
+        if not isinstance(stable, dict):
+            raise SystemExit("[http-bootstrap] refusing to modify invalid stable HTTP configuration")
 
         stable_has_proxy = bool(
             stable.get("use_x_forwarded_for") and stable.get("trusted_proxies")
