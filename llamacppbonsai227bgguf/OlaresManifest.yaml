@@ -7,7 +7,7 @@ metadata:
   description: "Ternary Bonsai 2 27B (GGUF PQ2_0) served with the PrismML llama.cpp fork."
   appid: llamacppbonsai227bgguf
   title: Bonsai 2 27B (llama.cpp)
-  version: '1.0.6'
+  version: '1.0.7'
   categories:
     - AI
     - models
@@ -38,6 +38,9 @@ spec:
   onlyAdmin: true
   versionName: 'prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0'
   upgradeDescription: |
+    v1.0.7: increase the NVIDIA GPU-memory quota to 23Gi and set ENGINE_ARGS to -np 2.
+    Migrate previous default presets while preserving custom arguments; CPU remains at -np 1.
+
     v1.0.6: remove --kv-unified from the single-slot NVIDIA default; retain it on CPU.
     Migrate the previous NVIDIA preset while preserving custom arguments.
 
@@ -81,10 +84,10 @@ spec:
     **Preset Configuration**
     - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with the `mmproj-Q8_0` projector for vision) — the same file in both modes
     - Capabilities: thinking, tools, vision
-    - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens, 1 slot; Q8_0 K/V)
+    - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 2 -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens total, 2 slots; Q8_0 K/V)
     - Engine args (cpu): `-c 131072 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8` (128 Ki tokens, 1 slot; f16 K/V; `-t` matches the container CPU limit)
-    - Required GPU memory: `15Gi` on nvidia; none in cpu mode
-    - Context includes input, image tokens, reasoning and output; one active request at a time.
+    - Required GPU memory: `23Gi` on nvidia; none in cpu mode
+    - Context includes input, image tokens, reasoning and output; NVIDIA has 2 slots; CPU has 1 slot.
     - nvidia: Q8_0 K/V at 128 Ki is 4.25Gi; measured resident set on a 24Gi card is 12.75Gi of the 15Gi quota.
     - cpu: PQ2_0 6.72Gi + mmproj 0.59Gi + estimated f16 K/V at 128 Ki approximately 8–8.5Gi, all out of host RAM.
     - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
@@ -93,7 +96,7 @@ spec:
     **Accelerator modes**
     | Mode     | Device                | Details                                                      |
     |----------|-----------------------|--------------------------------------------------------------|
-    | `nvidia` | discrete NVIDIA, CUDA | `15Gi` GPU-memory quota, 128 Ki context, Q8_0 K/V, `-ngl all` |
+    | `nvidia` | discrete NVIDIA, CUDA | `23Gi` GPU-memory quota, 128 Ki context, Q8_0 K/V, `-ngl all` |
     | `cpu`    | no accelerator        | 8 cores / 20Gi host RAM, 128 Ki context, f16 K/V, pinned `-t`  |
 
     The mode picks the engine image; both serve the same PQ2_0 file, so switching modes
@@ -142,14 +145,14 @@ spec:
       requiredCpu: "1100m"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # MEMORY_LIMIT 24Gi = anon under 1Gi + the 15Gi gpumem that mode-2 eviction
-      # spills into host RAM as unreclaimable UVM pages + GGUF page cache headroom.
+      # Host memory also accounts for UVM pages spilled by mode-2 eviction
+      # and the GGUF page cache.
       # Engine MEMORY_REQUEST 4Gi + llm-init 256Mi <= requiredMemory 5Gi;
       # MEMORY_LIMIT 24Gi + llm-init 2Gi <= limitedMemory 26Gi.
       limitedMemory: "26Gi"
       requiredMemory: "5Gi"
-      requiredGPUMemory: "15Gi"
-      limitedGPUMemory: "15Gi"
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "23Gi"
     #   cpu — no accelerator: the ubuntu-x64 build, for a host with no NVIDIA
     #   card. No GPU-memory field (there is no device), and the CPU is the
     #   compute rather than just the driver, so the core budget is larger.
@@ -248,11 +251,11 @@ envs:
     default: "medium"
     description:  "The level this model uses when a request does not ask for one."
   # `-fa on` is required by the ternary kernels (Hadamard activation transforms).
-  # NVIDIA uses one slot without --kv-unified; the CPU preset retains it.
+  # NVIDIA uses two slots without --kv-unified; CPU retains one slot and --kv-unified.
   # No --spec-type draft-mtp: this ternary re-architecture has no MTP head.
   - envName: ENGINE_ARGS
     required: true
-    default: "-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128"
+    default: "-c 131072 -ngl all -fa on --jinja -np 2 -ctk q8_0 -ctv q8_0 -b 512 -ub 128"
     type: string
     editable: true
     applyOnChange: true
@@ -311,6 +314,6 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "15Gi"
+    default: "23Gi"
     description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB."
     regex: "^[0-9]+(Gi|Mi)?$"
