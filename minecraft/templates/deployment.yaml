@@ -11,6 +11,21 @@
 {{- if hasKey $env "ONLINE_MODE" -}}
   {{- $onlineMode = (get $env "ONLINE_MODE" | toString | lower) -}}
 {{- end -}}
+{{- $allowCheats := "false" -}}
+{{- if hasKey $env "ALLOW_CHEATS" -}}
+  {{- $allowCheats = (get $env "ALLOW_CHEATS" | toString | lower) -}}
+{{- end -}}
+{{- $opPermissionLevel := "4" -}}
+{{- if eq $allowCheats "true" -}}
+  {{- $opPermissionLevel = "2" -}}
+{{- end -}}
+{{- $maxPlayers := "8" -}}
+{{- if hasKey $env "MAX_PLAYERS" -}}
+  {{- $rawMaxPlayers := get $env "MAX_PLAYERS" | toString -}}
+  {{- if regexMatch "^([1-9]|[1-9][0-9]|100)$" $rawMaxPlayers -}}
+    {{- $maxPlayers = $rawMaxPlayers -}}
+  {{- end -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,7 +70,20 @@ spec:
             - |
               set -e
               mkdir -p /data
+              # Marker means a previous start granted cheat-command access.
+              # Turning the setting off clears those operators once, and leaves
+              # operators created while the setting stayed off untouched.
+              if [ "$ALLOW_CHEATS" = "true" ]; then
+                touch /data/.olares-allow-cheats
+              elif [ -f /data/.olares-allow-cheats ]; then
+                printf '%s\n' '[]' > /data/ops.json
+                chown 1000:1000 /data/ops.json
+                rm -f /data/.olares-allow-cheats
+              fi
               chown 1000:1000 /data
+          env:
+            - name: ALLOW_CHEATS
+              value: {{ $allowCheats | quote }}
           securityContext:
             runAsUser: 0
           resources:
@@ -108,6 +136,18 @@ spec:
               value: {{ $onlineMode | quote }}
             - name: ENFORCE_SECURE_PROFILE
               value: {{ $onlineMode | quote }}
+            - name: ENABLE_COMMAND_BLOCK
+              value: {{ $allowCheats | quote }}
+            - name: OP_PERMISSION_LEVEL
+              value: {{ $opPermissionLevel | quote }}
+            {{- if eq $allowCheats "true" }}
+            - name: RCON_CMDS_ON_CONNECT
+              value: "op @a"
+            {{- if or (eq $version "26.2") (eq $version "LATEST") }}
+            - name: RCON_CMDS_STARTUP
+              value: "gamerule command_blocks_work true"
+            {{- end }}
+            {{- end }}
             - name: MOTD
               value: Olares Minecraft
             - name: DIFFICULTY
@@ -115,7 +155,7 @@ spec:
             - name: MODE
               value: survival
             - name: MAX_PLAYERS
-              value: "8"
+              value: {{ $maxPlayers | quote }}
             - name: VIEW_DISTANCE
               value: "10"
             - name: USE_AIKAR_FLAGS
