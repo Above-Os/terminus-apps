@@ -7,7 +7,7 @@ metadata:
   description: A multilingual translation model served with llama.cpp
   appid: llamacpphymt218bggufv3
   title: Hy-MT2-1.8B (llama.cpp)
-  version: '1.0.36'
+  version: '1.0.37'
   categories:
     - AI
     - models
@@ -36,7 +36,7 @@ workloadReplicas:
   llminit: 1
 spec:
   upgradeDescription: |
-    v1.0.36: Model Console (llm-init) updated to v1.7.21.
+    v1.0.37: Add Intel discrete GPU mode `intel-gpu` (SYCL). Engine image `beclab/ggml-org-llama.cpp:server-intel-b11459`. VRAM quota is the `gpu.bytetrade.io/required-gpu-memory` pod annotation.
 
   onlyAdmin: true
   versionName: 'tencent/Hy-MT2-1.8B-GGUF:Q4_K_M'
@@ -49,7 +49,7 @@ spec:
     - Follow translation instructions such as terminology and style.
     - Make translation available to compatible Olares applications.
 
-    A compatible NVIDIA GPU with at least `4Gi` of GPU memory is required.
+    A compatible NVIDIA GPU, or a discrete Intel Arc GPU, with at least `4Gi` of GPU memory is required.
   developer: Tencent
   website: https://huggingface.co/tencent/Hy-MT2-1.8B
   sourceCode: https://huggingface.co/tencent/Hy-MT2-1.8B
@@ -71,6 +71,9 @@ spec:
     # Sum rule: accelerator >= engine (llamacpp) + llm-init.
     # nvidia: MEMORY_REQUEST 4Gi + llm-init 256Mi; MEMORY_LIMIT 8Gi + llm-init 2Gi.
     # nvidia-gb10: engine host mem = GPU 4Gi (+ llm-init); limit 4Gi + 2Gi.
+    # intel-gpu: same host and GPU envelope as nvidia (engine 4Gi/8Gi +
+    # llm-init 256Mi/2Gi). The pod annotation still carries
+    # LLAMACPP_REQUIRED_GPU_MEMORY for the Arc device plugin.
     - mode: nvidia
       limitedCpu: "15360m"
       requiredCpu: "500m"
@@ -87,6 +90,15 @@ spec:
       limitedDisk: 100Gi
       limitedMemory: "6Gi"
       requiredMemory: "5Gi"
+    - mode: intel-gpu
+      limitedCpu: "15360m"
+      requiredCpu: "500m"
+      requiredDisk: 50Mi
+      limitedDisk: 100Gi
+      limitedMemory: "10Gi"
+      requiredMemory: "5Gi"
+      requiredGPUMemory: "4Gi"
+      limitedGPUMemory: "8Gi"
 
   supportArch:
     - amd64
@@ -213,5 +225,5 @@ envs:
     editable: true
     applyOnChange: true
     default: "4Gi"
-    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model."
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On nvidia-gb10 it sets pod memory. On intel-gpu it declares the discrete VRAM quota through the gpu.bytetrade.io/required-gpu-memory pod annotation."
     regex: "^[0-9]+(Gi|Mi)?$"
