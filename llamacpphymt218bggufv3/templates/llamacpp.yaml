@@ -21,9 +21,17 @@
 {{- end -}}
 {{- $isCpuMode := eq $gpuType "cpu" -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
+{{- $engineImage := "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10588" -}}
+{{- if $isIntelGpu -}}
+{{- $engineImage = "docker.io/beclab/ggml-org-llama.cpp:server-intel-b11459" -}}
+{{- end -}}
 {{- $engineArgs = include "llamacpphymt218bggufv3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) -}}
-{{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
-       same value as pod memory ("<MiB>Mi"). CPU mode skips GPU inject and gpumem. */ -}}
+{{- /* nvidia.com/gpumem is NVIDIA-HAMi only. Discrete Arc has no GPU-memory
+       extended resource, so intel-gpu puts the quota on the pod annotation
+       gpu.bytetrade.io/*-gpu-memory (plain Kubernetes quantity). Spark
+       unified memory reuses the same value as pod memory ("<MiB>Mi"). */ -}}
+{{- $needNvidiaGpumem := and (not $isCpuMode) (not $unifiedMem) (not $isIntelGpu) -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "4Gi") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
@@ -34,8 +42,9 @@
 # llama.cpp engine Deployment. wrappers/llamacpp.sh blocks on the sentinel
 # (download ready), then execs llama-server -hf "$MODEL_NAME".
 # llm-init reverse-proxies at http://llamacpp:8081 — Service name MUST be
-# "llamacpp". GPU base: CUDA server build + gpu-inject; put `-ngl all` in
-# ENGINE_ARGS to offload all layers to the GPU.
+# "llamacpp". NVIDIA uses the CUDA server build. intel-gpu uses the SYCL
+# image server-intel-b11459, mounts /dev/dri, and declares VRAM with
+# gpu.bytetrade.io/*-gpu-memory. Put `-ngl all` in ENGINE_ARGS.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,6 +70,14 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: llamacpp
+{{- if $isIntelGpu }}
+      # VRAM quota for intel-gpu. Unlike nvidia.com/gpumem this is a plain
+      # Kubernetes quantity. app-service reads it to resolve the manifest's
+      # requiredGPUMemory / limitedGPUMemory "-1".
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -76,9 +93,23 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+{{- if $isIntelGpu }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi
+{{- end }}
       containers:
         - name: llamacpp
-          image: docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10588
+          image: "{{ $engineImage }}"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]
           env:
@@ -132,22 +163,31 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+{{- if $isIntelGpu }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             # nvidia.com/gpumem is the per-instance GPU memory quota read by the
             # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
             # It's a non-overcommittable extended resource, so it must be in BOTH
             # requests and limits with the same value. Dropped on gb10 (unified
-            # memory uses pod memory instead) and cpu (no GPU inject).
+            # memory uses pod memory instead), cpu (no GPU inject), and
+            # intel-gpu (pod annotation above).
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
