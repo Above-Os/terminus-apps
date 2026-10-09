@@ -473,7 +473,13 @@ spec:
             - |
               dockerd --host tcp://0.0.0.0:2375 --host unix:///var/run/docker.sock &
               DOCKERD_PID=$!
-              until docker info >/dev/null 2>&1; do sleep 1; done
+              # Forward shutdown and wait for dockerd to release its persistent store.
+              trap 'kill -TERM "$DOCKERD_PID" 2>/dev/null || true; wait "$DOCKERD_PID" 2>/dev/null || true; exit 0' TERM INT
+              until docker info >/dev/null 2>&1; do
+                # Let Kubernetes retry if dockerd exits during startup.
+                kill -0 "$DOCKERD_PID" 2>/dev/null || { wait "$DOCKERD_PID"; exit 1; }
+                sleep 1
+              done
               echo "[dind] dockerd ready, pre-pulling sandbox image..."
               docker pull beclab/harveyff-openclaw-sandbox-common:2026.7.29 && echo "[dind] sandbox image ready" || echo "[dind] sandbox image pull failed" &
               wait $DOCKERD_PID
