@@ -23,11 +23,16 @@ spec:
     type: Recreate
   template:
     metadata:
+      annotations:
+        checksum/gateway-ipc: {{ include (print $.Template.BasePath "/configmap-gateway-ipc.yaml") . | sha256sum }}
+        checksum/openclaw-bin: {{ include (print $.Template.BasePath "/configmap-openclaw-bin.yaml") . | sha256sum }}
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: clawdbot
         bytetrade.io/terminal: clawdbot
     spec:
+      # Allow the Gateway's 85s drain/flush budget to finish before kubelet kills it.
+      terminationGracePeriodSeconds: 120
       # Recommended: make mounted volumes writable/readable for UID/GID 1000 more reliably
       securityContext:
         fsGroup: 1000
@@ -305,10 +310,6 @@ spec:
               name: app-data-config
             - mountPath: /home/node/
               name: app-data-node
-            - mountPath: /usr/local/bin/openclaw
-              name: openclaw-bin
-              subPath: openclaw
-              readOnly: true
             # Helper script: `restart-gateway` writes a sentinel into the
             # shared volume below to trigger gateway-only restart.
             - mountPath: /usr/local/bin/restart-gateway
