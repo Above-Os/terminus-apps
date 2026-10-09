@@ -6,7 +6,7 @@ metadata:
   labels:
     io.kompose.service: isaaclab
   annotations:
-    applications.app.bytetrade.io/gpu-inject: "true"
+    applications.app.bytetrade.io/gpu-inject: "isaaclab"
 spec:
   replicas: {{ .Values.workloads.isaaclab.replicaCount }}
   selector:
@@ -22,19 +22,107 @@ spec:
         io.kompose.service: isaaclab
         bytetrade.io/terminal: isaaclab
     spec:
+      shareProcessNamespace: true
       containers:
-        - name: isaaclab
-          image: docker.io/beclab/nvidia-isaac-lab:2.3.2
+        - name: preload-cover
+          image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1
           command: [ "/bin/bash" ]
           args:
             - "-c"
-            - "mount --bind /dev/null /etc/ld.so.preload && sleep infinity"
+            - |
+              echo "preload-cover started" >&2
+              needle="isaaclab-""hold"
+              covered=""
+              while true; do
+                target=""
+                for p in /proc/[0-9]*; do
+                  cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)
+                  case "$cmd" in
+                    *"$needle"*) target=${p#/proc/}; break ;;
+                  esac
+                done
+                if [ -z "$target" ]; then
+                  sleep 0.5
+                  continue
+                fi
+                src=$(nsenter -t "$target" -m -- findmnt -n -o SOURCE /etc/ld.so.preload 2>/dev/null || true)
+                case "$src" in
+                  *null*)
+                    if [ "$covered" != "$target" ]; then
+                      echo "already covered pid=$target src=$src" >&2
+                      covered=$target
+                    fi
+                    sleep 2
+                    continue
+                    ;;
+                esac
+                uid=$(awk '/^Uid:/ {print $2}' /proc/"$target"/status)
+                gid=$(awk '/^Gid:/ {print $2}' /proc/"$target"/status)
+                echo "covering pid=$target uid=$uid src=${src}" >&2
+                nsenter -t "$target" -m -- chown "$uid:$gid" /root /workspace/isaaclab /workspace/isaaclab/isaaclab.sh /isaac-sim/runheadless.sh || echo "chown failed pid=$target" >&2
+                nsenter -t "$target" -m -- chmod 755 /root || true
+                nsenter -t "$target" -m -- bash -c 'src=/isaac-sim/kit/python/lib/python3.12/site-packages/isaacteleop/cloudxr/native; for bin in /isaac-sim/extscache/omni.kit.livestream.webrtc-*/bin; do ln -sfn "$src/libNvStreamBase.so" "$bin/libNvStreamBase.so" && ln -sfn "$src/libcudart.so.12" "$bin/libcudart.so.12" || exit 1; done' || echo "webrtc link failed pid=$target" >&2
+                if nsenter -t "$target" -m -- mount --bind /dev/null /etc/ld.so.preload; then
+                  echo "mount ok pid=$target" >&2
+                  covered=$target
+                  nsenter -t "$target" -m -- chown -R "$uid:$gid" /isaac-sim/kit/cache /root/.cache /root/.nv /root/.nvidia-omniverse /root/.local /root/Documents || echo "cache chown failed pid=$target" >&2
+                else
+                  echo "mount failed pid=$target" >&2
+                fi
+                sleep 1
+              done
+          securityContext:
+            runAsUser: 0
+            privileged: true
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+        - name: isaaclab
+          image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1
+          command: [ "/bin/bash" ]
+          args:
+            - "-c"
+            - |
+              : isaaclab-hold
+              while true; do
+                src=$(findmnt -n -o SOURCE /etc/ld.so.preload 2>/dev/null || true)
+                case "$src" in
+                  *null*) break ;;
+                esac
+                sleep 0.5
+              done
+              insert_hub_cleanup() {
+                file="$1"
+                needle="$2"
+                grep -q "pkill -x hub" "$file" && return 0
+                tmp=$(mktemp)
+                awk -v needle="$needle" '
+                  !done && $0 == needle {
+                    print "# stale omniverse hub keeps 49100/47998 after the previous Kit exits"
+                    print "pkill -f ^/usr/local/bin/hub >/dev/null 2>&1 || true"
+                    print "sleep 0.5"
+                    done = 1
+                  }
+                  { print }
+                ' "$file" > "$tmp" && cat "$tmp" > "$file" && rm -f "$tmp"
+              }
+              insert_hub_cleanup /isaac-sim/runheadless.sh 'EXTRA_FLAGS=""'
+              insert_hub_cleanup /workspace/isaaclab/isaaclab.sh 'set -e'
+              sleep infinity
           env:
             - name: ACCEPT_EULA
               value: "Y"
             - name: PRIVACY_CONSENT
               value: "Y"
             - name: PUBLIC_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: ISAACSIM_HOST
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP
@@ -47,10 +135,6 @@ spec:
               cpu: 8000m
               memory: 15Gi
               nvidia.com/gpu: 1
-          securityContext:
-            privileged: true
-            capabilities:
-              add: [ "SYS_ADMIN" ]
           ports:
             - containerPort: {{ .Values.port | default 3000 }}
               protocol: TCP
