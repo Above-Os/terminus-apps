@@ -27,22 +27,14 @@ spec:
     - **[引导配置](https://docs.openclaw.ai/start/wizard) + [技能体系](https://docs.openclaw.ai/tools/skills)** —— 提供完善的引导流程，内置/可管理/可扩展的技能体系
 
   upgradeDescription: |
-    将 OpenClaw 更新至 2026.9.6。
+    将 OpenClaw 更新至 2026.9.9。
 
-    **上游更新亮点**
-    - 改进 Gateway 或 Node.js 重启后未完成对话和运行中任务的恢复。
-    - 恢复完整的 30 天用量报告，支持日期选择、按创建者细分，以及统计可见会话列表之外的用量。
-    - 新增 GitHub 阅读器，可在聊天旁查看公开议题、拉取请求、提交和差异。使用显式插件允许列表时，需加入 `github` 才能启用预览。
-    - 配对节点的工作区新增文件、记忆和技能支持；Gateway 与节点必须使用相同的 OpenClaw 版本。
-    - 支持在设置中登录 MCP 连接器，以及配置和测试网页搜索。
-    - 改善 Gateway 响应速度，并修复移动端聊天问题，包括 iOS 发送照片导致聊天卡住的问题。
+    本次上游更新还改进了升级时对活动 SQLite WAL 所有权的检查，并保留了与已发布的 2026.9.8 更新器的兼容性。
 
-    **Olares 部署更新**
+    上游改进了更新和 Doctor 恢复流程，在修复时保留本地插件配置，处理短暂的 SQLite 争用，并防止容器内重复启动 Gateway。
 
-    修复智能体数据库已升级至 schema 23 后，升级或重启时初始化失败的问题。迁移受支持的旧版 schema 前会先备份，再调用内置 OpenClaw 迁移代码。
+    Olares 现在会在启动应用前运行镜像内的 Doctor，支持 state schema 19 和 agent schema 24，无需 chart 专用迁移代码。常规 CLI 使用镜像内的版本；请通过 Olares 应用商店升级 OpenClaw，不要使用容器内更新器。
 
-    新安装默认使用 LAN 监听，并通过 Olares Gateway 入口 URL 生成手机配对二维码。Android 和 iOS 通过 Internal 入口连接时，即使处于同一局域网，也需保持 LarePass VPN 开启。
+    升级前请备份应用数据。中断的迁移或自定义恢复进程可能需要管理员协助。仅安装旧镜像无法回退已升级的 schema。
 
-    现有配置、令牌、已配对设备和工作区保持不变。已有安装可运行 `openclaw qr --url wss://<gateway-entrance-domain>` 生成手机配对码，或先配置 `plugins.entries.device-pair.config.publicUrl`，再运行 `openclaw qr`。
-
-    发布说明: https://github.com/openclaw/openclaw/releases/tag/v2026.9.6
+    发行说明：https://github.com/openclaw/openclaw/releases/tag/v2026.9.9
