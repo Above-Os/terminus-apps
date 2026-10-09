@@ -1,11 +1,13 @@
 # OpenClaw image upgrades and recovery
 
-Chart 1.0.48 pins OpenClaw 2026.9.8 (state schema 19, agent schema 24).
+Chart 1.0.48 pins OpenClaw 2026.9.9 (state schema 19, agent schema 24).
 The CLI, Gateway and `init-openclaw-state` use the same image. The init container
 runs upstream `doctor --fix --non-interactive` before application writers start.
 Doctor may repair configuration as well as databases; inspect its report and keep
 an application backup. This replaces the chart's legacy-file deletion and private
 schema migration code. It does not delete a user's persistent npm installation.
+
+Chinese operator checklist: [客户升级与恢复](RECOVERY.zh-CN.md).
 
 ## Normal upgrade
 
@@ -22,9 +24,17 @@ schema migration code. It does not delete a user's persistent npm installation.
 4. Verify the image version, Gateway readiness, real chat, and mobile WebSocket
    access. Test a Pod recreation before declaring recovery durable.
 
-The image is the official multi-architecture GHCR release pinned by digest. No
-custom OpenClaw image is built. Environments that require a registry mirror must
-mirror that exact digest and validate both amd64 and arm64 before changing it.
+The image is the official multi-architecture Docker Hub release
+`docker.io/openclaw/openclaw:2026.9.9`, referenced by version tag without a digest.
+The previous beclab 2026.9.6 mirror has the same image configuration and
+uncompressed root filesystem as the official release on amd64 and arm64. No
+beclab-specific image customization needs to be retained.
+
+The supported direct-upgrade scope starts with the 2026.6.9 runtime active at
+the start of the last three-month release window. Pre-June legacy state is
+outside this scope; do not add speculative legacy conversion to this chart.
+Handle any such installation separately with a verified backup and an upstream
+bridge version appropriate to its actual state. See [migration regression](tests/MIGRATION.md).
 
 ## An installation already repaired to 19/24 with a temporary bridge
 
@@ -53,7 +63,7 @@ kubectl -n "$NS" exec "$POD" -c clawdbot -- /opt/olares/bin/openclaw --version
 kubectl -n "$NS" exec "$POD" -c gateway -- /usr/local/bin/node /app/openclaw.mjs --version
 ```
 
-Both versions should be 2026.9.8. The readiness probe also requires the Gateway
+Both versions should be 2026.9.9. The readiness probe also requires the Gateway
 wrapper's child PID to exist inside its container, so a listener in a sibling
 container cannot alone make a failed wrapper Ready. This is a health check, not
 cryptographic process attestation.
@@ -127,6 +137,6 @@ Required runtime checks (use disposable copies, never a user's live databases):
 - Pod recreation, real model response and both ingress WebSocket paths.
 - Revalidate Olares skills/local plugins after Doctor and repeat Doctor once.
 
-Sources: [container entrypoint](https://github.com/openclaw/openclaw/blob/v2026.9.8/docker-entrypoint.mjs),
+Sources: [container entrypoint](https://github.com/openclaw/openclaw/blob/v2026.9.9/docker-entrypoint.mjs),
 [Doctor migration contract](https://docs.openclaw.ai/cli/doctor/state-migrations),
-[release notes](https://github.com/openclaw/openclaw/releases/tag/v2026.9.8).
+[release notes](https://github.com/openclaw/openclaw/releases/tag/v2026.9.9).
