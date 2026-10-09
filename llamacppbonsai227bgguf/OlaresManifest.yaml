@@ -3,11 +3,11 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: llamacppbonsai227bgguf
-  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
-  description: "Ternary Bonsai 2 27B (GGUF PQ2_0) served with the PrismML llama.cpp fork."
+  icon: https://app.cdn.olares.com/appstore/bonsai/icon.png
+  description: "A local AI model for reasoning, coding, image understanding, and tool use"
   appid: llamacppbonsai227bgguf
-  title: Bonsai 2 27B (llama.cpp)
-  version: '1.0.6'
+  title: Bonsai 2 27B
+  version: '1.0.7'
   categories:
     - AI
     - models
@@ -17,16 +17,16 @@ sharedEntrances:
   - name: llamacppbonsai227bgguf
     host: sharedentrances-api
     port: 0
-    title: Ternary Bonsai 2 27B
+    title: Bonsai 2 27B
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+    icon: https://app.cdn.olares.com/appstore/bonsai/icon.png
 entrances:
   - name: llamacppclient
     port: 8090
     host: download-svc
-    title: Ternary Bonsai 2 27B
-    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+    title: Bonsai 2 27B
+    icon: https://app.cdn.olares.com/appstore/bonsai/icon.png
     openMethod: window
     authLevel: internal
 #   llamacppbonsai227bgguf — engine Deployment (== appid / Release.Name)
@@ -38,102 +38,42 @@ spec:
   onlyAdmin: true
   versionName: 'prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0'
   upgradeDescription: |
-    v1.0.6: remove --kv-unified from the single-slot NVIDIA default; retain it on CPU.
-    Migrate the previous NVIDIA preset while preserving custom arguments.
+    Intel integrated GPU mode is no longer available. CPU support is restored, and Intel discrete GPU support is added.
 
-    v1.0.5: align CPU and NVIDIA default context lengths at 131072 tokens. CPU keeps
-    f16 K/V and one slot, with a 16Gi engine memory request and a 20Gi limit.
-    Migrate the previous CPU preset while preserving custom arguments. Memory is
-    budgeted from estimates; CPU throughput and peak usage at 128K need target testing.
+    NVIDIA handles two requests in parallel by default; CPU and Intel discrete GPU handle one. Existing default settings are updated automatically, while custom engine arguments are preserved.
 
-    v1.0.4: the non-NVIDIA path is the CPU build, not Vulkan — the Vulkan image does not
-    come up on the target hardware, and CUDA / Metal / CPU are the backends upstream
-    actually claims. Mode `intel` is replaced by mode `cpu`: same PQ2_0 file as nvidia
-    (the CPU backend has a repacked GEMM path for PQ2_0 and only a vector dot product for
-    PTQ1_0), no device passthrough, no privileged container, 8 cores and 20Gi of host RAM
-    instead of a GPU quota.
-
-    v1.0.3: context 98,304 -> 131,072 tokens (128 Ki) on nvidia, GPU quota unchanged at
-    15Gi. Measured on a 24Gi card: 12.75Gi resident (weights + mmproj + Q8_0 K/V).
-
-    v1.0.2: 15Gi GPU quota; one 98,304-token slot, Q8_0 K/V cache, batch 512 / ubatch 128.
-    Raise engine host-memory limit to 24Gi to retain GPU eviction headroom.
-
-    v1.0.0: first release. PrismML llama.cpp fork `prism-b10709-9a9394a` (CUDA 12.8), llm-init v1.7.21.
-    prism-ml/Ternary-Bonsai-2-27B-gguf PQ2_0 + mmproj-Q8_0, 32K context (-c 32768), GPU quota 12Gi.
-
-    Serves the ternary-quantized Bonsai 2 27B GGUF (`qwen35` architecture) with vision projector.
   fullDescription: |
-    **Model Overview**
-    Ternary Bonsai 2 27B is a ternary-weight ({-1, 0, +1}) build of a 27.36B vision-language model
-    from PrismML, derived from Qwen3.8-27B with hybrid attention (~75% linear, ~25% full attention).
-    It supports thinking, tool-calling, and image/video understanding, with a 262K context window.
-    This app serves the `PQ2_0` GGUF from `prism-ml/Ternary-Bonsai-2-27B-gguf`.
+    Bonsai 2 27B is a model from Prism ML that runs locally to answer questions, write code, and interpret images. Its compressed weights reduce model storage needs while retaining reasoning and tool-calling capabilities.
 
-    **Why a forked engine**
-    Stock llama.cpp cannot run these files: it rejects `PQ2_0` / `PTQ1_0` as unknown types, and it
-    loads `Q2_0` without any warning and produces garbage, because it has no Hadamard activation
-    runtime. This app therefore ships the PrismML fork
-    ([PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp)), which carries the ternary
-    hybrid-attention CUDA kernels. `-fa on` is required — it enables the Hadamard activation
-    transforms the weight rotation basis depends on.
+    **Key features**
 
-    **Preset Configuration**
-    - Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` (7.21 GB, with the `mmproj-Q8_0` projector for vision) — the same file in both modes
-    - Capabilities: thinking, tools, vision
-    - Engine args (nvidia): `-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128` (128 Ki tokens, 1 slot; Q8_0 K/V)
-    - Engine args (cpu): `-c 131072 -fa on --jinja -np 1 --kv-unified -b 512 -ub 128 -t 8` (128 Ki tokens, 1 slot; f16 K/V; `-t` matches the container CPU limit)
-    - Required GPU memory: `15Gi` on nvidia; none in cpu mode
-    - Context includes input, image tokens, reasoning and output; one active request at a time.
-    - nvidia: Q8_0 K/V at 128 Ki is 4.25Gi; measured resident set on a 24Gi card is 12.75Gi of the 15Gi quota.
-    - cpu: PQ2_0 6.72Gi + mmproj 0.59Gi + estimated f16 K/V at 128 Ki approximately 8–8.5Gi, all out of host RAM.
-    - Sampling the model card recommends: thinking `temp 1.0 / top_p 0.95 / top_k 20`;
-      instruct `temp 0.7 / top_p 0.80 / top_k 20 / presence_penalty 1.5`
+    - Work through tasks that require multiple reasoning steps, including coding and problem solving.
+    - Ask questions about images in compatible applications.
+    - Let compatible applications connect the model to tools for additional actions.
+    - Download and manage the model through Model Console, then access it through the Olares AI gateway or an OpenAI-compatible API.
 
-    **Accelerator modes**
-    | Mode     | Device                | Details                                                      |
-    |----------|-----------------------|--------------------------------------------------------------|
-    | `nvidia` | discrete NVIDIA, CUDA | `15Gi` GPU-memory quota, 128 Ki context, Q8_0 K/V, `-ngl all` |
-    | `cpu`    | no accelerator        | 8 cores / 20Gi host RAM, 128 Ki context, f16 K/V, pinned `-t`  |
+    **Before using**
 
-    The mode picks the engine image; both serve the same PQ2_0 file, so switching modes
-    downloads nothing. PQ2_0 is also the right packing for CPU: the CPU backend carries a
-    repacked GEMM path for it (`ggml_gemm_pq2_0_4x8_q8_0`) and only a vector dot product
-    for PTQ1_0, so PTQ1_0 would lose badly on prompt processing despite being 1.26 GB
-    smaller.
+    This app includes the `PQ2_0` model and its vision component. Wait for the model files to finish downloading before use. Image input and tool calling require a client that supports those features.
 
-    There is no integrated-GPU mode. The model card lists the supported backends as CUDA,
-    Metal and CPU; the fork does publish a Vulkan build, but it does not come up on the
-    target hardware, so an Intel iGPU host runs the CPU path. Upstream publishes no CPU
-    throughput figures — decode here is memory-bandwidth bound, so measure with
-    `llama-bench` before committing to a context size.
+    See the [official model card](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) for model details and usage guidance.
 
-    amd64 only: the PrismML fork publishes no linux-arm64 CUDA build, so DGX Spark
-    (`nvidia-gb10`) is not supported. The CUDA 12.8 build ships native cubins for
-    sm_86 / sm_89 / sm_120 and PTX for sm_50 through sm_90.
-
-    **How It Works**
-    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the
-    model when it's ready. These two parts run separately but share files and progress info.
-
-    **Stack**
-    - **llama.cpp** (PrismML `prism-b10709-9a9394a`, CUDA 12.8): Runs the model and serves API requests (port 8081)
-    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
-
-    **Model Storage**
-    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
-    All similar apps use this location for models.
-
-  developer: PrismML
-  website: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
-  sourceCode: https://github.com/PrismML-Eng/llama.cpp
+  developer: Prism ML
+  website: https://prismml.com/
+  sourceCode: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
+  doc: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - ja-JP
+    - de-DE
+    - fr-FR
+    - it-IT
+    - es-ES
   license:
     - text: Apache-2.0
-      url: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
+      url: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/blob/main/LICENSE
 
   accelerator:
     #   nvidia — discrete GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
@@ -142,17 +82,15 @@ spec:
       requiredCpu: "1100m"
       requiredDisk: 50Mi
       limitedDisk: 500Gi
-      # MEMORY_LIMIT 24Gi = anon under 1Gi + the 15Gi gpumem that mode-2 eviction
-      # spills into host RAM as unreclaimable UVM pages + GGUF page cache headroom.
+      # Host memory also accounts for UVM pages spilled by mode-2 eviction
+      # and the GGUF page cache.
       # Engine MEMORY_REQUEST 4Gi + llm-init 256Mi <= requiredMemory 5Gi;
       # MEMORY_LIMIT 24Gi + llm-init 2Gi <= limitedMemory 26Gi.
       limitedMemory: "26Gi"
       requiredMemory: "5Gi"
-      requiredGPUMemory: "15Gi"
-      limitedGPUMemory: "15Gi"
-    #   cpu — no accelerator: the ubuntu-x64 build, for a host with no NVIDIA
-    #   card. No GPU-memory field (there is no device), and the CPU is the
-    #   compute rather than just the driver, so the core budget is larger.
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "23Gi"
+    # CPU holds weights and K/V in host memory without an accelerator.
     - mode: cpu
       # Engine cpu 2 -> 8 plus llm-init 200m -> 1 fits 2200m / 9216m.
       limitedCpu: "9216m"
@@ -164,6 +102,18 @@ spec:
       # Reserve weights and 128K f16 K/V, with additional buffer headroom in the limit.
       limitedMemory: "22Gi"
       requiredMemory: "17Gi"
+
+    - mode: intel-gpu
+      supportMultiCard: false
+      supportMultiNodes: false
+      limitedCpu: "9216m"
+      requiredCpu: "2200m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "22Gi"
+      requiredMemory: "17Gi"
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "23Gi"
 
   supportArch:
     - amd64
@@ -248,11 +198,11 @@ envs:
     default: "medium"
     description:  "The level this model uses when a request does not ask for one."
   # `-fa on` is required by the ternary kernels (Hadamard activation transforms).
-  # NVIDIA uses one slot without --kv-unified; the CPU preset retains it.
+  # NVIDIA uses two slots without --kv-unified; CPU and Intel discrete GPU retain one slot and --kv-unified.
   # No --spec-type draft-mtp: this ternary re-architecture has no MTP head.
   - envName: ENGINE_ARGS
     required: true
-    default: "-c 131072 -ngl all -fa on --jinja -np 1 -ctk q8_0 -ctv q8_0 -b 512 -ub 128"
+    default: "-c 131072 -ngl all -fa on --jinja -np 2 -ctk q8_0 -ctv q8_0 -b 512 -ub 128"
     type: string
     editable: true
     applyOnChange: true
@@ -311,6 +261,6 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "15Gi"
+    default: "23Gi"
     description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB."
     regex: "^[0-9]+(Gi|Mi)?$"

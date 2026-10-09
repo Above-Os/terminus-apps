@@ -1,5 +1,7 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
+{{- $isIntelGpu := eq (include "llamacppbonsai227bgguf.isIntelGpu" .) "true" -}}
 {{- $isCpu := eq (include "llamacppbonsai227bgguf.isCpu" .) "true" -}}
+{{- $isNvidia := eq (include "llamacppbonsai227bgguf.gpuType" .) "nvidia" -}}
 {{- $engineImage := include "llamacppbonsai227bgguf.engineImage" . -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelMode := $oe.MODEL_MODE | default "" -}}
@@ -14,26 +16,20 @@
 {{- if eq $memLimit "21Gi" -}}
 {{- $memLimit = "24Gi" -}}
 {{- end -}}
-{{- /* CPU mode holds everything in host RAM and counts it against this
-       container's limit: PQ2_0 6.72Gi + mmproj 0.59Gi + f16 K/V at 128 Ki
-       approximately 8–8.5Gi + buffers, so the request is the real floor rather than the 4Gi
-       the CUDA path needs (where the same bytes sit in the card). CPU is also
-       the compute here, not just the driver, so the core budget goes up and
-       the preset's -t is pinned to $cpuLimit. The LLAMACPP_* envs stay
-       CUDA-shaped — they are editable:false and drive nvidia.com/gpumem,
-       which CPU mode does not use. */ -}}
-{{- if $isCpu -}}
+{{- /* CPU and Intel discrete GPU retain the host-memory envelope for
+       PQ2_0 weights, vision projector and 128K f16 K/V; no NVIDIA quota. */ -}}
+{{- if or $isCpu $isIntelGpu -}}
 {{- $cpuRequest = "2" -}}
 {{- $cpuLimit = "8" -}}
 {{- $memRequest = "16Gi" -}}
 {{- $memLimit = "20Gi" -}}
 {{- end -}}
-{{- /* nvidia.com/gpumem needs a BARE MiB int. This app is amd64/CUDA only —
+{{- /* nvidia.com/gpumem needs a BARE MiB int. This app is amd64 only —
        the PrismML fork publishes no linux-arm64 CUDA build — so there is no
        nvidia-gb10 (Spark unified memory) branch here. */ -}}
-{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "15Gi") -}}
-{{- if eq $gpuMiB "12288" -}}
-{{- $gpuMiB = "15360" -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "23Gi") -}}
+{{- if or (eq $gpuMiB "12288") (eq $gpuMiB "15360") -}}
+{{- $gpuMiB = "23552" -}}
 {{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
@@ -47,10 +43,11 @@
 # unknown types, and loads Q2_0 without warning and produces garbage, because
 # it has no Hadamard activation runtime.
 #
-# Two backends, picked from the accelerator mode app-service selected:
+# Three backends, picked from the accelerator mode app-service selected:
 #   nvidia -> CUDA 12.8 image, nvidia.com/gpumem quota via gpu-inject
-#   cpu    -> ubuntu-x64 image, no device, more cores and host RAM instead
-# Both serve the same PQ2_0 file out of the shared HF cache.
+#   cpu -> CPU image, no accelerator device or GPU quota
+#   intel-gpu -> Vulkan image; platform injects the Intel GPU device
+# All modes serve the same PQ2_0 file out of the shared HF cache.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -153,13 +150,13 @@ spec:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if not $isCpu }}
+{{- if $isNvidia }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if not $isCpu }}
+{{- if $isNvidia }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
