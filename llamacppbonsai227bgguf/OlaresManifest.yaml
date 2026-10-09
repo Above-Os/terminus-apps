@@ -3,8 +3,8 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: llamacppbonsai227bgguf
-  icon: https://raw.githubusercontent.com/Above-Os/terminus-apps/2f3e60bfe6bb36bb0fa542d141b08a0850672aaa/llamacppbonsai227bgguf/assets/icon.png
-  description: "A local AI model for reasoning, coding, tool use, and questions about images"
+  icon: https://app.cdn.olares.com/appstore/bonsai/icon.png
+  description: "A local AI model for reasoning, coding, image understanding, and tool use"
   appid: llamacppbonsai227bgguf
   title: Bonsai 2 27B
   version: '1.0.7'
@@ -20,13 +20,13 @@ sharedEntrances:
     title: Bonsai 2 27B
     invisible: true
     authLevel: internal
-    icon: https://raw.githubusercontent.com/Above-Os/terminus-apps/2f3e60bfe6bb36bb0fa542d141b08a0850672aaa/llamacppbonsai227bgguf/assets/icon.png
+    icon: https://app.cdn.olares.com/appstore/bonsai/icon.png
 entrances:
   - name: llamacppclient
     port: 8090
     host: download-svc
     title: Bonsai 2 27B
-    icon: https://raw.githubusercontent.com/Above-Os/terminus-apps/2f3e60bfe6bb36bb0fa542d141b08a0850672aaa/llamacppbonsai227bgguf/assets/icon.png
+    icon: https://app.cdn.olares.com/appstore/bonsai/icon.png
     openMethod: window
     authLevel: internal
 #   llamacppbonsai227bgguf — engine Deployment (== appid / Release.Name)
@@ -38,36 +38,39 @@ spec:
   onlyAdmin: true
   versionName: 'prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0'
   upgradeDescription: |
-    NVIDIA mode now requires 23Gi of GPU memory and provides two parallel request slots by default, up from one. CPU mode continues to use one slot.
+    Intel integrated GPU mode is no longer available. CPU support is restored, and Intel discrete GPU support is added.
 
-    Existing default settings are updated automatically. Custom engine arguments are preserved.
+    NVIDIA handles two requests in parallel by default; CPU and Intel discrete GPU handle one. Existing default settings are updated automatically, while custom engine arguments are preserved.
 
   fullDescription: |
-    Bonsai 2 27B is a model from Prism ML for answering questions, writing code, and working with images. It uses compressed model weights to run locally and supports reasoning and tool calling.
+    Bonsai 2 27B is a model from Prism ML that runs locally to answer questions, write code, and interpret images. Its compressed weights reduce model storage needs while retaining reasoning and tool-calling capabilities.
 
     **Key features**
 
-    - Ask questions about text and images in compatible chat applications.
-    - Use reasoning for tasks that require multiple steps, including coding and problem solving.
-    - Connect applications that support tool calling so the model can request actions from their tools.
-    - Download and manage the model through Model Console, and access it through the Olares AI gateway or an OpenAI-compatible API.
+    - Work through tasks that require multiple reasoning steps, including coding and problem solving.
+    - Ask questions about images in compatible applications.
+    - Let compatible applications connect the model to tools for additional actions.
+    - Download and manage the model through Model Console, then access it through the Olares AI gateway or an OpenAI-compatible API.
 
-    **Before installing**
+    **Before using**
 
-    This app provides the `PQ2_0` model with its vision component. It supports NVIDIA GPU and CPU modes on `amd64` systems. Integrated GPU acceleration and DGX Spark are not supported by this app.
-
-    Model files must finish downloading before the model is ready to use. Image input and tool calling require a client that supports those features.
+    This app includes the `PQ2_0` model and its vision component. Wait for the model files to finish downloading before use. Image input and tool calling require a client that supports those features.
 
     See the [official model card](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) for model details and usage guidance.
 
   developer: Prism ML
-  website: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
+  website: https://prismml.com/
   sourceCode: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
   doc: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf
   submitter: Olares
   locale:
     - en-US
     - zh-CN
+    - ja-JP
+    - de-DE
+    - fr-FR
+    - it-IT
+    - es-ES
   license:
     - text: Apache-2.0
       url: https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/blob/main/LICENSE
@@ -87,9 +90,7 @@ spec:
       requiredMemory: "5Gi"
       requiredGPUMemory: "23Gi"
       limitedGPUMemory: "23Gi"
-    #   cpu — no accelerator: the ubuntu-x64 build, for a host with no NVIDIA
-    #   card. No GPU-memory field (there is no device), and the CPU is the
-    #   compute rather than just the driver, so the core budget is larger.
+    # CPU holds weights and K/V in host memory without an accelerator.
     - mode: cpu
       # Engine cpu 2 -> 8 plus llm-init 200m -> 1 fits 2200m / 9216m.
       limitedCpu: "9216m"
@@ -101,6 +102,18 @@ spec:
       # Reserve weights and 128K f16 K/V, with additional buffer headroom in the limit.
       limitedMemory: "22Gi"
       requiredMemory: "17Gi"
+
+    - mode: intel-gpu
+      supportMultiCard: false
+      supportMultiNodes: false
+      limitedCpu: "9216m"
+      requiredCpu: "2200m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "22Gi"
+      requiredMemory: "17Gi"
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "23Gi"
 
   supportArch:
     - amd64
@@ -185,7 +198,7 @@ envs:
     default: "medium"
     description:  "The level this model uses when a request does not ask for one."
   # `-fa on` is required by the ternary kernels (Hadamard activation transforms).
-  # NVIDIA uses two slots without --kv-unified; CPU retains one slot and --kv-unified.
+  # NVIDIA uses two slots without --kv-unified; CPU and Intel discrete GPU retain one slot and --kv-unified.
   # No --spec-type draft-mtp: this ternary re-architecture has no MTP head.
   - envName: ENGINE_ARGS
     required: true
