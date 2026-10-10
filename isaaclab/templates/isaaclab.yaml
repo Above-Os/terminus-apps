@@ -112,19 +112,91 @@ spec:
               }
               insert_hub_cleanup /isaac-sim/runheadless.sh 'EXTRA_FLAGS=""'
               insert_hub_cleanup /workspace/isaaclab/isaaclab.sh 'set -e'
-              # uv run executes this entrypoint. Point it at Kit's Python and
-              # keep uv from reinstalling the script on the next run.
+              # uv's .venv exists so `uv run isaaclab` has an entrypoint. It is
+              # not Isaac Sim's Python, and the CLI refuses that combination.
+              # Both entrypoints below run this launcher, which keeps every
+              # flag on Kit's python.sh.
+              cat > /workspace/isaaclab/.kit-cli.py << 'PY'
+              import os
+              import sys
+              from pathlib import Path
+
+              os.environ.pop("VIRTUAL_ENV", None)
+              os.environ.pop("CONDA_PREFIX", None)
+              sys.argv[0] = "isaaclab"
+
+              # -s launches the windowed full kit. This container has no display;
+              # the streaming app is runheadless.sh.
+              if len(sys.argv) > 1 and sys.argv[1] in ("-s", "--sim"):
+                  cmd = [
+                      "/isaac-sim/runheadless.sh",
+                      "--ext-folder",
+                      "/workspace/isaaclab/source",
+                      *sys.argv[2:],
+                  ]
+                  os.execv(cmd[0], cmd)
+
+              import isaaclab.cli.utils as utils
+
+              _extract_python_exe = utils.extract_python_exe
+
+
+              def extract_python_exe():
+                  forced = "/isaac-sim/python.sh"
+                  if Path(forced).is_file():
+                      utils.print_info(f'Using Python: "{forced}"')
+                      return forced
+                  return _extract_python_exe()
+
+
+              utils.extract_python_exe = extract_python_exe
+
+              from isaaclab.cli import cli
+
+              cli()
+              PY
+              /isaac-sim/kit/python/bin/python3 - << 'PY'
+              from pathlib import Path
+              path = Path("/workspace/isaaclab/source/isaaclab_visualizers/isaaclab_visualizers/kit/kit_visualizer.py")
+              text = path.read_text()
+              if "ISAACLAB_LIVESTREAM_PUMP" not in text:
+                  old = """        # Headless mode: skip the app update and camera panel refresh; rendering is\n        # triggered on demand by render_rgb_array() / render_tiled_rgb_array().\n        if self._runtime_headless:\n            return\n"""
+                  new = """        # ISAACLAB_LIVESTREAM_PUMP: livestream marks SimulationApp headless, but\n        # /isaaclab/has_gui stays true. The WebRTC view advances only if this\n        # loop still calls app.update().\n        if self._runtime_headless and not get_settings_manager().get("/isaaclab/has_gui"):\n            return\n"""
+                  if old not in text:
+                      raise SystemExit("kit visualizer patch point missing")
+                  path.write_text(text.replace(old, new, 1))
+              PY
+              if ! grep -q ISAACLAB_KIT_CLI /workspace/isaaclab/isaaclab.sh; then
+                tmp=$(mktemp)
+                awk '
+                  !done && $0 == "set -e" {
+                    print
+                    print "# ISAACLAB_KIT_CLI: this uv venv is only the uv run entrypoint"
+                    print "unset VIRTUAL_ENV"
+                    print "unset CONDA_PREFIX"
+                    done = 1
+                    next
+                  }
+                  { print }
+                ' /workspace/isaaclab/isaaclab.sh > "$tmp" && cat "$tmp" > /workspace/isaaclab/isaaclab.sh && rm -f "$tmp"
+              fi
+              if grep -q 'from isaaclab.cli import cli; cli()' /workspace/isaaclab/isaaclab.sh; then
+                tmp=$(mktemp)
+                sed 's|^exec "\$python_exe" -c "from isaaclab.cli import cli; cli()" "\$@"|exec /isaac-sim/python.sh /workspace/isaaclab/.kit-cli.py "$@"|' /workspace/isaaclab/isaaclab.sh > "$tmp" && cat "$tmp" > /workspace/isaaclab/isaaclab.sh && rm -f "$tmp"
+              fi
               cat > /workspace/isaaclab/.venv/bin/isaaclab << 'EOF'
               #!/bin/bash
               pkill -f ^/usr/local/bin/hub >/dev/null 2>&1 || true
               sleep 0.5
+              unset VIRTUAL_ENV
+              unset CONDA_PREFIX
               export ISAAC_PATH=/isaac-sim
               export CARB_APP_PATH=/isaac-sim/kit
               export EXP_PATH=/isaac-sim/apps
               export RESOURCE_NAME="${RESOURCE_NAME:-IsaacSim}"
               . /isaac-sim/setup_python_env.sh
               export PYTHONPATH="/workspace/isaaclab/source/isaaclab:${PYTHONPATH}"
-              exec /isaac-sim/python.sh -c "from isaaclab.cli import cli; cli()" "$@"
+              exec /isaac-sim/python.sh /workspace/isaaclab/.kit-cli.py "$@"
               EOF
               chmod +x /workspace/isaaclab/.venv/bin/isaaclab
               sleep infinity
