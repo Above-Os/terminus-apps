@@ -84,10 +84,15 @@ data:
       mount_exists=$(printf '%s' "$mounts" | php -r '
         $mounts = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
         foreach ($mounts as $mount) {
+          // Match the physical local path to preserve user-selected names and access rules.
+          if (($mount["storage"] ?? "") === "\\OC\\Files\\Storage\\Local"
+              && rtrim($mount["configuration"]["datadir"] ?? "", "/") === rtrim($argv[2], "/")) {
+            echo "1"; exit(0);
+          }
           if (trim($mount["mount_point"], "/") === $argv[1]) { echo "1"; exit(0); }
         }
         echo "0";
-      ' "$mount_name")
+      ' "$mount_name" "$mount_path")
       if [ "$mount_exists" = 1 ]; then
         return
       fi
