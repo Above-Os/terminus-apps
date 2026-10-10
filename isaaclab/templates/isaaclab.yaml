@@ -25,7 +25,7 @@ spec:
       shareProcessNamespace: true
       containers:
         - name: preload-cover
-          image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1
+          image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1-uv1
           command: [ "/bin/bash" ]
           args:
             - "-c"
@@ -82,7 +82,7 @@ spec:
               cpu: 10m
               memory: 32Mi
         - name: isaaclab
-          image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1
+          image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1-uv1
           command: [ "/bin/bash" ]
           args:
             - "-c"
@@ -112,8 +112,31 @@ spec:
               }
               insert_hub_cleanup /isaac-sim/runheadless.sh 'EXTRA_FLAGS=""'
               insert_hub_cleanup /workspace/isaaclab/isaaclab.sh 'set -e'
+              # uv run executes this entrypoint. Point it at Kit's Python and
+              # keep uv from reinstalling the script on the next run.
+              cat > /workspace/isaaclab/.venv/bin/isaaclab << 'EOF'
+              #!/bin/bash
+              pkill -f ^/usr/local/bin/hub >/dev/null 2>&1 || true
+              sleep 0.5
+              export ISAAC_PATH=/isaac-sim
+              export CARB_APP_PATH=/isaac-sim/kit
+              export EXP_PATH=/isaac-sim/apps
+              export RESOURCE_NAME="${RESOURCE_NAME:-IsaacSim}"
+              . /isaac-sim/setup_python_env.sh
+              export PYTHONPATH="/workspace/isaaclab/source/isaaclab:${PYTHONPATH}"
+              exec /isaac-sim/python.sh -c "from isaaclab.cli import cli; cli()" "$@"
+              EOF
+              chmod +x /workspace/isaaclab/.venv/bin/isaaclab
               sleep infinity
           env:
+            - name: PATH
+              value: /usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+            - name: UV_PYTHON_INSTALL_DIR
+              value: /opt/uv-python
+            - name: UV_OFFLINE
+              value: "1"
+            - name: UV_NO_SYNC
+              value: "1"
             - name: ACCEPT_EULA
               value: "Y"
             - name: PRIVACY_CONSENT
