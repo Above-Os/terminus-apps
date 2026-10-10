@@ -70,7 +70,10 @@ data:
     #!/bin/sh
     set -eu
     cd /var/www/html
+    log() { printf '[%s] [final-upgrade] %s\n' "$(date -u +%FT%TZ)" "$*"; }
+    log 'START Final database upgrade; remaining time unknown'
     php occ upgrade --no-interaction
+    log 'DONE Final database upgrade'
     # The official image does not process the legacy APPS_ENABLE variable.
     # Keep Olares local mounts available after a major-version upgrade.
     php occ app:enable files_external
@@ -81,10 +84,15 @@ data:
       mount_exists=$(printf '%s' "$mounts" | php -r '
         $mounts = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
         foreach ($mounts as $mount) {
+          // Match the physical local path to preserve user-selected names and access rules.
+          if (($mount["storage"] ?? "") === "\\OC\\Files\\Storage\\Local"
+              && rtrim($mount["configuration"]["datadir"] ?? "", "/") === rtrim($argv[2], "/")) {
+            echo "1"; exit(0);
+          }
           if (trim($mount["mount_point"], "/") === $argv[1]) { echo "1"; exit(0); }
         }
         echo "0";
-      ' "$mount_name")
+      ' "$mount_name" "$mount_path")
       if [ "$mount_exists" = 1 ]; then
         return
       fi
@@ -96,9 +104,18 @@ data:
     if [ "${NEXTCLOUD_MOUNT_HOME_STORAGE:-false}" = true ]; then
       ensure_local_mount "$NEXTCLOUD_MOUNT_HOME_STORAGE_NAME" "$NEXTCLOUD_MOUNT_HOME_STORAGE_PATH"
     fi
-    php occ app:enable eurooffice
-    php occ config:app:set eurooffice DocumentServerUrl --value="$OFFICE_PUBLIC_URL"
-    php occ config:app:set eurooffice DocumentServerInternalUrl --value="http://nextcloud-office:8080/"
-    php occ config:app:set eurooffice StorageUrl --value="http://nextcloud-svc/"
-    php occ config:app:set eurooffice jwt_secret --value="$JWT_SECRET" >/dev/null
-    php occ config:app:set eurooffice jwt_header --value="AuthorizationJWT"
+    configure_office() {
+      php occ app:enable eurooffice || return $?
+      php occ config:app:set eurooffice DocumentServerUrl --value="$OFFICE_PUBLIC_URL" || return $?
+      php occ config:app:set eurooffice DocumentServerInternalUrl --value="http://nextcloud-office:8080/" || return $?
+      php occ config:app:set eurooffice StorageUrl --value="http://nextcloud-svc/" || return $?
+      php occ config:app:set eurooffice jwt_secret --value="$JWT_SECRET" >/dev/null || return $?
+      php occ config:app:set eurooffice jwt_header --value="AuthorizationJWT" || return $?
+    }
+    log 'START Office connector configuration'
+    if configure_office; then
+      log 'DONE Office connector configuration'
+    else
+      log 'WARN Office configuration incomplete; Nextcloud file service will start. Retry connector configuration to restore Office editing'
+    fi
+    log 'DONE Upgrade hook; application web service startup follows'
