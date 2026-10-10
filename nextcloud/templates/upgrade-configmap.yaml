@@ -8,19 +8,22 @@ data:
     #!/bin/sh
     set -eu
     log() { printf '[%s] [migration-%s] %s\n' "$(date -u +%FT%TZ)" "$MIGRATION_STAGE" "$*"; }
+    warnings=0
+    migration_started=$(date +%s)
+    phase() { log "PHASE $1/6 $2; phase count is not a time-based percentage; remaining time unknown"; }
     trap 'result=$?; if [ "$result" != 0 ]; then log "Migration stopped with exit=$result"; fi' EXIT
     run_step() {
       step="$1"
       shift
       started=$(date +%s)
-      log "START $step"
+      log "START $step; remaining time unknown (depends on database size and disk speed)"
       "$@" &
       task_pid=$!
       (
         while kill -0 "$task_pid" 2>/dev/null; do
           sleep 30
           if kill -0 "$task_pid" 2>/dev/null; then
-            log "WAIT $step elapsed=$(($(date +%s) - started))s"
+            log "WAIT $step elapsed=$(($(date +%s) - started))s; process running, remaining time unknown"
           fi
         done
       ) &
@@ -30,9 +33,17 @@ data:
       wait "$heartbeat_pid" 2>/dev/null || true
       if [ "$status" != 0 ]; then
         log "FAILED $step exit=$status elapsed=$(($(date +%s) - started))s"
-        exit "$status"
+        return "$status"
       fi
       log "DONE $step elapsed=$(($(date +%s) - started))s"
+    }
+    run_optional() {
+      if run_step "$@"; then
+        :
+      else
+        warnings=$((warnings + 1))
+        log "WARN Optional task failed; core upgrade continues. Background work can retry after startup"
+      fi
     }
     cd /var/www/html
     log 'Starting migration; existing database and file directories are retained'
@@ -49,6 +60,7 @@ data:
       echo 'This package supports installed Nextcloud 31 or newer' >&2
       exit 1
     fi
+    phase 1 'Check installed version and prepare recovery backup'
     if [ "$MIGRATION_STAGE" = 31 ]; then
       backup=data/.olares-upgrade-backups/pre-office-31
       if [ ! -f "$backup/complete" ]; then
@@ -64,36 +76,54 @@ data:
         '
         run_step 'Validate database backup' sh -c 'pg_restore --list "$1" > "$2"' sh "$backup/database.dump.partial" "$backup/database-toc.txt"
         mv "$backup/database.dump.partial" "$backup/database.dump"
-        run_step 'Backup Nextcloud files (external mounts excluded)' tar --exclude='data/.olares-upgrade-backups' -czf "$backup/files.tar.gz.partial" config data custom_apps themes version.php
-        run_step 'Validate file backup' sh -c 'tar -tzf "$1" > "$2"' sh "$backup/files.tar.gz.partial" "$backup/files-toc.txt"
-        mv "$backup/files.tar.gz.partial" "$backup/files.tar.gz"
-        run_step 'Generate backup checksums' sh -c 'sha256sum "$1" "$2" > "$3"' sh "$backup/database.dump" "$backup/files.tar.gz" "$backup/SHA256SUMS"
+        phase 2 'Save configuration and version information; user files are not copied'
+        run_step 'Backup configuration and version information' tar -czf "$backup/config.tar.gz.partial" config version.php
+        run_step 'Validate configuration backup' sh -c 'tar -tzf "$1" > "$2"' sh "$backup/config.tar.gz.partial" "$backup/config-toc.txt"
+        mv "$backup/config.tar.gz.partial" "$backup/config.tar.gz"
+        run_step 'Generate backup checksums' sh -c 'sha256sum "$1" "$2" > "$3"' sh "$backup/database.dump" "$backup/config.tar.gz" "$backup/SHA256SUMS"
         touch "$backup/complete"
         log 'Backup completed and checksums recorded'
       else
+        phase 2 'Existing recovery backup is available'
         log 'Reusing completed pre-upgrade backup'
       fi
+    else
+      phase 2 'Recovery backup was prepared in the previous version stage'
     fi
     # The official entrypoint performs exactly one supported version step.
     # NEXTCLOUD_UPDATE makes it initialize/upgrade and then exit via `true`.
+    phase 3 'Deploy code and run official version upgrade (required)'
     run_step 'Copy code and run official version upgrade' env NEXTCLOUD_UPDATE=1 /entrypoint.sh true
     # A failed occ upgrade can leave version.php ahead of the database.
     # Re-running occ also completes that interrupted step before proceeding.
+    phase 4 'Complete and verify database upgrade (required)'
     run_step 'Disable maintenance before recovery check' php occ maintenance:mode --off
     run_step 'Complete database upgrade' php occ upgrade --no-interaction
     php occ status --output=json
+    run_step 'Verify installed version and database migration state' php -r '
+      require "version.php"; require "config/config.php";
+      if (empty($CONFIG["installed"]) || ($CONFIG["version"] ?? "") !== implode(".", $OC_Version)) {
+        fwrite(STDERR, "Installed database version does not match deployed code\n"); exit(1);
+      }
+    '
     php occ maintenance:mode --off
     background_mode=$(php occ config:app:get core backgroundjobs_mode || true)
+    phase 5 'Optional background jobs; errors here do not block the core upgrade'
     log 'Background indexing excludes all external mounts, including Home/External Storage'
+    rounds_started=$(date +%s)
     for attempt in 1 2 3; do
-      run_step "Background jobs round $attempt/3" php /olares/migration-cron.php --verbose
+      log "BACKGROUND round $attempt/3; completed rounds=$((attempt - 1))/3"
+      run_optional "Background jobs round $attempt/3" php /olares/migration-cron.php --verbose
+      rounds_elapsed=$(($(date +%s) - rounds_started))
+      log "BACKGROUND completed rounds=$attempt/3; rough remaining estimate=$((rounds_elapsed * (3 - attempt) / attempt))s based on prior rounds; workload varies, not a completion guarantee"
     done
     if [ -n "$background_mode" ]; then
-      php occ config:app:set core backgroundjobs_mode --value="$background_mode"
+      run_optional 'Restore background-job mode' php occ config:app:set core backgroundjobs_mode --value="$background_mode"
     else
-      php occ config:app:delete core backgroundjobs_mode
+      run_optional 'Restore background-job mode' php occ config:app:delete core backgroundjobs_mode
     fi
-    log 'Stage completed; continuing to the next version'
+    phase 6 'Intermediate version stage completed; final application startup follows'
+    log "Stage completed; optional warnings=$warnings total elapsed=$(($(date +%s) - migration_started))s; continuing to the next version"
   migration-cron.php: |
     <?php
     declare(strict_types=1);
@@ -102,6 +132,21 @@ data:
     // files, mount configuration, job rows or user background-job settings.
     chdir('/var/www/html');
     require_once '/var/www/html/lib/base.php';
+
+    function olaresMigrationProgress(string $kind): void {
+      static $counts = [], $started = [], $reported = [];
+      $now = microtime(true);
+      $started[$kind] ??= $now;
+      $counts[$kind] = ($counts[$kind] ?? 0) + 1;
+      if ($counts[$kind] === 1 || $counts[$kind] % 100 === 0 || $now - ($reported[$kind] ?? $now) >= 15) {
+        $elapsed = $now - $started[$kind];
+        $rate = $elapsed > 0 ? round($counts[$kind] / $elapsed, 1) : 0;
+        echo '[migration] PROGRESS ' . $kind . ': processed=' . $counts[$kind]
+          . ' elapsed=' . round($elapsed, 1) . 's rate=' . $rate
+          . '/s; total and remaining time unknown (no extra directory traversal)' . PHP_EOL;
+        $reported[$kind] = $now;
+      }
+    }
 
     function olaresMigrationSkipMount(object $mount): bool {
       $type = $mount->getMountType();
@@ -133,10 +178,7 @@ data:
         if (\olaresMigrationSkipMount($folder->getMountPoint())) {
           return;
         }
-        static $folders = 0;
-        if (++$folders % 100 === 0) {
-          echo '[migration] Metadata folders processed: ' . $folders . PHP_EOL;
-        }
+        \olaresMigrationProgress('Internal metadata folders');
     PHP;
     $sourcePath = '/var/www/html/core/BackgroundJobs/GenerateMetadataJob.php';
     // The folder guard prevents recursion; also guard individual file mounts.
@@ -145,10 +187,7 @@ data:
         if (\olaresMigrationSkipMount($node->getMountPoint())) {
           continue;
         }
-        static $entries = 0;
-        if (++$entries % 100 === 0) {
-          echo '[migration] Internal entries visited: ' . $entries . PHP_EOL;
-        }
+        \olaresMigrationProgress('Internal metadata entries');
     PHP;
     $upstream = file_get_contents($sourcePath);
     if ($upstream === false || substr_count($upstream, $nodeAnchor) !== 1) {
