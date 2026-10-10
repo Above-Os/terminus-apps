@@ -28,15 +28,16 @@ spec:
     - 可选择安全云端或本地部署，确保数据始终在您掌控之中。定制安全、合规和访问控制，保障数据安全地仅存于您指定的位置。
 
   upgradeDescription: |
-    将 Mattermost 从 9.9.1 升级至官方 Team Edition 11.8.2。
+    将 Mattermost Team Edition 从 11.8.2 升级到 11.11.1。
 
-    **应用升级**
-    - 改用官方镜像 `mattermost/mattermost-team-edition:11.8.2`
-    - 通过 `MM_*` 环境变量配置 PostgreSQL 和站点 URL
-    - 内存上限提升至 4 GiB（Mattermost 11 需要 PostgreSQL 14+）
+    **应用**
+    - 使用官方镜像 `mattermost/mattermost-team-edition:11.11.1`（linux/amd64）
+    - 启动时执行 v11.9 至 v11.11 的数据库迁移，包括 v11.11 的频道类型枚举和 recap 索引。上游说明预期无需数据库停机。
+    - PostgreSQL 14+ 要求不变。本 Chart 使用标准 Team Edition 镜像，不是 FIPS 构建。
+    - 从 v11.9 起，OAuth 动态客户端注册的重定向允许列表按 URL 组件匹配。需要匹配查询字符串的模式须另加一条 `?**`。本 Chart 不配置 DCR。
 
-    **Chart 修复**
-    - 以 uid 1000 运行；init 容器修复 volume 权限
-    - 关闭文件日志；挂载服务器插件目录，修复权限错误
+    **Chart**
+    - 在 Deployment 中固定镜像，避免旧安装缺少 `image` 或仍保存旧 tag 时升级后继续运行 11.8.2。
 
-    发行说明：https://github.com/mattermost/mattermost/releases/tag/v11.8.2
+    发行说明：https://github.com/mattermost/mattermost/releases/tag/v11.11.1
+    升级说明：https://docs.mattermost.com/administration-guide/upgrade/important-upgrade-notes
