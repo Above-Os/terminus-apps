@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-upgrade
+  namespace: {{ .Release.Namespace }}
+data:
+  migrate.sh: |
+    #!/bin/sh
+    set -eu
+    cd /var/www/html
+    if [ ! -f config/config.php ] || [ ! -f version.php ]; then
+      echo 'No installed Nextcloud; skipping intermediate migration'
+      exit 0
+    fi
+    major=$(php -r 'require "version.php"; echo $OC_Version[0];')
+    if [ "$major" -gt "$MIGRATION_STAGE" ]; then
+      echo 'Intermediate migration already completed'
+      exit 0
+    fi
+    if [ "$major" -lt 31 ]; then
+      echo 'This package supports installed Nextcloud 31 or newer' >&2
+      exit 1
+    fi
+    if [ "$MIGRATION_STAGE" = 31 ]; then
+      backup=data/.olares-upgrade-backups/pre-office-31
+      if [ ! -f "$backup/complete" ]; then
+        php occ maintenance:mode --on
+        mkdir -p "$backup"
+        chmod 700 "$backup"
+        php -r '
+          require "config/config.php";
+          foreach (["PGHOST"=>"dbhost", "PGDATABASE"=>"dbname", "PGUSER"=>"dbuser", "PGPASSWORD"=>"dbpassword"] as $env=>$key) putenv($env."=".$CONFIG[$key]);
+          putenv("PGPORT=5432");
+          passthru("pg_dump -Fc --file=data/.olares-upgrade-backups/pre-office-31/database.dump.partial", $status);
+          exit($status);
+        '
+        pg_restore --list "$backup/database.dump.partial" > "$backup/database-toc.txt"
+        mv "$backup/database.dump.partial" "$backup/database.dump"
+        tar --exclude='data/.olares-upgrade-backups' -czf "$backup/files.tar.gz.partial" config data custom_apps themes version.php
+        tar -tzf "$backup/files.tar.gz.partial" > "$backup/files-toc.txt"
+        mv "$backup/files.tar.gz.partial" "$backup/files.tar.gz"
+        sha256sum "$backup/database.dump" "$backup/files.tar.gz" > "$backup/SHA256SUMS"
+        touch "$backup/complete"
+      fi
+    fi
+    # The official entrypoint performs exactly one supported version step.
+    # NEXTCLOUD_UPDATE makes it initialize/upgrade and then exit via `true`.
+    NEXTCLOUD_UPDATE=1 /entrypoint.sh true
+    # A failed occ upgrade can leave version.php ahead of the database.
+    # Re-running occ also completes that interrupted step before proceeding.
+    php occ maintenance:mode --off
+    php occ upgrade --no-interaction
+    php occ status --output=json
+    php occ maintenance:mode --off
+    background_mode=$(php occ config:app:get core backgroundjobs_mode || true)
+    for attempt in 1 2 3; do php -f cron.php; done
+    if [ -n "$background_mode" ]; then
+      php occ config:app:set core backgroundjobs_mode --value="$background_mode"
+    else
+      php occ config:app:delete core backgroundjobs_mode
+    fi
