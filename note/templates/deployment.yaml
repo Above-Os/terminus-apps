@@ -18,10 +18,17 @@ spec:
         app: note
       annotations:
         config.linkerd.io/skip-outbound-ports: "4222"
+        {{- if .Values.capture.bluetooth.enabled }}
+        container.apparmor.security.beta.kubernetes.io/note: unconfined
+        {{- end }}
     spec:
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
+        {{- if .Values.capture.usb.enabled }}
+        supplementalGroups:
+          - {{ .Values.capture.usb.audioGroup }}
+        {{- end }}
       initContainers:
         # Olares grants the appData mount but does not hand over ownership of
         # it, and kubelet creates a missing subPath as root. Each directory is
@@ -52,9 +59,25 @@ spec:
               containerPort: 8080
             - name: external
               containerPort: 8081
+          {{- if .Values.capture.usb.enabled }}
+          securityContext:
+            privileged: true
+          {{- end }}
           env:
             - name: NOTE_PORT
               value: "8080"
+            {{- if or .Values.capture.usb.enabled .Values.capture.bluetooth.enabled }}
+            - name: NOTE_CAPTURE_ENABLED
+              value: "true"
+            - name: NOTE_CAPTURE_USB
+              value: {{ .Values.capture.usb.enabled | quote }}
+            {{- end }}
+            {{- if .Values.capture.bluetooth.enabled }}
+            - name: NOTE_CAPTURE_PULSE_SERVER
+              value: unix:/run/host-pulse/native
+            - name: NOTE_CAPTURE_SYSTEM_BUS
+              value: unix:path=/run/host-dbus/system_bus_socket
+            {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
             - name: NOTE_DATA_DIR
@@ -153,11 +176,37 @@ spec:
           volumeMounts:
             - name: app-data
               mountPath: /data
+            {{- if .Values.capture.usb.enabled }}
+            - name: sound
+              mountPath: /dev/snd
+            {{- end }}
+            {{- if .Values.capture.bluetooth.enabled }}
+            - name: host-pulse
+              mountPath: /run/host-pulse
+            - name: host-dbus
+              mountPath: /run/host-dbus
+            {{- end }}
       volumes:
         - name: app-data
           hostPath:
             path: {{ .Values.userspace.appData }}
             type: DirectoryOrCreate
+        {{- if .Values.capture.usb.enabled }}
+        - name: sound
+          hostPath:
+            path: /dev/snd
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.capture.bluetooth.enabled }}
+        - name: host-pulse
+          hostPath:
+            path: /run/olares-audio/pulse
+            type: DirectoryOrCreate
+        - name: host-dbus
+          hostPath:
+            path: /run/dbus
+            type: Directory
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
