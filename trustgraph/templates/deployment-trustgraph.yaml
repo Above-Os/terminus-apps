@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: trustgraph-ui
+  name: trustgraph
+  namespace: '{{ .Release.Namespace }}'
+spec:
+  replicas: {{ (index .Values.workloads "trustgraph").replicaCount }}
+  selector:
+    matchLabels:
+      app: trustgraph-ui
+  template:
+    metadata:
+      labels:
+        app: trustgraph-ui
+      annotations:
+        trustgraph.olares.com/chart-version: '0.1.13'
+    spec:
+      containers:
+      - command:
+        - python
+        - -c
+        - from trustgraph_ui.api import Api; Api.auth=Api.proxy; from trustgraph_ui.service
+          import run; run()
+        - --proxy
+        - /demo-data=https://datasets.app.trustgraph.ai
+        image: docker.io/trustgraph/trustgraph-ui:2.3.2
+        name: trustgraph-ui
+        ports:
+        - containerPort: 8888
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256M
+          requests:
+            cpu: '0.1'
+            memory: 256M
+        volumeMounts:
+        - mountPath: /usr/lib/python3.12/site-packages/trustgraph_ui/ui/config/
+          name: ui-plugin-cfg
+        - mountPath: /usr/lib/python3.12/site-packages/trustgraph_ui/ui/config/tabs/
+          name: ui-tabs-cfg
+        - mountPath: /usr/lib/python3.12/site-packages/trustgraph_ui/ui/bundle/
+          name: ui-bundle-cfg
+        env:
+        - name: HOME
+          value: /tmp
+      enableServiceLinks: false
+      volumes:
+      - configMap:
+          name: ui-plugin-cfg
+        name: ui-plugin-cfg
+      - configMap:
+          name: ui-tabs-cfg
+        name: ui-tabs-cfg
+      - configMap:
+          name: ui-bundle-cfg
+        name: ui-bundle-cfg
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+  strategy:
+    type: Recreate
