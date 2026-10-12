@@ -1,6 +1,6 @@
 TrustGraph for Olares
 
-Core and Docling: 2.10.10; Web UI: 2.3.2; Chart: 0.1.14.
+Core and Docling: 2.10.10; Web UI: 2.3.2; Chart: 0.1.16.
 
 Install Router and start chat, embedding, and reranking models. Supply an OpenAI-compatible base URL ending in /v1 and a Router API key at installation. API credentials are supplied through Olares installation values and must not be committed.
 
@@ -12,4 +12,8 @@ Multipart upload compatibility stages browser transport chunks in the applicatio
 
 Validated on an amd64 Olares 1.12.7 instance: text/PDF/DOCX ingestion, vector retrieval, Document RAG, Graph RAG, graph/SPARQL access, CRUD and API-key authentication. Multipart cases cover 3 MiB, 13 MiB plus 17 bytes, reconnect/resume, duplicate/out-of-order chunks, invalid chunk rejection, cancellation, SHA256 integrity, and a large PDF through downstream RAG.
 
-Limitations: Graph RAG can include irrelevant provenance sources. Password login and multi-step agent workflows are not validated. A clean-install regression and two historical-version migration matrix remain pending; this draft is for test-market smoke testing.
+Limitations: Graph RAG can include irrelevant provenance sources. Username/password login, incorrect-password rejection, JWT identity and WebSocket authentication are validated. Multi-step agent workflows are not validated. A clean-install regression and two historical-version migration matrix remain pending; this draft is for test-market smoke testing.
+
+Authentication proxy preserves upstream HTTP status codes and Authorization headers. The first administrator password is managed through authenticated IAM reset-password/change-password operations, rather than direct database writes.
+
+IAM response translation preserves service errors so invalid credentials return HTTP 401, with no JWT issued.

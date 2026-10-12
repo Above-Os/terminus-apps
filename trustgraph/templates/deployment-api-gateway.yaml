@@ -15,11 +15,18 @@ spec:
       labels:
         app: api-gateway
       annotations:
-        trustgraph.olares.com/chart-version: '0.1.13'
+        trustgraph.olares.com/chart-version: 0.1.16
     spec:
       containers:
       - command:
-        - api-gateway
+        - python
+        - -c
+        - "from trustgraph.messaging.translators.iam import IamResponseTranslator\n\
+          original_encode = IamResponseTranslator.encode\ndef encode_with_error(self,\
+          \ response):\n    result = original_encode(self, response)\n    if response.error:\n\
+          \        result['error'] = {'type': response.error.type, 'message': response.error.message}\n\
+          \    return result\nIamResponseTranslator.encode = encode_with_error\nfrom\
+          \ trustgraph.gateway.service import run\nrun()\n"
         - --pubsub-backend
         - pulsar
         - --pulsar-host
