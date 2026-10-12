@@ -1,0 +1,84 @@
+{{- if and .Values.capture.bluetooth.enabled .Values.capture.hostAudioSetup.enabled }}
+# The host audio setup script, run on the host by the job below.
+# Source: beclab/shared-knowledge tools/olares-bt-audio (olares-bt-audio.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: note-host-audio-setup
+data:
+  olares-bt-audio.sh: |-
+{{ .Files.Get "files/olares-bt-audio.sh" | indent 4 }}
+---
+# Prepare the host for recording from Bluetooth headsets, at every install
+# and upgrade of Note. Recording from a headset needs, on the host, BlueZ's
+# audio plugin for PipeWire, a sound server running with nobody logged in,
+# wideband speech, and a pulse socket an app of another uid can reach;
+# olares-bt-audio.sh setup checks each and changes only what is missing or
+# has drifted, so a box set up already (by lares or by hand) is left as it
+# is. It also installs a boot self-check on the host, which keeps the box
+# ready after a power cut. It shares lares's wideband unit and WirePlumber
+# file, never touches lares's voice agent and never replaces a real
+# PulseAudio.
+#
+# A job of its own rather than an init container of Note: setup has to reach
+# the host's systemd, which answers by the caller's PID and so needs the
+# host's PID namespace (setns cannot enter it from a container, "Invalid
+# argument"); hostPID is a pod-wide setting, and on Note's own pod it would
+# show the host's processes to Note. Here only this short-lived pod has it,
+# and Note starts without waiting for it: its pulse relay looks for the
+# sound server at every connection, so nothing needs a restart once the
+# host is ready. The price is a
+# privileged pod with the host's PIDs at each install and upgrade;
+# capture.hostAudioSetup.enabled turns it off.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: note-host-audio-r{{ .Release.Revision }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      hostPID: true
+      restartPolicy: Never
+      containers:
+        - name: host-audio-setup
+          image: beclab/aboveos-busybox:1.37.0
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              H="nsenter -t 1 -m -u -i -n -p --"
+              S=/var/lib/olares-bt-audio/olares-bt-audio.sh
+              # Copied onto the host first: apply-async hands the host's systemd a
+              # host path, and setup compares this copy with the one its boot
+              # self-check runs, to restart the check when the script changed.
+              $H mkdir -p /var/lib/olares-bt-audio && $H tee "$S" >/dev/null </setup/olares-bt-audio.sh \
+                || { echo "host audio: cannot reach the host, skipped"; exit 0; }
+              # No terminal here: btmgmt and bluetoothctl wait on a stdin that never
+              # ends, so give them one that has ended. --quick does what needs no
+              # package and no session restart, and exits 4 when the rest is
+              # missing; that rest runs on the host's systemd, outside this pod,
+              # so a slow apt cannot hold the job.
+              LC_ALL=C timeout 90 $H bash "$S" setup --quick </dev/null; rc=$?
+              echo "host audio: setup --quick exited $rc (0 ready; 3 a real PulseAudio left alone; 4 needs apply; 5 no systemd)"
+              # 124 and 137 are --quick cut short by its own 60 s limit, or by this
+              # timeout, before it could tell: hand the full setup to the host as
+              # well, which checks first and changes only what is missing.
+              case "$rc" in 4|124|137)
+                LC_ALL=C timeout 30 $H bash "$S" apply-async </dev/null
+                echo "host audio: apply started on the host; journalctl -u olares-bt-audio-apply";;
+              esac
+              exit 0
+          volumeMounts:
+            - name: host-audio-setup
+              mountPath: /setup
+      volumes:
+        - name: host-audio-setup
+          configMap:
+            name: note-host-audio-setup
+{{- end }}
