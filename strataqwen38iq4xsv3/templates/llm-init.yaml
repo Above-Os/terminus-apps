@@ -67,6 +67,21 @@ spec:
         io.kompose.service: llm-init
     spec:
       restartPolicy: Always
+      # run-state is a node-local hostPath, so follow the engine onto its node.
+      # Keep the target instance label off this Pod to prevent self-affinity
+      # from allowing llm-init to schedule before the engine on another node.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/instance
+                operator: In
+                values:
+                - '{{ .Release.Name }}'
+            namespaces:
+            - {{ .Release.Namespace }}
       enableServiceLinks: false
       securityContext:
         runAsUser: 1000

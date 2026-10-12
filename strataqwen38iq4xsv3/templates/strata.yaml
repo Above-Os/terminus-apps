@@ -15,7 +15,10 @@ spec:
   strategy: {type: Recreate}
   template:
     metadata:
-      labels: {io.kompose.service: strata}
+      labels:
+        io.kompose.service: strata
+        # Only the engine Pod carries the target label for llm-init's affinity.
+        app.kubernetes.io/instance: '{{ .Release.Name }}'
       annotations:
         checksum/wrappers: {{ include (print $.Template.BasePath "/wrappers.yaml") . | sha256sum }}
     spec:
