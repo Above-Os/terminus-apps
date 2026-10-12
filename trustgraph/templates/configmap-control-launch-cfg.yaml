@@ -130,6 +130,24 @@ data:
     \ = upload_chunk\n    librarian_class.complete_upload = complete_upload\n    librarian_class.abort_upload\
     \ = abort_upload\n    blob_class._olares_multipart_installed = True\n    logger.info('Olares\
     \ staged multipart adapter enabled; transport chunks remain unchanged')\n"
+  install_password.py: "\"\"\"Use the install password during creation of a new IAM\
+    \ administrator only.\"\"\"\nimport os\nfrom trustgraph.iam.service.iam import\
+    \ IamService, _hash_password\n\ndef install():\n    if getattr(IamService, '_olares_install_password',\
+    \ False):\n        return\n    original_seed = IamService._seed_tables\n\n   \
+    \ async def seed(self, api_key_plaintext):\n        # Never overwrite an existing\
+    \ identity, including a partial bootstrap.\n        if await self.table_store.get_user_id_by_username('admin'):\n\
+    \            raise RuntimeError('IAM administrator already exists; refusing to\
+    \ reinitialize credentials')\n        password = os.environ.get('ADMIN_PASSWORD',\
+    \ '')\n        if not 12 <= len(password) <= 128 or '\\n' in password or '\\r'\
+    \ in password:\n            raise RuntimeError('Set ADMIN_PASSWORD to 12-128 characters\
+    \ during installation')\n        original_put = self.table_store.put_user\n\n\
+    \        async def put_user(*args, **kwargs):\n            if kwargs.get('username')\
+    \ == 'admin':\n                kwargs['password_hash'] = _hash_password(password)\n\
+    \                kwargs['must_change_password'] = False\n            return await\
+    \ original_put(*args, **kwargs)\n\n        self.table_store.put_user = put_user\n\
+    \        try:\n            return await original_seed(self, api_key_plaintext)\n\
+    \        finally:\n            self.table_store.put_user = original_put\n\n  \
+    \  IamService._seed_tables = seed\n    IamService._olares_install_password = True\n"
 kind: ConfigMap
 metadata:
   name: control-launch-cfg
