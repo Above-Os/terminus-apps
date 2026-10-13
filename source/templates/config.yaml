@@ -1,3 +1,7 @@
+{{- $sourceDomainENV := split "," .Values.domain.source -}}
+{{- $sourceDomain := index $sourceDomainENV "_0" -}}
+{{- $topDomain := regexReplaceAll ".*?([^.]+\\.[^.]+)$" $sourceDomain "$1" -}}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,5 +12,6 @@ metadata:
     app.kubernetes.io/instance: "{{ .Release.Name }}"
 data:
   AUTH_MODE: olares_header
-  LLDAP_READONLY_URL: http://lldap-provider-svc.os-framework:28080
-  LLDAP_RESYNC_SECONDS: "30"
+  LLDAP_SYNC_ENABLED: "false"
+  BOOTSTRAP_ADMIN_EMAIL: "{{ .Values.bfl.username }}@{{ $topDomain }}"
+  TRUSTED_PROXIES: "none"
