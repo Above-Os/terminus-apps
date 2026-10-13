@@ -7,11 +7,13 @@ This chart runs the Goose ACP backend. Install the matching native Goose Desktop
 1. Find the Goose ACP entrance URL in Olares Settings.
 2. Open the Goose Terminal entrance. Run `printenv GOOSE_SERVER__SECRET_KEY` and copy the key privately.
 3. In Goose Desktop, open Settings > goose Server. Enable the external server, enter its HTTPS URL and secret key, and set the remote working directory to `/config/workspace`.
-4. Configure a model through the connected Desktop client or the Olares app environment settings.
+4. AI Router's default chat model is configured by default. To use other third-party models, change the application environment variables.
 
 The internal ACP entrance (gooseapi) uses Goose authentication and accepts HTTP/WebSocket through the Olares HTTPS proxy. It does not require a browser login. Network reachability follows the Olares VPN configuration. Do not disable Goose authentication: the official Desktop connection check expects an authenticated endpoint.
 
 ## Model configuration
+
+The default provider is custom_olares_router, displayed as AI Router, with model default-chat. The endpoint is derived from the installing user''s Olares domain. Calls use the platform application identity; no user API key is bundled or required for this default. Router must be installed and have a usable chat model. Set GOOSE_PROVIDER=openai or anthropic and configure the associated environment variables to use a third-party provider.
 
 For OpenAI-compatible APIs, use `GOOSE_PROVIDER=openai`, `GOOSE_MODEL`, `OPENAI_HOST` (server root without `/v1`), `OPENAI_BASE_PATH=v1/chat/completions`, and `OPENAI_API_KEY`. Do not use `OPENAI_BASE_URL`.
 

@@ -22,7 +22,7 @@ spec:
           command: [sh, -ec]
           args:
             - |
-              for d in /config /config/.config /config/.local /config/.local/share /config/workspace /cache; do
+              for d in /config /config/.config /config/.config/goose /config/.config/goose/custom_providers /config/.local /config/.local/share /config/workspace /cache; do
                 mkdir -p "$d" && chown 1000:1000 "$d"
               done
           securityContext: {runAsUser: 0}
@@ -82,6 +82,10 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /config}
             - {name: cache, mountPath: /cache}
+            - name: router-provider
+              mountPath: /config/.config/goose/custom_providers/custom_olares_router.json
+              subPath: custom_olares_router.json
+              readOnly: true
             {{- if eq (toString (index $oe "ALLOW_HOME_DIR_ACCESS")) "true" }}
             - {name: home, mountPath: /config/Home}
             {{- end }}
@@ -89,6 +93,9 @@ spec:
             - {name: external, mountPath: /config/External}
             {{- end }}
       volumes:
+        - name: router-provider
+          configMap:
+            name: goose-router-provider
         - name: data
           hostPath: {path: {{ .Values.userspace.appData | quote }}, type: DirectoryOrCreate}
         - name: cache

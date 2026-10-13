@@ -14,3 +14,5 @@ Verified on 2026-10-13 using Olares olarestest01 (amd64).
 - Listing metadata and CDN references pass chart lint. Public assets: official upstream icon plus two all-English architecture/workflow illustrations; no generated product screenshots.
 
 The published chart uses a multi-architecture index pin. Its amd64 platform is the same mirrored version verified in the running deployment. arm64 runtime and third-party MCP extension dependencies require further testing.
+
+- Default AI Router provider verified through https://router.<user-domain>/v1/chat/completions using platform application identity and no model API key; returned ROUTER_DEFAULT_OK. The chart declares Router as an application dependency.
