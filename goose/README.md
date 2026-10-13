@@ -47,6 +47,3 @@ goose run --resume --session-id <ID> --no-profile --max-turns 1 -t 'Reply only O
 ```
 
 For an existing session, use `goose session rename --session-id <session-id> --new-name <new-name>`; check `goose session rename --help` for the installed version. In Desktop, rename the session before retrying. Supporting automatic naming concurrently requires sufficient model capacity and matching Router limits; increasing only a limit does not create engine capacity.
-
-
-
