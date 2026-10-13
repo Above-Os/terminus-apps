@@ -1,3 +1,4 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,12 +48,18 @@ spec:
             - {name: LDR_WEB_PORT, value: "5000"}
             - {name: LDR_DATA_DIR, value: /data}
             - {name: LDR_LLM_PROVIDER, value: openai_endpoint}
-            - {name: LDR_LLM_MODEL, value: default-chat}
+            - name: LDR_LLM_MODEL
+              value: {{ index $oe "LDR_LLM_MODEL" | default "default-chat" | quote }}
             - {name: LDR_SEARCH_TOOL, value: searxng}
             - name: LDR_SEARCH_ENGINE_WEB_SEARXNG_DEFAULT_PARAMS_INSTANCE_URL
-              value: {{ .Values.olaresEnv.SEARXNG_URL | quote }}
+              value: {{ index $oe "SEARXNG_URL" | quote }}
             - name: LDR_LLM_OPENAI_ENDPOINT_URL
-              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+              value: {{ index $oe "LDR_LLM_OPENAI_ENDPOINT_URL" | default (printf "https://router.%s/v1" .Values.user.zone) | quote }}
+            {{- with index $oe "LDR_LLM_OPENAI_ENDPOINT_API_KEY" }}
+            - name: LDR_LLM_OPENAI_ENDPOINT_API_KEY
+              valueFrom:
+                secretKeyRef: {name: localdeepresearch-model, key: api-key}
+            {{- end }}
             - {name: MPLCONFIGDIR, value: /data/cache/matplotlib}
             - {name: HF_HUB_CACHE, value: /data/cache/huggingface/hub}
             - {name: HF_HUB_DISABLE_IMPLICIT_TOKEN, value: "1"}
