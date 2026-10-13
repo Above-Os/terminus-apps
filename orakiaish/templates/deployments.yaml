@@ -129,16 +129,20 @@ spec:
           ports:
             - { name: api, containerPort: 8080 }
             - { name: pulse, containerPort: 4713 }
+          {{- if .Values.audio.hostBluetooth }}
           securityContext: { privileged: true }
           volumeMounts:
             - { name: dbus, mountPath: /run/dbus }
             - { name: snd, mountPath: /dev/snd }
             - { name: host-pulse, mountPath: /run/pulse }
+          {{- end }}
           readinessProbe: { httpGet: { path: /health, port: api }, initialDelaySeconds: 3, periodSeconds: 5 }
+      {{- if .Values.audio.hostBluetooth }}
       volumes:
         - { name: dbus, hostPath: { path: /run/dbus, type: Directory } }
         - { name: snd, hostPath: { path: /dev/snd, type: Directory } }
         - { name: host-pulse, hostPath: { path: /run/pulse, type: DirectoryOrCreate } }
+      {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
