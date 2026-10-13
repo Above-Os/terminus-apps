@@ -1072,35 +1072,26 @@ data:
     embedding.\r\n\r\nOutput one concept per line. No numbering, no bullet points,
     no explanation.\r\n\r\nFocus on:\r\n- Key nouns and noun phrases\r\n- Domain-specific
     terminology\r\n- Languages or time periods mentioned\r\n- Technical terms\r\n\r\nQuery:\r\n{{ "{{" }}query{{ "}}" }}\r\n",
-    "response-type": "text"}, "template.extract-definitions": {"object-schema": {"properties":
-    {"definition": {"type": "string"}, "entity": {"type": "string"{{ "}}" }}, "required":
-    ["entity", "definition"], "type": "object"}, "prompt": "<instructions>\r\nStudy
-    the following text and derive definitions for any discovered entities. Do not
-    provide definitions for entities whose definitions are incomplete or unknown.\r\n\r\nGuidelines
-    for high-quality definitions:\r\n- Capture what distinguishes this entity from
-    related entities\r\n- Include comparative facts (e.g. more/less common, larger/smaller)\r\n-
-    Include causal relationships and classifications\r\n- Be specific \u2014 name
-    related entities rather than using vague references like \"other types\"\r\n\r\nOutput
-    each definition as a separate JSON object on its own line (JSONL format). Each
-    object must have fields:\r\n- entity: the name of the entity\r\n- definition:
-    English text which defines the entity\r\n</instructions>\r\n\r\n<text>\r\n{{ "{{" }}text{{ "}}" }}\r\n</text>\r\n\r\n<requirements>\r\nOutput
-    format: JSONL (one JSON object per line, no array wrapper)\r\n- Each line must
-    be a complete, valid JSON object\r\n- No commas between lines\r\n- No [ ] array
-    brackets\r\n- No markdown formatting or prefixes\r\n- Do not use special characters
-    in the definition text\r\n- Do not include null or unknown definitions\r\n\r\nExample
-    output format:\r\n{\"entity\": \"photosynthesis\", \"definition\": \"The process
-    by which plants convert sunlight into energy\"}\r\n{\"entity\": \"melanoma\",
-    \"definition\": \"A type of skin cancer that is less common than basal cell carcinoma
-    and squamous cell carcinoma but tends to be more aggressive\"}\r\n</requirements>\r\n",
-    "response-type": "jsonl"}, "template.extract-relationships": {"object-schema":
-    {"properties": {"object": {"type": "string"}, "object-entity": {"type": "boolean"},
-    "predicate": {"type": "string"}, "subject": {"type": "string"{{ "}}" }}, "required":
-    ["subject", "predicate", "object", "object-entity"], "type": "object"}, "prompt":
-    "<instructions>\r\nStudy the following text and extract important entity relationships.  For
-    each relationship, derive the subject, predicate and object.\r\n\r\nFocus on relationships
-    that capture key facts: definitions, causes, types, comparisons, properties, and
-    classifications.\r\n\r\nGuidelines for high-quality relationships:\r\n- Use specific,
-    meaningful predicates (avoid vague verbs like \"is\", \"has\", \"can be\")                                                           \r\n-
+    "response-type": "text"}, "template.extract-definitions": {"response-type": "json",
+    "schema": {"type": "object", "properties": {"entities": {"type": "array", "items":
+    {"type": "object", "properties": {"entity": {"type": "string"}, "definition":
+    {"type": "string"{{ "}}" }}, "required": ["entity", "definition"], "additionalProperties":
+    false{{ "}}" }}}, "required": ["entities"], "additionalProperties": false}, "prompt":
+    "Extract every explicitly named entity from the text. Give each entity a short
+    factual description based only on the text. Include named entities even if no
+    formal definition is given. Preserve the entity names exactly as written. Return
+    a valid JSON object with exactly one field, entities, containing an array of objects
+    with exactly two string fields: entity and definition. If no named entities exist,
+    return {\"entities\": []}. Do not include commentary. Text:\n{{ "{{" }}text{{ "}}" }}"},
+    "template.extract-relationships": {"object-schema": {"properties": {"object":
+    {"type": "string"}, "object-entity": {"type": "boolean"}, "predicate": {"type":
+    "string"}, "subject": {"type": "string"{{ "}}" }}, "required": ["subject", "predicate",
+    "object", "object-entity"], "type": "object"}, "prompt": "<instructions>\r\nStudy
+    the following text and extract important entity relationships.  For each relationship,
+    derive the subject, predicate and object.\r\n\r\nFocus on relationships that capture
+    key facts: definitions, causes, types, comparisons, properties, and classifications.\r\n\r\nGuidelines
+    for high-quality relationships:\r\n- Use specific, meaningful predicates (avoid
+    vague verbs like \"is\", \"has\", \"can be\")                                                           \r\n-
     Resolve pronouns and references to their concrete entities\r\n- Prefer one clear
     fact per relationship over compound statements\r\n- Skip trivial or self-evident
     relationships\r\n</instructions>\r\n\r\n<text>\r\n{{ "{{" }}text{{ "}}" }}        \r\n</text>\r\n\r\n<requirements>\r\nOutput
@@ -1377,9 +1368,9 @@ data:
     {"input_price": 4.5e-07, "model_name": "mistral.mixtral-8x7b-instruct-v0:1", "output_price":
     7e-07}, "ollama": {"input_price": 0, "model_name": "ollama", "output_price": 0{{ "}}" }},
     "tool": {"knowledge-query": {"arguments": [{"description": "A simple natural language
-    question.", "name": "question", "type": "string"}], "collection": "default", "description":
-    "This tool queries a knowledge base that holds information about domain-specific
-    information. The question should be a natural language question.", "id": "knowledge-query",
+    question.", "name": "question", "type": "string"}], "description": "This tool
+    queries a knowledge base that holds information about domain-specific information.
+    The question should be a natural language question.", "id": "knowledge-query",
     "name": "Knowledge query", "type": "knowledge-query"}, "llm-completion": {"arguments":
     [{"description": "The question which should be asked of the LLM.", "name": "question",
     "type": "string"}], "description": "This tool queries an LLM for non-domain-specific

@@ -15,6 +15,17 @@ data:
     pulsar\"\n    \"pulsar_host\": \"pulsar://pulsar:6650\"\n- \"class\": \"trustgraph.prompt.template.Processor\"\
     \n  \"params\":\n    \"concurrency\": 1\n    \"id\": \"prompt\"\n    \"pubsub_backend\"\
     : \"pulsar\"\n    \"pulsar_host\": \"pulsar://pulsar:6650\""
+  structured_definitions_patch.py: "\"\"\"Unwrap the schema-constrained definitions\
+    \ object for the existing extractor.\"\"\"\nfrom functools import wraps\ndef install():\n\
+    \    from trustgraph.template.prompt_manager import PromptManager\n    if getattr(PromptManager,\
+    \ '_olares_definitions_patch', False):\n        return\n    original = PromptManager.invoke\n\
+    \    @wraps(original)\n    async def invoke(self, id, input, llm):\n        result\
+    \ = await original(self, id, input, llm)\n        if id == 'extract-definitions'\
+    \ and isinstance(result, dict):\n            entities = result.get('entities')\n\
+    \            if not isinstance(entities, list):\n                raise RuntimeError('Definitions\
+    \ response must contain an entities array')\n            return entities\n   \
+    \     return result\n    PromptManager.invoke = invoke\n    PromptManager._olares_definitions_patch\
+    \ = True\n"
 kind: ConfigMap
 metadata:
   name: ingest-launch-cfg

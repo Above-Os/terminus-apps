@@ -15,11 +15,14 @@ spec:
       labels:
         app: rag
       annotations:
-        trustgraph.olares.com/chart-version: '0.1.13'
+        trustgraph.olares.com/chart-version: '0.1.23'
+        checksum/rag-config: {{ include (print $.Template.BasePath "/configmap-rag-launch-cfg.yaml") . | sha256sum }}
     spec:
       containers:
       - command:
-        - processor-group
+        - python
+        - -c
+        - import sys; sys.path.insert(0,"/etc/trustgraph"); import agent_collection_patch; agent_collection_patch.install(); from trustgraph.base.processor_group import run; run()
         - --log-level
         - INFO
         - -c
