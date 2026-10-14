@@ -98,6 +98,10 @@ spec:
 
     Older installations may store the task database in the container at /app/records.db. To preserve task history, wait for tasks to finish and save a consistent SQLite backup to the app data/.upgrade-backups/records.db before upgrading. This version restores that backup or data/records.db only when the new database does not exist. Records held only in the old container cannot be recovered without a backup. Historical audio is preserved.
 
+    **Compute modes**
+
+    CPU mode uses CPU/int8 inference and preserves the mode of older installations during upgrade. NVIDIA mode uses CUDA/float16 and requires 5Gi GPU memory, with a 16Gi limit. New installations can choose either mode; CPU inference is slower. Back up the old task database before upgrading as described above.
+
     **Audio deletion and retention**
 
     AUTO_DELETE_SOURCE_AUDIO=true removes managed uploads, URL downloads, and converted audio after processing, including failed requests. AUTO_CLEANUP_SOURCE_AUDIO=true checks hourly and removes expired retained files and abandoned requests, while skipping active requests. SOURCE_AUDIO_RETENTION_HOURS defaults to 24 (whole hours, 1–8760); the age starts at request completion, or folder creation for abandoned requests. This retention period does not delay immediate deletion.
@@ -109,7 +113,7 @@ spec:
     Original files, transcription results, task records, models, and legacy data are preserved. Existing historical files are not automatically cleaned.
 
   upgradeDescription: |
-    v1.1.24: Automatically delete request-owned audio, add configurable retention and protected cleanup, persist task results, and declare NVIDIA GPU requirements. Existing historical files are preserved.
+    v1.1.24: Automatically delete request-owned audio, add configurable retention and protected cleanup, persist task results, and add NVIDIA GPU mode while preserving CPU mode for upgrades. Existing historical files are preserved.
 
     v1.1.23: Model Console (llm-init) updated to v1.7.21.
 
@@ -176,6 +180,13 @@ spec:
   onlyAdmin: true
 
   accelerator:
+  - mode: cpu
+    requiredCpu: "1"
+    limitedCpu: "5"
+    requiredMemory: 3Gi
+    limitedMemory: 24Gi
+    requiredDisk: 12Gi
+    limitedDisk: 20Gi
   - mode: nvidia
     supportMultiCard: false
     supportMultiNodes: false

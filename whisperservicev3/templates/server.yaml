@@ -95,6 +95,19 @@ spec:
           args:
             - |
               set -e
+              # Preserve old CPU-mode installations and select matching inference defaults.
+              case "${GPU_TYPE:-cpu}" in
+                cpu)
+                  export DEVICE=cpu COMPUTE_TYPE=int8 CUDA_VISIBLE_DEVICES=""
+                  ;;
+                nvidia)
+                  export DEVICE=cuda COMPUTE_TYPE=float16
+                  ;;
+                *)
+                  echo "Unsupported compute mode: $GPU_TYPE" >&2
+                  exit 1
+                  ;;
+              esac
               uv run --no-sync python - <<'PY'
               import pathlib
               import sqlite3
