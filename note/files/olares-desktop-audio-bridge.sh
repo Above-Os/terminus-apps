@@ -14,13 +14,23 @@
 #
 # Temporary: Olares' next release handles Bluetooth and voice itself. Then
 # `uninstall` takes all of this away; nothing here is written outside /run,
-# this script's copy and its unit.
+# this script's copy, its unit and the list of Notes using it.
 #
 #   olares-desktop-audio-bridge.sh check       read-only: what is in place
 #   olares-desktop-audio-bridge.sh up          bridge once (nothing to do without a desktop)
 #   olares-desktop-audio-bridge.sh watch       up every 10 s, quiet while all is well (the unit runs this)
 #   olares-desktop-audio-bridge.sh install     copy to /usr/local/sbin, install and start the unit
 #   olares-desktop-audio-bridge.sh uninstall   stop and remove the unit, the output, the mount, the copy
+#   olares-desktop-audio-bridge.sh attach ID   note that the Note in namespace ID uses the bridge, and install
+#   olares-desktop-audio-bridge.sh detach ID   forget it; uninstall once no Note on this host is left
+#
+# Every Note on a host shares one bridge: the release note and a renamed
+# preview (notefigma) each run the job below their chart, and Olares lets no
+# other two Notes share a box (a shared app is one per cluster, from one
+# source, never cloned). So the Note's job attaches at install and upgrade,
+# and its pre-delete hook detaches; the bridge goes with the last one. A Note
+# removed without its hook (a release before 0.6.2, a namespace deleted by
+# hand) leaves its name in the list, and the bridge stays: what it did before.
 #
 # How the desktop reaches the host session: olaresd cannot enter
 # /run/user/<uid> (0700), and widening that would also open the session bus,
@@ -67,6 +77,11 @@ SINK=olares-host
 SBIN=/usr/local/sbin/$NAME
 UNIT=/etc/systemd/system/$NAME.service
 INTERVAL=${OLARES_DESKTOP_BRIDGE_INTERVAL:-2}
+# One file per Note namespace that uses the bridge. Not under /run: a reboot
+# must not forget them, or the next detach would take the bridge from Notes
+# still installed. The lock is outside the directories uninstall removes.
+USERS=/var/lib/$NAME/users
+USERS_LOCK=/run/lock/$NAME.users
 # A pulse client run by root "secures" its own runtime directory; give it one
 # of its own so neither user's pulse directory is touched.
 CLIENT_RUN=/run/$NAME/client
@@ -222,6 +237,7 @@ check() {
   if [ -f "$UNIT" ]; then
     if [ "$(systemctl is-active "$NAME" 2>/dev/null)" = active ]; then ok "$NAME.service running"; else no "$NAME.service is $(systemctl is-active "$NAME" 2>/dev/null)"; fi
   else echo "  ·  $NAME.service not installed (install keeps the bridge up across desktop and audio restarts)"; fi
+  echo "  ·  used by: $(ls -A "$USERS" 2>/dev/null | tr '\n' ' ' | sed 's/ $//; s/^$/no Note recorded (installed by hand, or before 0.6.2)/')"
   [ "$bad" -eq 0 ]
 }
 
@@ -268,7 +284,28 @@ uninstall() {
   rmdir "$MNT" "$DIR" 2>/dev/null
   rm -rf "/run/$NAME"
   [ -f "$SBIN" ] && rm -f "$SBIN" && echo "removed $SBIN"
+  rm -rf "/var/lib/$NAME"
   return 0
+}
+
+# A namespace name, nothing that could walk out of $USERS.
+valid_id() { [[ "${1:-}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || { echo "not a namespace name: '${1:-}'"; exit 2; }; }
+# Under one lock, so a Note installing while another is removed cannot see the
+# bridge gone after it attached, or keep a bridge nobody is left to remove.
+users_locked() { mkdir -p "${USERS_LOCK%/*}"; ( flock -w 10 9 || { echo "another attach or detach holds $USERS_LOCK"; exit 1; }; "$@" ) 9>"$USERS_LOCK"; }
+
+attach() {
+  mkdir -p "$USERS" && touch "$USERS/$1" && echo "bridge used by $1"
+  install
+}
+
+detach() {
+  local left
+  rm -f "$USERS/$1"
+  left=$(ls -A "$USERS" 2>/dev/null | tr '\n' ' ')
+  if [ -n "$left" ]; then echo "bridge kept, still used by: ${left% }"; return 0; fi
+  echo "no Note on this host uses the bridge any more"
+  uninstall
 }
 
 need_root
@@ -278,5 +315,7 @@ case "${1:-}" in
   watch) watch ;;
   install) install ;;
   uninstall) uninstall ;;
-  *) sed -n '19,23p' "$0"; exit 2 ;;
+  attach) valid_id "${2:-}"; users_locked attach "$2" ;;
+  detach) valid_id "${2:-}"; users_locked detach "$2" ;;
+  *) sed -n '19,25p' "$0"; exit 2 ;;
 esac
