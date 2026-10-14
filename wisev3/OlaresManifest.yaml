@@ -7,7 +7,7 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Your Digital Secret Garden
   title: Wise
-  version: '1.2.40'
+  version: '1.2.41'
   categories:
     - homelab
     - Fun
@@ -67,6 +67,29 @@ middleware:
         extensions:
           - pg_trgm
           - btree_gin
+          - zhparser
+        scripts:
+          - |
+            DO $knowledge_search$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_ts_config config
+                JOIN pg_catalog.pg_namespace namespace
+                  ON namespace.oid = config.cfgnamespace
+                WHERE namespace.nspname = 'public'
+                  AND config.cfgname = 'chinese'
+              ) THEN
+                CREATE TEXT SEARCH CONFIGURATION public.chinese (PARSER = zhparser);
+              END IF;
+            END
+            $knowledge_search$;
+          - |
+            ALTER TEXT SEARCH CONFIGURATION public.chinese
+              ALTER MAPPING FOR
+                a, b, c, d, e, f, g, h, i, j, k, l, m,
+                n, o, p, q, r, s, t, u, v, w, x, y, z
+              WITH simple;
 
 spec:
   versionName: '1.11.43'
