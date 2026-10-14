@@ -168,6 +168,12 @@ data:
                     current_directory.reset(token)
 
     def install():
+        # Upstream request schemas hard-code cuda/float16 independently of Config.
+        # Set their defaults before routes import them, matching the selected mode.
+        from app.schemas import WhisperModelParams
+        WhisperModelParams.model_fields['device'].default.default = os.environ['DEVICE']
+        WhisperModelParams.model_fields['compute_type'].default.default = os.environ['COMPUTE_TYPE']
+        WhisperModelParams.model_rebuild(force=True)
         from app import audio, files
         from app.services import file_service
         manager = ManagedFiles(
