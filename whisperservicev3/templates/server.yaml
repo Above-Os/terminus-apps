@@ -105,7 +105,8 @@ spec:
               import pathlib
               import sqlite3
               destination = pathlib.Path('/state/records.db')
-              candidates = [pathlib.Path('/legacy-data/records.db'),
+              candidates = [pathlib.Path('/upgrade-backups/records.db'),
+                            pathlib.Path('/legacy-data/records.db'),
                             pathlib.Path('/legacy-data/.upgrade-backups/records.db')]
               source = next((path for path in candidates if path.is_file()), None)
               if source is not None and not destination.exists():
@@ -153,6 +154,9 @@ spec:
             - name: data
               mountPath: /legacy-data
               readOnly: true
+            - name: upgrade-backups
+              mountPath: /upgrade-backups
+              readOnly: true
             - name: state
               mountPath: /state
             - name: requests
@@ -172,6 +176,10 @@ spec:
         - name: data
           hostPath:
             path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: upgrade-backups
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/upgrade-backups"
             type: DirectoryOrCreate
         - name: tmp
           emptyDir:
