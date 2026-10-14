@@ -92,24 +92,84 @@ spec:
                 LC_ALL=C timeout 30 $H bash "$S" apply-async </dev/null
                 echo "host audio: apply started on the host; journalctl -u olares-bt-audio-apply";;
               esac
+              B=/var/lib/olares-bt-audio/olares-desktop-audio-bridge.sh
               {{- if .Values.capture.desktopBridge.enabled }}
               # olares-desktop brings a sound server of its own, without the
               # Bluetooth headsets; the bridge gives the desktop's browser an
               # output into the host session. Only where the desktop is installed.
+              # attach also records this Note as one using it, so that removing
+              # another Note leaves it (note-host-audio-detach below).
               if $H dpkg -s olares-desktop >/dev/null 2>&1; then
-                B=/var/lib/olares-bt-audio/olares-desktop-audio-bridge.sh
                 $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
-                  && LC_ALL=C timeout 30 $H bash "$B" install </dev/null
-                echo "host audio: desktop bridge install exited $?"
+                  && LC_ALL=C timeout 30 $H bash "$B" attach {{ .Release.Namespace | quote }} </dev/null
+                echo "host audio: desktop bridge attach exited $?"
               fi
               {{- else }}
-              # Turned off: a bridge an earlier install left on the host goes too,
-              # or the switch would only stop new installs.
-              if $H test -x /usr/local/sbin/olares-desktop-audio-bridge; then
-                LC_ALL=C timeout 30 $H /usr/local/sbin/olares-desktop-audio-bridge uninstall </dev/null
-                echo "host audio: desktop bridge uninstall exited $?"
-              fi
+              # Turned off: this Note stops using a bridge an earlier install left,
+              # which goes too unless another Note on the host still uses it.
+              $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
+                && LC_ALL=C timeout 30 $H bash "$B" detach {{ .Release.Namespace | quote }} </dev/null
+              echo "host audio: desktop bridge detach exited $?"
               {{- end }}
+              exit 0
+          volumeMounts:
+            - name: host-audio-setup
+              mountPath: /setup
+      volumes:
+        - name: host-audio-setup
+          configMap:
+            name: note-host-audio-setup
+---
+# Uninstalling Note takes the desktop bridge with it, unless another Note on
+# this host (a renamed preview) still uses it: detach forgets this namespace
+# and uninstalls only when none is left. Olares uninstalls through helm with
+# hooks on, and a hook that fails or never starts leaves the app in
+# UninstallFailed, its hook rerun every few seconds, until app-service gives
+# up and deletes the namespace: about two minutes (yaotest005, 2026-10-14,
+# a hook exiting 1 and one whose image could not be pulled). That uninstall
+# still ends clean, but without detach, so this namespace stays in the list
+# and the bridge stays. So everything here is bounded and the pod always
+# exits 0. It runs while the release's ConfigMap is still there.
+# Only a release installed or upgraded with this hook runs it on uninstall.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: note-host-audio-detach
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  # The script below is capped at 50 s; this is room for pulling the image,
+  # which the setup job already brought to the node.
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      # As for the setup job: no sidecar, or the pod never completes.
+      labels:
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
+    spec:
+      hostPID: true
+      restartPolicy: Never
+      containers:
+        - name: host-audio-detach
+          image: beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              H="nsenter -t 1 -m -u -i -n -p --"
+              B=/var/lib/olares-bt-audio/olares-desktop-audio-bridge.sh
+              timeout 10 $H mkdir -p /var/lib/olares-bt-audio \
+                && timeout 10 $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
+                && LC_ALL=C timeout 30 $H bash "$B" detach {{ .Release.Namespace | quote }} </dev/null
+              echo "host audio: desktop bridge detach exited $?"
               exit 0
           volumeMounts:
             - name: host-audio-setup
