@@ -95,19 +95,12 @@ spec:
           args:
             - |
               set -e
-              # Preserve old CPU-mode installations and select matching inference defaults.
-              case "${GPU_TYPE:-cpu}" in
-                cpu)
-                  export DEVICE=cpu COMPUTE_TYPE=int8 CUDA_VISIBLE_DEVICES=""
-                  ;;
-                nvidia)
-                  export DEVICE=cuda COMPUTE_TYPE=float16
-                  ;;
-                *)
-                  echo "Unsupported compute mode: $GPU_TYPE" >&2
-                  exit 1
-                  ;;
-              esac
+              # Keep legacy GPU visibility on upgrade; fall back only without CUDA.
+              if uv run --no-sync python -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)'; then
+                export DEVICE=cuda COMPUTE_TYPE=float16
+              else
+                export DEVICE=cpu COMPUTE_TYPE=int8
+              fi
               uv run --no-sync python - <<'PY'
               import pathlib
               import sqlite3
