@@ -8,6 +8,8 @@ metadata:
 data:
   olares-bt-audio.sh: |-
 {{ .Files.Get "files/olares-bt-audio.sh" | indent 4 }}
+  olares-desktop-audio-bridge.sh: |-
+{{ .Files.Get "files/olares-desktop-audio-bridge.sh" | indent 4 }}
 ---
 # Prepare the host for recording from Bluetooth headsets, at every install
 # and upgrade of Note. Recording from a headset needs, on the host, BlueZ's
@@ -36,9 +38,26 @@ metadata:
   name: note-host-audio-r{{ .Release.Revision }}
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 300
+  # The script below is capped at 90 s for --quick, 30 s for apply-async and
+  # 30 s for the desktop bridge: 150 s at worst, which a deadline of 150 cut
+  # off on the bridge, half installed (review of 0.6.1). Until this pod ends,
+  # stopping Note waits on it.
+  activeDeadlineSeconds: 180
   ttlSecondsAfterFinished: 86400
   template:
+    metadata:
+      # The script exits in about a minute; a sidecar does not, so the pod
+      # stays Running and stopping Note fails while it waits for every pod in
+      # the namespace to finish. This job only enters the host and calls no
+      # other app, so it needs no mesh. Olares injects its mesh-in agent into
+      # every non-entrance pod of an app that calls a shared app, and then
+      # sets linkerd.io/inject to enabled whatever the pod asked for; only
+      # this label keeps both sidecars out. The annotation still covers a box
+      # whose mesh-in admission is off, where linkerd alone would inject.
+      labels:
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
     spec:
       hostPID: true
       restartPolicy: Never
@@ -73,6 +92,24 @@ spec:
                 LC_ALL=C timeout 30 $H bash "$S" apply-async </dev/null
                 echo "host audio: apply started on the host; journalctl -u olares-bt-audio-apply";;
               esac
+              {{- if .Values.capture.desktopBridge.enabled }}
+              # olares-desktop brings a sound server of its own, without the
+              # Bluetooth headsets; the bridge gives the desktop's browser an
+              # output into the host session. Only where the desktop is installed.
+              if $H dpkg -s olares-desktop >/dev/null 2>&1; then
+                B=/var/lib/olares-bt-audio/olares-desktop-audio-bridge.sh
+                $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
+                  && LC_ALL=C timeout 30 $H bash "$B" install </dev/null
+                echo "host audio: desktop bridge install exited $?"
+              fi
+              {{- else }}
+              # Turned off: a bridge an earlier install left on the host goes too,
+              # or the switch would only stop new installs.
+              if $H test -x /usr/local/sbin/olares-desktop-audio-bridge; then
+                LC_ALL=C timeout 30 $H /usr/local/sbin/olares-desktop-audio-bridge uninstall </dev/null
+                echo "host audio: desktop bridge uninstall exited $?"
+              fi
+              {{- end }}
               exit 0
           volumeMounts:
             - name: host-audio-setup
