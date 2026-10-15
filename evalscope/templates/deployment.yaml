@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evalscope
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: evalscope
+spec:
+  replicas: {{ .Values.workloads.evalscope.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: evalscope
+  template:
+    metadata:
+      labels:
+        app: evalscope
+      annotations:
+        checksum/startup: {{ .Files.Get "scripts/bootstrap.sh" | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -ec
+            - |
+              for d in /data /data/outputs /data/config /data/bootstrap /cache /cache/runtime /cache/huggingface /cache/modelscope /cache/pip /cache/home; do
+                mkdir -p "$d"
+                chown 1000:1000 "$d"
+              done
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: cache
+              mountPath: /cache
+      containers:
+        - name: evalscope
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/startup/bootstrap.sh"]
+          workingDir: /data
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /cache/home
+            - name: HF_HOME
+              value: /cache/huggingface
+            - name: MODELSCOPE_CACHE
+              value: /cache/modelscope
+            - name: PIP_CACHE_DIR
+              value: /cache/pip
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONNOUSERSITE
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 9000
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 360
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: startup
+              mountPath: /startup
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: cache
+              mountPath: /cache
+      volumes:
+        - name: startup
+          configMap:
+            name: evalscope-startup
+        - name: data
+          hostPath:
+            path: {{ .Values.userspace.appData }}
+            type: DirectoryOrCreate
+        - name: cache
+          hostPath:
+            path: {{ .Values.userspace.appCache }}
+            type: DirectoryOrCreate
