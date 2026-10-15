@@ -7,7 +7,7 @@ metadata:
   description: FastAPI service on top of WhisperX
   appid: whisperservicev3
   title: Whisper API
-  version: '1.1.24'
+  version: '1.1.25'
   categories:
   - AI
   - Utilities_v112
@@ -94,9 +94,9 @@ spec:
     - Liveness probe (/health/live): Verifies if application is running
     - Readiness probe (/health/ready): Checks if application is ready to accept requests (includes database connectivity check)
 
-    **Back up task history before upgrading**
+    **Task history**
 
-    Older installations may store the task database in the container at /app/records.db. To preserve task history, wait for tasks to finish and save a consistent SQLite backup to the app data/.upgrade-backups/records.db before upgrading. This version restores that backup or data/records.db only when the new database does not exist. Records held only in the old container cannot be recovered without a backup. Historical audio is preserved.
+    Task history is automatically migrated and stored persistently during upgrades. No manual database backup is required.
 
     **Audio deletion and retention**
 
@@ -109,7 +109,9 @@ spec:
     Original files, transcription results, task records, models, and legacy data are preserved. Existing historical files are not automatically cleaned.
 
   upgradeDescription: |
-    v1.1.24: Automatically delete request-owned audio, add configurable retention and protected cleanup, persist task results, and declare NVIDIA GPU requirements. Existing historical files are preserved.
+    v1.1.25: Improve upgrade compatibility and store upgrade backups separately from historical audio.
+
+    v1.1.24: Automatically delete request-owned audio, add configurable retention and protected cleanup, persist task results. Existing historical files are preserved.
 
     v1.1.23: Model Console (llm-init) updated to v1.7.21.
 
@@ -176,6 +178,13 @@ spec:
   onlyAdmin: true
 
   accelerator:
+  - mode: cpu
+    requiredCpu: "1"
+    limitedCpu: "5"
+    requiredMemory: 3Gi
+    limitedMemory: 24Gi
+    requiredDisk: 12Gi
+    limitedDisk: 20Gi
   - mode: nvidia
     supportMultiCard: false
     supportMultiNodes: false
