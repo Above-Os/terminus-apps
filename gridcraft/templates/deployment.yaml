@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gridcraft
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: gridcraft
+spec:
+  replicas: {{ .Values.workloads.gridcraft.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gridcraft
+  template:
+    metadata:
+      labels:
+        app: gridcraft
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: gridcraft
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+        - name: agent
+          image: {{ .Values.agentImage }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: MCP_PORT
+              value: "8090"
+          ports:
+            - name: mcp
+              containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: mcp
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: mcp
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: files
+              mountPath: /data/files
+      volumes:
+        - name: files
+          hostPath:
+            path: {{ .Values.userspace.userData }}/GridCraft
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gridcraft-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: gridcraft
+spec:
+  selector:
+    app: gridcraft
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: mcp
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
