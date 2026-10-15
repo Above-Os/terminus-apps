@@ -1,0 +1,114 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+
+workloadReplicas:
+  fleet: 1
+metadata:
+  name: fleet
+  icon: https://cdn.olares.com/images/2026/10/ca510f5c7930e16dd32ea7125acfc016.png
+  description: Use the machines your team already has, from one place
+  appid: fleet
+  title: Fleet
+  version: 0.1.67
+  categories:
+  - Developer Tools
+  - agents
+  tags:
+  - coding
+  - agents
+
+# Two entrances, because there are two kinds of caller and only one of them is a person.
+#
+# The admin one is what somebody opens: it is `private`, so the platform edge signs them in and
+# stamps the identity this server reads. The data-plane one is what a daemon's tunnel dials, and
+# it has to be `public` — a machine has no browser to be redirected to a login page with, and it
+# authenticates itself with a device token the server issued.
+#
+# Splitting them is not a convenience. A single private entrance would mean no machine could ever
+# connect; a single public one would put the whole interface in front of anybody who can reach the
+# address. The names decide the order the platform assigns their hosts, which is the only way to
+# tell the two apart afterwards -- see docs/deploy.md in beclab/agent-daemon.
+entrances:
+- name: fleet
+  host: fleet-svc
+  port: 8080
+  title: Fleet
+  icon: https://cdn.olares.com/images/2026/10/ca510f5c7930e16dd32ea7125acfc016.png
+  openMethod: window
+  authLevel: private
+- name: fleetdata
+  host: fleet-svc
+  port: 8081
+  title: Fleet data plane
+  authLevel: public
+  invisible: true
+spec:
+  versionName: '0.1.67'
+  # Admin-only to install. `options.shared` already implies it, and it is stated anyway because
+  # the two are independent gates and a reader should not have to know which one is doing the
+  # work here.
+  onlyAdmin: true
+  featuredImage: https://cdn.olares.com/images/2026/10/ca510f5c7930e16dd32ea7125acfc016.png
+  fullDescription: |
+    **Overview**
+    Fleet is the control plane for the machines your team runs coding agents on. The machines
+    themselves run `agentd` — on laptops, servers, or embedded in agent applications on this Olares — and
+    they dial out to this server. It never reaches into them.
+
+    **What it gives you**
+    - Every machine that has joined, what agent CLIs each one has, and which of them you may use.
+    - Starting a run on any of them, answering the permission requests it raises, following up,
+      and reading what changed on disk afterwards.
+    - History that outlives the run: turns, tool calls, per-turn diffs, token usage, and who
+      approved what.
+
+    **Who can see what**
+    A run is visible to the person who asked for it and to the machine's owner, and to nobody
+    else — being in the same Olares is not a claim on somebody's prompt or somebody else's
+    working tree. Administrators read the approval audit instead, which carries who decided what
+    and when, and no prompts, diffs or output.
+
+    **Roles come from this Olares**
+    There is nothing to join and no member list to maintain: the people here are this Olares's
+    people, read from its directory, and being an Olares admin is what makes you a fleet admin.
+  requiredMemory: 256Mi
+  limitedMemory: 1Gi
+  requiredCpu: 100m
+  limitedCpu: 1
+  requiredDisk: 50Mi
+  limitedDisk: 200Mi
+  supportArch:
+  - amd64
+  - arm64
+
+permission: {}
+
+middleware:
+  postgres:
+    username: fleet
+    databases:
+    - name: fleet
+
+options:
+  # This is what makes the app a cluster-wide singleton in the `fleet-shared` namespace rather
+  # than one instance per user. It is the model rather than a preference: a fleet is one Olares
+  # and everybody in it, and a per-user install would put each person alone in a fleet of one
+  # while the structure claimed otherwise.
+  #
+  # It is also what lets this app reach the platform's provider gateway at all. A per-user
+  # namespace is refused by the mesh, which looks from inside exactly like the directory being
+  # down -- see the roster note in templates/deployment.yaml.
+  shared: true
+  # The tunnel is a long-lived response and the run stream is a longer one. The default 15-second
+  # cap at the entrance would cut every device's connection on a timer and the pod would look
+  # healthy throughout.
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.6-0'
+  - name: postgres
+    version: '>=17.0.0-0'
+    type: middleware
+    mandatory: true
