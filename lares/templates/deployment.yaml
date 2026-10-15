@@ -48,6 +48,42 @@ spec:
               mountPath: /appdata
             - name: flowstudio-files
               mountPath: /flowstudio-files
+        # Host Bluetooth audio (plugin, wideband speech, voice agent) lives
+        # outside this pod. Enter the host mount namespace; a machine without
+        # Bluetooth logs the miss and still lets Lares start.
+        - name: bluetooth-host
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Same tree the app process runs. The image installer is the
+              # fallback until this overlay has been seeded for the image.
+              if [ -f /devsrc/.hotreload ] && [ -f /app/.lares-image-id ] && [ -f /devsrc/.lares-seeded-image-id ] \
+                && [ "$(cat /app/.lares-image-id)" = "$(cat /devsrc/.lares-seeded-image-id)" ] \
+                && [ -f /devsrc/packages/core/voice/host/install-host.sh ]; then
+                exec /bin/sh /devsrc/packages/core/voice/host/install-host.sh
+              fi
+              if [ ! -f /app/packages/core/voice/host/install-host.sh ]; then
+                echo "bluetooth host setup skipped: installer is not in this image" >&2
+                exit 0
+              fi
+              exec /bin/sh /app/packages/core/voice/host/install-host.sh
+          env:
+            - name: LARES_HOST_VOICE_DIR
+              value: {{ printf "%s/data/voice" .Values.userspace.appData | quote }}
+          volumeMounts:
+            - name: host-proc
+              mountPath: /host-proc
+              readOnly: true
+            - name: app-data
+              mountPath: /devsrc
+              subPath: devsrc
+              readOnly: true
         {{- if $enableDind }}
         - name: init-docker-cli
           image: docker.io/beclab/docker:29.3.0-dind
@@ -237,6 +273,10 @@ spec:
           hostPath:
             path: {{ .Values.userspace.appData }}
             type: DirectoryOrCreate
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
         - name: flowstudio-files
           hostPath:
             path: "{{ .Values.userspace.userData }}/FlowStudio"
