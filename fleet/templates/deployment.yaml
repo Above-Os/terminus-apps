@@ -1,0 +1,121 @@
+# Fleet, the control plane, on Olares.
+#
+# It holds no state of its own. Everything a fleet knows -- machines, runs, the events they
+# produced, who approved what -- is in the Postgres this chart asks the platform for, which is why
+# there is no volume here and why a restart loses nothing.
+#
+# Two things about the environment below are load-bearing and neither announces itself when wrong.
+#
+# AGENTD_BEHIND_OLARES_EDGE inverts where a caller's identity comes from. Off, the server expects
+# to sign people in itself; on, it takes the identity the platform edge stamped and ignores any
+# the client sent. That is safe here and only here: the edge strips a client's own copy of those
+# headers before adding its own, so upstream is the one party that cannot be impersonated. A
+# server started without this while reachable directly would let anyone be anyone by typing a
+# name, which is why the code refuses to read the headers at all unless it is set.
+#
+# AGENTD_DIRECTORY_URL is the Olares roster, and its address is the provider gateway rather than
+# the directory's own service. Three things have to hold together or it does not answer, and all
+# three look identical from in here -- like the directory being down:
+#
+#   1. the app is shared (options.shared in the manifest), or the mesh refuses it;
+#   2. this namespace is bound to backend:lldap-provider (templates/rbac.yaml);
+#   3. the request carries this pod's own ServiceAccount token, which the code reads from
+#      /var/run/secrets/kubernetes.io/serviceaccount/token.
+#
+# Timing is the only thing that tells them apart: a 504 taking exactly one second is the mesh
+# refusing, a 401 in milliseconds reached the gateway with no token, and a failure in about a
+# millisecond is a name that never resolved.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    io.kompose.service: fleet
+  name: "{{ .Release.Name }}"
+  namespace: "{{ .Release.Namespace }}"
+spec:
+  replicas: {{ .Values.workloads.fleet.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: fleet
+  # Recreate rather than RollingUpdate. A device holds one tunnel and the newest connection wins,
+  # so two servers briefly both accepting them would hand the same machine's commands to whichever
+  # replica happened to hold the map -- and the migration runner is built for one instance coming
+  # up at a time.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: fleet
+    spec:
+      containers:
+        - name: fleet
+          image: "{{ .Values.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8081
+              name: data
+          env:
+            - name: AGENTD_SERVER_ADDR
+              value: "0.0.0.0:8080"
+            - name: AGENTD_SERVER_DATA_ADDR
+              value: "0.0.0.0:8081"
+            # The platform manages the password and injects it; the rest of the connection is
+            # named by the middleware block in the manifest.
+            - name: DATABASE_URL
+              value: "postgres://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.fleet }}?sslmode=disable"
+            - name: AGENTD_BEHIND_OLARES_EDGE
+              value: "1"
+            - name: AGENTD_DIRECTORY_URL
+              value: "http://lldap-provider-svc.os-framework:28080"
+            # What a browser and a device reach this server on. The admin entrance is the one a
+            # person opens; a machine is given the data-plane one when it is paired, and the two
+            # differ only in the host the platform assigned them.
+            - name: AGENTD_PUBLIC_URL
+              value: "https://{{ .Values.domain.fleet }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+          # Readiness before liveness, and both on the same cheap endpoint: /api/health needs no
+          # identity, which is the point -- a probe that required one would report an unhealthy
+          # pod every time sign-in was misconfigured.
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleet-svc
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    io.kompose.service: fleet
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: data
+      port: 8081
+      targetPort: 8081
+      protocol: TCP

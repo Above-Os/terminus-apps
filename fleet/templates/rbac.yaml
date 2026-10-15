@@ -1,0 +1,27 @@
+# The grant that lets this app read the Olares roster.
+#
+# The platform registers `/readonly/snapshot` as a nonResourceURL on a ClusterRole it ships,
+# `backend:lldap-provider` (see framework/authelia in beclab/Olares). Nothing binds that role to
+# an app on its own, so without the binding below the provider gateway authenticates this pod's
+# token and then refuses it -- a 403, which from inside is indistinguishable from the directory
+# being down. `LoadDirectory` reports it at startup and the server refuses to come up, which is
+# the intended outcome: a fleet running without a roster is one where nobody is an administrator
+# and every person who signs in is a stranger, and none of that announces itself.
+#
+# The subject is the namespace's default ServiceAccount because that is the identity the pod
+# actually presents -- the token it reads at /var/run/secrets is that account's, mounted by
+# kubelet without anything being asked for.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: "{{ .Release.Name }}-lldap-provider"
+  labels:
+    io.kompose.service: fleet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backend:lldap-provider
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: "{{ .Release.Namespace }}"
