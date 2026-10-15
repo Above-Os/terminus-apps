@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: effectcraft
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: effectcraft
+spec:
+  replicas: {{ .Values.workloads.effectcraft.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: effectcraft
+  template:
+    metadata:
+      labels:
+        app: effectcraft
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: effectcraft
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+        - name: agent
+          image: {{ .Values.agentImage }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: CRAFT_FILES
+              value: /data/files
+            - name: MCP_PORT
+              value: "8090"
+          ports:
+            - name: mcp
+              containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: mcp
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: mcp
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "6"
+              memory: 8Gi
+          volumeMounts:
+            - name: files
+              mountPath: /data/files
+      volumes:
+        - name: files
+          hostPath:
+            path: {{ .Values.userspace.userData }}/EffectCraft
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: effectcraft-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: effectcraft
+spec:
+  selector:
+    app: effectcraft
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: mcp
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
