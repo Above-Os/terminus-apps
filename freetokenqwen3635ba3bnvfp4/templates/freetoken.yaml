@@ -148,28 +148,10 @@ spec:
           ports:
             - name: freetoken
               containerPort: 30000
-          # /health returns HTTP 200 even while loading or after an error.
-          # The chart carries the script so fixes do not require an image rebuild.
-          # Initial downloads/conversion may be long: only gate traffic until ready.
-          startupProbe:
-            exec:
-              command: ["/opt/venv/bin/python", "/llm-init/wrappers/freetoken-healthcheck.py"]
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 8640
-          readinessProbe:
-            exec:
-              command: ["/opt/venv/bin/python", "/llm-init/wrappers/freetoken-healthcheck.py"]
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 1
-          livenessProbe:
-            exec:
-              command: ["/opt/venv/bin/python", "/llm-init/wrappers/freetoken-healthcheck.py", "--live"]
-            periodSeconds: 30
-            timeoutSeconds: 5
-            # Allow a Model Console relaunch to prepare a different FTW layout.
-            failureThreshold: 10
+          # Match the llama.cpp app: container startup makes the application
+          # Ready while the wrapper waits for downloads and FTW preparation.
+          # Model availability is tracked separately by llm-init; engine health
+          # probes here would block app readiness or restart long downloads.
           volumeMounts:
             - name: ftw-cache
               mountPath: /cache/freetoken-ftw
