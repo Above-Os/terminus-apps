@@ -16,16 +16,8 @@
 # FreeToken engine Deployment. wrappers/freetoken.sh blocks on the sentinel
 # (download ready), prepares/reuses FTW, then starts `ft serve`.
 #
-# SERVICE NAME: llm-init derives the engine URL from ITS OWN ENGINE_KIND and
-# has no `freetoken` kind yet (v1.7.21 knows ollama/vllm/llamacpp/sglang/...),
-# so llm-init.yaml sets ENGINE_KIND=sglang and its derived URL is
-# http://sglang:30000 — the Service below MUST stay named "sglang" on port
-# 30000, and the engine binds that port. The sglang flag table is also the
-# closest fit: --max-running-requests is spelled identically in both engines,
-# and --context-length is accepted by the wrapper as an alias for FreeToken's
-# --max-seq-len-override (see wrappers.yaml). This container's own ENGINE_KIND
-# below stays `freetoken`: it is what wrappers/freetoken.sh reports, and it is
-# never used to derive a URL.
+# Model Console derives http://freetoken:1919 from ENGINE_KIND=freetoken.
+# The Service maps that endpoint to the engine listening on port 30000.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -102,8 +94,7 @@ spec:
               value: /run/llm-init/wrappers/common.sh
             - name: MODEL_NAME
               value: "{{ $modelName }}"
-            # Must match the Service port below (== llm-init's derived
-            # http://sglang:30000).
+            # Must match the Service targetPort and containerPort below.
             - name: FREETOKEN_PORT
               value: "30000"
             - name: WAIT_TIMEOUT
@@ -191,9 +182,8 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # Named "sglang" on purpose — see the Deployment comment above. Renaming it
-  # silently breaks llm-init's reverse proxy.
-  name: sglang
+  # Matches Model Console's derived URL for ENGINE_KIND=freetoken.
+  name: freetoken
   namespace: {{ .Release.Namespace }}
   labels:
     io.kompose.service: freetoken
@@ -202,6 +192,6 @@ spec:
     io.kompose.service: freetoken
   ports:
     - name: freetoken
-      port: 30000
+      port: 1919
       targetPort: 30000
   type: ClusterIP
