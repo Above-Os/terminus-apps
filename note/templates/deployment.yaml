@@ -86,6 +86,10 @@ spec:
               value: unix:/run/host-pulse/native
             - name: NOTE_CAPTURE_SYSTEM_BUS
               value: unix:path=/run/host-dbus/system_bus_socket
+            # Pairing goes to the host's Bluetooth helper while its socket is
+            # there; the system bus above is for a host an older Note set up.
+            - name: NOTE_CAPTURE_BT_HELPER
+              value: /run/host-bt/helper.sock
             {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
@@ -143,6 +147,11 @@ spec:
             # their side of the network and nowhere in this cluster.
             - name: NOTE_FILES_BASE_URL
               value: {{ printf "https://files.{user}.%s" (.Values.user.zone | splitList "." | rest | join ".") | quote }}
+            # The directory app-data appears under in the user's Drive: the
+            # last element of the path app-service mounts, which is the name
+            # this app was installed under.
+            - name: NOTE_FILES_DRIVE_APP
+              value: {{ base .Values.userspace.appData | quote }}
             - name: NOTE_CPU_WORKERS
               value: {{ .Values.workers.cpu | quote }}
             - name: NOTE_GPU_WORKERS
@@ -199,6 +208,10 @@ spec:
             - name: host-dbus
               mountPath: /run/host-dbus
               # Connecting to the bus's socket needs no write to the mount.
+              readOnly: true
+            - name: host-bt
+              mountPath: /run/host-bt
+              # Connecting needs no write to the mount either.
               readOnly: true
             {{- end }}
         {{- if .Values.capture.bluetooth.enabled }}
@@ -300,6 +313,14 @@ spec:
         - name: host-dbus
           hostPath:
             path: /run/dbus
+            type: DirectoryOrCreate
+        # The host's Bluetooth helper (olares-note-bt.socket, installed by the
+        # host audio job). The directory, as above: systemd makes the socket
+        # again when the unit restarts. OrCreate, so Note starts before the
+        # job has run; it asks again at each call.
+        - name: host-bt
+          hostPath:
+            path: /run/olares-audio/bt
             type: DirectoryOrCreate
         {{- end }}
 ---

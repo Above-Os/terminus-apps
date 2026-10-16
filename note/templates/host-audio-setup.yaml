@@ -8,8 +8,8 @@ metadata:
 data:
   olares-bt-audio.sh: |-
 {{ .Files.Get "files/olares-bt-audio.sh" | indent 4 }}
-  olares-desktop-audio-bridge.sh: |-
-{{ .Files.Get "files/olares-desktop-audio-bridge.sh" | indent 4 }}
+  olares-note-host.sh: |-
+{{ .Files.Get "files/olares-note-host.sh" | indent 4 }}
 ---
 # Prepare the host for recording from Bluetooth headsets, at every install
 # and upgrade of Note. Recording from a headset needs, on the host, BlueZ's
@@ -92,25 +92,16 @@ spec:
                 LC_ALL=C timeout 30 $H bash "$S" apply-async </dev/null
                 echo "host audio: apply started on the host; journalctl -u olares-bt-audio-apply";;
               esac
-              B=/var/lib/olares-bt-audio/olares-desktop-audio-bridge.sh
-              {{- if .Values.capture.desktopBridge.enabled }}
-              # olares-desktop brings a sound server of its own, without the
-              # Bluetooth headsets; the bridge gives the desktop's browser an
-              # output into the host session. Only where the desktop is installed.
-              # attach also records this Note as one using it, so that removing
-              # another Note leaves it (note-host-audio-detach below).
-              if $H dpkg -s olares-desktop >/dev/null 2>&1; then
-                $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
-                  && LC_ALL=C timeout 30 $H bash "$B" attach {{ .Release.Namespace | quote }} </dev/null
-                echo "host audio: desktop bridge attach exited $?"
-              fi
-              {{- else }}
-              # Turned off: this Note stops using a bridge an earlier install left,
-              # which goes too unless another Note on the host still uses it.
-              $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
-                && LC_ALL=C timeout 30 $H bash "$B" detach {{ .Release.Namespace | quote }} </dev/null
-              echo "host audio: desktop bridge detach exited $?"
-              {{- end }}
+              # The host services for Note: the Bluetooth helper, which pairs
+              # headsets for the record dialog, and where olares-desktop is,
+              # the desktop bridge, which gives the desktop's browser an output
+              # into the host session (the desktop's own sound server has no
+              # Bluetooth). attach records this Note as one using them, so
+              # removing another Note leaves them (note-host-audio-detach below).
+              B=/var/lib/olares-bt-audio/olares-note-host.sh
+              $H tee "$B" >/dev/null </setup/olares-note-host.sh \
+                && LC_ALL=C timeout 30 $H env OLARES_NOTE_DESKTOP_BRIDGE={{ if .Values.capture.desktopBridge.enabled }}on{{ else }}off{{ end }} bash "$B" attach {{ .Release.Namespace | quote }} </dev/null
+              echo "host audio: host services attach exited $?"
               exit 0
           volumeMounts:
             - name: host-audio-setup
@@ -140,9 +131,9 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 0
-  # The script below is capped at 50 s; this is room for pulling the image,
+  # The script below is capped at 105 s; this is room for pulling the image,
   # which the setup job already brought to the node.
-  activeDeadlineSeconds: 120
+  activeDeadlineSeconds: 180
   template:
     metadata:
       # As for the setup job: no sidecar, or the pod never completes.
@@ -165,11 +156,14 @@ spec:
             - -c
             - |
               H="nsenter -t 1 -m -u -i -n -p --"
-              B=/var/lib/olares-bt-audio/olares-desktop-audio-bridge.sh
+              B=/var/lib/olares-bt-audio/olares-note-host.sh
+              # Both scripts, this release's: the last Note out also has the
+              # Bluetooth audio setup remove what it did for Note.
               timeout 10 $H mkdir -p /var/lib/olares-bt-audio \
-                && timeout 10 $H tee "$B" >/dev/null </setup/olares-desktop-audio-bridge.sh \
-                && LC_ALL=C timeout 30 $H bash "$B" detach {{ .Release.Namespace | quote }} </dev/null
-              echo "host audio: desktop bridge detach exited $?"
+                && timeout 10 $H tee "$B" >/dev/null </setup/olares-note-host.sh \
+                && timeout 10 $H tee /var/lib/olares-bt-audio/olares-bt-audio.sh >/dev/null </setup/olares-bt-audio.sh \
+                && LC_ALL=C timeout 75 $H bash "$B" detach {{ .Release.Namespace | quote }} </dev/null
+              echo "host audio: host services detach exited $?"
               exit 0
           volumeMounts:
             - name: host-audio-setup

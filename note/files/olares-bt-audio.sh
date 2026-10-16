@@ -18,6 +18,13 @@
 #   olares-bt-audio.sh pair <name>           scan and pair in ONE bluetoothctl session (press the
 #                                            device's pairing button first); trusts and connects it
 #   olares-bt-audio.sh test <MAC>            cued 8 s recording in mSBC, then CVSD, with levels
+#   olares-bt-audio.sh remove                undo what is Note's alone (boot self-check, the link
+#                                            and its boot config, the pulse directory's sharing,
+#                                            the copies); keep what Lares or the desktop share
+#
+# A host with no Bluetooth adapter gets nothing but a unit that waits for one
+# (olares-bt-audio-on-adapter, wanted by bluetooth.target): plugging a USB
+# adapter in, or booting with one, runs setup then, without reinstalling Note.
 #
 # --shared-socket (not yet tried on a host): pipewire-pulse also listens in
 # /run/olares-audio/pulse, so apps no longer depend on the 0700 runtime directory.
@@ -370,6 +377,11 @@ SBIN=$R/usr/local/sbin/olares-bt-audio.sh
 READY=olares-audio-ready.service
 READY_UNIT=$R/etc/systemd/system/$READY
 READY_STATUS=$R/run/olares-audio-ready.status
+ONADAPTER=olares-bt-audio-on-adapter.service
+ONADAPTER_UNIT=$R/etc/systemd/system/$ONADAPTER
+# Where the host audio job copies the scripts it runs (Note's chart).
+COPIES=$R/var/lib/olares-bt-audio
+have_adapter() { compgen -G "$R/sys/class/bluetooth/hci*" >/dev/null; }
 
 # "devices Paired|Connected" is BlueZ 5.65+; older ones only know
 # paired-devices, newer ones answer that with "Invalid command". An empty list
@@ -586,6 +598,69 @@ WantedBy=multi-user.target
 UNIT
 }
 
+onadapter_unit_body() {
+  cat <<UNIT
+[Unit]
+Description=Prepare Bluetooth audio for Olares apps once an adapter is here
+After=bluetooth.service
+ConditionPathExistsGlob=/sys/class/bluetooth/hci*
+
+[Service]
+Type=oneshot
+Environment=OLARES_AUDIO_USER=$USER_NAME LC_ALL=C
+ExecStart=/bin/bash $SBIN setup
+TimeoutStartSec=1200
+
+[Install]
+WantedBy=bluetooth.target
+UNIT
+}
+
+# No adapter: nothing but the copy and the unit that waits for one. systemd
+# reaches bluetooth.target when the kernel sees an adapter, at boot or when
+# one is plugged in, and the unit runs the full setup then.
+install_onadapter() {
+  local self tmp
+  self=$(readlink -f "${BASH_SOURCE[0]}")
+  mkdir -p "$(dirname "$SBIN")" "$(dirname "$ONADAPTER_UNIT")"
+  if [ -f "$self" ] && [ "$self" != "$SBIN" ] && ! cmp -s "$self" "$SBIN"; then
+    tmp=$SBIN.new; cp "$self" "$tmp" && chmod 755 "$tmp" && mv -f "$tmp" "$SBIN"
+  fi
+  if ! onadapter_unit_body | cmp -s - "$ONADAPTER_UNIT"; then onadapter_unit_body > "$ONADAPTER_UNIT"; systemctl daemon-reload; fi
+  systemctl enable "$ONADAPTER" >/dev/null 2>&1
+}
+remove_onadapter() {
+  [ -f "$ONADAPTER_UNIT" ] || return 0
+  systemctl disable "$ONADAPTER" >/dev/null 2>&1
+  rm -f "$ONADAPTER_UNIT"; systemctl daemon-reload
+}
+
+# What is Note's alone goes; what Lares or the desktop share stays, and why:
+# the packages (the desktop depends on pipewire-pulse, wireplumber and
+# pulseaudio-utils; Lares on bluez), WirePlumber's Bluetooth fragment and the
+# wideband unit (Lares writes the same ones and reads them), and linger (the
+# olares user's audio session, which anything recording at the box uses).
+remove() {
+  if [ -f "$READY_UNIT" ]; then
+    systemctl disable --now "$READY" >/dev/null 2>&1; rm -f "$READY_UNIT"; echo "removed the boot self-check ($READY)"
+  fi
+  rm -f "$READY_STATUS"
+  remove_onadapter
+  if [ -L "$LINK" ]; then rm -f "$LINK"; elif [ -d "$LINK" ]; then rmdir "$LINK" 2>/dev/null; fi
+  rmdir "$(dirname "$LINK")" 2>/dev/null
+  [ -f "$LINK_CONF" ] && rm -f "$LINK_CONF" && echo "removed $LINK and its boot config"
+  local f; for f in "$(share_conf)" "$(shared_conf)"; do
+    [ -f "$f" ] && rm -f "$f" && rmdir "$(dirname "$f")" 2>/dev/null && echo "removed $f"
+  done
+  [ -d "$RUNDIR" ] && "${USER_CTL[@]}" daemon-reload >/dev/null 2>&1
+  # The directory stays enterable (711) until pipewire-pulse restarts, which
+  # is not forced here: it would cut off whatever plays or records now.
+  systemctl daemon-reload
+  rm -f "$SBIN"
+  rm -rf "$COPIES"
+  echo "kept, shared with Lares or the desktop: packages, $(wp_conf_path), $WB, linger for $USER_NAME"
+}
+
 # Idempotent: copies and reloads only what differs. Sets READY_RESULT.
 READY_RESULT=""
 install_ready() {
@@ -673,10 +748,16 @@ apply_changes() {
   for p in "${PKGS[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   if [ ${#missing[@]} -gt 0 ]; then
     echo "installing ${missing[*]}"
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" || { echo "apt failed"; exit 1; }
-    case " ${missing[*]} " in *" pipewire "*|*" pipewire-pulse "*|*" wireplumber "*) session=1 ;; esac
-    case " ${missing[*]} " in *" libspa-0.2-bluetooth "*) wp=1 ;; esac
+    # Offline, or apt locked: what needs no package is set up all the same
+    # (linger, the WirePlumber fragment, the link, wideband), and the next
+    # setup installs the packages; check lists them as missing until then.
+    if DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"; then
+      case " ${missing[*]} " in *" pipewire "*|*" pipewire-pulse "*|*" wireplumber "*) session=1 ;; esac
+      case " ${missing[*]} " in *" libspa-0.2-bluetooth "*) wp=1 ;; esac
+    else
+      echo "apt failed: ${missing[*]} not installed; setting up the rest"
+    fi
   fi
   [ -e "$R/var/lib/systemd/linger/$USER_NAME" ] || loginctl enable-linger "$USER_NAME"
   local wp_backup wp_before="" f; wp_backup=$(mktemp -d)
@@ -758,6 +839,14 @@ setup() {
     if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "setup --quick did not finish within $limit s" >&3; fi
     return "$rc"
   fi
+  if ! have_adapter; then
+    install_onadapter
+    echo "== Result"
+    printf '  %-16s %s\n' "Bluetooth" "no adapter on this host: nothing installed" \
+      "when one appears" "$ONADAPTER runs setup (wanted by bluetooth.target)"
+    return 0
+  fi
+  remove_onadapter
   echo "== Before"; check
   before=$(failing)
   if ! sd_reachable; then
@@ -880,5 +969,6 @@ case "${1:-check}" in
   watch) watch ;;
   pair)  [ -n "${2:-}" ] || { echo "usage: $0 pair <name>"; exit 2; }; pair "$2" ;;
   test)  [ -n "${2:-}" ] || { echo "usage: $0 test <MAC>"; exit 2; }; test_rec "$2" ;;
-  *) sed -n '2,24p' "$0"; exit 2 ;;
+  remove) remove ;;
+  *) sed -n '2,31p' "$0"; exit 2 ;;
 esac
