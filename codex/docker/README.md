@@ -72,3 +72,15 @@ The Codex standalone package (rust-v0.149.1 etc.) is controlled separately by
 `https://chatgpt.com/codex/install.sh --release <appVersion>` whenever
 `$HOME/.install-state/codex-standalone-<version>-<target>` is missing or the
 install is binary-only (no `~/.codex/packages/standalone/current`).
+
+## Embedded agentd
+
+The chart adds a UID 1000 sidecar built by agent-daemon's `publish-docker.yaml`
+(`image=codex`, with a published `daemon_tag`). Its Dockerfile is
+[`deploy/Dockerfile.codex`](https://github.com/beclab/agent-daemon/blob/main/deploy/Dockerfile.codex).
+It shares this Ubuntu runtime and `/opt/data` with the terminal, including the CLI
+installation and login; daemon state is a separate persistent `/var/lib/agentd`.
+Only `/opt/data/agentd-workspace` is registered. The app environment `AGENTD_WORKSPACE_GRANTS` maps this
+path to stable fleet user IDs; the default is owner only and restart replaces the
+audience. An internal owner-only entrance proxies the loopback API without sending
+its Secret-backed token to the browser. Pairing still requires the owner in fleet.

@@ -11,7 +11,7 @@ metadata:
   description: OpenAI's lightweight coding agent that runs in your terminal
   appid: codex
   title: Codex CLI
-  version: 1.0.19
+  version: 1.0.21
   categories:
   - Developer Tools
   - Productivity_v112
@@ -25,6 +25,13 @@ entrances:
   host: terminal
   port: 80
   title: Codex CLI
+  icon: https://app.cdn.olares.com/appstore/codex/icon.png
+  openMethod: window
+  authLevel: internal
+- name: agentd
+  host: agentd-admin
+  port: 8084
+  title: Agent management
   icon: https://app.cdn.olares.com/appstore/codex/icon.png
   openMethod: window
   authLevel: internal
@@ -63,6 +70,17 @@ spec:
     This installs the latest complete package (including code-mode host and other dependencies) onto the persisted volume and repairs a binary-only install.
 
   upgradeDescription: |
+    **v1.0.21**
+
+    - Update agentd to 0.1.19 to isolate selected MCP tools from inherited plugins and connectors.
+    - Preserve nullable inherited configuration safely without changing the owner's Codex configuration.
+
+    **v1.0.20**
+
+    - Embed agentd 0.1.18 alongside the existing Codex CLI, sharing its login and installation.
+    - Add an owner-protected agent management entrance and a dedicated persistent test workspace.
+    - Keep daemon pairing and history in a separate volume; workspace collaboration defaults to owner only.
+
     **v1.0.17**
 
     **Codex CLI**
@@ -122,6 +140,12 @@ options:
     type: system
     version: '>=1.12.6-0'
 envs:
+- envName: AGENTD_WORKSPACE_GRANTS
+  type: string
+  default: '{}'
+  editable: true
+  applyOnChange: true
+  description: Dedicated workspace audience as a JSON map from /opt/data/agentd-workspace to stable fleet user IDs. Empty means owner only.
 - envName: OPENAI_API_KEY
   type: password
   required: false
