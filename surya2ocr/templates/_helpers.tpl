@@ -14,7 +14,7 @@
 {{- end -}}
 
 {{- define "surya2ocr.llmInitTag" -}}v1.7.21{{- end -}}
-{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.9{{- end -}}
+{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.10-rc.1{{- end -}}
 {{- /* Olares accelerator mode selected at install time. */ -}}
 {{- define "surya2ocr.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
