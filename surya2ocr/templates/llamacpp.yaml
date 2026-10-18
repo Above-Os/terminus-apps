@@ -1,6 +1,7 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "surya2ocr.modelName" .) -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99 -c 16384 -n 4096 --image-min-tokens 1024" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99 -c 16384 --image-min-tokens 1024" -}}
+{{- $maxOutputTokens := $oe.OCR_MAX_OUTPUT_TOKENS | default "8192" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "1250m") -}}
@@ -112,6 +113,8 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: OCR_MAX_OUTPUT_TOKENS
+              value: "{{ $maxOutputTokens }}"
             - name: OLARES_GPU_MODE
               value: {{ $gpuType | quote }}
 {{- if $isAmdGpu }}
