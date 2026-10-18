@@ -96,11 +96,18 @@ data:
 
         ARGV=""
         HAS_MMPROJ=0
+        SKIP_PREDICT_VALUE=0
         if [ -n "${ENGINE_ARGS:-}" ]; then
             # shellcheck disable=SC2086
             set -- $ENGINE_ARGS
             for tok in "$@"; do
+                if [ "$SKIP_PREDICT_VALUE" -eq 1 ]; then
+                    SKIP_PREDICT_VALUE=0
+                    continue
+                fi
                 case "$tok" in
+                    -n|--predict) SKIP_PREDICT_VALUE=1 ;;
+                    -n=*|--predict=*) ;;
                     --mmproj) HAS_MMPROJ=1; ARGV="$ARGV $tok" ;;
                     -*)       ARGV="$ARGV $tok" ;;
                     LLAMA_ARG_*=*) export "$tok" && log "engine_args export: $tok" ;;
@@ -109,6 +116,10 @@ data:
                 esac
             done
         fi
+
+        # One setting controls both the adapter request and the engine default.
+        # Remove any legacy prediction flag from ENGINE_ARGS before appending it.
+        ARGV="$ARGV --predict ${OCR_MAX_OUTPUT_TOKENS:-8192}"
 
         # Auto --mmproj if not already in ENGINE_ARGS.
         if [ "$HAS_MMPROJ" -eq 0 ]; then
