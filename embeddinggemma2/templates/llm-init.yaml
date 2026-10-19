@@ -1,0 +1,154 @@
+{{- $domain := .Values.domain | default dict -}}
+{{- $embedclientDomainENV := split "," ($domain.embedclient | default "embedclient.local") -}}
+{{- $embedclientDomain := index $embedclientDomainENV "_0" -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $logLevel := $oe.LOG_LEVEL | default "info" -}}
+{{- $modelMode := $oe.MODEL_MODE | default "embedding" -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $modelName := $oe.MODEL_NAME | default (include "embeddinggemma2.logicalModelName" .) -}}
+{{- $modelSource := include "embeddinggemma2.modelSource" . -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llminit
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  replicas: {{ .Values.workloads.llminit.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: llm-init
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: llm-init
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: {{ printf "%s/huggingface" .Values.userspace.appCommon | quote }}
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: {{ $runStateHostPath | quote }}
+            type: DirectoryOrCreate
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - chown 1000:1000 /cache/hf/hub /run/llm-init
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+      containers:
+        - name: llm-init
+          image: docker.io/beclab/llm-init:{{ include "embeddinggemma2.llmInitTag" . }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          env:
+            - name: ENGINE_KIND
+              value: multimodalembed
+            - name: MODEL_NAME
+              value: {{ $modelName | quote }}
+            - name: MODEL_MODE
+              value: {{ $modelMode | quote }}
+            - name: MODEL_SOURCE
+              value: {{ $modelSource | quote }}
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: {{ $hfEndpoint | quote }}
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+{{- end }}
+            - name: RUN_DIR
+              value: /run/llm-init
+            - name: PORT
+              value: "8090"
+            - name: LOG_LEVEL
+              value: {{ $logLevel | quote }}
+            - name: LOG_FORMAT
+              value: json
+            - name: APP_URL
+              value: https://{{ $embedclientDomain }}
+          ports:
+            - name: http
+              containerPort: 8090
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: run-state
+              mountPath: /run/llm-init
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: download-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: llm-init
+spec:
+  selector:
+    io.kompose.service: llm-init
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+  type: ClusterIP
