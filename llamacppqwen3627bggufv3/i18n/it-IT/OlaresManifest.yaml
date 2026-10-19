@@ -3,6 +3,8 @@ metadata:
   description: "Qwen3.6-27B (GGUF Q4_K_M) servito con llama.cpp. Corretto l’avvio nei cluster con più nodi collocando llm-init e il motore di inferenza sullo stesso nodo per condividere lo stato di esecuzione locale."
 spec:
   upgradeDescription: |
+    v1.0.22: Add Intel integrated and discrete GPU modes with server-intel-b11718; preserve NVIDIA and Spark paths. B70 preset: 128K context, one slot, batch/microbatch 2048. MTP stays disabled because this GGUF does not contain MTP layers.
+
     v1.0.20: Model Console (llm-init) è stato aggiornato alla versione v1.7.21.
 
     v1.0.19: Model Console viene aggiornato a llm-init v1.7.19.
@@ -20,6 +22,12 @@ spec:
     v1.0.4: aggiornato llm-init a v1.3.1.
     v1.0.4: allineati nvidia requiredMemory=12Gi e LLAMACPP_MEMORY_REQUEST=11Gi (pattern qwopus).
   fullDescription: |
+    **Intel acceleration**
+    - `intel`: Intel integrated GPU, 35Gi system-memory reservation (38Gi limit).
+    - `intel-gpu`: Intel discrete GPU, 26Gi VRAM and 6Gi system-memory reservation (28Gi limit).
+    - Engine image: `beclab/ggml-org-llama.cpp:server-intel-b11718`.
+    - Intel preset: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 -b 2048 -ub 2048`. Custom engine arguments are preserved.
+
     **Panoramica del modello**
     Qwen3.6-27B è un modello visione-linguaggio della serie Qwen (Alibaba). Integra comprensione multimodale con un encoder di visione incorporato, supporta finestre di contesto molto lunghe e offre capacità di thinking, tool-calling e vision. Questa app serve il build GGUF `Q4_K_M` da `unsloth/Qwen3.6-27B-GGUF` tramite llama.cpp.
 

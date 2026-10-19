@@ -32,3 +32,19 @@
 {{- end -}}
 {{- $args -}}
 {{- end -}}
+
+{{- /* Resolve GPU type safely when the legacy GPU object is absent. */ -}}
+{{- define "llamacppqwen3627bggufv3.gpuType" -}}
+{{- $gpu := .Values.GPU | default dict -}}
+{{- .Values.gpu | default $gpu.Type | default "nvidia" -}}
+{{- end -}}
+{{- /* Intel uses a single slot and batch/microbatch 2048 without MTP.
+         Preserve complete user-supplied custom argument strings. */ -}}
+{{- define "llamacppqwen3627bggufv3.platformArgs" -}}
+{{- $args := trim (.Args | default "") -}}
+{{- if and (or (eq .Gpu "intel") (eq .Gpu "intel-gpu")) (or (eq $args "") (eq $args "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1")) -}}
+-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 -b 2048 -ub 2048
+{{- else -}}
+{{- $args -}}
+{{- end -}}
+{{- end -}}
