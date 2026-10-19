@@ -38,7 +38,7 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL'
   upgradeDescription: |
-    v1.0.25: Add Intel discrete GPU mode using server-intel-b11718. Upgrade the NVIDIA/Spark CUDA image to server-cuda13-b11718. Intel uses MTP depth 3 and offline loading after Model Console downloads the weights.
+    v1.0.25: Add Intel discrete GPU mode using server-intel-b11718. Upgrade the NVIDIA/Spark CUDA image to server-cuda13-b11718. Set the default MTP depth to 3 while retaining the 128K context; migrate exact previous presets and preserve other custom arguments. Intel loads offline after Model Console downloads the weights.
 
     v1.0.23: Model Console (llm-init) updated to v1.7.21.
 
@@ -70,7 +70,7 @@ spec:
     **Preset Configuration**
     - Model: `unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL`
     - Capabilities: thinking, tools
-    - Engine args: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2` (128K context, MTP draft-2, full GPU offload, q8_0 KV cache)
+    - Engine args: `-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 3` (128K context, MTP draft-3, full GPU offload, q8_0 KV cache)
     - MTP adds modest VRAM overhead; if OOM at full 128K context, reduce `-c` (e.g. `-c 65536`).
     - Required GPU memory: `23Gi`
 
@@ -210,7 +210,7 @@ envs:
     description:  "The model capabilities. Pick what your model supports, if no extra capabilities, pick None."
   - envName: ENGINE_ARGS         # example: -c 8192 -ngl all -fa on
     required: true
-    default: "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2"
+    default: "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 3"
     type: string
     editable: true
     applyOnChange: true

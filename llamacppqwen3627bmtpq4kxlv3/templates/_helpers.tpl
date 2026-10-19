@@ -23,6 +23,10 @@
 {{- $in := . -}}
 {{- $args := trim ($in.Args | default "") -}}
 {{- $isCpu := $in.IsCpu | default false -}}
+{{- /* Migrate only the complete old default; preserve custom argument strings. */ -}}
+{{- if and (not $isCpu) (or (eq $args "") (eq $args "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2")) -}}
+{{- $args = "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 3" -}}
+{{- end -}}
 {{- if and $isCpu (not (contains "-ngl" $args)) -}}
 {{- if $args -}}
 {{- $args = printf "%s -ngl 0" $args -}}
@@ -42,7 +46,7 @@
          Preserve complete user-supplied custom argument strings. */ -}}
 {{- define "llamacppqwen3627bmtpq4kxlv3.platformArgs" -}}
 {{- $args := trim (.Args | default "") -}}
-{{- if and (eq .Gpu "intel-gpu") (or (eq $args "") (eq $args "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 2")) -}}
+{{- if and (eq .Gpu "intel-gpu") (or (eq $args "") (eq $args "-c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 3")) -}}
 -c 131072 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 --spec-type draft-mtp --spec-draft-n-max 3 -b 512 -ub 256 --offline
 {{- else -}}
 {{- $args -}}
