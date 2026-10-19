@@ -1,3 +1,4 @@
+{{- /* Immutable tags built by CI from the merged main commits validated for this release. */ -}}
 {{- define "embeddinggemma2.embedTag" -}}b4727a7-onnx-cpu{{- end -}}
 {{- define "embeddinggemma2.llmInitTag" -}}3c3f14b{{- end -}}
 {{- define "embeddinggemma2.modelRepo" -}}onnx-community/embeddinggemma-2-ONNX{{- end -}}
