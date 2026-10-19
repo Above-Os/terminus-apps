@@ -4,6 +4,8 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.0.21: 新增 Intel 核显及独显模式，使用 server-intel-b11718；保留 NVIDIA 与 Spark 路径。 B70 验证使用 102K 上下文、单槽、MTP 深度 2，以及 2048 批次/微批次。将唯一的 IQ3_S 张量 blk.14.ffn_down.weight 放在 CPU，并使用 6 个 CPU 线程，避免 Intel 后端输出异常。
+
     v1.0.18: 升级 llama.cpp 至 server-cuda13-b11046。NVIDIA 主机内存上限增加 10Gi（引擎 38Gi 至 48Gi，chart limitedMemory 40Gi 至 50Gi）。
 
     v1.0.17: Model Console（llm-init）版本更新为 v1.7.21。
@@ -26,6 +28,12 @@ spec:
 
     v1.0.0: 首发。llama.cpp server-cuda12-b10454，llm-init v1.3.5。Unsloth Qwen3.8-27B UD-Q4_K_XL + mmproj，102K 上下文（-c 104448），MTP --spec-draft-n-max 4，显存配额 23Gi。
   fullDescription: |
+    **Intel 加速**
+    - `intel`: Intel 核显，预留 35Gi 系统内存，上限 38Gi。
+    - `intel-gpu`: Intel 独显，预留 26Gi 显存及 6Gi 系统内存，系统内存上限 28Gi。
+    - 引擎镜像： `beclab/ggml-org-llama.cpp:server-intel-b11718`.
+    - Intel 预设： `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 -b 2048 -ub 2048 --spec-type draft-mtp --spec-draft-n-max 2 LLAMA_ARG_OVERRIDE_TENSOR=blk.14.ffn_down.weight=CPU -t 6 -tb 6`。保留自定义引擎参数。
+
     **模型简介**
     Qwen3.8-27B 是阿里巴巴 Qwen 系列的视觉语言模型，基于 Qwen3.5 架构，开箱即用支持思考、工具调用与原生图像/视频理解，上下文窗口 256K。本应用通过 llama.cpp 运行 `unsloth/Qwen3.8-27B-GGUF` 的 `UD-Q4_K_XL` GGUF 量化版本。
 

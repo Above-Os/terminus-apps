@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.8-27B (GGUF UD-Q4_K_XL) served with llama.cpp. Fixed multi-node startup by scheduling llm-init and the inference engine on the same node to share local run-state."
   appid: llamacppqwen3827bggufv3
   title: Qwen3.8-27B (llama.cpp)
-  version: '1.0.20'
+  version: '1.0.21'
   categories:
     - AI
     - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL'
   upgradeDescription: |
+    v1.0.21: Add Intel integrated and discrete GPU modes with server-intel-b11718; preserve NVIDIA and Spark paths. B70 preset: 102K context, one slot, MTP depth 2, batch/microbatch 2048. Keep the single IQ3_S tensor blk.14.ffn_down.weight on CPU with six threads to avoid corrupt Intel output.
+
     v1.0.18: Upgrade llama.cpp to server-cuda13-b11046. Raise the NVIDIA host-memory limit by 10Gi (engine 38Gi to 48Gi, chart limitedMemory 40Gi to 50Gi).
 
     v1.0.17: Model Console (llm-init) updated to v1.7.21.
@@ -76,6 +78,12 @@ spec:
     |----------------|-------------------|--------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; `-ngl all` for full GPU  |
     | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
+
+    **Intel acceleration**
+    - `intel`: Intel integrated GPU, 35Gi system-memory reservation (38Gi limit).
+    - `intel-gpu`: Intel discrete GPU, 26Gi VRAM and 6Gi system-memory reservation (28Gi limit).
+    - Engine image: `beclab/ggml-org-llama.cpp:server-intel-b11718`.
+    - Intel preset: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 -b 2048 -ub 2048 --spec-type draft-mtp --spec-draft-n-max 2 LLAMA_ARG_OVERRIDE_TENSOR=blk.14.ffn_down.weight=CPU -t 6 -tb 6`. Custom engine arguments are preserved.
 
     **How It Works**
     First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
@@ -126,6 +134,23 @@ spec:
       limitedDisk: 500Gi
       limitedMemory: "48Gi"
       requiredMemory: "32Gi"
+
+    - mode: intel
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      requiredMemory: "35Gi"
+      limitedMemory: "38Gi"
+    - mode: intel-gpu
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      requiredMemory: "6Gi"
+      limitedMemory: "28Gi"
+      requiredGPUMemory: "26Gi"
+      limitedGPUMemory: "26Gi"
 
   supportArch:
     - amd64
