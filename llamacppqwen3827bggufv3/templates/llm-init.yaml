@@ -38,10 +38,7 @@
 {{- end -}}
 {{- end -}}
 {{- $modelSupports = join "," $expandedSupports -}}
-{{- $gpuType := .Values.gpu | default "" -}}
-{{- if not $gpuType -}}
-{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
-{{- end -}}
+{{- $gpuType := include "llamacppqwen3827bggufv3.gpuType" . -}}
 {{- /* The reasoning_effort levels this model's chat template accepts, and
        the one it uses when a request names none. llm-init turns these into
        the card's parameter rule, which is what Router publishes; unknown
@@ -56,6 +53,7 @@
 {{- $engineArgs = trim (printf "%s --embedding" $engineArgs) -}}
 {{- end -}}
 {{- $engineArgs = include "llamacppqwen3827bggufv3.engineArgs" (dict "Args" $engineArgs) -}}
+{{- $engineArgs = include "llamacppqwen3827bggufv3.platformArgs" (dict "Args" $engineArgs "Gpu" $gpuType) -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "debug" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
