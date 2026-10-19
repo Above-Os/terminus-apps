@@ -16,8 +16,7 @@
 {{- $gpuType := include "llamacppqwen3827bggufv3.gpuType" . -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
 {{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
-{{- $isIntel := eq $gpuType "intel" -}}
-{{- $needDri := or $isIntel $isIntelGpu -}}
+{{- $needDri := $isIntelGpu -}}
 {{- $engineArgs = include "llamacppqwen3827bggufv3.engineArgs" (dict "Args" $engineArgs) -}}
 {{- $engineArgs = include "llamacppqwen3827bggufv3.platformArgs" (dict "Args" $engineArgs "Gpu" $gpuType) -}}
 {{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
@@ -27,10 +26,7 @@
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
-{{- if $isIntel -}}
-{{- $memRequest = "34Gi" -}}
-{{- $memLimit = "36Gi" -}}
-{{- else if $isIntelGpu -}}
+{{- if $isIntelGpu -}}
 {{- $memRequest = "4Gi" -}}
 {{- $memLimit = "24Gi" -}}
 {{- end -}}
@@ -110,7 +106,7 @@ spec:
 {{- if $needDri }}
           image: docker.io/beclab/ggml-org-llama.cpp:server-intel-b11718
 {{- else }}
-          image: docker.io/beclab/ggml-org-llama.cpp:server-cuda13-b11046
+          image: docker.io/beclab/ggml-org-llama.cpp:server-cuda13-b11718
 {{- end }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]

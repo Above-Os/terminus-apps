@@ -53,7 +53,7 @@
          Preserve complete user-supplied custom argument strings. */ -}}
 {{- define "llamacppqwen3827bggufv3.platformArgs" -}}
 {{- $args := trim (.Args | default "") -}}
-{{- if and (or (eq .Gpu "intel") (eq .Gpu "intel-gpu")) (or (eq $args "") (eq $args "-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 2 -kvu --spec-type draft-mtp --spec-draft-n-max 2")) -}}
+{{- if and (eq .Gpu "intel-gpu") (or (eq $args "") (eq $args "-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 2 -kvu --spec-type draft-mtp --spec-draft-n-max 2")) -}}
 -c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1 -b 2048 -ub 2048 --spec-type draft-mtp --spec-draft-n-max 2 LLAMA_ARG_OVERRIDE_TENSOR=blk.14.ffn_down.weight=CPU -t 6 -tb 6
 {{- else -}}
 {{- $args -}}
