@@ -1,5 +1,5 @@
-{{- define "embeddinggemma2.embedTag" -}}embeddinggemma2-bdd5717-onnx-cpu{{- end -}}
-{{- define "embeddinggemma2.llmInitTag" -}}embeddinggemma2-cabe786{{- end -}}
+{{- define "embeddinggemma2.embedTag" -}}b4727a7-onnx-cpu{{- end -}}
+{{- define "embeddinggemma2.llmInitTag" -}}3c3f14b{{- end -}}
 {{- define "embeddinggemma2.modelRepo" -}}onnx-community/embeddinggemma-2-ONNX{{- end -}}
 {{- define "embeddinggemma2.modelRevision" -}}daa72c51243991dfcaf9f9137d2c573d8f7790c0{{- end -}}
 {{- define "embeddinggemma2.logicalModelName" -}}embeddinggemma-2{{- end -}}
