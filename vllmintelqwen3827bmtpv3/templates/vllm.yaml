@@ -86,6 +86,15 @@ spec:
           image: "{{ $engineImage }}"
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash", "/llm-init/wrappers/vllm.sh"]
+          # CAP_PERFMON lets the xe driver report used VRAM to this process. On
+          # pre-7.x kernels (seen on 6.14) it reports used=0 to unprivileged
+          # callers, so torch.xpu.mem_get_info() returns free == total, vLLM
+          # sizes the KV cache as if the weights took no memory (28.1 GiB
+          # instead of 7.43 GiB) and the allocation fails with XPU OOM.
+          securityContext:
+            capabilities:
+              add:
+                - PERFMON
           env:
             - name: ENGINE_KIND
               value: vllm
