@@ -1,0 +1,175 @@
+{{- /* vLLM engine Deployment (Intel Arc XPU only). ENGINE_ARGS = raw vLLM CLI
+       flags, word-split and appended after --model by wrappers/vllm.sh. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- /* Defaults avoid empty K8s quantities. Sums (llm-init + vllm) must fit
+       the manifest accelerator limits. */ -}}
+{{- $cpuRequest := trim ($oe.VLLM_CPU_REQUEST | default "200m") -}}
+{{- $memRequest := trim ($oe.VLLM_MEMORY_REQUEST | default "10Gi") -}}
+{{- $cpuLimit := trim ($oe.VLLM_CPU_LIMIT | default "8") -}}
+{{- $memLimit := trim ($oe.VLLM_MEMORY_LIMIT | default "32Gi") -}}
+{{- $gpuType := include "llmbase.gpuType" . -}}
+{{- $engineImage := include "vllmintelqwen3827bmtpv3.engineImage" . -}}
+{{- $engineArgs = include "vllmintelqwen3827bmtpv3.engineArgs" (dict "Args" $engineArgs) -}}
+{{- /* The Intel device plugin advertises a card count only, so the VRAM quota
+       travels on a pod annotation that app-service reads. */ -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" ($oe.VLLM_REQUIRED_GPU_MEMORY | default "29Gi") -}}
+{{- /* Must match llm-init.yaml: per-release run-state hostPath. */ -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+---
+# vLLM engine Deployment. wrappers/vllm.sh waits on llm-init's sentinel in
+# the shared run-state dir, then serves --model "$MODEL_NAME" on :8000. llm-init
+# reverse-proxies http://vllm:8000 via the "vllm" Service below.
+# Shared hostPath volumes (read-only here, llm-init owns writes): hf-cache
+# (/cache/hf/hub), run-state (sentinel handshake). vllm-cache lives as a subdir
+# of the same appCommon/huggingface store (sibling to models--*).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Primary workload: named after the release (== appid vllmintelqwen3827bmtpv3).
+  # Label/selector stays io.kompose.service: vllm.
+  name: '{{ .Release.Name }}'
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "vllm"
+    vllmintelqwen3827bmtpv3.io/engine-image: {{ $engineImage | quote }}
+spec:
+  replicas: {{ .Values.workloads.vllmintelqwen3827bmtpv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: vllm
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: vllm
+        # Target of the llm-init Pod's podAffinity (it must run on this Pod's
+        # node to hand over run-state). Keep this label OFF the llm-init Pod
+        # template - see the note there.
+        app.kubernetes.io/instance: '{{ .Release.Name }}'
+      # VRAM quota (plain Kubernetes quantity).
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: llm-init-wrappers
+            defaultMode: 0555
+        # No /dev/dri hostPath: the Intel device plugin injects only the
+        # allocated card (cardN, renderDN and its /dev/dri/by-path entries).
+        # Mounting the whole host /dev/dri exposes the other cards' nodes,
+        # which the device cgroup then refuses, and oneCCL's init (vLLM's
+        # warm-up all_reduce, even on one card) opens every render node and
+        # aborts with "fill_device_fds: open failed ... Operation not permitted".
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi
+      containers:
+        - name: vllm
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/llm-init/wrappers/vllm.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: vllm
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: VLLM_PORT
+              value: "8000"
+            - name: WAIT_TIMEOUT
+              value: "3600"
+            - name: ENGINE_ARGS
+              value: "{{ $engineArgs }}"
+            - name: OLARES_GPU_MODE
+              value: {{ $gpuType | quote }}
+            # Read the model llm-init already downloaded to the shared HF Hub
+            # cache instead of re-downloading to ~/.cache/huggingface.
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            # Weights are guaranteed local (wait_for_sentinel gates startup), so
+            # skip the Hub entirely instead of HEADing it for every missing file.
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: VLLM_CACHE_ROOT
+              value: /cache/vllm
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # MTP on Intel XPU needs the V2 model runner: the patched image's
+            # MTP fixes (1+k prefill bug, int4 draft lm_head) live there, and the
+            # V1 runner is only the slower fallback.
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "1"
+            # XPU graphs for decode (FULL_DECODE_ONLY in ENGINE_ARGS).
+            - name: VLLM_XPU_ENABLE_XPU_GRAPH
+              value: "1"
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+            - name: TZ
+              value: Etc/UTC
+          ports:
+            - name: vllm
+              containerPort: 8000
+          # No readiness/liveness probe (intentional): serving readiness is owned
+          # by llm-init (polls /v1/models, flips its own /readyz). A probe here
+          # would keep the Pod NotReady during the long model load.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+              readOnly: true
+            - name: hf-cache
+              mountPath: /cache/vllm
+              subPath: vllm-cache
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /llm-init/wrappers
+              readOnly: true
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+---
+# Service name MUST be "vllm": llm-init derives the engine URL
+# http://vllm:8000 from ENGINE_KIND (no override). Internal only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+spec:
+  selector:
+    io.kompose.service: vllm
+  ports:
+    - name: vllm
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
