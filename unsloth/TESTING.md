@@ -24,6 +24,16 @@ The backport is specific to the pinned Studio image. Review/remove it when an
 upstream image includes equivalent descendant cleanup; do not carry it across an
 image upgrade without running the regression tests.
 
+## Final inline-package retest
+
+The complete device suite was rerun after moving the compatibility code into
+`runtime-configmap.yaml`, against runtime commit
+`5767d401dc5366c1bd37d5e8878b613cb774511c`. The tested 0.0.7 package SHA256 is
+`49dbf18ee7ad2828b08e94ff00660c15c6125f24d370ebbeabca0558a130cb8f`.
+The backport regression used the script extracted from this package. The deployed
+ConfigMap and generated backend module were checked, and the package contains no
+standalone Python files. All results below describe this fresh run.
+
 ## Results
 
 | Check | Result |
@@ -32,15 +42,16 @@ image upgrade without running the regression tests.
 | Baseline 0.0.5 install, upgrade to candidate | Pass |
 | UID 1000 offline uv and pip installations into the configured directory | Pass |
 | Real `causal-conv1d` installation and fresh-process CUDA extension import | Pass |
-| Dependency persistence and import after Pod recreation during upgrade | Pass |
+| Dependency persistence and fresh-process CUDA import after a full app restart | Pass |
 | Fresh-cache HTTP download of an Xet-backed official Hub weight | Pass |
 | Backport regression, including a real installer ignoring SIGTERM, baseline orphan reproduction, and superseded-worker guard | 5 passed |
 | Upstream stop watchdog, terminal state, start idempotency, and shutdown/save tests | 112 passed |
-| Browser: cancel during preparation, wait for stopped state, reload | Pass; configuration page restored without a stop dialog |
-| Qwen3.5-2B two-step QLoRA through Studio API, adapter saved | Pass; step 2/2, final loss 1.302899 |
+| Browser after restart: cancel during model loading, reload twice | Pass; stopped state remained stable, configuration page restored without a stop dialog or worker |
+| Qwen3.5-2B two-step QLoRA through Studio API, adapter saved | Pass; step 2/2, final loss 1.302319 |
 | Configured Hub mirror, fresh-cache HTTP weight download | Pass with a 60-second transfer timeout in the test process |
-| Final candidate: cancel while preparing/importing, terminal stability | Pass; stopped about 24 seconds after cancel, no remaining training workers |
-| Final candidate: cancel after a real optimizer step, terminal stability | Pass; stopped about 4 seconds after cancel, output directory cleared |
+| Jupyter authenticated login and kernelspec API | Pass |
+| Final candidate: cancel while preparing/importing, terminal stability | Pass; stopped about 16 seconds after cancel, no remaining training workers |
+| Final candidate: cancel after a real optimizer step, terminal stability | Pass; stopped about 2 seconds after cancel, output directory cleared; no final adapter saved |
 
 The HTTP test downloaded `hf-internal-testing/tiny-random-LlamaForCausalLM` /
 `model.safetensors` into a new temporary cache. Xet metadata was present; the test
@@ -55,7 +66,7 @@ The mirror initially hit the library's default transfer timeout. Retesting with
 the application's configured Hub endpoint and timeout were not changed. The
 download fixture is pinned to revision `9fb191250dd56d0ba7ec9785a025ed29c03d5998`.
 
-The completed training saved a 21,851,336-byte `adapter_model.safetensors`.
+The completed training saved a 21,851,336-byte `adapter_model.safetensors`, also verified after the full app restart. The real CUDA wheel was reinstalled with uv using the configured writable target; no pip fallback was used.
 The image logged torch.compile eager-fallback warnings during the first run;
 training completed and the adapter was saved. The completed GPU worker used the
 existing upstream post-completion retirement watchdog before a subsequent run
