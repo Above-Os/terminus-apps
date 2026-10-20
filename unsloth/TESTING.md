@@ -67,34 +67,17 @@ watchdog test's import stubs otherwise mask `utils.paths.storage_roots` during
 collection. No upstream test files were changed. The final run produced 112
 passes with existing dependency deprecation/syntax warnings.
 
-## Reproduce
+## Validation setup
 
-Run these scripts with the Studio virtual environment's Python inside the test
-container. Copy the scripts to a temporary directory first; `tests/` and this
-document are excluded from the installable chart by `.helmignore`.
+The disposable verification scripts are kept locally and are not included in
+this PR. The cancellation compatibility code is embedded in the ConfigMap; the
+init container reads it as `/runtime-config/prepare-runtime.py`.
 
-```sh
-PY=/opt/unsloth-studio/unsloth_studio/bin/python
-
-# After Studio or its official install-kernels command installs causal-conv1d:
-$PY verify_dependencies.py
-$PY verify_http_download.py --endpoint https://huggingface.co --require-xet
-
-# Use the original, unpatched module from the pinned image for this source test:
-$PY verify_cancellation.py /tmp/original-training.py prepare-runtime.py -v
-
-# Uses the container's install-time password without printing credentials.
-# Creates disposable training runs and writes progress logs under /tmp.
-$PY verify_training.py complete
-$PY verify_training.py cancel-prep
-$PY verify_training.py cancel-training
-```
-
-`verify_training.py` uses `Qwen/Qwen3.5-2B`, 32 rows from
+The training validation used `Qwen/Qwen3.5-2B`, 32 rows from
 `mlabonne/FineTome-100k`, QLoRA, sequence length 128, batch size 1, LoRA rank 8,
-and two steps for the completion case. The cancellation cases use a longer run.
-Verify the completion case produces a nonempty adapter, and verify terminal
-state remains stable after cancellation and page reload.
+and two steps for completion. Cancellation cases used a longer run. The checks
+verified a nonempty adapter and stable terminal state after cancellation and
+page reload.
 
 For the upstream suite, preload `core.training.training` with the backend source
 directory on `sys.path`, then run pytest on:
