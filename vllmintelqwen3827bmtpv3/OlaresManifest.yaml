@@ -1,0 +1,254 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: vllmintelqwen3827bmtpv3
+  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+  description: "Qwen3.8-27B (GPTQ-Int4) with MTP speculative decoding on Intel Arc vLLM, tuned for Arc Pro B70."
+  appid: vllmintelqwen3827bmtpv3
+  title: Qwen3.8-27B MTP (Intel vLLM)
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+    - llm
+sharedEntrances:
+  - name: vllmintelqwen3827bmtpv3
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3.8-27B MTP
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+entrances:
+  - name: vllmclient
+    port: 8090
+    host: download-svc
+    title: Qwen3.8-27B MTP
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+    openMethod: window
+    authLevel: internal
+#   vllmintelqwen3827bmtpv3 — engine Deployment (== appid / Release.Name)
+#   llminit                 — llm-init / entrance Deployment
+workloadReplicas:
+  vllmintelqwen3827bmtpv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16'
+  upgradeDescription: |
+    v1.0.0: First release. Qwen3.8-27B GPTQ-Int4 (with BF16 MTP head) on `beclab/llm-scaler-vllm:0.26.0-b2-pp-mtp-263b3a7`, Intel discrete GPU only. MTP with 3 draft tokens and an int4 draft lm_head, V2 model runner, XPU graphs for decode, fp8 KV cache, 128K context, up to 64 concurrent requests.
+  fullDescription: |
+    **Model Overview**
+    Qwen3.8-27B is a vision-language model from the Qwen series (Alibaba), built on the Qwen3.5 architecture. It supports thinking, tool-calling, and image understanding. This app serves the community GPTQ build `SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16` (int4 weights, group size 128, BF16 multi-token-prediction head kept) with vLLM on Intel Arc.
+
+    **Target hardware**
+    Intel discrete GPUs with 32GB VRAM, tuned on **Intel Arc Pro B70**. Install with compute mode **`intel-gpu`**. Other GPUs are not supported by this app.
+
+    **Preset Configuration**
+    - Engine image: `beclab/llm-scaler-vllm:0.26.0-b2-pp-mtp-263b3a7` = `intel/llm-scaler-vllm:0.26.0-b2` plus fixes for MTP on the V2 model runner (wrong output on prompts of exactly 1 + draft-length tokens, eager drafter under TP) and an optional int4 draft lm_head.
+    - Speculative decoding: MTP, 3 draft tokens, int4 draft lm_head (about 2–3× faster decoding than without MTP).
+    - Runner: `VLLM_USE_V2_MODEL_RUNNER=1`, `VLLM_XPU_ENABLE_XPU_GRAPH=1`, `-cc.cudagraph_mode=FULL_DECODE_ONLY`.
+    - Context: 128K (`--max-model-len 131072`), up to 64 concurrent requests. KV cache in fp8 (`--kv-cache-dtype fp8`): about 191K tokens in total, enough for 1.4 full-length requests at once; the Gated DeltaNet state stays float32.
+    - Capabilities: thinking, tools, vision.
+    - Engine args: `--dtype float16 --gpu-memory-utilization 0.9 --max-model-len 131072 --kv-cache-dtype fp8 --max-num-batched-tokens 8192 --max-num-seqs 64 --block-size 64 --trust-remote-code --speculative-config.method=qwen3_5_mtp --speculative-config.num_speculative_tokens=3 --speculative-config.draft_lm_head_quantization=int4 -cc.mode=none -cc.cudagraph_mode=FULL_DECODE_ONLY --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3`
+    - Required GPU memory: `29Gi` (the engine takes 90% of a 32GB card).
+
+    **Tuning**
+    - Single user: `--speculative-config.num_speculative_tokens=4` is about 7% faster for one request at a time; 3 is faster from 8 concurrent requests up.
+    - Keep `--dtype float16` and do not add `--quantization` (GPTQ is detected from the model).
+    - Use dotted flags (`--speculative-config.key=value`) in ENGINE_ARGS, not inline JSON.
+    - Do not raise `--gpu-memory-utilization` above 0.9: at 0.93 a 150K-token prompt runs out of device memory during prefill.
+    - Without `--kv-cache-dtype fp8` the KV cache holds only about 83K tokens; lower `--max-model-len` to 65536 in that case.
+
+    **Measured on one Arc Pro B70** (this preset, greedy)
+    | Workload | Throughput |
+    |---|---|
+    | Short math Q&A, 1 request | 80 output tok/s |
+    | Short math Q&A, 8 concurrent | 404 output tok/s |
+    | Short math Q&A, 32 concurrent | 421 output tok/s |
+    | 30K-token prompt, 1 request | 1404 tok/s (prompt + output) |
+    | 130K-token prompt | prefill about 147 s |
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then vLLM starts serving the model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **vLLM** (`beclab/llm-scaler-vllm:0.26.0-b2-pp-mtp-263b3a7`): Runs the model and serves API requests (port 8000)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to vLLM.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
+
+  developer: Alibaba
+  website: https://qwen.ai/home
+  sourceCode: https://huggingface.co/SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16
+
+  accelerator:
+    #   intel-gpu — discrete Intel Arc XPU; VLLM_REQUIRED_GPU_MEMORY -> gpu-memory pod annotation
+    - mode: intel-gpu
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # Engine anon memory measured at 9.0Gi (peak 10.6Gi) on a B70; the rest
+      # of the limit is page cache from reading the 18Gi of weights.
+      # Engine MEMORY_REQUEST 10Gi + llm-init 128Mi <= requiredMemory 11Gi;
+      # MEMORY_LIMIT 32Gi + llm-init 4Gi <= limitedMemory 36Gi.
+      requiredMemory: "11Gi"
+      limitedMemory: "36Gi"
+      requiredGPUMemory: "29Gi"
+      limitedGPUMemory: "29Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16"
+    description: "HuggingFace source for the Qwen3.8-27B GPTQ-Int4 + MTP safetensors."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16"
+    description: "vLLM --model / OpenAI alias."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "Qwen3.8-27B capabilities."
+  # Not editable: which levels exist is a fact of this model's chat template,
+  # which rejects anything outside low / medium / xhigh with HTTP 400
+  # (measured: "high" and "minimal" are refused).
+  - envName: MODEL_REASONING_EFFORT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "low,medium,xhigh"
+    description: "The reasoning_effort levels this model accepts, published on the model card so clients can read them instead of guessing."
+  # The level the chat template uses when a request carries no
+  # reasoning_effort. Published, never injected.
+  - envName: MODEL_REASONING_EFFORT_DEFAULT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "xhigh"
+    description: "The level this model uses when a request does not ask for one."
+  - envName: ENGINE_ARGS
+    required: true
+    default: "--dtype float16 --gpu-memory-utilization 0.9 --max-model-len 131072 --kv-cache-dtype fp8 --max-num-batched-tokens 8192 --max-num-seqs 64 --block-size 64 --trust-remote-code --speculative-config.method=qwen3_5_mtp --speculative-config.num_speculative_tokens=3 --speculative-config.draft_lm_head_quantization=int4 -cc.mode=none -cc.cudagraph_mode=FULL_DECODE_ONLY --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3"
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Flags only — do not prefix with ENGINE_ARGS=. Use dotted flags such as --speculative-config.num_speculative_tokens=4, not inline JSON. Keep --dtype float16 and do not add --quantization."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: VLLM_CPU_REQUEST
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_MEMORY_REQUEST
+    required: true
+    default: "10Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_CPU_LIMIT
+    required: true
+    default: "8"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_MEMORY_LIMIT
+    required: true
+    default: "32Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: VLLM_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "29Gi"
+    description: "VRAM quota declared through the gpu.bytetrade.io/required-gpu-memory pod annotation. The engine uses --gpu-memory-utilization 0.9 of a 32GB card."
+    regex: "^[0-9]+(Gi|Mi)?$"
