@@ -7,7 +7,7 @@ metadata:
   description: A preset-voice speech model for reading text aloud
   appid: audioqwen3tts06v3
   title: Qwen3-TTS 0.6B CustomVoice
-  version: '1.0.0'
+  version: '1.0.1'
   categories:
     - AI
     - models
@@ -84,6 +84,24 @@ spec:
       limitedDisk: 50Gi
       limitedMemory: "8Gi"
       requiredMemory: "4352Mi"
+    # Intel iGPU: engine request 4Gi / limit 8Gi + llm-init 256Mi/4Gi. No GPU-memory field.
+    - mode: intel
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "4352Mi"
+    # Intel Arc: discrete. GPU-memory field is the installer label. The pod bind-mounts /dev/dri.
+    - mode: intel-gpu
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "4Gi"
+      limitedGPUMemory: "4Gi"
 
   supportArch:
     - amd64
@@ -189,8 +207,10 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    description: "Engine image override. Left empty, the chart uses
-      docker.io/beclab/audio-qwen3tts:v1.1.15. Filling this replaces that image."
+    # No default: nvidia/gb10 stay on the CUDA image; intel/intel-gpu use the OpenVINO image.
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
+      docker.io/beclab/audio-qwen3tts:v1.1.30; intel and intel-gpu use
+      docker.io/beclab/audio-qwen3tts-ov:v1.1.30. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string

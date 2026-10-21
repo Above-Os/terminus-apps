@@ -11,7 +11,6 @@
 {{- end -}}
 {{- end -}}
 {{- $supportsRaw := join "," $supportsKeys -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-qwen3tts:v1.1.15" -}}
 {{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
 {{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
 {{- $memRequest := trim ($oe.MEMORY_REQUEST | default "2Gi") -}}
@@ -25,7 +24,14 @@
 {{- if not $gpuType -}}
 {{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
 {{- end -}}
+{{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
+{{- /* No manifest default: a filled ENGINE_IMAGE would pin every mode to one image. */ -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen3tts-ov:v1.1.30" "docker.io/beclab/audio-qwen3tts:v1.1.30" $isIntel) -}}
 {{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- if $isIntel -}}
+{{- /* iGPU request is not the limit. 4Gi + llm-init 256Mi = requiredMemory 4352Mi. Limit stays 8Gi. */ -}}
+{{- $memRequest = "4Gi" -}}
+{{- end -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if $unifiedMem -}}
@@ -50,7 +56,7 @@ metadata:
   annotations:
     audio.bytetrade.io/model: "{{ $modelName }}"
     audio.bytetrade.io/supports: "{{ $supportsRaw }}"
-{{- if $wantGpu }}
+{{- if or $isIntel $wantGpu }}
     applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
 {{- end }}
 spec:
@@ -84,6 +90,20 @@ spec:
           configMap:
             name: audio-wrappers
             defaultMode: 0555
+{{- if $isIntel }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+{{- end }}
       containers:
         - name: {{ $cname }}
           image: "{{ $engineImage }}"
@@ -153,17 +173,25 @@ spec:
             - name: wrappers
               mountPath: /wrappers
               readOnly: true
+{{- if $isIntel }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and $wantGpu (not $unifiedMem) }}
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and $wantGpu (not $unifiedMem) }}
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
