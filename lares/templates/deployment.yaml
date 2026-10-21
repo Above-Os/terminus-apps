@@ -5,18 +5,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: {{ .Chart.Name }}
-  annotations:
-    {{- $domains := .Values.domain | default dict }}
-    {{- $page := index $domains .Chart.Name | default "" | toString }}
-    {{- if $page }}
-    {{- /* Two entrances publish the page at <appid>0. The app list opens <appid>, which this install's injected host already carries. */}}
-    {{- $label := index (splitList "." $page) 0 }}
-    {{- $appid := $label }}
-    {{- if gt (len $domains) 1 }}
-    {{- $appid = trimSuffix "0" $label }}
-    {{- end }}
-    applications.app.bytetrade.io/default-thirdlevel-domains: '[{"appName":"{{ .Chart.Name }}","entranceName":"{{ .Chart.Name }}","thirdLevelDomain":"{{ $appid }}"}]'
-    {{- end }}
 spec:
   replicas: {{ .Values.workloads.lares.replicaCount }}
   strategy:
