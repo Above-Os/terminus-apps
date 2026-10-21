@@ -93,6 +93,14 @@ spec:
             {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
+            # Where an API key's integrations reach that port: the note-api
+            # entrance's own label (app id and entrance index, as app-service
+            # names it), under the caller's zone as for Files below. The page
+            # cannot tell it reliably from the host it is served on.
+            {{- with index (.Values.domain | default dict) "note-api" }}
+            - name: NOTE_EXTERNAL_ORIGIN
+              value: {{ printf "https://%s.{user}.%s" (. | splitList "." | first) ($.Values.user.zone | splitList "." | rest | join ".") | quote }}
+            {{- end }}
             - name: NOTE_DATA_DIR
               value: /data
             - name: TZ
