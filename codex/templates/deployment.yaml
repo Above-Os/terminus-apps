@@ -84,27 +84,42 @@ spec:
             - |
               set -e
               mkdir -p /opt/data/.local/bin /opt/data/.codex/skills /opt/data/.install-state
-              chown -R 1000:1000 /opt/data
-              chmod -R 0755 /opt/data
+              chown 1000:1000 /opt/data /opt/data/.local /opt/data/.local/bin /opt/data/.codex /opt/data/.codex/skills /opt/data/.install-state
+              mkdir -p /upgrade-backups
+              chown 1000:1000 /upgrade-backups
+              chmod 0700 /upgrade-backups
               echo "[init-chmod-data] /opt/data owned by 1000:1000"
           resources: {}
           volumeMounts:
+            - {name: upgrade-backups, mountPath: /upgrade-backups}
             - mountPath: /opt/data
               name: app-data-home
 
         # Flatten Olares skills from /skills-staging into Codex's
         # user skills dir (~/.codex/skills = /opt/data/.codex/skills).
+        - name: backup-workspace
+          image: beclab/harveyff-codex-base:0.5.9
+          securityContext: {runAsUser: 1000, runAsGroup: 1000, allowPrivilegeEscalation: false}
+          command: [python3, /upgrade/backup.py]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: app-data-home, mountPath: /opt/data}
+            - {name: agentd-state, mountPath: /var/lib/agentd, readOnly: true}
+            - {name: upgrade-backups, mountPath: /upgrade-backups}
+            - {name: upgrade-script, mountPath: /upgrade, readOnly: true}
         - name: init-skills
           image: "beclab/harveyff-codex-base:0.5.9"
           imagePullPolicy: IfNotPresent
           securityContext:
-            runAsUser: 0
-            runAsGroup: 0
+            runAsUser: 1000
+            runAsGroup: 1000
           command:
             - sh
             - -c
             - |
-              set -u
+              set -eu
               if [ ! -d /skills-staging ]; then
                 echo "[init-skills] /skills-staging not in image; skipping"
                 exit 0
@@ -112,9 +127,9 @@ spec:
               mkdir -p /opt/data/.codex/skills
               for d in /skills-staging/*/; do
                 name="$(basename "$d")"
-                rm -rf "/opt/data/.codex/skills/$name"
-                cp -a "$d" "/opt/data/.codex/skills/$name"
-                chown -R 1000:1000 "/opt/data/.codex/skills/$name"
+                if [ ! -e "/opt/data/.codex/skills/$name" ]; then
+                  cp -r "$d" "/opt/data/.codex/skills/$name"
+                fi
               done
               echo "[init-skills] Olares skills installed under /opt/data/.codex/skills:"
               ls -1 /skills-staging
@@ -249,7 +264,7 @@ spec:
               STANDALONE_CURRENT="$HOME/.codex/packages/standalone/current"
 
               if [ -x "$HOME/.local/bin/codex" ] && [ -e "$STANDALONE_CURRENT" ] && [ -f "$SENTINEL" ]; then
-                if "$HOME/.local/bin/codex" --version >/dev/null 2>&1; then
+                if [ "$("$HOME/.local/bin/codex" --version)" = "codex-cli ${CODEX_VERSION}" ]; then
                   echo "[init-install-codex] cached standalone package found (installed $(cat "$SENTINEL"), ${TARGET})"
                   "$HOME/.local/bin/codex" --version
                   exit 0
@@ -277,6 +292,7 @@ spec:
                 exit 1
               fi
 
+              test "$("$HOME/.local/bin/codex" --version)" = "codex-cli ${CODEX_VERSION}"
               date -u +%Y-%m-%dT%H:%M:%SZ > "$SENTINEL"
               echo "[init-install-codex] installed official standalone Codex ${CODEX_VERSION} for ${TARGET}"
               "$HOME/.local/bin/codex" --version
@@ -377,6 +393,11 @@ spec:
           command:
             - sleep
             - infinity
+          readinessProbe:
+            exec:
+              command: [sh, -ec, 'test "$(/opt/data/.local/bin/codex --version)" = "codex-cli {{ .Chart.AppVersion }}"']
+            periodSeconds: 20
+            timeoutSeconds: 10
           resources:
             limits:
               cpu: "4"
@@ -385,6 +406,7 @@ spec:
               cpu: 100m
               memory: 2Gi
           volumeMounts:
+            - {name: upgrade-backups, mountPath: /opt/backups, readOnly: true}
             - mountPath: /opt/data
               name: app-data-home
             {{- if eq (toString .Values.olaresEnv.ALLOW_HOME_DIR_ACCESS) "true" }}
@@ -406,7 +428,7 @@ spec:
               readOnly: true
             {{- end }}
         - name: agentd
-          image: {{ required "agentd.image must name the published Codex embedding" .Values.agentd.image | quote }}
+          image: {{ index (.Values.agentd | default dict) "image" | default "beclab/codex-agentd:0.1.19" | quote }}
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 1000
@@ -498,7 +520,7 @@ spec:
           command:
             - dockerd
             - --host
-            - tcp://0.0.0.0:2375
+            - tcp://127.0.0.1:2375
             - --host
             - unix:///var/run/docker.sock
             - --mtu=1450
@@ -544,7 +566,7 @@ spec:
             - name: PORT_WATCHER_ADDR
               value: "127.0.0.1:19790"
             - name: PORT_WATCHER_DENYLIST
-              value: "19790,4477,8084"
+              value: "19790,4477,8084,2375"
             - name: PORT_WATCHER_DEBOUNCE
               value: "1s"
             - name: ENTRANCE_HOST
@@ -575,6 +597,13 @@ spec:
 
       restartPolicy: Always
       volumes:
+        - name: upgrade-backups
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/upgrade-backups"
+            type: DirectoryOrCreate
+        - name: upgrade-script
+          configMap:
+            name: {{ .Release.Name }}-upgrade
         - name: agentd-state
           hostPath:
             path: "{{ .Values.userspace.appData }}/agentd"
