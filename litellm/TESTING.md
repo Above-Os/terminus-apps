@@ -1,3 +1,34 @@
+# Chart 1.0.24: unchanged legacy-key upgrade recovery
+
+The prior 1.0.23 candidate failed on a real test-market installation because LiteLLM 1.106.2 refuses the historical public default master key. Earlier safe-key and explicit-rotation tests did not cover that unchanged-key case. This follow-up keeps LiteLLM 1.106.2 and does **not** rotate API keys automatically.
+
+## Compatibility boundary
+
+- Only a Helm **upgrade** whose current master-key SHA256 matches the upstream historical-default fingerprint renders `LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true`.
+- Fresh installs, secure keys, empty keys and unset keys render the override false. Fresh install input validation requires `sk-` followed by at least 32 alphanumeric characters; an actual default-key new-install attempt was rejected with `Invalid values: LITELLM_MASTER_KEY`.
+- This deliberately retains the existing public-default-key risk for affected legacy installations. It is a compatibility measure, not a security improvement. Upstream describes the override as development-only. Owners should schedule a separate voluntary key rotation, after updating callers and migrating encrypted secrets; that is not a prerequisite for this upgrade.
+- Existing master/virtual keys and provider credentials are preserved. The UI environment-login toggle is independent: create/verify an independent Proxy Admin before disabling bootstrap UI login.
+- The backup directory is now `appData/backups/chart-1.0.24`; earlier-version backup markers do not suppress this version's backup.
+
+## Repeated end-to-end checks, 2026-10-22, olarestest01 / amd64
+
+| Path | Result |
+| --- | --- |
+| Actual 1.103.0 / chart 1.0.22 with unchanged historical default → 1.106.2 / chart 1.0.24 | Passed, same Upload installation; no uninstall |
+| Actual 1.83.3 / chart 1.0.21 with unchanged historical default → 1.106.2 / chart 1.0.24 | Passed, same Upload installation; no uninstall |
+| Fresh target with random strong master key | Passed; override=false, independent-admin invitation/login and bootstrap login passed |
+| Fresh target with historical default | Correctly rejected by installation input validation |
+
+Both old-version fixtures preserved team/model IDs, virtual-key hash/model allowlist/team relationships, persistent-file SHA256, admin login and post-upgrade metadata writes. Database backups completed for both upgrades. The 1.83.3 path additionally stored a real scoped Router credential and two model configurations **before** upgrading; ordinary and streaming default-chat calls worked on the old version.
+
+After upgrade, the original real model IDs and virtual key still worked, and the stored Router credential decrypted/forwarded successfully. Real checks passed: ordinary chat, SSE, tool calling plus tool-result continuation, strict JSON schema, Anthropic Messages, Responses-to-chat translation, a call using the unchanged legacy master key, and model-allowlist rejection (403). The default Router route was not changed.
+
+An initial real-test harness read failed because its own checkpoint was created root-owned mode 0600 on the old image. Only that exact disposable test file was re-owned to UID/GID 1000 in the isolated test namespace; no user file or recursive ownership change was made, and this test-only step is not in the production chart. The corrected assertions then passed. Product state is stored in PostgreSQL; no direct database edits or re-encryption were used for compatibility.
+
+The user's existing market.test instance was repaired in place by adding the authorized compatibility environment override to its Deployment, after verifying its key fingerprint. The entire key Secret was compared before/after and was unchanged. The app resumed, its existing UI credentials logged in (303), and the unchanged master key authenticated `/model/info`; the returned model list was empty, so no existing user-configured model inference is claimed for that live instance. A further app restart preserved recovery. The live instance is retained; only isolated test aliases are cleanup targets.
+
+## Earlier 1.0.23 verification (historical record)
+
 # LiteLLM 1.106.2 verification
 
 Tested on 2026-10-22 with Olares 1.12.7-20260908, an amd64 node, and Chart 1.0.23. This is a test-market candidate; independent colleague smoke testing and public-market publication remain outstanding.
@@ -47,7 +78,7 @@ Expected authorization/budget denials appear as failed requests in the usage UI;
 
 ## Compatibility and limits
 
-- Empty/public master keys such as `sk-1234` must be replaced. If an old key encrypted stored credentials, set `LITELLM_MIGRATE_FROM_MASTER_KEY` with the old key alongside the new key, verify migration success, then clear the old-key field and update callers as necessary. Existing secure keys are preserved.
+- New installations require a strong master key. Chart 1.0.24 preserves an existing historical default during a Helm upgrade using the narrowly scoped compatibility rule documented below. Rotation is optional and separate: if an old key encrypted stored credentials, set `LITELLM_MIGRATE_FROM_MASTER_KEY` alongside the new key, verify migration success, then clear the migration field and update master-key callers as necessary.
 - UI users must sign in again after the old session-format transition. stdio MCP defaults and upstream MCP credentials, cache message limits, and Responses WebSocket session limits require review for customized installations.
 - The Olares CLI environment editor rejected an update because it also submitted the noneditable `SMTP_ENABLED` field. Rotation was verified using isolated test-only chart overrides; the Olares settings UI rotation workflow itself was not tested.
 - Main container UID/GID 1000, actual workload image, healthy database readiness, successful migration logs, and zero restart counts were checked. An existing `trusted_proxy_ranges` warning does not block the tested workflows. The environment-credential-login warning is handled by the administrator onboarding workflow below.
