@@ -30,7 +30,7 @@ spec:
               umask 077
               mkdir -p /backup/litellm
               chown 1000:1000 /backup/litellm
-              DEST=/backup/backups/chart-1.0.23
+              DEST=/backup/backups/chart-1.0.24
               MARKER="${DEST}/.backup_complete"
               mkdir -p "$DEST"
               if [ -f "$MARKER" ]; then
@@ -88,6 +88,10 @@ spec:
                 name: {{ .Release.Name }}-secrets
                 key: LITELLM_MIGRATE_FROM_MASTER_KEY
           {{- end }}
+          # Only a Helm upgrade retaining the historical public default is eligible.
+          # Empty keys and fresh installations never bypass the upstream check.
+          - name: LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY
+            value: {{ and .Release.IsUpgrade (eq (sha256sum (.Values.olaresEnv.LITELLM_MASTER_KEY | default "" | trim)) "88dc28d0f030c55ed4ab77ed8faf098196cb1c05df778539800c9f1243fe6b4b") | quote }}
           - name: UI_USERNAME
             value: {{ .Values.olaresEnv.UI_USERNAME | quote }}
           - name: DISABLE_ENV_CREDENTIAL_LOGIN
