@@ -14,8 +14,12 @@ spec:
     - Rate Limiting: 組み込みのレート制限とスロットリング
     - Proxy Server: AI Gateway／プロキシサーバーとしてデプロイ
     - Multi-tenant: 複数ユーザーとチームをサポート
+    管理者ログインの設定：まず UI_USERNAME/UI_PASSWORD でログインし、Internal Users で独立した Proxy Admin を作成して、招待リンクから専用パスワードを設定してください。プライベートウィンドウでログインを確認してから、Olares アプリの環境変数 DISABLE_ENV_CREDENTIAL_LOGIN を true にします。再起動後、共有ログインと赤い警告が無効になります。確認が済むまでは既定の false を維持し、ログインできない場合は false に戻してください。マスター API キーは引き続き利用できます。
+
   upgradeDescription: |
-    Chart 1.0.22 は LiteLLM Proxy を v1.83.3-stable から v1.103.0 に更新します。
-    イメージは docker.io/beclab/berriai-litellm:v1.103.0 で、main-stable と同じダイジェストです。
-    master key、管理画面の認証、PostgreSQL、proxy 設定はそのままです。LiteLLM は起動時に Prisma のマイグレーションを実行します。public._prisma_migrations が既にある場合、init コンテナが先に pg_dump を appData/backups/chart-1.0.22/litellm.dump へ書き出します。以降の起動と、そのテーブルがないデータベースでは省略します。
-    リリースノート: https://github.com/BerriAI/litellm/releases/tag/v1.103.0
+    管理者ログインの設定：まず UI_USERNAME/UI_PASSWORD でログインし、Internal Users で独立した Proxy Admin を作成して、招待リンクから専用パスワードを設定してください。プライベートウィンドウでログインを確認してから、Olares アプリの環境変数 DISABLE_ENV_CREDENTIAL_LOGIN を true にします。再起動後、共有ログインと赤い警告が無効になります。確認が済むまでは既定の false を維持し、ログインできない場合は false に戻してください。マスター API キーは引き続き利用できます。
+    Chart 1.0.23 は LiteLLM Proxy を v1.103.0 から v1.106.2 に更新します。
+    更新前に、空の master key または既知の公開キー（sk-1234 を含む）を安全なキーへ変更してください。保存済み認証情報が旧キーで暗号化されている場合は、LITELLM_MIGRATE_FROM_MASTER_KEY に旧キーも設定し、移行成功後に空にしてください。既存の安全なキーは維持されます。管理画面には再ログインが必要です。
+    Prisma 移行前に既存データベースを appData/backups/chart-1.0.23/litellm.dump にバックアップします。失敗した場合は起動を停止します。PostgreSQL と永続化パスは変更しません。
+    互換性：stdio MCP は既定で無効、応答キャッシュは既定で最大4メッセージ、MCP サーバーには専用の認証情報が必要です。カスタム構成では上流のリリースノートを確認してください。
+    リリースノート：https://github.com/BerriAI/litellm/releases/tag/v1.106.2

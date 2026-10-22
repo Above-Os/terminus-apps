@@ -11,7 +11,7 @@ metadata:
   description: Call 100+ LLMs in OpenAI format
   appid: litellm
   title: LiteLLM
-  version: "1.0.22"
+  version: "1.0.23"
   categories:
   - Utilities_v112
   - models
@@ -19,7 +19,7 @@ metadata:
   - gateway
 
 spec:
-  versionName: "1.103.0"
+  versionName: "1.106.2"
   featuredImage: https://app.cdn.olares.com/appstore/litellm/1.webp
   promoteImage:
     - https://app.cdn.olares.com/appstore/litellm/1.webp
@@ -38,13 +38,16 @@ spec:
     - Proxy Server: Deploy as an AI Gateway/Proxy server
     - Multi-tenant: Support for multiple users and teams
 
+    Admin login setup: use UI_USERNAME/UI_PASSWORD for initial access, create a separate Proxy Admin under Internal Users and set its own password via an invitation link. Verify that account in a private window, then enable DISABLE_ENV_CREDENTIAL_LOGIN in Olares app environment settings. After the app restarts, shared environment login is disabled and its red warning disappears. Keep the default false until the separate login works; set false again to recover bootstrap access if needed. Master API keys remain usable.
+
   upgradeDescription: |
-    Chart 1.0.22 upgrades LiteLLM Proxy from v1.83.3-stable to v1.103.0.
-    Image: docker.io/beclab/berriai-litellm:v1.103.0. The same digest is published as the main-stable tag.
+    Admin login setup: use UI_USERNAME/UI_PASSWORD for initial access, create a separate Proxy Admin under Internal Users and set its own password via an invitation link. Verify that account in a private window, then enable DISABLE_ENV_CREDENTIAL_LOGIN in Olares app environment settings. After the app restarts, shared environment login is disabled and its red warning disappears. Keep the default false until the separate login works; set false again to recover bootstrap access if needed. Master API keys remain usable.
+    Chart 1.0.23 upgrades LiteLLM Proxy from v1.103.0 to v1.106.2.
+    Before upgrading, replace an empty or publicly known master key (including sk-1234) with a secure key. If stored credentials use the old key, also set LITELLM_MIGRATE_FROM_MASTER_KEY to that key; remove it after migration succeeds. Existing secure keys are preserved. Admin UI users must sign in again.
+    Before Prisma migrations, an existing database is backed up to appData/backups/chart-1.0.23/litellm.dump. Startup stops if the backup fails. PostgreSQL and persistent paths are unchanged.
+    Compatibility: stdio MCP servers are disabled by upstream; response caching now defaults to at most four messages; upstream MCP servers need their own credentials. Review the upstream release notes before upgrading customized deployments.
+    Release notes: https://github.com/BerriAI/litellm/releases/tag/v1.106.2
 
-    The master key, admin UI credentials, PostgreSQL wiring, and proxy config stay as they are. LiteLLM applies Prisma migrations on startup. When public._prisma_migrations already exists, an init container writes a PostgreSQL custom-format dump to appData/backups/chart-1.0.22/litellm.dump first. Later starts and a database without that table skip the dump.
-
-    Release notes: https://github.com/BerriAI/litellm/releases/tag/v1.103.0
   developer: BerriAI
   website: https://www.litellm.ai
   sourceCode: https://github.com/BerriAI/litellm
@@ -104,13 +107,18 @@ middleware:
         distributed: false
 envs:
   - envName: LITELLM_MASTER_KEY
-    required: false
+    required: true
     type: password
     editable: true
     applyOnChange: true
     regex: '^sk-[A-Za-z0-9]+$'
-    description: "Master API key (must start with sk-, followed by letters and numbers)"
-    default: "sk-1234"
+    description: "Secure master API key (sk- followed by letters and numbers). Public defaults such as sk-1234 are refused. Preserve the existing key or use the migration field when rotating it."
+  - envName: LITELLM_MIGRATE_FROM_MASTER_KEY
+    required: false
+    type: password
+    editable: true
+    applyOnChange: true
+    description: "Previous master key, only when rotating a key used to encrypt stored credentials. Set together with the new master key; clear after successful migration."
   - envName: UI_USERNAME
     required: true
     type: string
@@ -125,6 +133,13 @@ envs:
     applyOnChange: true
     regex: '^[\w\-!@#$%^&*()+={}\[\]:,.?~]{6,}$'
     description: "Password for admin UI (must be at least 6 characters)"
+  - envName: DISABLE_ENV_CREDENTIAL_LOGIN
+    required: false
+    type: bool
+    default: "false"
+    editable: true
+    applyOnChange: true
+    description: "Disable shared UI_USERNAME/UI_PASSWORD admin login and its red warning. FIRST create a separate Proxy Admin in LiteLLM, set its own password using the invitation link, and verify login in a private window. Then set true here. If locked out, set false to restore the bootstrap login. This does not disable master API keys."
   - envName: LITELLM_DROP_PARAMS
     required: false
     applyOnChange: true
