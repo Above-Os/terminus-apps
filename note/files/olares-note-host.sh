@@ -362,7 +362,9 @@ bt_session() {
   exec 7>"$io/in" 8<"$io/out"
   for f in "$@"; do
     cmd=${f%|*} wait=${f##*|}
-    printf '%s\n' "$cmd" >&7 2>/dev/null || break
+    # The peer may have exited after quit or a failed step. Confine SIGPIPE
+    # to the writer so this helper can still return its protocol trailer.
+    (printf '%s\n' "$cmd" >&7) 2>/dev/null || break
     [ -n "${OLARES_NOTE_BT_NO_WAIT:-}" ] && continue
     case "$cmd" in
       "scan on") ok=${mac:+"Device $mac"} fail="" ;;
@@ -378,7 +380,7 @@ bt_session() {
       if [ -n "$ok" ] && [[ "$line" =~ $ok ]]; then break; fi
     done
   done
-  printf 'quit\n' >&7 2>/dev/null
+  (printf 'quit\n' >&7) 2>/dev/null || true
   exec 7>&-
   # Whatever it still prints is drained, so it never blocks on a full fifo.
   cat <&8 >/dev/null 2>&1
