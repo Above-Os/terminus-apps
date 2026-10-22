@@ -6,8 +6,8 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
   description: "Qwen3-TTS 1.7B CustomVoice for preset-voice text to speech."
   appid: audioqwen3ttsv3
-  title: Qwen3-TTS 1.7B
-  version: '1.0.10'
+  title: Qwen3-TTS 1.7B CustomVoice
+  version: '1.0.11'
   categories:
     - AI
     - models
@@ -20,7 +20,7 @@ sharedEntrances:
   - name: audioqwen3ttsv3api
     host: sharedentrances-api
     port: 0
-    title: Qwen3-TTS 1.7B API
+    title: Qwen3-TTS 1.7B CustomVoice API
     invisible: true
     authLevel: internal
     icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
@@ -29,7 +29,7 @@ entrances:
   - name: audioqwen3ttsv3
     port: 8090
     host: download-svc
-    title: Qwen3-TTS 1.7B
+    title: Qwen3-TTS 1.7B CustomVoice
     icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
     openMethod: window
     authLevel: internal
@@ -102,6 +102,24 @@ spec:
       limitedDisk: 200Gi
       limitedMemory: "10Gi"
       requiredMemory: "6400Mi"
+    # Intel iGPU: engine request 4Gi / limit 12Gi + llm-init 256Mi/4Gi. No GPU-memory field.
+    - mode: intel
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "4352Mi"
+    # Intel Arc: discrete. GPU-memory field is the installer label. The pod bind-mounts /dev/dri.
+    - mode: intel-gpu
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "16Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
 
   supportArch:
     - amd64
@@ -117,7 +135,7 @@ options:
   templateOnly: false
   dependencies:
     - name: olares
-      version: '>=1.12.6-0'
+      version: '>=1.12.7-0'
       type: system
 envs:
   - envName: MODEL_SOURCE
@@ -207,6 +225,9 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
+      docker.io/beclab/audio-qwen3tts:v1.1.31; intel and intel-gpu use
+      docker.io/beclab/audio-qwen3tts-ov:v1.1.31. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
