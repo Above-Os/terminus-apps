@@ -59,16 +59,6 @@ spec:
         fsGroup: 1000
 
       initContainers:
-        - name: init-agentd-state
-          image: beclab/ubuntu:24.04
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-          command: [sh, -ec, 'chown 1000:1000 /var/lib/agentd; chmod 0700 /var/lib/agentd']
-          resources: {}
-          volumeMounts:
-            - name: agentd-state
-              mountPath: /var/lib/agentd
         # Fix ownership of the PVC so the non-root runtime user can
         # write to it. Root is required here because hostPath volumes
         # land on disk with root ownership on first create.
@@ -106,7 +96,6 @@ spec:
             limits: {cpu: 500m, memory: 512Mi}
           volumeMounts:
             - {name: app-data-home, mountPath: /opt/data}
-            - {name: agentd-state, mountPath: /var/lib/agentd, readOnly: true}
             - {name: upgrade-backups, mountPath: /upgrade-backups}
             - {name: upgrade-script, mountPath: /upgrade, readOnly: true}
         - name: init-skills
@@ -427,87 +416,6 @@ spec:
               subPath: cli-plugins
               readOnly: true
             {{- end }}
-        - name: agentd
-          image: {{ index (.Values.agentd | default dict) "image" | default "beclab/codex-agentd:0.1.19" | quote }}
-          imagePullPolicy: IfNotPresent
-          securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
-          command: [sh, -ec]
-          args:
-            - |
-              workspace=/opt/data/agentd-workspace
-              mkdir -p "$workspace"
-              if [ ! -d "$workspace/.git" ]; then
-                if [ -n "$(ls -A "$workspace")" ]; then
-                  echo 'The dedicated agentd workspace is nonempty and has no git baseline' >&2
-                  exit 1
-                fi
-                git init -q "$workspace"
-                git -C "$workspace" -c user.name=Agentd -c user.email=agentd@localhost commit --allow-empty -qm 'Initialize the dedicated workspace'
-              fi
-              exec /usr/local/bin/agentd serve -addr 127.0.0.1:4477
-          env:
-            - name: HOME
-              value: /opt/data
-            - name: CODEX_HOME
-              value: /opt/data/.codex
-            - name: PATH
-              value: /opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-            - name: AGENTD_HOME
-              value: /var/lib/agentd
-            - name: AGENTD_DEVICE_KIND
-              value: hosted
-            - name: AGENTD_AGENT_PROVIDER
-              value: codex
-            - name: AGENTD_AGENT_PATH
-              value: /opt/data/.local/bin/codex
-            - name: AGENTD_WORKSPACE_DIRS
-              value: /opt/data/agentd-workspace
-            - name: AGENTD_WORKSPACE_GRANTS
-              value: {{ index (.Values.olaresEnv | default dict) "AGENTD_WORKSPACE_GRANTS" | default "{}" | quote }}
-            - name: AGENTD_MAX_CONCURRENT
-              value: "2"
-            - name: AGENTD_ADMIN_ADDR
-              value: 0.0.0.0:8084
-            - name: AGENTD_ADMIN_OWNER
-              value: {{ .Values.bfl.username | quote }}
-            - name: AGENTD_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-agentd
-                  key: token
-            {{- with .Values.olaresEnv.OPENAI_API_KEY }}
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $.Release.Name }}-secrets
-                  key: OPENAI_API_KEY
-            {{- end }}
-            {{- with .Values.olaresEnv.OPENAI_BASE_URL }}
-            - name: OPENAI_BASE_URL
-              value: {{ . | quote }}
-            {{- end }}
-          readinessProbe:
-            tcpSocket:
-              port: 8084
-            initialDelaySeconds: 3
-            periodSeconds: 10
-          resources:
-            requests:
-              cpu: 50m
-              memory: 128Mi
-            limits:
-              cpu: "2"
-              memory: 2Gi
-          volumeMounts:
-            - name: app-data-home
-              mountPath: /opt/data
-            - name: agentd-state
-              mountPath: /var/lib/agentd
         {{- if eq (toString .Values.olaresEnv.ENABLE_DIND) "true" }}
         - name: docker-dind
           image: "docker.io/beclab/docker:29.3.0-dind"
@@ -566,7 +474,7 @@ spec:
             - name: PORT_WATCHER_ADDR
               value: "127.0.0.1:19790"
             - name: PORT_WATCHER_DENYLIST
-              value: "19790,4477,8084,2375"
+              value: "19790,2375"
             - name: PORT_WATCHER_DEBOUNCE
               value: "1s"
             - name: ENTRANCE_HOST
@@ -604,10 +512,6 @@ spec:
         - name: upgrade-script
           configMap:
             name: {{ .Release.Name }}-upgrade
-        - name: agentd-state
-          hostPath:
-            path: "{{ .Values.userspace.appData }}/agentd"
-            type: DirectoryOrCreate
         - name: app-data-home
           hostPath:
             path: "{{ .Values.userspace.appData }}/home"
@@ -668,17 +572,3 @@ roleRef:
   kind: ClusterRole
   name: {{ .Release.Name }}-{{ .Values.bfl.username }}
   apiGroup: rbac.authorization.k8s.io
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: agentd-admin
-  namespace: {{ .Release.Namespace }}
-spec:
-  selector:
-    io.kompose.service: codex
-  ports:
-    - name: http
-      port: 8084
-      targetPort: 8084
