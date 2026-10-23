@@ -9,13 +9,14 @@ data:
     from pathlib import Path
     os.umask(0o077)
     root=Path('/upgrade-backups')
+    generation='{{ .Chart.AppVersion }}-chart-{{ .Chart.Version }}'
     def sha(p):
      h=hashlib.sha256()
      with p.open('rb') as f:
       for b in iter(lambda:f.read(1024*1024),b''):h.update(b)
      return h.hexdigest()
     for home,label in [(Path('/opt/data'),'workspace')]:
-     target=root/('before-0.163.0-'+label+'.tar');marker=target.with_suffix('.json')
+     target=root/('before-'+generation+'-'+label+'.tar');marker=target.with_suffix('.json')
      if marker.exists():
       saved=json.loads(marker.read_text());assert target.exists() and sha(target)==saved['sha256'],'Backup verification failed'
       print(label+': previously verified backup retained');continue
@@ -38,7 +39,7 @@ data:
         p=home/name
         with p.open('rb') as f:magic=f.read(16)
         if magic==b'SQLite format 3\x00':
-         backup=root/(label+'-sqlite-'+hashlib.sha256(name.encode()).hexdigest()[:16]+'.sqlite')
+         backup=root/(generation+'-'+label+'-sqlite-'+hashlib.sha256(name.encode()).hexdigest()[:16]+'.sqlite')
          assert not backup.exists(),'An unverified SQLite backup exists; preserve for inspection'
          src=sqlite3.connect(p.as_uri()+'?mode=ro',uri=True);dst=sqlite3.connect(backup);src.backup(dst)
          assert dst.execute('PRAGMA integrity_check').fetchone()[0]=='ok';src.close();dst.close()
