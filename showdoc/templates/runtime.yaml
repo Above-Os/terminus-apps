@@ -28,6 +28,7 @@ data:
       test -s "$backup"
       sqlite3 -readonly "$backup" 'SELECT count(*) FROM sqlite_master;' >/dev/null
       echo "Database backup completed: $backup"
+      php /etc/showdoc/sqlite-guard.php "$db" "$backup"
     fi
     ln -sfn "$data/Sqlite" "$app/Sqlite"
     ln -sfn "$data/Public/Uploads" "$app/Public/Uploads"
@@ -78,7 +79,7 @@ data:
         index index.php index.html;
         location / { try_files $uri $uri/ /index.php?$query_string; }
         location /web/ { try_files $uri $uri/ =404; }
-        location /Public/Uploads/ { try_files $uri =404; }
+        location ^~ /Public/Uploads/ { deny all; }
         location ^~ /Sqlite/ { deny all; }
         location ^~ /server/bin/ { deny all; }
         location ~ /\. { deny all; }
@@ -210,3 +211,67 @@ data:
       fi
       sleep 30
     done
+
+  sqlite-guard.php: |
+    <?php
+    // Run before PHP/Mock start. Only the exact upstream seed's four orphan pages
+    // are eligible; other integrity errors require operator intervention.
+    umask(0077);
+    $path=$argv[1]??'';
+    if(!is_file($path))throw new RuntimeException('SQLite database is missing');
+    function logicalSnapshot(SQLite3 $db): array {
+        $schema=[];$q=$db->query('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name');
+        while($row=$q->fetchArray(SQLITE3_ASSOC))$schema[]=$row;
+        $q->finalize();
+        $tables=[];$q=$db->query("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name");
+        while($row=$q->fetchArray(SQLITE3_ASSOC))$tables[]=$row;
+        $q->finalize();$content=[];
+        foreach($tables as $table){
+            $name=$table['name'];$quoted='"'.str_replace('"','""',$name).'"';
+            $withRowid=!str_starts_with($name,'sqlite_')&&!str_contains(strtoupper($table['sql']??''),'WITHOUT ROWID');
+            $q=$db->query('SELECT '.($withRowid?'rowid AS "__audit_rowid", ':'').'* FROM '.$quoted);
+            $rows=[];while($row=$q->fetchArray(SQLITE3_ASSOC))$rows[]=hash('sha256',serialize($row));
+            $q->finalize();sort($rows,SORT_STRING);
+            $content[$name]=['rows'=>count($rows),'sha256'=>hash('sha256',implode('',$rows))];
+        }
+        return ['schema_sha256'=>hash('sha256',serialize($schema)),'tables'=>$content,'user_version'=>$db->querySingle('PRAGMA user_version'),'application_id'=>$db->querySingle('PRAGMA application_id'),'encoding'=>$db->querySingle('PRAGMA encoding')];
+    }
+    function integrity(SQLite3 $db): array {
+        $rows=[];$q=$db->query('PRAGMA integrity_check');
+        while($row=$q->fetchArray(SQLITE3_NUM))$rows[]=$row[0];
+        $q->finalize();return $rows;
+    }
+    $db=new SQLite3($path,SQLITE3_OPEN_READWRITE);$db->enableExceptions(true);$db->busyTimeout(30000);
+    $check=integrity($db);
+    if($check===['ok']){$db->close();echo "SQLite integrity check passed.\n";exit(0);}
+    $pages=[];
+    foreach(preg_split('/\R/',implode("\n",$check)) as $line){
+        if($line===''||$line==='*** in database main ***')continue;
+        if(!preg_match('/^Page (\d+): never used$/',$line,$m))throw new RuntimeException('Unexpected SQLite integrity error; original database retained');
+        $pages[]=(int)$m[1];
+    }
+    sort($pages);
+    if($pages!==[34,35,36,95])throw new RuntimeException('Unrecognized SQLite seed anomaly; original database retained');
+    if($db->querySingle('PRAGMA journal_mode')!=='delete')throw new RuntimeException('Seed maintenance requires DELETE journal mode; original database retained');
+    $before=logicalSnapshot($db);
+    $stamp=gmdate('Ymd\THis\Z').'-'.bin2hex(random_bytes(3));
+    $backup=$argv[2]??($path.'.olares-before-repack-'.$stamp);
+    if(isset($argv[2])){
+        if(!is_file($backup)||realpath($backup)===realpath($path))throw new RuntimeException('A separate pre-maintenance backup is required');
+        $copy=new SQLite3($backup,SQLITE3_OPEN_READONLY);
+    }else{
+        $copy=new SQLite3($backup,SQLITE3_OPEN_READWRITE|SQLITE3_OPEN_CREATE);
+        if(!$db->backup($copy))throw new RuntimeException('Pre-maintenance backup failed');
+    }
+    $copy->enableExceptions(true);chmod($backup,0600);
+    if(logicalSnapshot($copy)!==$before)throw new RuntimeException('Backup data verification failed');
+    $copy->close();
+    $candidate=$path.'.olares-repack-'.$stamp;
+    if(!$db->exec("VACUUM INTO '".SQLite3::escapeString($candidate)."'"))throw new RuntimeException('SQLite seed repack failed; original database retained');
+    $copy=new SQLite3($candidate,SQLITE3_OPEN_READONLY);$copy->enableExceptions(true);
+    if(integrity($copy)!==['ok']||logicalSnapshot($copy)!==$before)throw new RuntimeException('Repacked data/row-ID verification failed; original database retained');
+    $copy->close();$db->close();
+    foreach(['-wal','-shm','-journal'] as $suffix)if(file_exists($path.$suffix)||file_exists($candidate.$suffix))throw new RuntimeException('Active SQLite journal detected; original database retained');
+    chmod($candidate,fileperms($path)&0777);
+    if(!rename($candidate,$path))throw new RuntimeException('Atomic SQLite replacement failed; original database retained');
+    echo 'Known seed orphan pages removed; schema, every row and application row IDs verified; backup retained: '.$backup."\n";
