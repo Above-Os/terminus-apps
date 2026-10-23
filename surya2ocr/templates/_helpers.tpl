@@ -14,7 +14,7 @@
 {{- end -}}
 
 {{- define "surya2ocr.llmInitTag" -}}v1.7.21{{- end -}}
-{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:dev-surya2-tiled-long-tail-20261023-amd64{{- end -}}
+{{- define "surya2ocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:dev-surya2-tiled-long-tail-a3-20261023-amd64{{- end -}}
 {{- /* Olares accelerator mode selected at install time. */ -}}
 {{- define "surya2ocr.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
