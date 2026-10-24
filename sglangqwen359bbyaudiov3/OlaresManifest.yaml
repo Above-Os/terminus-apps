@@ -4,10 +4,10 @@ apiVersion: 'v3'
 metadata:
   name: sglangqwen359bbyaudiov3
   icon: https://app.cdn.olares.com/appstore/llm/sgl/qwen.png
-  description: "Qwen3.5-9B (AWQ-4bit) served with SGLang, reserving 15Gi GPU memory so it can run alongside audio models. llm-init and the inference engine share a node and local run-state."
+  description: "Qwen3.5-9B (AWQ-4bit) served with SGLang, reserving 13.5Gi (13824Mi) GPU memory so it can run alongside audio models. llm-init and the inference engine share a node and local run-state."
   appid: sglangqwen359bbyaudiov3
   title: Qwen3.5-9B by Audio
-  version: '1.0.0'
+  version: '1.0.1'
   categories:
   - AI
   - models
@@ -38,6 +38,8 @@ spec:
   onlyAdmin: true
   versionName: 'cyankiwi/Qwen3.5-9B-AWQ-4bit'
   upgradeDescription: |
+    v1.0.1: Use 13824Mi (13.5Gi) GPU memory, 64K context, FP8 E4M3 KV cache, automatic request concurrency and 2048-token chunked prefill. Keep the static pool at min(0.80, 11Gi / visible GPU memory). Existing installations must update ENGINE_ARGS and the Model Console model card to this preset, then restart with a 13824Mi GPU binding; upgrades can retain old values. SGLANG_REQUIRED_GPU_MEMORY=13824Mi.
+
     v1.0.0: Same chat as Qwen3.5-9B (SGLang), with the GPU reservation lowered from 23Gi to 15Gi so it can run beside audio models.
 
     v1.0.23: Model Console upgrades to llm-init v1.7.19.
@@ -86,16 +88,16 @@ spec:
     **Preset Configuration**
     - Model: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Capabilities: thinking, tools, vision
-    - Engine args: `--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser qwen3 --tool-call-parser qwen3_coder`
-    - Required GPU memory: `15Gi`
+    - Engine args: `--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
+    - Required GPU memory: `13.5Gi (13824Mi)`
     - SGLang excels at prefix caching and structured output (JSON, tool calls, agents); prefix caching is enabled by default.
 
 
     **Accelerator modes**
     | Mode           | Device            | Details                                                              |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia`       | GPU (CUDA)        | Uses `15Gi` GPU memory; tune `--mem-fraction-static` in ENGINE_ARGS  |
-    | `nvidia-gb10`  | GPU (Spark)       | Same as `nvidia`: `15Gi` memory, managed by the pod                  |
+    | `nvidia`       | GPU (CUDA)        | Uses `13824Mi` GPU memory; static pool capped at 80% and 11Gi  |
+    | `nvidia-gb10`  | GPU (Spark)       | Same as `nvidia`: `13.5Gi (13824Mi)` memory, managed by the pod                  |
     
     **How It Works**
     First, Model Console downloads the model and gets it ready, then SGLang starts serving the model when it's ready. These two parts run in separate Deployments, sharing the HF cache via App Common and transient run-state via App Cache.
@@ -135,8 +137,8 @@ spec:
       # Engine MEMORY_REQUEST 6Gi + llm-init <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
       limitedMemory: "32Gi"
       requiredMemory: "7Gi"
-      requiredGPUMemory: "15Gi"
-      limitedGPUMemory: "16Gi"
+      requiredGPUMemory: "13824Mi"
+      limitedGPUMemory: "13824Mi"
     - mode: nvidia-gb10
       limitedCpu: "15360m"
       requiredCpu: "1400m"
@@ -207,13 +209,13 @@ envs:
     - title: None
       value: none
     description: "The model capabilities. Pick what your model supports. If no extra capabilities, pick None."
-  - envName: ENGINE_ARGS         # example: --context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser gpt-oss --tool-call-parser gpt-oss
+  - envName: ENGINE_ARGS
     required: true
-    default: "--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser qwen3 --tool-call-parser qwen3_coder"
+    default: "--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3"
     type: string
     editable: true
     applyOnChange: true
-    description: "Example: --context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser gpt-oss --tool-call-parser gpt-oss. Extra SGLang CLI flags. Separate multiple --key value pairs with spaces. Adjust parsers to match your model family."
+    description: "SGLang flags. The preset uses 64K context, FP8 E4M3 KV, automatic request concurrency and 2048-token chunked prefill. The wrapper sets the static pool to min(0.80, 11Gi / visible GPU memory), overriding --mem-fraction-static."
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -268,6 +270,6 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "15Gi"
+    default: "13824Mi"
     description: "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
     regex: "^[0-9]+(Gi|Mi)?$"
