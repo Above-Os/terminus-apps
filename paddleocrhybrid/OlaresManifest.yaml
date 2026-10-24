@@ -7,7 +7,7 @@ metadata:
   description: Text recognition and document parsing toolkit
   appid: paddleocrhybrid
   title: PaddleOCR Hybrid
-  version: '1.0.24'
+  version: '1.0.37'
   categories:
     - AI
     - models
@@ -74,13 +74,13 @@ spec:
       url: https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE
   accelerator:
     # Σ requests ≈ llamacpp(750m) + llminit(200m) + ocradapter(100m) + layout(1) = 2050m → requiredCpu 3.
-    # Σ limits ≈ llamacpp(4/6Gi) + llminit(1/2Gi) + ocradapter(0.5/512Mi) + layout(2/2Gi) ≤ 8 CPU / 12Gi.
+    # Σ limits ≈ llamacpp(4/12Gi) + llminit(1/2Gi) + ocradapter(0.5/1Gi) + layout(2/2Gi) ≤ 8 CPU / 20Gi.
     # GPU: sustained real-document benchmark peak ~4.3Gi; reserve 6Gi for runtime headroom.
     - mode: nvidia
       requiredCpu: "3"
       limitedCpu: "8"
-      requiredMemory: "6Gi"
-      limitedMemory: "12Gi"
+      requiredMemory: "9Gi"
+      limitedMemory: "20Gi"
       requiredDisk: "5Gi"
       limitedDisk: "50Gi"
       requiredGPUMemory: "6Gi"
@@ -95,8 +95,8 @@ spec:
     - mode: amd-gpu
       requiredCpu: "3"
       limitedCpu: "8"
-      requiredMemory: "6Gi"
-      limitedMemory: "12Gi"
+      requiredMemory: "9Gi"
+      limitedMemory: "20Gi"
       requiredDisk: "5Gi"
       limitedDisk: "50Gi"
       requiredGPUMemory: "6Gi"
@@ -104,8 +104,8 @@ spec:
     - mode: intel-gpu
       requiredCpu: "3"
       limitedCpu: "8"
-      requiredMemory: "6Gi"
-      limitedMemory: "12Gi"
+      requiredMemory: "9Gi"
+      limitedMemory: "20Gi"
       requiredDisk: "5Gi"
       limitedDisk: "50Gi"
       requiredGPUMemory: "6Gi"
@@ -166,7 +166,7 @@ envs:
     editable: true
     applyOnChange: true
     default: "-ngl 99"
-    description: "llama.cpp flags on the engine Pod only (not llm-init). mmproj is auto-resolved next to the main GGUF."
+    description: "Additional llama.cpp flags on the engine Pod only (not llm-init). The runtime enforces one bounded context slot because OCRAdapter dispatches one inference at a time; mmproj is auto-resolved next to the main GGUF."
   - envName: LLAMACPP_REQUIRED_GPU_MEMORY
     required: true
     type: string
@@ -191,13 +191,13 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: "3Gi"
+    default: "6Gi"
   - envName: LLAMACPP_MEMORY_LIMIT
     required: false
     type: string
     editable: true
     applyOnChange: true
-    default: "6Gi"
+    default: "12Gi"
   - envName: LAYOUT_CPU_REQUEST
     required: false
     type: string

@@ -1,12 +1,13 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "paddleocrhybrid.modelName" .) -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99" -}}
+{{- $userEngineArgs := $oe.ENGINE_ARGS | default "-ngl 99" -}}
+{{- $engineArgs := printf "%s -np 1 -c 8192 --no-cache-prompt" $userEngineArgs -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "750m") -}}
-{{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "3Gi") -}}
+{{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "6Gi") -}}
 {{- $cpuLimit := trim ($oe.LLAMACPP_CPU_LIMIT | default "4") -}}
-{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "6Gi") -}}
+{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "12Gi") -}}
 {{- $gpuType := include "paddleocrhybrid.gpuType" . -}}
 {{- $engineImage := include "paddleocrhybrid.llamacppImage" . -}}
 {{- /* Do not fail() on cpu/intel: Market check-chart helm-renders mode=cpu to extract images.
@@ -140,6 +141,19 @@ spec:
           ports:
             - name: llamacpp
               containerPort: 8081
+          # The current llama.cpp VLM build retains anonymous CPU memory across
+          # image requests. Recycle before the 12 GiB cgroup hard limit so the
+          # adapter can wait for a clean reload and retry the interrupted crop.
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - 'test "$(cat /sys/fs/cgroup/memory.current)" -lt 10737418240'
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 1
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub

@@ -17,7 +17,7 @@
 {{- /* Needs llm-init with ROLE=extra → extra_model_path (L6+). */ -}}
 {{- define "paddleocrhybrid.llmInitTag" -}}v1.7.21{{- end -}}
 {{- /* Needs OCRAdapter with paddle-hybrid pipeline (S11+). */ -}}
-{{- define "paddleocrhybrid.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.13{{- end -}}
+{{- define "paddleocrhybrid.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter@sha256:694dd315f3b98a1fcecae8f3322335e04564a0b76a6bfd487065cf29a183f180{{- end -}}
 {{- /* Olares accelerator mode selected at install time. */ -}}
 {{- define "paddleocrhybrid.gpuType" -}}
 {{- $gpuObj := .Values.GPU | default dict -}}
