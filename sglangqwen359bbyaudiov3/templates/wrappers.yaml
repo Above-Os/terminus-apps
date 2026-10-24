@@ -78,14 +78,23 @@ data:
 
     run_sglang() {
         load_engine_args_from_handoff
-        log "starting SGLang with model-path=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
-        # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
+        # Chat turns thinking off by default: Qwen3.5 otherwise reasons before every
+        # answer, which costs a voice reply seconds and, under a small token budget, the
+        # whole reply. It is a launch default rather than part of ENGINE_ARGS because
+        # Model Console's card keeps the flags it was first seeded with across upgrades.
+        # Set before ENGINE_ARGS, so a card that sets the flag wins; a request can still
+        # turn thinking on with chat_template_kwargs.
+        chat_defaults='--default-chat-template-kwargs {"enable_thinking":false}'
+        case " ${ENGINE_ARGS:-} " in *" --is-embedding "*) chat_defaults= ;; esac
+        log "starting SGLang with model-path=$MODEL_NAME args=${chat_defaults:+$chat_defaults }${ENGINE_ARGS:-<empty>}"
+        # shellcheck disable=SC2086  # intentional word-splitting of chat_defaults and ENGINE_ARGS
         exec python3 -m sglang.launch_server \
             --model-path "$MODEL_NAME" \
             --served-model-name "$MODEL_NAME" \
             --host 0.0.0.0 \
             --port "${SGLANG_PORT:-30000}" \
             --enable-metrics \
+            $chat_defaults \
             ${ENGINE_ARGS:-} \
             --mem-fraction-static "$(cat /tmp/qwen-static-fraction)" \
             "$@"
