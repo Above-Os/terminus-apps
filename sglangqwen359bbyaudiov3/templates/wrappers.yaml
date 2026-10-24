@@ -74,6 +74,8 @@ data:
         exit 1
     fi
 
+    python3 /llm-init/wrappers/prepare.py
+
     run_sglang() {
         load_engine_args_from_handoff
         log "starting SGLang with model-path=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
@@ -85,7 +87,17 @@ data:
             --port "${SGLANG_PORT:-30000}" \
             --enable-metrics \
             ${ENGINE_ARGS:-} \
+            --mem-fraction-static "$(cat /tmp/qwen-static-fraction)" \
             "$@"
     }
 
     supervise_engine run_sglang "$@"
+  prepare.py: |
+    import torch
+    from pathlib import Path
+
+    # Keep the tested static budget when time slicing exposes the whole GPU.
+    total = torch.cuda.get_device_properties(0).total_memory
+    fraction = min(0.80, (11 * 1024**3) / total)
+    Path("/tmp/qwen-static-fraction").write_text(f"{fraction:.5f}")
+    print(f"[qwen-memory] visible GPU total={total / 1024**3:.3f}Gi, static fraction={fraction:.5f}", flush=True)

@@ -1,9 +1,11 @@
 metadata:
-  description: "SGLang で提供する Qwen3.5-9B（AWQ-4bit）。音声モデルと同時に動かすため GPU メモリは 15Gi。llm-init と推論エンジンは同一ノードでローカル実行状態を共有します。"
+  description: "SGLang で提供する Qwen3.5-9B（AWQ-4bit）。音声モデルと同時に動かすため GPU メモリは 13.5Gi (13824Mi)。llm-init と推論エンジンは同一ノードでローカル実行状態を共有します。"
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.1: GPU メモリを 13824Mi（13.5Gi）に削減。64K コンテキスト、FP8 E4M3 KV、同時リクエスト 1 件、2048-token 分割プリフィルを使用。静的プール比率は min(0.80, 11Gi / 可視 GPU メモリ)。既存環境では ENGINE_ARGS と Model Console のモデルカードを更新し、13824Mi の GPU 割り当てで再起動してください。アップグレード後も旧値が残る場合があります。 SGLANG_REQUIRED_GPU_MEMORY=13824Mi.
+
     v1.0.0: Qwen3.5-9B (SGLang) と同じチャットです。GPU メモリ申請を 23Gi から 15Gi に下げ、音声モデルと同時に動かせるようにしました。
 
     v1.0.23: Model Console を llm-init v1.7.19 にアップグレードしました。
@@ -50,15 +52,15 @@ spec:
     **プリセット構成**
     - モデル: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - 能力: thinking, tools, vision
-    - エンジン引数: `--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser qwen3 --tool-call-parser qwen3_coder`
-    - 必要 GPU メモリ: `15Gi`
+    - エンジン引数: `--context-length 65536 --mem-fraction-static 0.8 --max-running-requests 1 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
+    - 必要 GPU メモリ: `13.5Gi (13824Mi)`
     - SGLang はプレフィックスキャッシュと構造化出力（JSON、ツール呼び出し、エージェント）に優れ、プレフィックスキャッシュはデフォルトで有効です。
 
     **アクセラレータモード**
     | モード         | デバイス          | 詳細                                                                 |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia`       | GPU (CUDA)        | `15Gi` GPU メモリを使用；ENGINE_ARGS で `--mem-fraction-static` を調整 |
-    | `nvidia-gb10`  | GPU (Spark)       | `nvidia` と同じ：`15Gi` メモリ、pod が管理                           |
+    | `nvidia` | GPU (CUDA) | GPU メモリ `13824Mi`；静的プールの上限は 80% および 11Gi |
+    | `nvidia` | GPU (CUDA) | GPU メモリ `13824Mi`；静的プールの上限は 80% および 11Gi |
 
     **動作の仕組み**
     まず Model Console がモデルをダウンロードして準備し、準備ができたら SGLang がサービングを開始します。この 2 つは別々の Deployment で動作しますが、App Common ストレージ経由で HF キャッシュと実行状態を共有します。

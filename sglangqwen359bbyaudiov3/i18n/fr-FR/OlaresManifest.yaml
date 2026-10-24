@@ -1,9 +1,11 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) servi avec SGLang, 15Gi de mémoire GPU pour tourner à côté des modèles audio. llm-init et le moteur d’inférence partagent un nœud et l’état local."
+  description: "Qwen3.5-9B (AWQ-4bit) servi avec SGLang, 13.5Gi (13824Mi) de mémoire GPU pour tourner à côté des modèles audio. llm-init et le moteur d’inférence partagent un nœud et l’état local."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.1 : 13824Mi (13.5Gi) de mémoire GPU, contexte 64K, cache KV FP8 E4M3, une requête simultanée et préremplissage par blocs de 2048 tokens. Pool statique : min(0.80, 11Gi / mémoire GPU visible). Pour une installation existante, mettre à jour ENGINE_ARGS et la fiche Model Console, puis redémarrer avec une allocation GPU de 13824Mi ; les mises à jour peuvent conserver les anciennes valeurs.
+
     v1.0.0 : Même chat que Qwen3.5-9B (SGLang), réservation GPU abaissée de 23Gi à 15Gi pour tourner à côté des modèles audio.
 
     v1.0.23 : Model Console passe à llm-init v1.7.19.
@@ -50,15 +52,15 @@ spec:
     **Configuration prédéfinie**
     - Modèle : `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Capacités : thinking, tools, vision
-    - Args moteur : `--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser qwen3 --tool-call-parser qwen3_coder`
-    - Mémoire GPU requise : `15Gi`
+    - Args moteur : `--context-length 65536 --mem-fraction-static 0.8 --max-running-requests 1 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
+    - Mémoire GPU requise : `13.5Gi (13824Mi)`
     - SGLang excelle dans le prefix caching et la sortie structurée (JSON, appels d'outils, agents) ; le prefix caching est activé par défaut.
 
     **Modes d'accélérateur**
     | Mode           | Périphérique      | Détails                                                              |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia`       | GPU (CUDA)        | Utilise `15Gi` de mémoire GPU ; réglez `--mem-fraction-static` dans ENGINE_ARGS |
-    | `nvidia-gb10`  | GPU (Spark)       | Identique à `nvidia` : `15Gi` de mémoire, gérée par le pod           |
+    | `nvidia` | GPU (CUDA) | `13824Mi` de mémoire GPU ; pool statique limité à 80% et 11Gi |
+    | `nvidia-gb10`  | GPU (Spark)       | Identique à `nvidia` : `13.5Gi (13824Mi)` de mémoire, gérée par le pod           |
 
     **Fonctionnement**
     D'abord, Model Console télécharge et prépare le modèle, puis SGLang démarre le serving lorsqu'il est prêt. Ces deux parties s'exécutent dans des Deployments séparés mais partagent le cache HF et l'état d'exécution via le stockage App Common.

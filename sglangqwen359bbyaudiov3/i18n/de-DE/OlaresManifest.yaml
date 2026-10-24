@@ -1,9 +1,11 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) mit SGLang, 15Gi GPU-Speicher, damit es neben Audiomodellen läuft. llm-init und die Inferenz-Engine teilen sich einen Knoten und den lokalen Laufzeitstatus."
+  description: "Qwen3.5-9B (AWQ-4bit) mit SGLang, 13.5Gi (13824Mi) GPU-Speicher, damit es neben Audiomodellen läuft. llm-init und die Inferenz-Engine teilen sich einen Knoten und den lokalen Laufzeitstatus."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.1: 13824Mi (13.5Gi) GPU-Speicher, 64K Kontext, FP8 E4M3 KV-Cache, eine gleichzeitige Anfrage und Prefill-Blöcke mit 2048 Tokens. Statischer Pool: min(0.80, 11Gi / sichtbarer GPU-Speicher). Bestehende Installationen: ENGINE_ARGS und die Model-Console-Modellkarte aktualisieren, dann mit einer 13824Mi-GPU-Bindung neu starten; Upgrades können alte Werte behalten. SGLANG_REQUIRED_GPU_MEMORY=13824Mi.
+
     v1.0.0: Derselbe Chat wie Qwen3.5-9B (SGLang), GPU-Reservierung von 23Gi auf 15Gi gesenkt, damit er neben Audiomodellen läuft.
 
     v1.0.23: Model Console wird auf llm-init v1.7.19 aktualisiert.
@@ -50,15 +52,15 @@ spec:
     **Preset-Konfiguration**
     - Modell: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Fähigkeiten: thinking, tools, vision
-    - Engine-Args: `--context-length 65536 --mem-fraction-static 0.85 --chunked-prefill-size 4096 --reasoning-parser qwen3 --tool-call-parser qwen3_coder`
-    - Erforderlicher GPU-Speicher: `15Gi`
+    - Engine-Args: `--context-length 65536 --mem-fraction-static 0.8 --max-running-requests 1 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
+    - Erforderlicher GPU-Speicher: `13.5Gi (13824Mi)`
     - SGLang zeichnet sich durch Prefix Caching und strukturierte Ausgabe (JSON, Tool Calls, Agents) aus; Prefix Caching ist standardmäßig aktiviert.
 
     **Beschleuniger-Modi**
     | Modus          | Gerät             | Details                                                              |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia`       | GPU (CUDA)        | Nutzt `15Gi` GPU-Speicher; `--mem-fraction-static` in ENGINE_ARGS anpassen |
-    | `nvidia-gb10`  | GPU (Spark)       | Wie `nvidia`: `15Gi` Speicher, vom Pod verwaltet                     |
+    | `nvidia` | GPU (CUDA) | `13824Mi` GPU-Speicher; statischer Pool auf 80% und 11Gi begrenzt |
+    | `nvidia-gb10`  | GPU (Spark)       | Wie `nvidia`: `13.5Gi (13824Mi)` Speicher, vom Pod verwaltet                     |
 
     **So funktioniert es**
     Zuerst lädt Model Console das Modell herunter und bereitet es vor, dann beginnt SGLang mit dem Serving, wenn es bereit ist. Diese beiden Teile laufen in getrennten Deployments, teilen aber den HF-Cache und den Run-State über App-Common-Speicher.
