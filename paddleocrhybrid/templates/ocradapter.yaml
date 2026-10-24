@@ -84,6 +84,14 @@ spec:
               value: "{{ $defaultFormat }}"
             - name: RUST_LOG
               value: "{{ $logLevel }}"
+            # Limit glibc arena growth and return short-lived image/crop buffers
+            # promptly during long full-dataset runs.
+            - name: MALLOC_ARENA_MAX
+              value: "2"
+            - name: MALLOC_TRIM_THRESHOLD_
+              value: "131072"
+            - name: MALLOC_MMAP_THRESHOLD_
+              value: "131072"
           ports:
             - name: http
               containerPort: 8080
@@ -93,10 +101,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 256Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1Gi
 ---
 apiVersion: v1
 kind: Service
