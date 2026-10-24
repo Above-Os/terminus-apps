@@ -1,39 +1,50 @@
-# Reasoning options validation — 1.0.2
+# Thinking off by default — 1.0.3
 
-The chart publishes `reasoning_effort` options `none` and `high`, with default
-`high`. It retains the existing engine arguments and all resource settings.
+The engine now starts with `--default-chat-template-kwargs {"enable_thinking":false}`.
+The chart's `engineArgs` helper adds it unless `ENGINE_ARGS` already carries the
+flag or the app serves embeddings. It is added there, not to the `ENGINE_ARGS`
+default, because an upgrade keeps an installation's saved `ENGINE_ARGS`. A
+request can still turn thinking on with `chat_template_kwargs`.
+
+`MODEL_REASONING_EFFORT` and `MODEL_REASONING_EFFORT_DEFAULT` are removed.
+llm-init then builds no `reasoning_effort` rule for a new card. Its overlay only
+acts when the chart declares a ladder, so a card persisted by 1.0.2 keeps its
+`none,high` rule (`internal/config/config_load_model.go`,
+`overlayReasoningEffortRuleFromEnv`).
+
+`ENGINE_ARGS` is rendered with `toJson` in both templates, because the new flag
+carries double quotes.
+
+## Why
+
+Measured on pptest03 through Router against 1.0.2, with a one-sentence answer
+and `max_tokens` 1024:
+
+| Request | Time | Reasoning tokens | Answer |
+| --- | --- | --- | --- |
+| Default (thinking on) | 9.9 s | 1024 (the whole budget) | empty |
+| `chat_template_kwargs.enable_thinking=false` | 0.17–0.22 s | 0 | complete |
+| `reasoning_effort: "none"` | 0.37 s | 0 | complete |
+
+Lares voice sessions on this model passed 36/50 live scenarios with thinking on
+and 46–49/50 with it off (`scripts/voice-eval` in beclab/lares).
 
 ## Local checks
 
-- Olares CLI `chart lint`: passed, including both owner installation scenarios.
-- Manifest and Chart versions match; both reasoning environment declarations
-  are non-editable and do not apply changes independently.
-- Helm render with new-install defaults: passed.
-- Helm render with the new environment values absent from installation values:
-  passed; template defaults still supply `none,high` and `high`.
-- Semantic comparison against the parent commit: all other manifest environment
-  declarations and rendered workload fields are unchanged.
-- Existing Model Console source tests for reasoning-rule seeding, validation and
-  reconciliation of persisted cards: passed (`go test ./internal/config -run
-  'ReasoningEffort|OverlayReasoning' -count=1`). This is a source-level check,
-  not a runtime check of the pinned container image.
+- `olares-cli chart lint`: passed under both owner installation scenarios,
+  including the Helm dry-run render.
+- The flag's value reaches SGLang intact: `wrappers/sglang.sh` word-splits
+  `ENGINE_ARGS` without `eval`, and the JSON has no spaces.
+- `--default-chat-template-kwargs` exists in the pinned image
+  (`lmsysorg/sglang:v0.5.18-cu130`, `python3 -m sglang.launch_server --help`).
 
 ## Runtime checks pending deployment
 
-This change was not uploaded, installed or deployed. The following checks are
-not executed against this chart revision:
+This revision was not uploaded, installed or deployed. Still to check:
 
-- Router catalog publication after a new install and after upgrading an existing
-  model card. Verify options `none`/`high` and default `high`.
-- Real requests with omitted effort, `none` and `high`. Check engine-default
-  behavior, successful complete replies, and no reasoning output for `none`.
-
-| Interface | Build / viewport | Status | Remaining check |
-| --- | --- | --- | --- |
-| Official dsh PC | Not measured | Blocked: chart not deployed | Options, selection persistence, request effort |
-| Vue mobile: chat and settings | Not measured | Blocked: chart not deployed | Options, selection persistence, request effort |
-| Vue desktop: chat and settings | Not measured | Blocked: chart not deployed | Options, selection persistence, request effort |
-
-UI checks must use the real Host and Router, select `none`, save and reload, then
-confirm the actual request carries `reasoning_effort: "none"`. Do not substitute
-a mocked catalog or a successful source test for runtime acceptance.
+- After a new install and after an upgrade from 1.0.2: the engine command line
+  carries the flag, and a request with no thinking parameters returns
+  `reasoning_tokens: 0` and a complete reply.
+- A request with `chat_template_kwargs.enable_thinking=true` still thinks.
+- Router catalog: no `reasoning_effort` rule on a new card; an upgraded card
+  keeps `none,high`.
