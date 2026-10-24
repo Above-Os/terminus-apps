@@ -25,3 +25,9 @@
 内置浏览器已完成真实密码登录、代码编辑器保存草稿及重新打开；其正文 blob 画布存在渲染差异。用户随后在普通浏览器退出代码模式，确认可视化编辑与草稿保存/刷新正常（2026-10-24 人工确认）。新装实例随后完成完整停止恢复，原账户、文章、页面、评论、分类标签、附件字节、插件主题、配置及数据库检查点全部通过。
 
 三组测试均通过后卸载本次专用实例和数据，并删除全部本次 Upload 版本；共享中间件保留。尚未进行同事冒烟及原生 ARM64 运行验证。提交目标为测试市场草稿 PR。
+
+## HTTP/1.1 follow-up diagnosis (2026-10-24)
+
+Dedicated synthetic-response tests identified the system L4 gateway HTML buffering limit. L4 access logs report `response_payload_too_large`. Plain text of the same size passes; uncompressed HTML of approximately 32 KiB or larger fails over HTTP/1.1 even with explicit Content-Length, while HTTP/2 passes. The gateway injects a language meta tag into HTML. System source sets the TLS listener buffer limit to 32768 and buffers HTML in its Lua filter. This is not a PHP exception or a general chunked-transfer failure. Compressed HTML succeeds in the observed path; it is only a temporary mitigation. A system gateway change is required and was not applied to the live test machine.
+
+[System source](https://github.com/beclab/Olares/blob/main/framework/l4-bfl-proxy/internal/xds/translator/translator.go) · [Envoy flow-control documentation](https://www.envoyproxy.io/docs/envoy/latest/faq/configuration/flow_control). The dedicated diagnostic application and Upload record were cleaned; shared services were retained.
