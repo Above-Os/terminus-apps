@@ -18,11 +18,8 @@
 {{- end -}}
 {{- end -}}
 {{- /* sglangqwen359bbyaudiov3.engineArgs: CPU mode auto-adds --device cpu unless already set.
-       Chat turns thinking off by default: Qwen3.5 otherwise reasons before every
-       answer, which cost voice replies seconds and, under a 1024-token budget, the
-       whole reply. Added here rather than to the ENGINE_ARGS default because an
-       upgrade keeps an installation's saved ENGINE_ARGS. A request can still turn
-       it on with chat_template_kwargs, and an operator who sets the flag keeps theirs.
+       Thinking off is not added here: ENGINE_ARGS only seeds Model Console's card on first
+       boot, and the card on disk wins after that, so wrappers/sglang.sh sets it at launch.
        Usage: {{ include "sglangqwen359bbyaudiov3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) }} */ -}}
 {{- define "sglangqwen359bbyaudiov3.engineArgs" -}}
 {{- $in := . -}}
@@ -34,9 +31,6 @@
 {{- else -}}
 {{- $args = "--device cpu" -}}
 {{- end -}}
-{{- end -}}
-{{- if not (or (contains "--default-chat-template-kwargs" $args) (contains "--is-embedding" $args)) -}}
-{{- $args = trim (printf "%s --default-chat-template-kwargs {\"enable_thinking\":false}" $args) -}}
 {{- end -}}
 {{- $args -}}
 {{- end -}}
