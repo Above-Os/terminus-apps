@@ -38,7 +38,7 @@ spec:
   onlyAdmin: true
   versionName: 'cyankiwi/Qwen3.5-9B-AWQ-4bit'
   upgradeDescription: |
-    v1.0.1: Use 13824Mi (13.5Gi) GPU memory, 64K context, FP8 E4M3 KV cache, one concurrent request and 2048-token chunked prefill. Keep the static pool at min(0.80, 11Gi / visible GPU memory). Existing installations must update ENGINE_ARGS and the Model Console model card to this preset, then restart with a 13824Mi GPU binding; upgrades can retain old values. SGLANG_REQUIRED_GPU_MEMORY=13824Mi.
+    v1.0.1: Use 13824Mi (13.5Gi) GPU memory, 64K context, FP8 E4M3 KV cache, automatic request concurrency and 2048-token chunked prefill. Keep the static pool at min(0.80, 11Gi / visible GPU memory). Existing installations must update ENGINE_ARGS and the Model Console model card to this preset, then restart with a 13824Mi GPU binding; upgrades can retain old values. SGLANG_REQUIRED_GPU_MEMORY=13824Mi.
 
     v1.0.0: Same chat as Qwen3.5-9B (SGLang), with the GPU reservation lowered from 23Gi to 15Gi so it can run beside audio models.
 
@@ -88,7 +88,7 @@ spec:
     **Preset Configuration**
     - Model: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Capabilities: thinking, tools, vision
-    - Engine args: `--context-length 65536 --mem-fraction-static 0.8 --max-running-requests 1 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
+    - Engine args: `--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
     - Required GPU memory: `13.5Gi (13824Mi)`
     - SGLang excels at prefix caching and structured output (JSON, tool calls, agents); prefix caching is enabled by default.
 
@@ -211,11 +211,11 @@ envs:
     description: "The model capabilities. Pick what your model supports. If no extra capabilities, pick None."
   - envName: ENGINE_ARGS
     required: true
-    default: "--context-length 65536 --mem-fraction-static 0.8 --max-running-requests 1 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3"
+    default: "--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3"
     type: string
     editable: true
     applyOnChange: true
-    description: "SGLang flags. The preset uses 64K context, FP8 E4M3 KV, one concurrent request and 2048-token chunked prefill. The wrapper sets the static pool to min(0.80, 11Gi / visible GPU memory), overriding --mem-fraction-static."
+    description: "SGLang flags. The preset uses 64K context, FP8 E4M3 KV, automatic request concurrency and 2048-token chunked prefill. The wrapper sets the static pool to min(0.80, 11Gi / visible GPU memory), overriding --mem-fraction-static."
   - envName: LOG_LEVEL
     required: false
     type: string
