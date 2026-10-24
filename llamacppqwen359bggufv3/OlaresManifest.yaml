@@ -7,7 +7,7 @@ metadata:
   description: Qwen3.5-9B Q4_K_M vision and reasoning with Model Console. Four slots dynamically share a 256K KV pool within a 12GiB NVIDIA GPU quota.
   appid: llamacppqwen359bggufv3
   title: Qwen3.5-9B (llama.cpp)
-  version: 1.0.3
+  version: 1.0.4
   categories:
   - AI
   - models
@@ -36,13 +36,16 @@ workloadReplicas:
 spec:
   onlyAdmin: true
   versionName: Qwen3.5-9B Q4_K_M / b11515
-  upgradeDescription: 'Initial release: pinned Q4_K_M vision model, Q8 KV, four slots sharing a 256K KV pool, and a 12GiB NVIDIA GPU quota.'
+  upgradeDescription: |
+    v1.0.4: Publish reasoning_effort options none/high with default none. Upgrade and restart refresh this rule on existing model cards; engine defaults and resource settings are unchanged.
+
+    Initial release: pinned Q4_K_M vision model, Q8 KV, four slots sharing a 256K KV pool, and a 12GiB NVIDIA GPU quota.
   fullDescription: |
     Qwen3.5-9B Q4_K_M vision and reasoning model served by llama.cpp, with Model Console managing model and F16 projector downloads, lifecycle and the OpenAI-compatible API consumed by Router.
 
     Default: -c 262144 -np 4 -kvu --kv-unified-per-slot 131072. Four slots dynamically share a total 256K KV pool. Each request is capped at 128K; simultaneous input and output budgets must fit the total pool. This does not provide four separate 256K windows. Windows include template, text, images and output, with up to 1024 tokens per image.
 
-    Q8_0 KV, GPU weights and vision projector, Flash Attention, batch/microbatch 512. Thinking is disabled by default; request-level chat_template_kwargs.enable_thinking can enable it. Model Console uses llm-init v1.7.21 with shared-pool budget admission checks.
+    Q8_0 KV, GPU weights and vision projector, Flash Attention, batch/microbatch 512. Thinking is disabled by default; clients can select reasoning_effort=none or high, with high enabling thinking. Model Console uses llm-init v1.7.21 with shared-pool budget admission checks.
 
     Requires NVIDIA amd64 Olares and 12288 MiB available GPU memory. Model and projector downloads total approximately 6.2 GiB and use the shared appCommon/huggingface cache.
 
@@ -109,6 +112,20 @@ envs:
   editable: false
   applyOnChange: false
   default: vision,thinking
+- envName: MODEL_REASONING_EFFORT
+  required: false
+  type: string
+  editable: false
+  applyOnChange: false
+  default: "none,high"
+  description: "Accepted reasoning_effort values published to Router and clients."
+- envName: MODEL_REASONING_EFFORT_DEFAULT
+  required: false
+  type: string
+  editable: false
+  applyOnChange: false
+  default: "none"
+  description: "The engine default when a request omits reasoning_effort; this declaration does not inject it into requests."
 - envName: ENGINE_ARGS
   required: true
   type: string
