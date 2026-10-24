@@ -31,7 +31,7 @@
        engine limit as Arc. intel-gpu (Arc) is discrete. */ -}}
 {{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
 {{- /* ENGINE_IMAGE has no manifest default: filling one would pin every mode to the same image. */ -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.28" "docker.io/beclab/audio-qwen:v1.1.28" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen-ov:v1.1.33" "docker.io/beclab/audio-qwen:v1.1.33" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if and $unifiedMem (eq $gpuType "nvidia-gb10") -}}
@@ -152,6 +152,9 @@ spec:
               value: /run/llm-init/wrappers/common.sh
             - name: OLARES_GPU_MODE
               value: "{{ $gpuType }}"
+            # Requests Router may hold open here at once; inference still runs one call at a time.
+            - name: ENGINE_MAX_CONCURRENCY
+              value: "{{ $oe.ENGINE_MAX_CONCURRENCY | default "3" }}"
 {{- if $engineArgs }}
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
