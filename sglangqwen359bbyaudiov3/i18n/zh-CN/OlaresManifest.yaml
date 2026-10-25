@@ -1,9 +1,10 @@
 metadata:
-  description: "使用 SGLang 运行 Qwen3.5-9B（AWQ-4bit），显存申请 13.5Gi (13824Mi)，便于与音频模型同时运行。llm-init 与推理引擎调度到同一节点，共享本地运行状态。"
+  description: "使用 SGLang 运行 Qwen3.5-9B（AWQ-4bit），显存申请 15Gi (15360Mi)，便于与音频模型同时运行。llm-init 与推理引擎调度到同一节点，共享本地运行状态。"
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.5: 显存申请改为 15360Mi（15Gi），静态池上限提高到 min(0.80, 12Gi / 可见显存)。在显存切分的显卡上，多出的显存用于 KV 缓存和 mamba 状态缓存；状态槽位过少会让语音 Agent 的长提示词无法在两轮之间保留缓存。时间分片的安装静态池也由 11Gi 变为 12Gi。
     v1.0.4: 升级后的安装也能默认关闭思考了：引擎启动脚本会在模型卡的引擎参数之前加上 --default-chat-template-kwargs {"enable_thinking":false}。Model Console 升级时会保留模型卡上原有的引擎参数，v1.0.3 加的这个参数因此没有生效。模型卡里自己设置了该参数时，仍以模型卡为准。
 
     v1.0.3: 默认关闭思考：引擎启动时带上 --default-chat-template-kwargs {"enable_thinking":false}（ENGINE_ARGS 里已设置时不重复添加），升级后的安装同样生效。单个请求仍可通过 chat_template_kwargs 打开思考。去掉 reasoning_effort 档位声明：新安装不再发布 reasoning_effort 规则，已有模型卡上的规则保持不变。
@@ -59,14 +60,14 @@ spec:
     - 模型：`cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - 能力：思考、工具、视觉
     - 引擎参数：`--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
-    - 所需显存：`13.5Gi (13824Mi)`
+    - 所需显存：`15Gi (15360Mi)`
     - SGLang 擅长前缀缓存与结构化输出（JSON、工具调用、智能体），因此默认启用前缀缓存。
 
     **加速器模式**
     | 模式           | 设备             | 说明                                                         |
     |----------------|------------------|--------------------------------------------------------------|
-    | `nvidia` | GPU (CUDA) | 使用 `13824Mi` 显存；静态池上限为 80% 和 11Gi |
-    | `nvidia-gb10`  | GPU (Spark)      | 与 `nvidia` 相同：`13.5Gi (13824Mi)` 显存，由 pod 管理                    |
+    | `nvidia` | GPU (CUDA) | 使用 `15360Mi` 显存；静态池上限为 80% 和 12Gi |
+    | `nvidia-gb10`  | GPU (Spark)      | 与 `nvidia` 相同：`15Gi (15360Mi)` 显存，由 pod 管理                    |
     
     **工作流程说明**
     首先，Model Console 下载并准备模型，然后 SGLang 在模型准备好后启动服务。两个部分运行在不同 Deployment 中，但通过 App Common 存储共享 HF 缓存与运行状态。

@@ -1,9 +1,10 @@
 metadata:
-  description: "SGLang で提供する Qwen3.5-9B（AWQ-4bit）。音声モデルと同時に動かすため GPU メモリは 13.5Gi (13824Mi)。llm-init と推論エンジンは同一ノードでローカル実行状態を共有します。"
+  description: "SGLang で提供する Qwen3.5-9B（AWQ-4bit）。音声モデルと同時に動かすため GPU メモリは 15Gi (15360Mi)。llm-init と推論エンジンは同一ノードでローカル実行状態を共有します。"
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.5: GPU メモリの確保量を 15360Mi（15Gi）にし、静的プールの上限を min(0.80, 12Gi / 可視 GPU メモリ) に引き上げます。メモリ分割された GPU では、増えた分が KV キャッシュと mamba 状態キャッシュに回ります。状態スロットが少ないと、音声 Agent の長いプロンプトがターン間でキャッシュに残りませんでした。タイムスライスのインストールも静的プールが 11Gi から 12Gi になります。
     v1.0.4: アップグレード後のインストールでも思考オフが効くようになりました。エンジンのラッパーが、Model Console がアップグレード後も保持するモデルカードのエンジン引数（v1.0.3 のフラグが抜けていたもの）より前に --default-chat-template-kwargs {"enable_thinking":false} を付けて起動します。カードでフラグを指定した場合はそちらが優先されます。
 
     v1.0.3: 思考を既定でオフにしました。ENGINE_ARGS に指定がない限り、エンジンは --default-chat-template-kwargs {"enable_thinking":false} 付きで起動し、アップグレード後も有効です。リクエストごとに chat_template_kwargs でオンにできます。reasoning_effort の宣言を削除しました。新規インストールはルールを公開せず、既存のモデルカードのルールはそのまま残ります。
@@ -59,14 +60,14 @@ spec:
     - モデル: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - 能力: thinking, tools, vision
     - エンジン引数: `--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
-    - 必要 GPU メモリ: `13.5Gi (13824Mi)`
+    - 必要 GPU メモリ: `15Gi (15360Mi)`
     - SGLang はプレフィックスキャッシュと構造化出力（JSON、ツール呼び出し、エージェント）に優れ、プレフィックスキャッシュはデフォルトで有効です。
 
     **アクセラレータモード**
     | モード         | デバイス          | 詳細                                                                 |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia` | GPU (CUDA) | GPU メモリ `13824Mi`；静的プールの上限は 80% および 11Gi |
-    | `nvidia` | GPU (CUDA) | GPU メモリ `13824Mi`；静的プールの上限は 80% および 11Gi |
+    | `nvidia` | GPU (CUDA) | GPU メモリ `15360Mi`；静的プールの上限は 80% および 12Gi |
+    | `nvidia` | GPU (CUDA) | GPU メモリ `15360Mi`；静的プールの上限は 80% および 12Gi |
 
     **動作の仕組み**
     まず Model Console がモデルをダウンロードして準備し、準備ができたら SGLang がサービングを開始します。この 2 つは別々の Deployment で動作しますが、App Common ストレージ経由で HF キャッシュと実行状態を共有します。

@@ -1,50 +1,54 @@
-# Thinking off by default — 1.0.3
+# 15Gi GPU memory and a 12Gi static pool — 1.0.5
 
-The engine now starts with `--default-chat-template-kwargs {"enable_thinking":false}`.
-The chart's `engineArgs` helper adds it unless `ENGINE_ARGS` already carries the
-flag or the app serves embeddings. It is added there, not to the `ENGINE_ARGS`
-default, because an upgrade keeps an installation's saved `ENGINE_ARGS`. A
-request can still turn thinking on with `chat_template_kwargs`.
+The NVIDIA reservation rises from 13824Mi (13.5Gi) to 15360Mi (15Gi), and the
+launch wrapper's static-pool cap from `min(0.80, 11Gi / visible)` to
+`min(0.80, 12Gi / visible)`. On a 15Gi slice that is the full 80%, 12Gi, against
+10.8Gi before; raising the reservation alone would have left the pool at 11Gi.
+The cap lives in `templates/wrappers.yaml` (`prepare.py`), which an upgrade
+applies, unlike a saved `ENGINE_ARGS`. Time-sliced installations, which see the
+whole card, get 12Gi instead of 11Gi.
 
-`MODEL_REASONING_EFFORT` and `MODEL_REASONING_EFFORT_DEFAULT` are removed.
-llm-init then builds no `reasoning_effort` rule for a new card. Its overlay only
-acts when the chart declares a ladder, so a card persisted by 1.0.2 keeps its
-`none,high` rule (`internal/config/config_load_model.go`,
-`overlayReasoningEffortRuleFromEnv`).
-
-`ENGINE_ARGS` is rendered with `toJson` in both templates, because the new flag
-carries double quotes.
+The companion charts free the memory on the same card: audioqwen3asr06v3 1.0.3
+(3.5Gi → 2.3Gi) and audioqwen3ttsv3 1.0.12 (6Gi → 5.7Gi). The three still add up
+to 23Gi.
 
 ## Why
 
-Measured on pptest03 through Router against 1.0.2, with a one-sentence answer
-and `max_tokens` 1024:
+Measured on pptest03 (RTX 5090 Laptop, 24Gi, memory slicing) with 1.0.4:
 
-| Request | Time | Reasoning tokens | Answer |
-| --- | --- | --- | --- |
-| Default (thinking on) | 9.9 s | 1024 (the whole budget) | empty |
-| `chat_template_kwargs.enable_thinking=false` | 0.17–0.22 s | 0 | complete |
-| `reasoning_effort: "none"` | 0.37 s | 0 | complete |
+- SGLang allocates `max_mamba_cache_size: 19` (conv 0.02GB, ssm 0.94GB) beside
+  1.12GB of FP8 KV, and logs `mamba usage: 0.21` at rest: about four slots hold
+  cached prefixes while each running request takes five.
+- A 15.5k-token prompt sent again after N other prompts of about 4k tokens:
 
-Lares voice sessions on this model passed 36/50 live scenarios with thinking on
-and 46–49/50 with it off (`scripts/voice-eval` in beclab/lares).
+  | Other prompts in between | Second request | Prefix |
+  | --- | --- | --- |
+  | 0–2 | 0.11–0.28 s | cached |
+  | 3 | 3.15 s | re-read |
+  | 6 | 3.34 s | re-read |
+
+- In a Lares voice session the Agent's first call of a turn reused 11–13k of a
+  22k-token prompt (`#cached-token`) and re-read the rest, adding 2–6 s, although
+  the request matched the previous one byte for byte up to its new messages
+  (Lares `agent-request` trace). The dialogue's own calls in between were enough
+  to evict the Agent's state.
+
+Peak use over three hours on that card: ASR 2.04Gi of 3.5Gi, TTS 5.23Gi of 6Gi,
+SGLang 13.08Gi of 13.5Gi.
 
 ## Local checks
 
 - `olares-cli chart lint`: passed under both owner installation scenarios,
   including the Helm dry-run render.
-- The flag's value reaches SGLang intact: `wrappers/sglang.sh` word-splits
-  `ENGINE_ARGS` without `eval`, and the JSON has no spaces.
-- `--default-chat-template-kwargs` exists in the pinned image
-  (`lmsysorg/sglang:v0.5.18-cu130`, `python3 -m sglang.launch_server --help`).
+- No upgrade note before 1.0.5 was changed; only current descriptions and
+  defaults now say 15Gi / 12Gi.
 
-## Runtime checks pending deployment
+## To check after upgrading pptest03
 
-This revision was not uploaded, installed or deployed. Still to check:
-
-- After a new install and after an upgrade from 1.0.2: the engine command line
-  carries the flag, and a request with no thinking parameters returns
-  `reasoning_tokens: 0` and a complete reply.
-- A request with `chat_template_kwargs.enable_thinking=true` still thinks.
-- Router catalog: no `reasoning_effort` rule on a new card; an upgraded card
-  keeps `none,high`.
+- The SGLang pod requests `nvidia.com/gpumem` 15360 and logs
+  `visible GPU total≈15Gi, static fraction=0.80000` and a larger
+  `max_mamba_cache_size`.
+- `SGLANG_REQUIRED_GPU_MEMORY` is not editable; confirm an upgraded installation
+  takes the new default rather than keeping 13824Mi.
+- The same prefix probe and the weather → light → light-off voice sequence:
+  how many other prompts the Agent's prefix now survives.
