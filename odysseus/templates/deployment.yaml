@@ -24,7 +24,7 @@ spec:
           command: [sh, -ec]
           args:
             - |
-              for d in /runtime /data /data/logs /data/ssh /data/local /data/document-deps /cache; do
+              for d in /runtime /data /data/logs /data/ssh /data/local /data/document-deps /data/document-deps/site-packages /cache; do
                 mkdir -p "$d"
                 chown 1000:1000 "$d"
               done
@@ -39,7 +39,7 @@ spec:
         # Copy only image-owned application code into a writable ephemeral tree.
         # This avoids upstream's root entrypoint and recursive ownership repair.
         - name: prepare-runtime
-          image: beclab/odysseus-dev-odysseus:1.0.3@sha256:141077b62824698bf38e03c6061deabba60ce785e920b64a7b678d7a14d8fe3b
+          image: beclab/odysseus-dev-odysseus:1.0.3
           command: [sh, -ec]
           args:
             - |
@@ -59,22 +59,9 @@ spec:
           volumeMounts:
             - {name: runtime, mountPath: /runtime}
             - {name: runtime-config, mountPath: /runtime-config, readOnly: true}
-        - name: prepare-document-dependencies
-          image: beclab/odysseus-dev-odysseus:1.0.3@sha256:141077b62824698bf38e03c6061deabba60ce785e920b64a7b678d7a14d8fe3b
-          command: [python, /document-config/install.py]
-          env:
-            - {name: HOME, value: /tmp}
-            - {name: PYTHONNOUSERSITE, value: '1'}
-            - {name: PYTHONDONTWRITEBYTECODE, value: '1'}
-          resources:
-            requests: {cpu: 100m, memory: 256Mi}
-            limits: {cpu: '2', memory: 2Gi}
-          volumeMounts:
-            - {name: data, mountPath: /document-deps, subPath: document-deps}
-            - {name: document-config, mountPath: /document-config, readOnly: true}
       containers:
         - name: odysseus
-          image: beclab/odysseus-dev-odysseus:1.0.3@sha256:141077b62824698bf38e03c6061deabba60ce785e920b64a7b678d7a14d8fe3b
+          image: beclab/odysseus-dev-odysseus:1.0.3
           workingDir: /app
           command: [sh, -ec]
           args:
@@ -134,6 +121,21 @@ spec:
             - {name: data, mountPath: /app/.local, subPath: local}
             - {name: data, mountPath: /app/document-deps, subPath: document-deps}
             - {name: cache, mountPath: /app/.cache}
+        # Optional parsers never participate in the application's startup gate.
+        - name: document-dependencies
+          image: beclab/odysseus-dev-odysseus:1.0.3
+          command: [python, /document-config/install.py]
+          env:
+            - {name: HOME, value: /tmp}
+            - {name: PYTHONNOUSERSITE, value: '1'}
+            - {name: PYTHONDONTWRITEBYTECODE, value: '1'}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: '1', memory: 2Gi}
+          volumeMounts:
+            - {name: data, mountPath: /document-deps, subPath: document-deps}
+            - {name: cache, mountPath: /document-cache}
+            - {name: document-config, mountPath: /document-config, readOnly: true}
       volumes:
         - name: runtime-config
           configMap: {name: odysseus-runtime}

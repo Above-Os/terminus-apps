@@ -12,62 +12,146 @@ data:
     Pillow>=12.0.0,<13.0
     python-dateutil>=2.9.0,<3.0
   install.py: |
-    """Provision document parsers once per requirements and Python runtime."""
+    """Prepare optional parsers independently of the main application's readiness."""
+    from concurrent.futures import ThreadPoolExecutor
+    import fcntl
     import hashlib
+    import json
     import os
     from pathlib import Path
     import platform
     import shutil
+    import signal
     import subprocess
     import sys
     import tempfile
+    import time
+    import urllib.request
 
-    root = Path('/document-deps')
+    root = Path(os.environ.get('DOC_DEPS_ROOT', '/document-deps'))
     requirements = Path('/document-config/requirements.txt')
     target = root / 'site-packages'
-    marker = root / 'ready.sha256'
-    signature = hashlib.sha256(
-        requirements.read_bytes() + Path(__file__).read_bytes()
-        + sys.version.encode() + platform.machine().encode()
-    ).hexdigest()
+    configured = os.environ.get('DOC_DEPS_INDEXES', '')
+    indexes = [s.strip() for s in configured.split(',') if s.strip()] or [
+        'https://pypi.org/simple',
+        'https://pypi.tuna.tsinghua.edu.cn/simple',
+    ]
+    attempt_timeout = max(5, min(600, int(os.environ.get('DOC_DEPS_ATTEMPT_TIMEOUT', '240'))))
+    backoffs = (60, 300, 900, 3600)
+
+
+    def status(state, **details):
+        value = {'state': state, 'updated_at': time.time(), **details}
+        print(json.dumps(value), flush=True)
+        try:
+            pending = root / 'status.tmp'
+            pending.write_text(json.dumps(value) + '\n')
+            pending.replace(root / 'status.json')
+        except OSError:
+            pass
+
 
     def check(directory):
-        code = (
-            'import sys; sys.path.insert(0, sys.argv[1]); '
-            'import mammoth, markitdown, pymupdf; '
-            'from importlib.metadata import version; '
-            'assert version("mammoth") == "1.11.0"; '
-            'assert version("markitdown") == "0.1.6"; '
-            'assert version("PyMuPDF") == "2.0"'
-        )
-        subprocess.run([sys.executable, '-s', '-c', code, str(directory)], check=True, timeout=90)
+        code = '''import sys
+    sys.path.insert(0, sys.argv[1])
+    from importlib.metadata import version
+    from packaging.requirements import Requirement
+    import mammoth, markitdown, pymupdf
+    for module in (mammoth, markitdown, pymupdf):
+        assert module.__file__.startswith(sys.argv[1] + '/')
+    for line in open(sys.argv[2]):
+        line = line.strip()
+        if line and not line.startswith('#'):
+            requirement = Requirement(line)
+            assert version(requirement.name) in requirement.specifier, line
+    '''
+        subprocess.run([sys.executable, '-s', '-c', code, str(directory), str(requirements)],
+                       check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    if marker.exists() and marker.read_text().strip() == signature:
+
+    def probe(url):
+        started = time.monotonic()
         try:
-            check(target)
-            print('Document dependencies ready (reused)', flush=True)
-            sys.exit(0)
-        except (subprocess.SubprocessError, OSError):
-            print('Document dependencies need repair', flush=True)
+            with urllib.request.urlopen(url.rstrip('/') + '/mammoth/', timeout=5) as response:
+                if response.status != 200:
+                    return (10, url)
+            return (time.monotonic() - started, url)
+        except Exception:
+            return (10, url)
 
-    staging = Path(tempfile.mkdtemp(prefix='install-', dir=root))
-    try:
-        subprocess.run([
-            sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check',
-            '--no-cache-dir', '--only-binary=:all:', '--ignore-installed',
-            '--target', str(staging), '-r', str(requirements),
-        ], check=True, timeout=600)
-        check(staging)
-        backup = root / 'previous-site-packages'
-        if backup.exists():
-            shutil.rmtree(backup)
+
+    def prepare():
+        # A download-policy change does not invalidate working components.
         if target.exists():
-            target.rename(backup)
-        staging.rename(target)
-        marker.write_text(signature + '\n')
-        if backup.exists():
-            shutil.rmtree(backup)
-        print('Document dependencies ready (installed)', flush=True)
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging)
+            try:
+                check(target)
+                status('ready', reused=True)
+                return True
+            except (subprocess.SubprocessError, OSError):
+                pass
+        ordered = indexes
+        if not configured:
+            with ThreadPoolExecutor(max_workers=len(indexes)) as pool:
+                ordered = [url for _, url in sorted(pool.map(probe, indexes))]
+        for index in ordered:
+            staging = Path(tempfile.mkdtemp(prefix='install-', dir=root))
+            try:
+                status('downloading', index=index)
+                # Separate attempts give each mirror a bounded opportunity. Cached
+                # downloads survive a retry, and partial installs are never exposed.
+                subprocess.run([
+                    sys.executable, '-m', 'pip', '--isolated', 'install',
+                    '--disable-pip-version-check', '--no-input', '--only-binary=:all:',
+                    '--ignore-installed', '--retries', '2', '--timeout', '20',
+                    '--cache-dir', '/document-cache/pip', '--index-url', index,
+                    '--target', str(staging), '-r', str(requirements),
+                ], check=True, timeout=attempt_timeout)
+                check(staging)
+                backup = root / 'previous-site-packages'
+                if backup.exists():
+                    shutil.rmtree(backup)
+                if target.exists():
+                    target.rename(backup)
+                try:
+                    staging.rename(target)
+                except Exception:
+                    if backup.exists() and not target.exists():
+                        backup.rename(target)
+                    raise
+                signature = hashlib.sha256(requirements.read_bytes()
+                    + sys.version.encode() + platform.machine().encode()).hexdigest()
+                (root / 'ready.sha256').write_text(signature + '\n')
+                if backup.exists():
+                    shutil.rmtree(backup)
+                status('ready', reused=False, index=index)
+                return True
+            except (subprocess.SubprocessError, OSError) as error:
+                status('source_failed', index=index, reason=type(error).__name__)
+            finally:
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+        return False
+
+
+    def stop(signum, frame):
+        raise SystemExit(0)
+
+
+    signal.signal(signal.SIGTERM, stop)
+    failures = 0
+    while True:
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            with (root / 'installer.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                if prepare():
+                    # A running worker has no readiness probe and never gates the app.
+                    while True:
+                        time.sleep(3600)
+            delay = backoffs[min(failures, len(backoffs) - 1)]
+        except Exception as error:
+            delay = backoffs[min(failures, len(backoffs) - 1)]
+            status('worker_error', reason=type(error).__name__)
+        status('retrying', failures=failures + 1, retry_after_seconds=delay)
+        failures += 1
+        time.sleep(delay)
