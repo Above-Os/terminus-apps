@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supabase-runtime
+data:
+  keys.js: |
+    const fs=require('node:fs'), crypto=require('node:crypto');
+    const b=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
+    const token=role=>{const h=b({alg:'HS256',typ:'JWT'})+'.'+b({role,iss:'supabase',iat:1700000000,exp:2147483647});return h+'.'+crypto.createHmac('sha256',process.env.JWT_SECRET).update(h).digest('base64url')};
+    const values={ANON_KEY:token('anon'),SERVICE_ROLE_KEY:token('service_role')};
+    fs.writeFileSync('/runtime/keys.env',Object.entries(values).map(([k,v])=>`export ${k}='${v}'`).join('\n')+'\n',{mode:0o600});
+    if(process.env.GATEWAY==='true') {
+     let text=fs.readFileSync('/config/lds.template.yaml','utf8');
+     const all={...process.env,...values,DASHBOARD_BASIC_AUTH:process.env.DASHBOARD_USERNAME+':{SHA}'+crypto.createHash('sha1').update(process.env.DASHBOARD_PASSWORD).digest('base64')};
+     text=text.replace(/\$\{([A-Z_]+)\}/g,(_,k)=>all[k]||'');
+     fs.writeFileSync('/runtime/lds.yaml',text,{mode:0o600});
+    }
