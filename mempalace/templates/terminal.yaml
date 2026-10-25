@@ -13,7 +13,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "create", "delete"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
@@ -50,11 +50,17 @@ spec:
     type: Recreate
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/terminal-config.yaml") . | sha256sum }}
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: terminal
     spec:
       serviceAccountName: terminal-account
+      volumes:
+        - name: terminal-config
+          configMap:
+            name: mempalace-terminal-config
       containers:
         - name: nginx
           image: docker.io/beclab/terminal:v0.0.10
@@ -67,11 +73,20 @@ spec:
             - name: TZ
               value: Etc/UTC
           command:
-            - nginx
-            - -g
-            - "daemon off;"
+            - sh
+            - -c
+            - mkdir -p /tmp/terminal-nginx/logs; exec nginx -p /tmp/terminal-nginx/ -c /etc/nginx/olares.conf -g 'daemon off;'
           securityContext:
-            privileged: false
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: terminal-config
+              mountPath: /etc/nginx/olares.conf
+              subPath: nginx.conf
+              readOnly: true
           resources:
             limits:
               cpu: 50m
@@ -81,7 +96,7 @@ spec:
               memory: 50Mi
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8088
               protocol: TCP
         - name: terminal
           image: docker.io/beclab/terminal:v0.0.10
@@ -107,7 +122,11 @@ spec:
             - --container=mempalace
             - --v=3
           securityContext:
-            privileged: false
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             limits:
               cpu: 100m
@@ -129,4 +148,4 @@ spec:
     - name: terminal
       protocol: TCP
       port: 80
-      targetPort: 80
+      targetPort: 8088
