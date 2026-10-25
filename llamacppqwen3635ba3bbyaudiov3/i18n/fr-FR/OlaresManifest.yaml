@@ -1,0 +1,35 @@
+metadata:
+  description: "Qwen3.6-35B-A3B (GGUF UD-IQ4_XS) servi avec llama.cpp pour la voix : réflexion désactivée par défaut, deux slots partagent un pool KV de 100K."
+  title: Qwen3.6-35B-A3B by Audio
+spec:
+  upgradeDescription: |
+    v1.0.0 : Première version, basée sur Qwen3.6-35B-A3B (llama.cpp) 1.0.25. La réflexion est désactivée par défaut ; une requête l'active avec chat_template_kwargs {"enable_thinking": true}. Deux slots partagent un pool KV de 100K (102400 jetons, -np 2 -kvu), une requête peut donc utiliser toute la fenêtre.
+
+  fullDescription: |
+    **Aperçu du modèle**
+    Qwen3.6-35B-A3B est un modèle vision-langage Mixture-of-Experts de la série Qwen (Alibaba), avec 35B paramètres au total et environ 3B actifs par token. Il dispose d'un encodeur de vision intégré, d'un support de contexte très long, et propose thinking, tool-calling et vision. Cette app sert le build GGUF `UD-IQ4_XS` de `unsloth/Qwen3.6-35B-A3B-GGUF` via llama.cpp.
+    
+    Bien adapté aux charges multimodales nécessitant un long contexte et une compréhension visuelle. La série Qwen3.6 35B prend nativement en charge des fenêtres de contexte étendues et inclut un encodeur de vision pour les tâches image-et-texte.
+    
+    **Configuration du preset**
+    - Model: `unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS` (avec projecteur `mmproj-F16.gguf` pour la vision)
+    - Capabilities: thinking, tools, vision
+    - Arguments du moteur : `-c 102400 -ngl all -fa on -ctk q8_0 -ctv q8_0 -np 2 -kvu` (deux slots partagent un pool KV de 100K, une seule requête peut utiliser jusqu'à 100K ; déchargement complet sur GPU ; cache KV quantifié en q8_0)
+    - Réflexion : désactivée par défaut (`--reasoning off` au démarrage). Le modèle de conversation ignore `reasoning_effort` ; activez-la par requête avec `chat_template_kwargs: {"enable_thinking": true}`
+    - Mémoire GPU requise : `23Gi`
+    
+    **Modes accélérateur**
+    | Mode           | Device            | Details                                          |
+    |----------------|-------------------|--------------------------------------------------|
+    | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; `-ngl all` for full GPU  |
+    | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
+    
+    **Fonctionnement**
+    D'abord, Model Console télécharge le modèle et le prépare, puis `llama.cpp` commence à servir le modèle quand il est prêt. Ces deux parties tournent séparément mais partagent fichiers et infos de progression.
+    
+    **Pile logicielle**
+    - **llama.cpp** : Exécute le modèle et sert les requêtes API (port 8081)
+    - **Model Console** : Télécharge le modèle, affiche la progression et fournit l'API OpenAI sur le port 8090, en proxy vers `llamacpp`.
+    
+    **Stockage du modèle**
+    Tous les fichiers du modèle sont stockés dans un dossier partagé à `appCommon/huggingface`, monté comme `/cache/hf/hub`. Toutes les apps similaires utilisent cet emplacement pour les modèles.
