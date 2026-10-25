@@ -1,9 +1,10 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) servito con SGLang, 13.5Gi (13824Mi) di memoria GPU per girare insieme ai modelli audio. llm-init e il motore di inferenza condividono nodo e stato locale."
+  description: "Qwen3.5-9B (AWQ-4bit) servito con SGLang, 15Gi (15360Mi) di memoria GPU per girare insieme ai modelli audio. llm-init e il motore di inferenza condividono nodo e stato locale."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.5: Riserva 15360Mi (15Gi) di memoria GPU e alza il limite del pool statico a min(0.80, 12Gi / memoria GPU visibile). Su una scheda con memoria suddivisa, la memoria in più va alla cache KV e alla cache degli stati mamba, i cui pochi slot impedivano al prompt lungo di un Agent vocale di restare in cache tra un turno e l'altro. Anche le installazioni in time slicing passano a un pool statico di 12Gi invece di 11Gi.
     v1.0.4: Il ragionamento disattivato ora vale anche dopo un aggiornamento: il wrapper del motore parte con --default-chat-template-kwargs {"enable_thinking":false} prima degli argomenti della scheda del modello, che Model Console conserva tra un aggiornamento e l'altro e che avevano perso l'opzione della v1.0.3. Una scheda che imposta l'opzione ha ancora la precedenza.
 
     v1.0.3: Ragionamento disattivato per impostazione predefinita: il motore parte con --default-chat-template-kwargs {"enable_thinking":false}, salvo che ENGINE_ARGS lo imposti già, anche dopo l'aggiornamento. Una richiesta può riattivarlo con chat_template_kwargs. Rimossa la dichiarazione reasoning_effort: le nuove installazioni non pubblicano la regola, le schede esistenti mantengono la loro.
@@ -59,14 +60,14 @@ spec:
     - Modello: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Capacità: thinking, tools, vision
     - Argomenti engine: `--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
-    - Memoria GPU richiesta: `13.5Gi (13824Mi)`
+    - Memoria GPU richiesta: `15Gi (15360Mi)`
     - SGLang eccelle nel prefix caching e nell'output strutturato (JSON, tool call, agent); il prefix caching è abilitato di default.
 
     **Modalità acceleratore**
     | Modalità       | Dispositivo       | Dettagli                                                             |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia` | GPU (CUDA) | `13824Mi` di memoria GPU; pool statico limitato a 80% e 11Gi |
-    | `nvidia-gb10`  | GPU (Spark)       | Come `nvidia`: `13.5Gi (13824Mi)` di memoria, gestita dal pod                    |
+    | `nvidia` | GPU (CUDA) | `15360Mi` di memoria GPU; pool statico limitato a 80% e 12Gi |
+    | `nvidia-gb10`  | GPU (Spark)       | Come `nvidia`: `15Gi (15360Mi)` di memoria, gestita dal pod                    |
 
     **Come funziona**
     Prima Model Console scarica e prepara il modello, poi SGLang avvia il serving quando è pronto. Queste due parti girano in Deployment separati ma condividono la cache HF e lo stato di esecuzione tramite lo storage App Common.

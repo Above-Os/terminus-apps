@@ -1,9 +1,10 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) mit SGLang, 13.5Gi (13824Mi) GPU-Speicher, damit es neben Audiomodellen läuft. llm-init und die Inferenz-Engine teilen sich einen Knoten und den lokalen Laufzeitstatus."
+  description: "Qwen3.5-9B (AWQ-4bit) mit SGLang, 15Gi (15360Mi) GPU-Speicher, damit es neben Audiomodellen läuft. llm-init und die Inferenz-Engine teilen sich einen Knoten und den lokalen Laufzeitstatus."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.5: Reserviert 15360Mi (15Gi) GPU-Speicher und hebt die Obergrenze des statischen Pools auf min(0.80, 12Gi / sichtbarer GPU-Speicher) an. Auf einer speichergeteilten Karte geht der zusätzliche Speicher an den KV-Cache und den Mamba-Zustandscache, dessen wenige Plätze den langen Prompt eines Sprach-Agenten nicht zwischen den Zügen im Cache hielten. Zeitgeteilte Installationen erhalten ebenfalls 12Gi statt 11Gi statischen Pool.
     v1.0.4: Ausgeschaltetes Denken greift jetzt auch nach einem Upgrade: Der Engine-Wrapper startet mit --default-chat-template-kwargs {"enable_thinking":false} vor den Engine-Argumenten der Modellkarte, die Model Console über Upgrades hinweg behält und die das Flag aus v1.0.3 verloren hatten. Eine Karte, die das Flag setzt, hat weiterhin Vorrang.
 
     v1.0.3: Denken ist standardmäßig aus: Die Engine startet mit --default-chat-template-kwargs {"enable_thinking":false}, sofern ENGINE_ARGS es nicht schon setzt, auch nach einem Upgrade. Eine Anfrage kann es per chat_template_kwargs einschalten. Die reasoning_effort-Deklaration entfällt: Neue Installationen veröffentlichen keine reasoning_effort-Regel, vorhandene Modellkarten behalten ihre.
@@ -59,14 +60,14 @@ spec:
     - Modell: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Fähigkeiten: thinking, tools, vision
     - Engine-Args: `--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
-    - Erforderlicher GPU-Speicher: `13.5Gi (13824Mi)`
+    - Erforderlicher GPU-Speicher: `15Gi (15360Mi)`
     - SGLang zeichnet sich durch Prefix Caching und strukturierte Ausgabe (JSON, Tool Calls, Agents) aus; Prefix Caching ist standardmäßig aktiviert.
 
     **Beschleuniger-Modi**
     | Modus          | Gerät             | Details                                                              |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia` | GPU (CUDA) | `13824Mi` GPU-Speicher; statischer Pool auf 80% und 11Gi begrenzt |
-    | `nvidia-gb10`  | GPU (Spark)       | Wie `nvidia`: `13.5Gi (13824Mi)` Speicher, vom Pod verwaltet                     |
+    | `nvidia` | GPU (CUDA) | `15360Mi` GPU-Speicher; statischer Pool auf 80% und 12Gi begrenzt |
+    | `nvidia-gb10`  | GPU (Spark)       | Wie `nvidia`: `15Gi (15360Mi)` Speicher, vom Pod verwaltet                     |
 
     **So funktioniert es**
     Zuerst lädt Model Console das Modell herunter und bereitet es vor, dann beginnt SGLang mit dem Serving, wenn es bereit ist. Diese beiden Teile laufen in getrennten Deployments, teilen aber den HF-Cache und den Run-State über App-Common-Speicher.

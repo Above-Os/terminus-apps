@@ -105,8 +105,9 @@ data:
     import torch
     from pathlib import Path
 
-    # Keep the tested static budget when time slicing exposes the whole GPU.
+    # Keep the tested static budget when time slicing exposes the whole GPU. 12Gi leaves a 15Gi
+    # slice its 80%: what goes past 11Gi reaches the KV cache and the mamba state cache.
     total = torch.cuda.get_device_properties(0).total_memory
-    fraction = min(0.80, (11 * 1024**3) / total)
+    fraction = min(0.80, (12 * 1024**3) / total)
     Path("/tmp/qwen-static-fraction").write_text(f"{fraction:.5f}")
     print(f"[qwen-memory] visible GPU total={total / 1024**3:.3f}Gi, static fraction={fraction:.5f}", flush=True)

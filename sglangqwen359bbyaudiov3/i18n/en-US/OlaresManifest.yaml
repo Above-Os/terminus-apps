@@ -1,9 +1,10 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) served with SGLang, reserving 13.5Gi (13824Mi) GPU memory so it can run alongside audio models. llm-init and the inference engine share a node and local run-state."
+  description: "Qwen3.5-9B (AWQ-4bit) served with SGLang, reserving 15Gi (15360Mi) GPU memory so it can run alongside audio models. llm-init and the inference engine share a node and local run-state."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.5: Reserve 15360Mi (15Gi) of GPU memory and raise the static-pool cap to min(0.80, 12Gi / visible GPU memory). On a memory-sliced card the extra memory goes to the KV cache and to the mamba state cache, whose few slots kept a voice Agent's long prompt from staying cached between turns. Time-sliced installations also get a 12Gi static pool instead of 11Gi.
     v1.0.4: Thinking-off now reaches upgraded installations: the engine wrapper launches with --default-chat-template-kwargs {"enable_thinking":false} ahead of the model card's engine args, which Model Console keeps across upgrades and which had dropped the v1.0.3 flag. A card that sets the flag still wins.
 
     v1.0.3: Thinking is off by default: the engine starts with --default-chat-template-kwargs {"enable_thinking":false}, added unless ENGINE_ARGS already sets it, so upgraded installations get it too. A request can still turn thinking on with chat_template_kwargs. The reasoning_effort declaration is removed: new installations publish no reasoning_effort rule, and a model card that already carries one keeps it.
@@ -59,14 +60,14 @@ spec:
     - Model: `cyankiwi/Qwen3.5-9B-AWQ-4bit`
     - Capabilities: thinking, tools, vision
     - Engine args: `--context-length 65536 --mem-fraction-static 0.8 --chunked-prefill-size 2048 --reasoning-parser qwen3 --tool-call-parser qwen3_coder --kv-cache-dtype fp8_e4m3`
-    - Required GPU memory: `13.5Gi (13824Mi)`
+    - Required GPU memory: `15Gi (15360Mi)`
     - SGLang excels at prefix caching and structured output (JSON, tool calls, agents); prefix caching is enabled by default.
 
     **Accelerator modes**
     | Mode           | Device            | Details                                                              |
     |----------------|-------------------|----------------------------------------------------------------------|
-    | `nvidia` | GPU (CUDA) | Uses `13824Mi` GPU memory; static pool capped at 80% and 11Gi |
-    | `nvidia-gb10`  | GPU (Spark)       | Same as `nvidia`: `13.5Gi (13824Mi)` memory, managed by the pod                  |
+    | `nvidia` | GPU (CUDA) | Uses `15360Mi` GPU memory; static pool capped at 80% and 12Gi |
+    | `nvidia-gb10`  | GPU (Spark)       | Same as `nvidia`: `15Gi (15360Mi)` memory, managed by the pod                  |
     
     **How It Works**
     First, Model Console downloads the model and gets it ready, then SGLang starts serving the model when it's ready. These two parts run in separate Deployments, sharing the HF cache via App Common and transient run-state via App Cache.
