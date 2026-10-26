@@ -19,10 +19,15 @@
 {{- end -}}
 {{- $isCpuMode := eq $gpuType "cpu" -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
 {{- $engineArgs = include "llamacppqwen3635ba3bbyaudiov3.engineArgs" (dict "Args" $engineArgs "IsCpu" $isCpuMode) -}}
 {{- /* nvidia.com/gpumem needs a BARE MiB int; Spark unified memory reuses the
-       same value as pod memory ("<MiB>Mi"). CPU mode skips GPU inject and gpumem. */ -}}
+       same value as pod memory ("<MiB>Mi"). Intel uses pod annotations for its 22Gi quota.
+       CPU mode skips GPU inject and gpumem. */ -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "4096") -}}
+{{- if $isIntelGpu -}}
+{{- $gpuMiB = "22528" -}}
+{{- end -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
@@ -63,6 +68,11 @@ spec:
         # node to hand over run-state). Keep this label OFF the llm-init Pod
         # template - see the note there.
         app.kubernetes.io/instance: '{{ .Release.Name }}'
+{{- if $isIntelGpu }}
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -78,9 +88,27 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+{{- if $isIntelGpu }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi
+{{- end }}
       containers:
         - name: llamacpp
+{{- if $isIntelGpu }}
+          image: docker.io/beclab/ggml-org-llama.cpp:server-intel-b11718
+{{- else }}
           image: docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10068
+{{- end }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]
           env:
@@ -134,22 +162,30 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+{{- if $isIntelGpu }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             # nvidia.com/gpumem is the per-instance GPU memory quota read by the
             # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
             # It's a non-overcommittable extended resource, so it must be in BOTH
             # requests and limits with the same value. Dropped on gb10 (unified
-            # memory uses pod memory instead) and cpu (no GPU inject).
+            # memory uses pod memory instead), Intel (pod annotations), and CPU.
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if eq $gpuType "nvidia" }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if eq $gpuType "nvidia" }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
