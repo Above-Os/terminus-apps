@@ -7,7 +7,7 @@ metadata:
   description: A text-to-speech model with preset, cloned, and designed voices
   appid: audiofireredttsv3
   title: FireRedTTS3 Instruct
-  version: '1.0.12'
+  version: '1.0.13'
   categories:
     - AI
     - models
@@ -50,7 +50,6 @@ spec:
 
     A compatible NVIDIA GPU with at least `16Gi` of GPU memory is required.
 
-
   developer: Xiaohongshu
   website: https://fireredteam.github.io/demos/firered_tts_3/
   sourceCode: https://huggingface.co/FireRedTeam/FireRedTTS3
@@ -69,8 +68,7 @@ spec:
       url: https://github.com/FireRedTeam/FireRedTTS3/blob/main/LICENSE
 
   accelerator:
-    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). On nvidia-gb10 the
-    # engine's memory request AND limit become the GPU quota (unified memory).
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). On nvidia-gb10 the engine's memory request AND limit become the GPU quota (unified memory).
     - mode: nvidia
       limitedCpu: "7"
       requiredCpu: "700m"
@@ -87,6 +85,23 @@ spec:
       limitedDisk: 200Gi
       limitedMemory: "20Gi"
       requiredMemory: "16640Mi"
+    # Intel iGPU: engine request 6Gi / limit 32Gi + llm-init 256Mi/4Gi.
+    - mode: intel
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "36Gi"
+      requiredMemory: "6400Mi"
+    - mode: intel-gpu
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "24Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "16Gi"
+      limitedGPUMemory: "16Gi"
 
   supportArch:
     - amd64
@@ -198,6 +213,9 @@ envs:
     editable: false
     applyOnChange: false
     default: "20Gi"
+    description: "Engine container memory limit on CUDA and intel-gpu. nvidia-gb10
+      replaces it with the GPU quota. intel iGPU replaces it with 32Gi (OpenVINO
+      weights share the cgroup; 32Gi + llm-init 4Gi = that mode's limitedMemory 36Gi)."
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -218,6 +236,9 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
+      docker.io/beclab/audio-firered:v1.1.35; intel and intel-gpu use
+      docker.io/beclab/audio-firered-ov:v1.1.35. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
