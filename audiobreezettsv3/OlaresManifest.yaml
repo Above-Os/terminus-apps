@@ -7,7 +7,7 @@ metadata:
   description: "A text-to-speech model with built-in, cloned, and description-based voices"
   appid: audiobreezettsv3
   title: Breeze TTS 2
-  version: '1.0.19'
+  version: '1.0.20'
   categories:
     - AI
     - models
@@ -77,8 +77,7 @@ spec:
       url: https://huggingface.co/BreezeBlue/Breeze-TTS-2/blob/main/LICENSE
 
   accelerator:
-    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). On nvidia-gb10 the
-    # engine's memory request AND limit become the GPU quota (unified memory).
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). On nvidia-gb10 the engine's memory request AND limit become the GPU quota (unified memory).
     - mode: nvidia
       limitedCpu: "7"
       requiredCpu: "700m"
@@ -95,6 +94,23 @@ spec:
       limitedDisk: 200Gi
       limitedMemory: "16Gi"
       requiredMemory: "12544Mi"
+    # Intel iGPU: engine request 6Gi / limit 32Gi + llm-init 256Mi/4Gi.
+    - mode: intel
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "36Gi"
+      requiredMemory: "6400Mi"
+    - mode: intel-gpu
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "12Gi"
+      limitedGPUMemory: "12Gi"
 
   supportArch:
     - amd64
@@ -206,6 +222,9 @@ envs:
     editable: false
     applyOnChange: false
     default: "16Gi"
+    description: "Engine container memory limit on CUDA and intel-gpu. nvidia-gb10
+      replaces it with the GPU quota. intel iGPU replaces it with 32Gi (OpenVINO
+      weights share the cgroup; 32Gi + llm-init 4Gi = that mode's limitedMemory 36Gi)."
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -226,6 +245,9 @@ envs:
     type: string
     editable: true
     applyOnChange: true
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
+      docker.io/beclab/audio-breeze:v1.1.35; intel and intel-gpu use
+      docker.io/beclab/audio-breeze-ov:v1.1.35. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
