@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.6-35B-A3B (GGUF UD-IQ4_XS) served with llama.cpp."
   appid: llamacppqwen3635ba3bggufv3
   title: Qwen3.6-35B-A3B (llama.cpp)
-  version: '1.0.25'
+  version: '1.0.27'
   categories:
   - AI
   - models
@@ -38,6 +38,10 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS'
   upgradeDescription: |
+    v1.0.27: Set the Intel discrete GPU memory request and limit to 22Gi for local testing.
+
+    v1.0.26: Add Intel discrete GPU mode `intel-gpu` (SYCL) with a 23Gi VRAM quota.
+
     v1.0.24: Model Console (llm-init) updated to v1.7.21.
 
     v1.0.23: Model Console upgrades to llm-init v1.7.19.
@@ -104,6 +108,7 @@ spec:
     | Mode           | Device            | Details                                          |
     |----------------|-------------------|--------------------------------------------------|
     | `nvidia`       | GPU (CUDA)        | Uses `23Gi` GPU memory; `-ngl all` for full GPU  |
+    | `intel-gpu`    | Intel discrete GPU (SYCL) | Uses `22Gi` GPU memory |
     | `nvidia-gb10`  | GPU (Spark)       | Like above, but memory is managed by the pod     |
     
     **How It Works**
@@ -146,6 +151,15 @@ spec:
       requiredMemory: "7Gi"
       requiredGPUMemory: "23Gi"
       limitedGPUMemory: "24Gi"
+    - mode: intel-gpu
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "32Gi"
+      requiredMemory: "7Gi"
+      requiredGPUMemory: "22Gi"
+      limitedGPUMemory: "22Gi"
     - mode: nvidia-gb10
       limitedCpu: "15360m"
       requiredCpu: "1100m"
@@ -278,5 +292,5 @@ envs:
     editable: false
     applyOnChange: false
     default: "23Gi"
-    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory. Intel discrete GPU mode uses a fixed 22Gi quota via pod annotations."
     regex: "^[0-9]+(Gi|Mi)?$"
