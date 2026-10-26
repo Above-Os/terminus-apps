@@ -8,11 +8,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: auth
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: auth
@@ -40,11 +43,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: rest
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: rest
@@ -72,11 +78,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: realtime
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: realtime
@@ -104,11 +113,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: storage
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: storage
@@ -136,11 +148,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: functions
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: functions
@@ -167,11 +182,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: meta
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: meta
@@ -199,11 +217,14 @@ data:
       - '@type': type.googleapis.com/envoy.config.cluster.v3.Cluster
         name: studio
         connect_timeout: 5s
-        type: STRICT_DNS
-        dns_refresh_rate: 5s
-        dns_failure_refresh_rate:
-          base_interval: 1s
-          max_interval: 1s
+        cluster_type:
+          name: envoy.clusters.dns
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+            dns_refresh_rate: 5s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 1s
         lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: studio
@@ -296,14 +317,16 @@ data:
                       - name: supabase_host
                         domains:
                           - '*'
-                        cors:
-                          allow_origin_string_match:
-                            - safe_regex:
-                                regex: ".*"
-                          allow_methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD,CONNECT,TRACE"
-                          allow_headers: "*"
-                          expose_headers: "*"
-                          max_age: "3600"
+                        typed_per_filter_config:
+                          envoy.filters.http.cors:
+                            '@type': type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy
+                            allow_origin_string_match:
+                              - safe_regex:
+                                  regex: ".*"
+                            allow_methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD,CONNECT,TRACE"
+                            allow_headers: "*"
+                            expose_headers: "*"
+                            max_age: "3600"
                         request_headers_to_add:
                           - header:
                               key: X-Forwarded-Host
@@ -975,390 +998,396 @@ data:
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local FUNCTIONS_ROUTE = "functions-v1-all"
-                          local FUNCTIONS_PREFIX = "/functions/v1/"
+                        default_source_code:
+                          inline_string: |
+                            local FUNCTIONS_ROUTE = "functions-v1-all"
+                            local FUNCTIONS_PREFIX = "/functions/v1/"
 
-                          local function is_functions_request(request_handle, headers)
-                            if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
-                              return true
+                            local function is_functions_request(request_handle, headers)
+                              if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
+                                return true
+                              end
+
+                              local path = headers:get(":path")
+                              if path == nil then
+                                return false
+                              end
+
+                              return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
                             end
 
-                            local path = headers:get(":path")
-                            if path == nil then
-                              return false
-                            end
-
-                            return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
-                          end
-
-                          function envoy_on_request(request_handle)
-                            local headers = request_handle:headers()
-                            if is_functions_request(request_handle, headers) then
-                              return
-                            end
-
-                            if headers:get("apikey") ~= nil then
-                              return
-                            end
-
-                            local path = headers:get(":path")
-                            local query_start = string.find(path, "?", 1, true)
-                            if query_start == nil then
-                              return
-                            end
-
-                            local query = string.sub(path, query_start + 1)
-                            for key, value in string.gmatch(query, "([^&]+)=([^&]*)") do
-                              if key == "apikey" and value ~= "" then
-                                headers:add("apikey", value)
+                            function envoy_on_request(request_handle)
+                              local headers = request_handle:headers()
+                              if is_functions_request(request_handle, headers) then
                                 return
                               end
+
+                              if headers:get("apikey") ~= nil then
+                                return
+                              end
+
+                              local path = headers:get(":path")
+                              local query_start = string.find(path, "?", 1, true)
+                              if query_start == nil then
+                                return
+                              end
+
+                              local query = string.sub(path, query_start + 1)
+                              for key, value in string.gmatch(query, "([^&]+)=([^&]*)") do
+                                if key == "apikey" and value ~= "" then
+                                  headers:add("apikey", value)
+                                  return
+                                end
+                              end
                             end
-                          end
 
                     # Returns 401 for missing/invalid API keys on protected API routes.
                     - name: envoy.filters.http.lua
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local ANON_KEY = "${ANON_KEY}"
-                          local SERVICE_ROLE_KEY = "${SERVICE_ROLE_KEY}"
-                          local SUPABASE_PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
-                          local SUPABASE_SECRET_KEY = "${SUPABASE_SECRET_KEY}"
-                          local ANON_KEY_ASYMMETRIC = "${ANON_KEY_ASYMMETRIC}"
-                          local SERVICE_ROLE_KEY_ASYMMETRIC = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
-                          local TRANSLATION_ENABLED = SUPABASE_SECRET_KEY ~= "" and SUPABASE_PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_KEY_ASYMMETRIC ~= "" and ANON_KEY_ASYMMETRIC ~= ""
+                        default_source_code:
+                          inline_string: |
+                            local ANON_KEY = "${ANON_KEY}"
+                            local SERVICE_ROLE_KEY = "${SERVICE_ROLE_KEY}"
+                            local SUPABASE_PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
+                            local SUPABASE_SECRET_KEY = "${SUPABASE_SECRET_KEY}"
+                            local ANON_KEY_ASYMMETRIC = "${ANON_KEY_ASYMMETRIC}"
+                            local SERVICE_ROLE_KEY_ASYMMETRIC = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
+                            local TRANSLATION_ENABLED = SUPABASE_SECRET_KEY ~= "" and SUPABASE_PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_KEY_ASYMMETRIC ~= "" and ANON_KEY_ASYMMETRIC ~= ""
 
-                          local PROTECTED_ROUTES = {
-                            ["auth-v1-protected"] = true,
-                            ["rest-v1-openapi-protected"] = true,
-                            ["rest-v1-protected"] = true,
-                            ["graphql-v1-protected"] = true,
-                            ["realtime-v1-api-protected"] = true,
-                            ["realtime-v1-ws-protected"] = true,
-                            ["pg-protected"] = true,
-                          }
+                            local PROTECTED_ROUTES = {
+                              ["auth-v1-protected"] = true,
+                              ["rest-v1-openapi-protected"] = true,
+                              ["rest-v1-protected"] = true,
+                              ["graphql-v1-protected"] = true,
+                              ["realtime-v1-api-protected"] = true,
+                              ["realtime-v1-ws-protected"] = true,
+                              ["pg-protected"] = true,
+                            }
 
-                          local function is_protected_route(route_name)
-                            if route_name == nil or route_name == "" then
+                            local function is_protected_route(route_name)
+                              if route_name == nil or route_name == "" then
+                                return false
+                              end
+
+                              return PROTECTED_ROUTES[route_name] == true
+                            end
+
+                            local function is_valid_apikey(apikey)
+                              if apikey == nil or apikey == "" then
+                                return false
+                              end
+
+                              if SERVICE_ROLE_KEY ~= "" and apikey == SERVICE_ROLE_KEY then
+                                return true
+                              end
+
+                              if ANON_KEY ~= "" and apikey == ANON_KEY then
+                                return true
+                              end
+
+                              if TRANSLATION_ENABLED and apikey == SUPABASE_SECRET_KEY then
+                                return true
+                              end
+
+                              if TRANSLATION_ENABLED and apikey == SUPABASE_PUBLISHABLE_KEY then
+                                return true
+                              end
+
                               return false
                             end
 
-                            return PROTECTED_ROUTES[route_name] == true
-                          end
+                            function envoy_on_request(request_handle)
+                              local headers = request_handle:headers()
+                              local route_name = request_handle:streamInfo():routeName()
+                              if not is_protected_route(route_name) then
+                                return
+                              end
 
-                          local function is_valid_apikey(apikey)
-                            if apikey == nil or apikey == "" then
-                              return false
+                              if is_valid_apikey(headers:get("apikey")) then
+                                return
+                              end
+
+                              request_handle:respond({
+                                [":status"] = "401",
+                                ["content-type"] = "text/plain",
+                              }, "Unauthorized")
                             end
-
-                            if SERVICE_ROLE_KEY ~= "" and apikey == SERVICE_ROLE_KEY then
-                              return true
-                            end
-
-                            if ANON_KEY ~= "" and apikey == ANON_KEY then
-                              return true
-                            end
-
-                            if TRANSLATION_ENABLED and apikey == SUPABASE_SECRET_KEY then
-                              return true
-                            end
-
-                            if TRANSLATION_ENABLED and apikey == SUPABASE_PUBLISHABLE_KEY then
-                              return true
-                            end
-
-                            return false
-                          end
-
-                          function envoy_on_request(request_handle)
-                            local headers = request_handle:headers()
-                            local route_name = request_handle:streamInfo():routeName()
-                            if not is_protected_route(route_name) then
-                              return
-                            end
-
-                            if is_valid_apikey(headers:get("apikey")) then
-                              return
-                            end
-
-                            request_handle:respond({
-                              [":status"] = "401",
-                              ["content-type"] = "text/plain",
-                            }, "Unauthorized")
-                          end
 
                     # Translates the query parameter apikey into the matching internal JWT and rewrites the URL so only JWTs propagate downstream.
                     - name: envoy.filters.http.lua
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local FUNCTIONS_ROUTE = "functions-v1-all"
-                          local FUNCTIONS_PREFIX = "/functions/v1/"
-                          local SECRET_KEY = "${SUPABASE_SECRET_KEY}"
-                          local PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
-                          local SERVICE_ROLE_JWT = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
-                          local ANON_JWT = "${ANON_KEY_ASYMMETRIC}"
-                          local TRANSLATION_ENABLED = SECRET_KEY ~= "" and PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_JWT ~= "" and ANON_JWT ~= ""
+                        default_source_code:
+                          inline_string: |
+                            local FUNCTIONS_ROUTE = "functions-v1-all"
+                            local FUNCTIONS_PREFIX = "/functions/v1/"
+                            local SECRET_KEY = "${SUPABASE_SECRET_KEY}"
+                            local PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
+                            local SERVICE_ROLE_JWT = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
+                            local ANON_JWT = "${ANON_KEY_ASYMMETRIC}"
+                            local TRANSLATION_ENABLED = SECRET_KEY ~= "" and PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_JWT ~= "" and ANON_JWT ~= ""
 
-                          local function is_functions_request(request_handle, headers)
-                            if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
-                              return true
+                            local function is_functions_request(request_handle, headers)
+                              if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
+                                return true
+                              end
+
+                              local path = headers:get(":path")
+                              if path == nil then
+                                return false
+                              end
+
+                              return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
                             end
 
-                            local path = headers:get(":path")
-                            if path == nil then
-                              return false
-                            end
+                            local function translate_apikey(apikey)
+                              if apikey == nil or apikey == "" then
+                                return nil
+                              end
 
-                            return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
-                          end
+                              if not TRANSLATION_ENABLED then
+                                return nil
+                              end
 
-                          local function translate_apikey(apikey)
-                            if apikey == nil or apikey == "" then
+                              if apikey == SECRET_KEY then
+                                return SERVICE_ROLE_JWT
+                              end
+
+                              if apikey == PUBLISHABLE_KEY then
+                                return ANON_JWT
+                              end
+
                               return nil
                             end
 
-                            if not TRANSLATION_ENABLED then
+                            local function extract_query_apikey(path)
+                              if path == nil or path == "" then
+                                return nil
+                              end
+
+                              local query_start = string.find(path, "?", 1, true)
+                              if query_start == nil then
+                                return nil
+                              end
+
+                              local query = string.sub(path, query_start + 1)
+                              for key, value in string.gmatch(query, "([^&]+)=([^&]*)") do
+                                if key == "apikey" and value ~= "" then
+                                  return value
+                                end
+                              end
+
                               return nil
                             end
 
-                            if apikey == SECRET_KEY then
-                              return SERVICE_ROLE_JWT
+                            local function replace_query_apikey(path, new_value)
+                              if path == nil or path == "" or new_value == nil or new_value == "" then
+                                return nil
+                              end
+
+                              local query_start = string.find(path, "?", 1, true)
+                              if query_start == nil then
+                                return nil
+                              end
+
+                              local base = string.sub(path, 1, query_start)
+                              local query = string.sub(path, query_start + 1)
+                              local updated = {}
+                              local replaced = false
+
+                              for part in string.gmatch(query, "([^&]+)") do
+                                local key, value = string.match(part, "([^=]+)=(.*)")
+                                if key == "apikey" then
+                                  part = key .. "=" .. new_value
+                                  replaced = true
+                                end
+                                table.insert(updated, part)
+                              end
+
+                              if not replaced then
+                                return nil
+                              end
+
+                              return base .. table.concat(updated, "&")
                             end
 
-                            if apikey == PUBLISHABLE_KEY then
-                              return ANON_JWT
-                            end
+                            function envoy_on_request(request_handle)
+                              local headers = request_handle:headers()
+                              if is_functions_request(request_handle, headers) then
+                                return
+                              end
 
-                            return nil
-                          end
+                              local path = headers:get(":path")
+                              local apikey = extract_query_apikey(path)
+                              local translated = translate_apikey(apikey)
 
-                          local function extract_query_apikey(path)
-                            if path == nil or path == "" then
-                              return nil
-                            end
+                              if translated == nil then
+                                return
+                              end
 
-                            local query_start = string.find(path, "?", 1, true)
-                            if query_start == nil then
-                              return nil
-                            end
+                              headers:replace("apikey", translated)
 
-                            local query = string.sub(path, query_start + 1)
-                            for key, value in string.gmatch(query, "([^&]+)=([^&]*)") do
-                              if key == "apikey" and value ~= "" then
-                                return value
+                              local rewritten_path = replace_query_apikey(path, translated)
+                              if rewritten_path ~= nil then
+                                headers:replace(":path", rewritten_path)
                               end
                             end
-
-                            return nil
-                          end
-
-                          local function replace_query_apikey(path, new_value)
-                            if path == nil or path == "" or new_value == nil or new_value == "" then
-                              return nil
-                            end
-
-                            local query_start = string.find(path, "?", 1, true)
-                            if query_start == nil then
-                              return nil
-                            end
-
-                            local base = string.sub(path, 1, query_start)
-                            local query = string.sub(path, query_start + 1)
-                            local updated = {}
-                            local replaced = false
-
-                            for part in string.gmatch(query, "([^&]+)") do
-                              local key, value = string.match(part, "([^=]+)=(.*)")
-                              if key == "apikey" then
-                                part = key .. "=" .. new_value
-                                replaced = true
-                              end
-                              table.insert(updated, part)
-                            end
-
-                            if not replaced then
-                              return nil
-                            end
-
-                            return base .. table.concat(updated, "&")
-                          end
-
-                          function envoy_on_request(request_handle)
-                            local headers = request_handle:headers()
-                            if is_functions_request(request_handle, headers) then
-                              return
-                            end
-
-                            local path = headers:get(":path")
-                            local apikey = extract_query_apikey(path)
-                            local translated = translate_apikey(apikey)
-
-                            if translated == nil then
-                              return
-                            end
-
-                            headers:replace("apikey", translated)
-
-                            local rewritten_path = replace_query_apikey(path, translated)
-                            if rewritten_path ~= nil then
-                              headers:replace(":path", rewritten_path)
-                            end
-                          end
 
                     # Translates an apikey header into the appropriate internal JWT for downstream RBAC checks.
                     - name: envoy.filters.http.lua
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local FUNCTIONS_ROUTE = "functions-v1-all"
-                          local FUNCTIONS_PREFIX = "/functions/v1/"
-                          local SECRET_KEY = "${SUPABASE_SECRET_KEY}"
-                          local PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
-                          local SERVICE_ROLE_JWT = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
-                          local ANON_JWT = "${ANON_KEY_ASYMMETRIC}"
-                          local TRANSLATION_ENABLED = SECRET_KEY ~= "" and PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_JWT ~= "" and ANON_JWT ~= ""
+                        default_source_code:
+                          inline_string: |
+                            local FUNCTIONS_ROUTE = "functions-v1-all"
+                            local FUNCTIONS_PREFIX = "/functions/v1/"
+                            local SECRET_KEY = "${SUPABASE_SECRET_KEY}"
+                            local PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
+                            local SERVICE_ROLE_JWT = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
+                            local ANON_JWT = "${ANON_KEY_ASYMMETRIC}"
+                            local TRANSLATION_ENABLED = SECRET_KEY ~= "" and PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_JWT ~= "" and ANON_JWT ~= ""
 
-                          local function is_functions_request(request_handle, headers)
-                            if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
-                              return true
+                            local function is_functions_request(request_handle, headers)
+                              if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
+                                return true
+                              end
+
+                              local path = headers:get(":path")
+                              if path == nil then
+                                return false
+                              end
+
+                              return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
                             end
 
-                            local path = headers:get(":path")
-                            if path == nil then
-                              return false
-                            end
+                            local function translate_apikey(apikey)
+                              if apikey == nil or apikey == "" then
+                                return nil
+                              end
 
-                            return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
-                          end
+                              if not TRANSLATION_ENABLED then
+                                return nil
+                              end
 
-                          local function translate_apikey(apikey)
-                            if apikey == nil or apikey == "" then
+                              if apikey == SECRET_KEY then
+                                return SERVICE_ROLE_JWT
+                              end
+
+                              if apikey == PUBLISHABLE_KEY then
+                                return ANON_JWT
+                              end
+
                               return nil
                             end
 
-                            if not TRANSLATION_ENABLED then
-                              return nil
-                            end
+                            function envoy_on_request(request_handle)
+                              local headers = request_handle:headers()
+                              if is_functions_request(request_handle, headers) then
+                                return
+                              end
 
-                            if apikey == SECRET_KEY then
-                              return SERVICE_ROLE_JWT
+                              local translated = translate_apikey(headers:get("apikey"))
+                              if translated ~= nil and translated ~= "" then
+                                headers:replace("apikey", translated)
+                              end
                             end
-
-                            if apikey == PUBLISHABLE_KEY then
-                              return ANON_JWT
-                            end
-
-                            return nil
-                          end
-
-                          function envoy_on_request(request_handle)
-                            local headers = request_handle:headers()
-                            if is_functions_request(request_handle, headers) then
-                              return
-                            end
-
-                            local translated = translate_apikey(headers:get("apikey"))
-                            if translated ~= nil and translated ~= "" then
-                              headers:replace("apikey", translated)
-                            end
-                          end
 
                     # Mirrors apikey into x-api-key for realtime WS compatibility.
                     - name: envoy.filters.http.lua
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local REALTIME_WS_ROUTE = "realtime-v1-ws-protected"
+                        default_source_code:
+                          inline_string: |
+                            local REALTIME_WS_ROUTE = "realtime-v1-ws-protected"
 
-                          function envoy_on_request(request_handle)
-                            local route_name = request_handle:streamInfo():routeName()
-                            if route_name ~= REALTIME_WS_ROUTE then
-                              return
+                            function envoy_on_request(request_handle)
+                              local route_name = request_handle:streamInfo():routeName()
+                              if route_name ~= REALTIME_WS_ROUTE then
+                                return
+                              end
+
+                              local headers = request_handle:headers()
+                              local apikey = headers:get("apikey")
+                              if apikey == nil or apikey == "" then
+                                return
+                              end
+
+                              headers:replace("x-api-key", apikey)
                             end
-
-                            local headers = request_handle:headers()
-                            local apikey = headers:get("apikey")
-                            if apikey == nil or apikey == "" then
-                              return
-                            end
-
-                            headers:replace("x-api-key", apikey)
-                          end
 
                     # Synthesizes an Authorization header (Bearer …) from apikey when callers don’t provide a real JWT header.
                     - name: envoy.filters.http.lua
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local FUNCTIONS_ROUTE = "functions-v1-all"
-                          local FUNCTIONS_PREFIX = "/functions/v1/"
-                          local REALTIME_WS_ROUTE = "realtime-v1-ws-protected"
+                        default_source_code:
+                          inline_string: |
+                            local FUNCTIONS_ROUTE = "functions-v1-all"
+                            local FUNCTIONS_PREFIX = "/functions/v1/"
+                            local REALTIME_WS_ROUTE = "realtime-v1-ws-protected"
 
-                          local function is_functions_request(request_handle, headers)
-                            if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
-                              return true
+                            local function is_functions_request(request_handle, headers)
+                              if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
+                                return true
+                              end
+
+                              local path = headers:get(":path")
+                              if path == nil then
+                                return false
+                              end
+
+                              return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
                             end
 
-                            local path = headers:get(":path")
-                            if path == nil then
-                              return false
+                            local function has_real_jwt(auth_header)
+                              if auth_header == nil or auth_header == "" then
+                                return false
+                              end
+
+                              if string.sub(auth_header, 1, 7) ~= "Bearer " then
+                                return false
+                              end
+
+                              return string.sub(auth_header, 1, 10) ~= "Bearer sb_"
                             end
 
-                            return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
-                          end
+                            local function format_authorization(value)
+                              if value == nil or value == "" then
+                                return nil
+                              end
 
-                          local function has_real_jwt(auth_header)
-                            if auth_header == nil or auth_header == "" then
-                              return false
+                              if string.sub(value, 1, 7) == "Bearer " then
+                                return value
+                              end
+
+                              return "Bearer " .. value
                             end
 
-                            if string.sub(auth_header, 1, 7) ~= "Bearer " then
-                              return false
+                            function envoy_on_request(request_handle)
+                              local headers = request_handle:headers()
+                              if request_handle:streamInfo():routeName() == REALTIME_WS_ROUTE then
+                                return
+                              end
+
+                              if is_functions_request(request_handle, headers) then
+                                return
+                              end
+
+                              if has_real_jwt(headers:get("authorization")) then
+                                return
+                              end
+
+                              local apikey = headers:get("apikey")
+                              local authorization_value = format_authorization(apikey)
+                              if authorization_value ~= nil then
+                                headers:replace("authorization", authorization_value)
+                              end
                             end
-
-                            return string.sub(auth_header, 1, 10) ~= "Bearer sb_"
-                          end
-
-                          local function format_authorization(value)
-                            if value == nil or value == "" then
-                              return nil
-                            end
-
-                            if string.sub(value, 1, 7) == "Bearer " then
-                              return value
-                            end
-
-                            return "Bearer " .. value
-                          end
-
-                          function envoy_on_request(request_handle)
-                            local headers = request_handle:headers()
-                            if request_handle:streamInfo():routeName() == REALTIME_WS_ROUTE then
-                              return
-                            end
-
-                            if is_functions_request(request_handle, headers) then
-                              return
-                            end
-
-                            if has_real_jwt(headers:get("authorization")) then
-                              return
-                            end
-
-                            local apikey = headers:get("apikey")
-                            local authorization_value = format_authorization(apikey)
-                            if authorization_value ~= nil then
-                              headers:replace("authorization", authorization_value)
-                            end
-                          end
 
                     # Functions: mirror the platform behavior. Translate opaque sb_
                     # keys to the pre-signed internal asymmetric JWT and inject it as a
@@ -1373,93 +1402,94 @@ data:
                       typed_config:
                         '@type': >-
                           type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-                        inline_code: |
-                          local FUNCTIONS_ROUTE = "functions-v1-all"
-                          local FUNCTIONS_PREFIX = "/functions/v1/"
-                          local PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
-                          local SECRET_KEY = "${SUPABASE_SECRET_KEY}"
-                          local ANON_JWT = "${ANON_KEY_ASYMMETRIC}"
-                          local SERVICE_ROLE_JWT = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
-                          local TRANSLATION_ENABLED = SECRET_KEY ~= "" and PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_JWT ~= "" and ANON_JWT ~= ""
+                        default_source_code:
+                          inline_string: |
+                            local FUNCTIONS_ROUTE = "functions-v1-all"
+                            local FUNCTIONS_PREFIX = "/functions/v1/"
+                            local PUBLISHABLE_KEY = "${SUPABASE_PUBLISHABLE_KEY}"
+                            local SECRET_KEY = "${SUPABASE_SECRET_KEY}"
+                            local ANON_JWT = "${ANON_KEY_ASYMMETRIC}"
+                            local SERVICE_ROLE_JWT = "${SERVICE_ROLE_KEY_ASYMMETRIC}"
+                            local TRANSLATION_ENABLED = SECRET_KEY ~= "" and PUBLISHABLE_KEY ~= "" and SERVICE_ROLE_JWT ~= "" and ANON_JWT ~= ""
 
-                          local function is_functions_request(request_handle, headers)
-                            if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
-                              return true
+                            local function is_functions_request(request_handle, headers)
+                              if request_handle:streamInfo():routeName() == FUNCTIONS_ROUTE then
+                                return true
+                              end
+
+                              local path = headers:get(":path")
+                              if path == nil then
+                                return false
+                              end
+
+                              return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
                             end
 
-                            local path = headers:get(":path")
-                            if path == nil then
-                              return false
+                            local function bearer_token(auth)
+                              if auth == nil then
+                                return nil
+                              end
+
+                              return string.match(auth, "^[Bb]earer%s+(.+)$")
                             end
 
-                            return string.sub(path, 1, string.len(FUNCTIONS_PREFIX)) == FUNCTIONS_PREFIX
-                          end
-
-                          local function bearer_token(auth)
-                            if auth == nil then
-                              return nil
+                            local function unauthorized(request_handle, message)
+                              request_handle:respond(
+                                { [":status"] = "401", ["content-type"] = "text/plain" },
+                                message
+                              )
                             end
 
-                            return string.match(auth, "^[Bb]earer%s+(.+)$")
-                          end
+                            function envoy_on_request(request_handle)
+                              local headers = request_handle:headers()
+                              if not is_functions_request(request_handle, headers) then
+                                return
+                              end
 
-                          local function unauthorized(request_handle, message)
-                            request_handle:respond(
-                              { [":status"] = "401", ["content-type"] = "text/plain" },
-                              message
-                            )
-                          end
+                              -- Strip any client-supplied sb-api-key (anti-spoof).
+                              headers:remove("sb-api-key")
 
-                          function envoy_on_request(request_handle)
-                            local headers = request_handle:headers()
-                            if not is_functions_request(request_handle, headers) then
-                              return
+                              -- No opaque keys configured: nothing to translate, pass through.
+                              if not TRANSLATION_ENABLED then
+                                return
+                              end
+
+                              local apikey = headers:get("apikey")
+                              local bearer = bearer_token(headers:get("authorization"))
+
+                              -- No key at all: pass through (verify_jwt:false / unauthenticated).
+                              if (apikey == nil or apikey == "") and (bearer == nil or bearer == "") then
+                                return
+                              end
+
+                              -- Conflict: bearer carries an sb_ key that disagrees with apikey.
+                              if bearer ~= nil and string.sub(bearer, 1, 3) == "sb_"
+                                 and apikey ~= nil and apikey ~= "" and apikey ~= bearer then
+                                unauthorized(request_handle, "Conflicting API keys")
+                                return
+                              end
+
+                              -- Resolve the key from apikey, else an Authorization `Bearer sb_` fallback.
+                              local key = apikey
+                              if (key == nil or key == "") and bearer ~= nil and string.sub(bearer, 1, 3) == "sb_" then
+                                key = bearer
+                              end
+
+                              -- Non-sb_ value (legacy/user/third-party JWT, or anything else):
+                              -- pass through; the runtime verifies it.
+                              if key == nil or key == "" or string.sub(key, 1, 3) ~= "sb_" then
+                                return
+                              end
+
+                              -- sb_ key: translate publishable/secret, otherwise reject.
+                              if key == SECRET_KEY then
+                                headers:replace("sb-api-key", SERVICE_ROLE_JWT)
+                              elseif key == PUBLISHABLE_KEY then
+                                headers:replace("sb-api-key", ANON_JWT)
+                              else
+                                unauthorized(request_handle, "Invalid API key")
+                              end
                             end
-
-                            -- Strip any client-supplied sb-api-key (anti-spoof).
-                            headers:remove("sb-api-key")
-
-                            -- No opaque keys configured: nothing to translate, pass through.
-                            if not TRANSLATION_ENABLED then
-                              return
-                            end
-
-                            local apikey = headers:get("apikey")
-                            local bearer = bearer_token(headers:get("authorization"))
-
-                            -- No key at all: pass through (verify_jwt:false / unauthenticated).
-                            if (apikey == nil or apikey == "") and (bearer == nil or bearer == "") then
-                              return
-                            end
-
-                            -- Conflict: bearer carries an sb_ key that disagrees with apikey.
-                            if bearer ~= nil and string.sub(bearer, 1, 3) == "sb_"
-                               and apikey ~= nil and apikey ~= "" and apikey ~= bearer then
-                              unauthorized(request_handle, "Conflicting API keys")
-                              return
-                            end
-
-                            -- Resolve the key from apikey, else an Authorization `Bearer sb_` fallback.
-                            local key = apikey
-                            if (key == nil or key == "") and bearer ~= nil and string.sub(bearer, 1, 3) == "sb_" then
-                              key = bearer
-                            end
-
-                            -- Non-sb_ value (legacy/user/third-party JWT, or anything else):
-                            -- pass through; the runtime verifies it.
-                            if key == nil or key == "" or string.sub(key, 1, 3) ~= "sb_" then
-                              return
-                            end
-
-                            -- sb_ key: translate publishable/secret, otherwise reject.
-                            if key == SECRET_KEY then
-                              headers:replace("sb-api-key", SERVICE_ROLE_JWT)
-                            elseif key == PUBLISHABLE_KEY then
-                              headers:replace("sb-api-key", ANON_JWT)
-                            else
-                              unauthorized(request_handle, "Invalid API key")
-                            end
-                          end
 
                     - name: envoy.filters.http.rbac
                       typed_config:
