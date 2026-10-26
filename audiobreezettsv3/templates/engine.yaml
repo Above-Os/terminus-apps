@@ -1,4 +1,4 @@
-{{- /* Breeze TTS 2: official PyTorch in-process. One 3B weight does voices + clone + design. */ -}}
+{{- /* Breeze TTS 2: NVIDIA uses the CUDA image; Intel uses OpenVINO. One 3B weight. */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
@@ -11,13 +11,11 @@
 {{- end -}}
 {{- end -}}
 {{- $supportsRaw := join "," $supportsKeys -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-breeze:v1.1.16" -}}
 {{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
 {{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
 {{- $memRequest := trim ($oe.MEMORY_REQUEST | default "4Gi") -}}
 {{- $cpuLimit := trim ($oe.CPU_LIMIT | default "6") -}}
 {{- $memLimit := trim ($oe.MEMORY_LIMIT | default "16Gi") -}}
-{{- /* GPU is required: Breeze is CUDA. REQUIRED_GPU_MEMORY="0" would start and then fail. */ -}}
 {{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "12Gi") -}}
 {{- $wantGpu := and (ne $gpuRaw "") (ne $gpuRaw "0") -}}
 {{- $gpuMiB := "" -}}
@@ -25,12 +23,20 @@
 {{- if not $gpuType -}}
 {{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
 {{- end -}}
-{{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
+{{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
+{{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-breeze-ov:v1.1.35" "docker.io/beclab/audio-breeze:v1.1.35" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if $unifiedMem -}}
+{{- if eq $gpuType "nvidia-gb10" -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
+{{- else if eq $gpuType "intel" -}}
+{{- /* Request 6Gi, not the 12Gi quota. Limit stays 32Gi; + llm-init 4Gi = limitedMemory 36Gi. */ -}}
+{{- $memRequest = "6Gi" -}}
+{{- $memLimit = "32Gi" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- /* Engine-native flags in llm-init's one channel. Filling ENGINE_ARGS replaces the whole string. */ -}}
@@ -53,7 +59,7 @@ metadata:
   annotations:
     audio.bytetrade.io/model: "{{ $modelName }}"
     audio.bytetrade.io/supports: "{{ $supportsRaw }}"
-{{- if $wantGpu }}
+{{- if or $isIntel $wantGpu }}
     applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
 {{- end }}
 spec:
@@ -91,6 +97,20 @@ spec:
           configMap:
             name: audio-wrappers
             defaultMode: 0555
+{{- if $isIntel }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+{{- end }}
       containers:
         - name: {{ $cname }}
           image: "{{ $engineImage }}"
@@ -111,6 +131,8 @@ spec:
               value: "{{ $oe.LOG_LEVEL | default "info" }}"
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
+            - name: OLARES_GPU_MODE
+              value: "{{ $gpuType }}"
             - name: ENGINE_ARGS
               value: {{ $engineArgs | quote }}
 {{- if $wantGpu }}
@@ -158,17 +180,25 @@ spec:
             - name: wrappers
               mountPath: /wrappers
               readOnly: true
+{{- if $isIntel }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and $wantGpu (not $unifiedMem) }}
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and $wantGpu (not $unifiedMem) }}
+{{- if and $wantGpu (not $unifiedMem) (not $isIntel) }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---
