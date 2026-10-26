@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3-TTS 1.7B CustomVoice for preset-voice text to speech."
   appid: audioqwen3ttsv3
   title: Qwen3-TTS 1.7B CustomVoice
-  version: '1.0.12'
+  version: '1.0.13'
   categories:
     - AI
     - models
@@ -71,6 +71,7 @@ spec:
     All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`.
 
   upgradeDescription: |
+    v1.0.13: Engine v1.1.34. A streamed sentence whose client hangs up no longer leaves the engine stuck; each request's length is bounded by its text; first audio stays fast while an LLM shares the GPU.
     v1.0.12: Lower the NVIDIA GPU reservation from 6Gi to 5837Mi (5.7Gi).
     v1.0.0: Initial release.
 
@@ -227,8 +228,8 @@ envs:
     editable: true
     applyOnChange: true
     description: "Engine image override. Left empty, nvidia and nvidia-gb10 use
-      docker.io/beclab/audio-qwen3tts:v1.1.31; intel and intel-gpu use
-      docker.io/beclab/audio-qwen3tts-ov:v1.1.31. Filling this REPLACES that choice for every mode."
+      docker.io/beclab/audio-qwen3tts:v1.1.34; intel and intel-gpu use
+      docker.io/beclab/audio-qwen3tts-ov:v1.1.34. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
@@ -239,7 +240,9 @@ envs:
       ~2.8 min and sizes the static KV buffer the CUDA graphs pin, so raising it costs VRAM.
       --chunk-size 8 is how many 12 Hz codec steps a streamed chunk carries (~667 ms): lower it for
       faster first audio, at one extra codec decode per chunk. --language Auto lets the model
-      detect; --voice picks the preset a request may still override. --attn-implementation sdpa is
+      detect; --voice picks the preset a request may still override. --seconds-per-char 0.4 bounds
+      a request without max_new_tokens at 3 s plus that much per character (0 turns it off).
+      --attn-implementation sdpa is
       the portable path — flash_attention_2 only if the image carries it."
   - envName: HF_ENDPOINT
     required: false
