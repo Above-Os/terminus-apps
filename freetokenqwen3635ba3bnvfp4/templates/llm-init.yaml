@@ -48,11 +48,8 @@
 # serves progress UI + OpenAI /v1/* proxy on :8090, and reverse-proxies the
 # engine at the URL it derives from ENGINE_KIND.
 #
-# ENGINE_KIND=sglang is a compatibility shim: llm-init v1.7.21 has no
-# `freetoken` kind, and sglang is the closest of the four it does have —
-# derived URL http://sglang:30000 (matching the Service in freetoken.yaml) and
-# a flag table whose --max-running-requests / --context-length keys the wrapper
-# can honour. The engine really is FreeToken.
+# ENGINE_KIND=freetoken derives http://freetoken:1919, matching the Service
+# in freetoken.yaml, which forwards to the engine on port 30000.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -75,6 +72,30 @@ spec:
         io.kompose.service: llm-init
     spec:
       restartPolicy: Always
+      # llm-init hands common.sh / the sentinel / model-spec.json to the engine
+      # through run-state below, a NODE-LOCAL hostPath (userspace.appCache lives
+      # on /olares/userdata, not on the shared JuiceFS mount), so this Pod has to
+      # land on the engine's node. The engine holds the GPU request and is placed
+      # first by the HAMi scheduler; this Pod follows it.
+      #
+      # NOTE: app.kubernetes.io/instance is set ONLY on the engine Pod template,
+      # never on this one. If this Pod also carried it, it would match its own
+      # affinity term, and kube-scheduler's self-affinity fallback ("first pod in
+      # a series that have affinity to themselves") would let it schedule onto any
+      # node before the engine is bound - silently restoring the split-node bug
+      # this rule exists to prevent.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/instance
+                operator: In
+                values:
+                - '{{ .Release.Name }}'
+            namespaces:
+            - {{ .Release.Namespace }}
       volumes:
         - name: hf-cache
           hostPath:
@@ -101,11 +122,11 @@ spec:
             runAsUser: 0
       containers:
         - name: llm-init
-          image: docker.io/beclab/llm-init:v1.7.21
+          image: docker.io/beclab/llm-init:v1.7.24
           imagePullPolicy: IfNotPresent
           env:
             - name: ENGINE_KIND
-              value: sglang
+              value: freetoken
             - name: MODEL_NAME
               value: "{{ $modelName }}"
             - name: MODEL_SOURCE

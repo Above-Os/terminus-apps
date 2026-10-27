@@ -1,0 +1,175 @@
+{{- if and .Values.capture.bluetooth.enabled .Values.capture.hostAudioSetup.enabled }}
+# The host audio setup script, run on the host by the job below.
+# Source: beclab/shared-knowledge tools/olares-bt-audio (olares-bt-audio.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: note-host-audio-setup
+data:
+  olares-bt-audio.sh: |-
+{{ .Files.Get "files/olares-bt-audio.sh" | indent 4 }}
+  olares-note-host.sh: |-
+{{ .Files.Get "files/olares-note-host.sh" | indent 4 }}
+---
+# Prepare the host for recording from Bluetooth headsets, at every install
+# and upgrade of Note. Recording from a headset needs, on the host, BlueZ's
+# audio plugin for PipeWire, a sound server running with nobody logged in,
+# wideband speech, and a pulse socket an app of another uid can reach;
+# olares-bt-audio.sh setup checks each and changes only what is missing or
+# has drifted, so a box set up already (by lares or by hand) is left as it
+# is. It also installs a boot self-check on the host, which keeps the box
+# ready after a power cut. It shares lares's wideband unit and WirePlumber
+# file, never touches lares's voice agent and never replaces a real
+# PulseAudio.
+#
+# A job of its own rather than an init container of Note: setup has to reach
+# the host's systemd, which answers by the caller's PID and so needs the
+# host's PID namespace (setns cannot enter it from a container, "Invalid
+# argument"); hostPID is a pod-wide setting, and on Note's own pod it would
+# show the host's processes to Note. Here only this short-lived pod has it,
+# and Note starts without waiting for it: its pulse relay looks for the
+# sound server at every connection, so nothing needs a restart once the
+# host is ready. The price is a
+# privileged pod with the host's PIDs at each install and upgrade;
+# capture.hostAudioSetup.enabled turns it off.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: note-host-audio-r{{ .Release.Revision }}
+spec:
+  backoffLimit: 0
+  # The script below is capped at 90 s for --quick, 30 s for apply-async and
+  # 30 s for the desktop bridge: 150 s at worst, which a deadline of 150 cut
+  # off on the bridge, half installed (review of 0.6.1). Until this pod ends,
+  # stopping Note waits on it.
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      # The script exits in about a minute; a sidecar does not, so the pod
+      # stays Running and stopping Note fails while it waits for every pod in
+      # the namespace to finish. This job only enters the host and calls no
+      # other app, so it needs no mesh. Olares injects its mesh-in agent into
+      # every non-entrance pod of an app that calls a shared app, and then
+      # sets linkerd.io/inject to enabled whatever the pod asked for; only
+      # this label keeps both sidecars out. The annotation still covers a box
+      # whose mesh-in admission is off, where linkerd alone would inject.
+      labels:
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
+    spec:
+      hostPID: true
+      restartPolicy: Never
+      containers:
+        - name: host-audio-setup
+          image: beclab/aboveos-busybox:1.37.0
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              H="nsenter -t 1 -m -u -i -n -p --"
+              S=/var/lib/olares-bt-audio/olares-bt-audio.sh
+              # Copied onto the host first: apply-async hands the host's systemd a
+              # host path, and setup compares this copy with the one its boot
+              # self-check runs, to restart the check when the script changed.
+              $H mkdir -p /var/lib/olares-bt-audio && $H tee "$S" >/dev/null </setup/olares-bt-audio.sh \
+                || { echo "host audio: cannot reach the host, skipped"; exit 0; }
+              # No terminal here: btmgmt and bluetoothctl wait on a stdin that never
+              # ends, so give them one that has ended. --quick does what needs no
+              # package and no session restart, and exits 4 when the rest is
+              # missing; that rest runs on the host's systemd, outside this pod,
+              # so a slow apt cannot hold the job.
+              LC_ALL=C timeout 90 $H bash "$S" setup --quick </dev/null; rc=$?
+              echo "host audio: setup --quick exited $rc (0 ready; 3 a real PulseAudio left alone; 4 needs apply; 5 no systemd)"
+              # 124 and 137 are --quick cut short by its own 60 s limit, or by this
+              # timeout, before it could tell: hand the full setup to the host as
+              # well, which checks first and changes only what is missing.
+              case "$rc" in 4|124|137)
+                LC_ALL=C timeout 30 $H bash "$S" apply-async </dev/null
+                echo "host audio: apply started on the host; journalctl -u olares-bt-audio-apply";;
+              esac
+              # The host services for Note: the Bluetooth helper, which pairs
+              # headsets for the record dialog, and where olares-desktop is,
+              # the desktop bridge, which gives the desktop's browser an output
+              # into the host session (the desktop's own sound server has no
+              # Bluetooth). attach records this Note as one using them, so
+              # removing another Note leaves them (note-host-audio-detach below).
+              B=/var/lib/olares-bt-audio/olares-note-host.sh
+              $H tee "$B" >/dev/null </setup/olares-note-host.sh \
+                && LC_ALL=C timeout 30 $H env OLARES_NOTE_DESKTOP_BRIDGE={{ if .Values.capture.desktopBridge.enabled }}on{{ else }}off{{ end }} bash "$B" attach {{ .Release.Namespace | quote }} </dev/null
+              echo "host audio: host services attach exited $?"
+              exit 0
+          volumeMounts:
+            - name: host-audio-setup
+              mountPath: /setup
+      volumes:
+        - name: host-audio-setup
+          configMap:
+            name: note-host-audio-setup
+---
+# Uninstalling Note takes the desktop bridge with it, unless another Note on
+# this host (a renamed preview) still uses it: detach forgets this namespace
+# and uninstalls only when none is left. Olares uninstalls through helm with
+# hooks on, and a hook that fails or never starts leaves the app in
+# UninstallFailed, its hook rerun every few seconds, until app-service gives
+# up and deletes the namespace: about two minutes (yaotest005, 2026-10-14,
+# a hook exiting 1 and one whose image could not be pulled). That uninstall
+# still ends clean, but without detach, so this namespace stays in the list
+# and the bridge stays. So everything here is bounded and the pod always
+# exits 0. It runs while the release's ConfigMap is still there.
+# Only a release installed or upgraded with this hook runs it on uninstall.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: note-host-audio-detach
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  # The script below is capped at 105 s; this is room for pulling the image,
+  # which the setup job already brought to the node.
+  activeDeadlineSeconds: 180
+  template:
+    metadata:
+      # As for the setup job: no sidecar, or the pod never completes.
+      labels:
+        gateway.olares.io/shared-caller-outbound: "false"
+      annotations:
+        linkerd.io/inject: disabled
+    spec:
+      hostPID: true
+      restartPolicy: Never
+      containers:
+        - name: host-audio-detach
+          image: beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              H="nsenter -t 1 -m -u -i -n -p --"
+              B=/var/lib/olares-bt-audio/olares-note-host.sh
+              # Both scripts, this release's: the last Note out also has the
+              # Bluetooth audio setup remove what it did for Note.
+              timeout 10 $H mkdir -p /var/lib/olares-bt-audio \
+                && timeout 10 $H tee "$B" >/dev/null </setup/olares-note-host.sh \
+                && timeout 10 $H tee /var/lib/olares-bt-audio/olares-bt-audio.sh >/dev/null </setup/olares-bt-audio.sh \
+                && LC_ALL=C timeout 75 $H bash "$B" detach {{ .Release.Namespace | quote }} </dev/null
+              echo "host audio: host services detach exited $?"
+              exit 0
+          volumeMounts:
+            - name: host-audio-setup
+              mountPath: /setup
+      volumes:
+        - name: host-audio-setup
+          configMap:
+            name: note-host-audio-setup
+{{- end }}

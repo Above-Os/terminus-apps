@@ -1,0 +1,20 @@
+metadata:
+  title: Qwen3.5-9B (llama.cpp)
+  description: Qwen3.5-9B Q4_K_M vision and reasoning with Model Console. Four slots dynamically share a 256K KV pool within a 12GiB NVIDIA GPU quota.
+spec:
+  fullDescription: |
+    Qwen3.5-9B Q4_K_M vision and reasoning model served by llama.cpp, with Model Console managing model and F16 projector downloads, lifecycle and the OpenAI-compatible API consumed by Router.
+
+    Default: -c 262144 -np 4 -kvu --kv-unified-per-slot 131072. Four slots dynamically share a total 256K KV pool. Each request is capped at 128K; simultaneous input and output budgets must fit the total pool. This does not provide four separate 256K windows. Windows include template, text, images and output, with up to 1024 tokens per image.
+
+    Q8_0 KV, GPU weights and vision projector, Flash Attention, batch/microbatch 512. Thinking is disabled by default; clients can select reasoning_effort=none or high, with high enabling thinking. Model Console uses llm-init v1.7.21 with shared-pool budget admission checks.
+
+    Requires NVIDIA amd64 Olares and 12288 MiB available GPU memory. Model and projector downloads total approximately 6.2 GiB and use the shared appCommon/huggingface cache.
+
+    Earlier fixed-partition 4x64K and 2x128K presets passed capacity testing; see README for shared-pool validation. Measurements use a 12288 MiB HAMi quota on a physical 24GB RTX 5090 Laptop and do not establish physical 12GB GPU performance. GPU memory margin is small and image recognition remains fallible.
+
+    Model revision: 3885219b6810b007914f3a7950a8d1b469d598a5. Engine: server-cuda12-b11515.
+  upgradeDescription: |
+    v1.0.4: Publish reasoning_effort options none/high with default none. Upgrade and restart refresh this rule on existing model cards; engine defaults and resource settings are unchanged.
+
+    Initial release: pinned Q4_K_M vision model, Q8 KV, four slots sharing a 256K KV pool, and a 12GiB NVIDIA GPU quota.

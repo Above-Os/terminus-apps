@@ -7,7 +7,7 @@ metadata:
   icon: https://app.cdn.olares.com/appstore/wise/icon.png
   description: Your Digital Secret Garden
   title: Wise
-  version: '1.2.37'
+  version: '1.2.59'
   categories:
     - homelab
     - Fun
@@ -37,7 +37,7 @@ entrances:
     host: wise-svc
     title: Wise
     icon: https://app.cdn.olares.com/appstore/wise/icon.png
-    authLevel: internal
+    authLevel: private
     openMethod: window
   - name: knowledge
     port: 3010
@@ -67,6 +67,13 @@ middleware:
         extensions:
           - pg_trgm
           - btree_gin
+          - zhparser
+        # app-service wraps each script in single quotes when it renders the
+        # MiddlewareRequest. Keep these statements on one line and use dollar
+        # quoting so the generated YAML remains valid during upgrades/retries.
+        scripts:
+          - DO $knowledge_search$ BEGIN CREATE TEXT SEARCH CONFIGURATION public.chinese (PARSER = zhparser); EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $knowledge_search$;
+          - ALTER TEXT SEARCH CONFIGURATION public.chinese ALTER MAPPING FOR a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z WITH simple;
 
 spec:
   versionName: '1.11.43'
@@ -127,6 +134,7 @@ spec:
   onlyAdmin: true
 
 options:
+  mobileSupported: true
   shared: true
   apiTimeout: 0
   dependencies:

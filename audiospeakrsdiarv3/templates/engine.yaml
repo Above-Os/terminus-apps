@@ -7,7 +7,13 @@
 {{- $modelSupports := (get $manifestEnvs "MODEL_SUPPORTS") | default $olaresEnv.MODEL_SUPPORTS }}
 {{- $modelSource := (get $manifestEnvs "MODEL_SOURCE") | default $olaresEnv.MODEL_SOURCE }}
 {{- $logLevel := $olaresEnv.LOG_LEVEL | default (get $manifestEnvs "LOG_LEVEL") | default .Values.logLevel }}
-{{- $engineArgs := $olaresEnv.ENGINE_ARGS | default (get $manifestEnvs "ENGINE_ARGS") | default .Values.model.engineArgs | trim }}
+{{- /* Empty ENGINE_ARGS keeps the manifest/model flags and leaves segmentation batching on.
+       A filled box replaces them. --execution-mode is still appended below. */ -}}
+{{- $userArgs := trim ($olaresEnv.ENGINE_ARGS | default "") -}}
+{{- $engineArgs := $userArgs -}}
+{{- if eq $userArgs "" -}}
+{{- $engineArgs = (get $manifestEnvs "ENGINE_ARGS") | default .Values.model.engineArgs | default "" | trim -}}
+{{- end -}}
 {{- $gpuType := .Values.gpu | default "" }}
 {{- if not $gpuType }}
 {{- if .Values.GPU }}{{- $gpuType = .Values.GPU.Type | default "nvidia" }}{{- else }}{{- $gpuType = "nvidia" }}{{- end }}
@@ -76,7 +82,7 @@ spec:
     spec:
       containers:
         - name: audio-speakrs-speaker-diarization-community-1
-          image: "{{ if $intel }}docker.io/beclab/audio-speakrs-ov:v1.1.25{{ else }}docker.io/beclab/audio-speakrs:v1.1.25{{ end }}"
+          image: "{{ if $intel }}docker.io/beclab/audio-speakrs-ov:v1.1.28{{ else }}docker.io/beclab/audio-speakrs:v1.1.28{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "/wrappers/speakrs.sh"]
           env:

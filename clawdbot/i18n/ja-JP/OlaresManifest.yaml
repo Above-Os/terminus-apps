@@ -26,20 +26,24 @@ spec:
     - **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — 同梱／管理／ワークスペーススキルによるオンボーディング主導セットアップ。
 
   upgradeDescription: |
-    OpenClawを2026.9.6に更新。
+    起動時の所有者とアクセス権の再帰的な変更を廃止しました。指定したディレクトリのみを準備し、UID/GID 1000 でファイルを初期化して既存のアクセス権を維持します。Homebrew の更新は中断後の再試行と読み取り専用ファイルに対応します。既存の所有者の問題は別途明示的な修復が必要です。
 
-    **アップストリームの主な更新**
-    - GatewayまたはNode.jsの再起動後に、未完了の会話や実行中の作業を復旧する処理を改善しました。
-    - 日付選択、作成者別の内訳、表示中のセッション一覧外も含む合計に対応した、過去30日間の完全な使用状況レポートを復元しました。
-    - チャットの横で公開Issue、プルリクエスト、コミット、差分を確認できるGitHubリーダーを追加しました。プラグインの許可リストを明示している場合、プレビューを有効にするには`github`を追加する必要があります。
-    - ペアリング済みノードのワークスペースでファイル、Memory、Skillsに対応しました。Gatewayとノードには同じOpenClawバージョンが必要です。
-    - 設定からMCPコネクターへのログインと、ウェブ検索の設定・テストができるようになりました。
-    - Gatewayの応答性を改善し、iOSでの写真送信によるチャットのフリーズなど、モバイルチャットの問題を修正しました。
+    CLI と Gateway でプロセス名前空間を共有し、端末でのトークン取得と Doctor チェックの失敗を修正しました。Gateway の再起動中も復旧用端末を使用できます。
 
-    **Olaresのデプロイ変更**
+    Chart 1.0.54 で OpenClaw を 2026.10.5 に更新します。
 
-    新規インストールではLANで待ち受け、OlaresのGateway入口URLを使ってモバイル端末のペアリング用QRコードを生成します。Internal入口で接続する場合は、同じローカルネットワーク内でもAndroidとiOSでLarePass VPNを有効にしてください。
+    主な更新：Gateway 再起動後の中断した会話の復元を改善。セッション・履歴の SQLite 処理と Gateway のメモリ使用量を削減。ダウンロードしたモデルカタログを Gateway の再起動なしで適用し、更新時に llama.cpp ルーターモデルの現在のコンテキスト上限とツールを維持します。
 
-    既存の設定、トークン、ペアリング済み端末、ワークスペースは保持されます。既存環境では`openclaw qr --url wss://<gateway-entrance-domain>`でモバイル用ペアリングコードを生成するか、`plugins.entries.device-pair.config.publicUrl`を設定してから`openclaw qr`を実行してください。
+    https://github.com/openclaw/openclaw/releases/tag/v2026.10.5
 
-    リリースノート: https://github.com/openclaw/openclaw/releases/tag/v2026.9.6
+    Chart 1.0.53でOpenClawを2026.10.1に更新します。
+
+    Claude Haiku 5.5への対応が追加され、既存のエージェントがローカルClawsに移行されます。Code Modeのstore/load値は、複数の応答やGatewayの再起動をまたいで保持されます。
+
+    データベースやDoctorの処理中断からの復旧、別々のDocker CLIコンテナ間やコンテナ再作成後の状態所有権、セッションの継続性、プラグインの起動が改善されました。応答の配信、メディア再生、複数のモデルプロバイダー連携も修正されています。
+
+    Olaresは引き続きアプリ起動前にイメージ内のDoctorを実行し、CLIとGatewayに同じイメージを使用します。Olaresマーケットから更新してください。
+
+    更新前にアプリのデータをバックアップしてください。Doctorは永続状態を移行する場合があります。古いイメージをインストールするだけでは、移行を元に戻せません。
+
+    リリースノート：https://github.com/openclaw/openclaw/releases/tag/v2026.10.1

@@ -1,0 +1,20 @@
+metadata:
+  title: Qwen3.5-9B (llama.cpp)
+  description: 通过 Model Console 管理的 Qwen3.5-9B Q4_K_M 视觉与推理模型，12GiB NVIDIA 显存配额，四路共享总 256K KV 池。
+spec:
+  upgradeDescription: |
+    v1.0.4: 声明 reasoning_effort 的 none/high 档位，默认 none。升级并重启后更新已有模型卡的思考档位声明；引擎默认行为和资源配置保持不变。
+
+    首次发布：固定 Q4_K_M 视觉模型、Q8 KV cache、四路共享总 256K KV 池和 12GiB NVIDIA 显存配额。
+  fullDescription: |
+    使用 llama.cpp 运行 Qwen3.5-9B Q4_K_M，通过 Model Console 下载模型与 F16 图片投影、管理引擎，并经 Router 提供 OpenAI 兼容 API。
+
+    默认 -c 262144 -np 4 -kvu --kv-unified-per-slot 131072，四个 slots 动态共享总 256K KV 池；单请求最多 128K，可以使用空闲容量，并发请求的输入与输出预算合计受总池约束。这不表示四路各有 256K。窗口包含模板、文本、图片和输出；每张图片最多 1024 tokens。
+
+    保持 Q8_0 KV、GPU 权重与视觉投影、Flash Attention，batch/microbatch 512。默认关闭 thinking；客户端可选择 reasoning_effort=none 或 high，其中 high 开启思考。Model Console 使用 llm-init v1.7.21 的共享池容量校验，避免并发预算超额。
+
+    需要 amd64 Olares 与 12288 MiB 可用 NVIDIA 显存，模型和投影下载约 6.2 GiB，使用 appCommon/huggingface 共享缓存。
+
+    此前固定分区的 4×64K 和 2×128K 已完成容量测试；共享池模式的验证结果见应用 README。测试是在物理约 24GB 的 RTX 5090 Laptop 上施加 12288 MiB HAMi 限额，不能代表所有物理 12GB 显卡的速度。显存余量较小，图片识别可能出错。
+
+    固定模型 revision 为 3885219b6810b007914f3a7950a8d1b469d598a5，引擎 server-cuda12-b11515。

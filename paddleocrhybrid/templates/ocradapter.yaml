@@ -2,6 +2,8 @@
 {{- $modelName := $oe.MODEL_NAME | default (include "paddleocrhybrid.modelName" .) -}}
 {{- $pipeline := $oe.OCR_PIPELINE | default "paddle-hybrid" -}}
 {{- $maxInflight := $oe.OCR_MAX_INFLIGHT | default "1" -}}
+{{- $maxOutputTokens := $oe.OCR_MAX_OUTPUT_TOKENS | default "4096" -}}
+{{- $vlmRequestTimeout := $oe.OCR_VLM_REQUEST_TIMEOUT | default "90s" -}}
 {{- $pdfStrategy := $oe.OCR_PDF_STRATEGY | default "vision" -}}
 {{- $defaultFormat := $oe.OCR_DEFAULT_FORMAT | default "text" -}}
 {{- $logLevel := $oe.LOG_LEVEL | default "info" -}}
@@ -72,12 +74,24 @@ spec:
               value: "/var/ocr-spool"
             - name: OCR_MAX_INFLIGHT
               value: "{{ $maxInflight }}"
+            - name: OCR_MAX_OUTPUT_TOKENS
+              value: "{{ $maxOutputTokens }}"
+            - name: OCR_VLM_REQUEST_TIMEOUT
+              value: "{{ $vlmRequestTimeout }}"
             - name: OCR_PDF_STRATEGY
               value: "{{ $pdfStrategy }}"
             - name: OCR_DEFAULT_FORMAT
               value: "{{ $defaultFormat }}"
             - name: RUST_LOG
               value: "{{ $logLevel }}"
+            # Limit glibc arena growth and return short-lived image/crop buffers
+            # promptly during long full-dataset runs.
+            - name: MALLOC_ARENA_MAX
+              value: "2"
+            - name: MALLOC_TRIM_THRESHOLD_
+              value: "131072"
+            - name: MALLOC_MMAP_THRESHOLD_
+              value: "131072"
           ports:
             - name: http
               containerPort: 8080
@@ -87,10 +101,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 256Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1Gi
 ---
 apiVersion: v1
 kind: Service

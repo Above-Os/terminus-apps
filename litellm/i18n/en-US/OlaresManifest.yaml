@@ -15,34 +15,11 @@ spec:
     - Proxy Server: Deploy as an AI Gateway/Proxy server
     - Multi-tenant: Support for multiple users and teams
 
+    Admin login setup: use UI_USERNAME/UI_PASSWORD for initial access, create a separate Proxy Admin under Internal Users and set its own password via an invitation link. Verify that account in a private window, then enable DISABLE_ENV_CREDENTIAL_LOGIN in Olares app environment settings. After the app restarts, shared environment login is disabled and its red warning disappears. Keep the default false until the separate login works; set false again to recover bootstrap access if needed. Master API keys remain usable.
+
   upgradeDescription: |
-    Switch the reverse-proxy image from Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) to the official OpenResty image `openresty/openresty:1.29.2.5-bookworm-fat`.
-
-    Align nginx config mounts and log paths with the official image layout (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`), and drop Bitnami-specific `OPENRESTY_CONF_FILE` wiring.
-
-    Upgrade to [v1.83.3-stable](https://github.com/BerriAI/litellm/releases/tag/v1.83.3-stable) (from v1.81.4).
-
-    Security:
-    - Fix privilege escalation on /key/block, /key/unblock, /key/update max_budget
-    - Global secret redaction via root logger and key-name-based pattern matching
-    - Supply chain hardening: pin all Docker/npm/pip dependencies, cosign image signing
-
-    Providers:
-    - Anthropic: preserve thinking.summary when routing to OpenAI Responses API; add opt-out flag for default reasoning summary
-    - Gemini: fix image token undercounting in usage metadata; pass model to context caching URL builder for custom api_base
-    - Azure: auto-route gpt-5.4+ tools+reasoning to Responses API
-    - Bedrock: support cache_control_injection_points for tool_config; respect api_base in count_tokens
-    - OpenAI: round-trip Responses API reasoning_items in chat completions; GPT-5.4 mini/nano day-0 support
-
-    *Proxy & Core:*
-    - Project-level guardrails support
-    - Redis cluster caching fix; Redis-backed cross-pod budget enforcement
-    - Fix streaming guardrail race condition and post-call guardrail response capture
-    - Per-model-group deployment affinity; per-model rate limits for teams
-    - Auto-recover shared aiohttp session when closed
-
-    UI:
-    - Migrate components from Tremor to Ant Design
-    - Team management modernization; team guardrails UI
-    - Logs filter fix (empty filter no longer shows stale data); CSV export fix on Global Usage page
-    - Paginated team search on usage page; key alias substring search
+    Chart 1.0.24 fixes startup failures when upgrading existing installations that retain the historical public default master key; LiteLLM remains 1.106.2.
+    Existing master keys, virtual keys and stored provider credentials are preserved without automatic key rotation. Only Helm upgrades retaining the exact historical default enable legacy-key compatibility. This preserves the existing weak-key security risk; empty/unset keys are never allowed by this compatibility rule.
+    New installations require sk- followed by at least 32 letters/digits and do not enable compatibility. An existing database is backed up to appData/backups/chart-1.0.24/litellm.dump before startup. Key rotation is a separate optional maintenance operation.
+    To remove the environment-login red banner, first create and verify an independent Proxy Admin, then set DISABLE_ENV_CREDENTIAL_LOGIN=true in Olares app settings and Apply. This UI setting does not rotate API keys.
+    https://github.com/BerriAI/litellm/releases/tag/v1.106.2

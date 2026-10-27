@@ -14,34 +14,11 @@ spec:
     - Rate Limiting : Limitation de débit et throttling intégrés
     - Proxy Server : Déployez comme AI Gateway/Proxy
     - Multi-tenant : Prise en charge de plusieurs utilisateurs et équipes
+    Connexion administrateur : connectez-vous avec UI_USERNAME/UI_PASSWORD, créez un Proxy Admin distinct dans Internal Users et définissez son mot de passe via le lien d’invitation. Vérifiez sa connexion dans une fenêtre privée, puis activez DISABLE_ENV_CREDENTIAL_LOGIN dans les variables de l’application Olares. Après redémarrage, la connexion partagée et son avertissement rouge sont désactivés. Conservez false avant validation ; remettez false pour rétablir la connexion initiale. Les clés API maîtres restent utilisables.
+
   upgradeDescription: |
-    Remplacement de l'image du reverse proxy Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) par l'image officielle OpenResty `openresty/openresty:1.29.2.5-bookworm-fat`.
-    
-    Alignement des montages de configuration nginx et des chemins de journaux sur la disposition de l'image officielle (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`), et suppression du câblage spécifique Bitnami `OPENRESTY_CONF_FILE`.
-    
-    Mise à niveau vers [v1.83.3-stable](https://github.com/BerriAI/litellm/releases/tag/v1.83.3-stable) (depuis v1.81.4).
-    
-    Sécurité :
-    - Correction d'une escalade de privilèges sur /key/block, /key/unblock, /key/update max_budget
-    - Rédaction globale des secrets via le root logger et correspondance par nom de clé
-    - Durcissement de la chaîne d'approvisionnement : épinglage de toutes les dépendances Docker/npm/pip, signature d'images cosign
-    
-    Fournisseurs :
-    - Anthropic : conserver thinking.summary lors du routage vers OpenAI Responses API ; flag d'opt-out pour le résumé de raisonnement par défaut
-    - Gemini : corriger le sous-comptage des tokens image dans les métadonnées d'usage ; passer le modèle au constructeur d'URL de context caching pour api_base personnalisé
-    - Azure : routage auto de gpt-5.4+ tools+reasoning vers Responses API
-    - Bedrock : prise en charge de cache_control_injection_points pour tool_config ; respecter api_base dans count_tokens
-    - OpenAI : round-trip des reasoning_items Responses API dans les chat completions ; support day-0 GPT-5.4 mini/nano
-    
-    *Proxy & Core :*
-    - Guardrails au niveau projet
-    - Correctif de cache Redis cluster ; application budgétaire cross-pod basée sur Redis
-    - Correctif de condition de course des guardrails en streaming et capture de réponse post-call
-    - Affinité de déploiement par groupe de modèles ; limites de débit par modèle pour les équipes
-    - Récupération auto de la session aiohttp partagée lorsqu'elle est fermée
-    
-    UI :
-    - Migration des composants de Tremor vers Ant Design
-    - Modernisation de la gestion d'équipes ; UI des guardrails d'équipe
-    - Correctif du filtre de logs (filtre vide n'affiche plus de données obsolètes) ; correctif d'export CSV sur Global Usage
-    - Recherche d'équipes paginée sur la page usage ; recherche par sous-chaîne d'alias de clé
+    Chart 1.0.24 corrige le démarrage des anciennes installations conservant la clé maître publique historique ; LiteLLM reste en 1.106.2.
+    Les clés maîtres, clés virtuelles et identifiants des fournisseurs sont conservés. Seules les mises à niveau Helm avec cette clé exacte activent la compatibilité. Le risque existant de clé faible demeure ; aucune clé vide ou absente n’est autorisée.
+    Les nouvelles installations exigent sk- suivi d’au moins 32 lettres/chiffres, sans compatibilité. La base existante est sauvegardée dans appData/backups/chart-1.0.24/litellm.dump avant démarrage. La rotation des clés reste une maintenance facultative distincte.
+    Pour supprimer l’avertissement rouge, créez et vérifiez un Proxy Admin indépendant, puis appliquez DISABLE_ENV_CREDENTIAL_LOGIN=true dans Olares. Cette option ne modifie pas les clés API.
+    https://github.com/BerriAI/litellm/releases/tag/v1.106.2

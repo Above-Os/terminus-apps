@@ -9,7 +9,7 @@ metadata:
   description: The all-in-one AI workflow production app for Olares.
   # Public direct URL required by Market; source icons/icon.png — sync flowstudio-assets when changing.
   icon: https://raw.githubusercontent.com/ffkijjkokok/flowstudio-assets/main/icon.png
-  version: 0.3.77
+  version: 0.3.91
   categories:
   - Creativity
   - AI
@@ -34,7 +34,7 @@ sharedEntrances:
   authLevel: internal
 
 spec:
-  versionName: "0.3.77"
+  versionName: "0.3.91"
   onlyAdmin: true
   runAsUser: true
   fullDescription: |
@@ -55,15 +55,14 @@ spec:
     - **Router and OpenAI APIs**: Registers with Olares Router as an image-generation provider, and exposes an OpenAI-style `/v1/models` and `/v1/images/generations` alongside a workflow catalogue and generation API.
 
     **Requirements**
-    - Olares >= 1.12.6 on `amd64`
-    - An NVIDIA GPU, bound when installing or resuming the app
+    - Olares >= 1.12.6 on `amd64` and `arm64`
+    - An NVIDIA GPU, bound when installing or resuming the app. GB10 (Spark) uses the `nvidia-gb10` accelerator.
     - Free VRAM >= 6 GiB for lite image templates
   upgradeDescription: |
-    **FlowStudio 0.3.77**
+    **FlowStudio 0.3.91**
 
-    - Cancel a queued or running generation from its card.
-    - Reuse and retry map dropdown labels and size ratios to the values the engine expects.
-    - The media picker no longer includes an Assets library.
+    - Recommended reference-to-video is FastH3 OmniRef.
+    - NVIDIA engines move to ComfyUI v0.42.5: `engine-1.0.9` on discrete cards, `engine-1.0.9-arm64` on GB10.
   developer: luolong
   website: https://github.com/beclab/flowstudio
   sourceCode: https://github.com/beclab/flowstudio
@@ -71,10 +70,16 @@ spec:
   locale:
   - en-US
   - zh-CN
+  - fr-FR
+  - de-DE
+  - ja-JP
+  - it-IT
+  - es-ES
   # accelerator mutually exclusive with flat requiredCpu; envelope must cover api+engine.
   # Do not use gpumem-percentage — app writes gpumem from detect/lock caps.
   supportArch:
   - amd64
+  - arm64
   accelerator:
   - mode: nvidia
     supportMultiCard: false
@@ -89,6 +94,16 @@ spec:
     limitedDisk: 10Gi
     requiredGPUMemory: 6Gi
     limitedGPUMemory: 24Gi
+  - mode: nvidia-gb10
+    supportMultiCard: false
+    supportMultiNodes: false
+    requiredCpu: "2"
+    limitedCpu: "12"
+    # Unified memory: the 6Gi GPU floor is carved from pod memory.
+    requiredMemory: 10Gi
+    limitedMemory: 96Gi
+    requiredDisk: 2Gi
+    limitedDisk: 10Gi
 
 permission:
   appData: true

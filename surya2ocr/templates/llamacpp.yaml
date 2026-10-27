@@ -1,19 +1,23 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "surya2ocr.modelName" .) -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99 -c 16384 -n 4096 --image-min-tokens 1024" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99 -c 16384 -np 1 --image-min-tokens 1024" -}}
+{{- $maxOutputTokens := $oe.OCR_MAX_OUTPUT_TOKENS | default "12288" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "1250m") -}}
 {{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "1Gi") -}}
 {{- $cpuLimit := trim ($oe.LLAMACPP_CPU_LIMIT | default "4") -}}
-{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "4Gi") -}}
-{{- $gpuType := .Values.gpu | default "" -}}
-{{- if not $gpuType -}}
-{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
-{{- end -}}
-{{- /* Market validation renders CPU mode to extract images; the manifest restricts installation to NVIDIA. */ -}}
+{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "12Gi") -}}
+{{- $gpuType := include "surya2ocr.gpuType" . -}}
+{{- $engineImage := include "surya2ocr.llamacppImage" . -}}
+{{- /* Do not fail() on cpu/intel: Market check-chart helm-renders mode=cpu to extract images.
+       Installability is gated by OlaresManifest accelerator. */ -}}
 {{- $isCpuMode := or (eq $gpuType "cpu") (eq $gpuType "intel") -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
+{{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
+{{- $needDri := or $isAmdGpu $isIntelGpu -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
+{{- $needNvidiaGpumem := and (not $isCpuMode) (not $unifiedMem) (not $needDri) -}}
 {{- $gpuMiB := include "surya2ocr.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "10Gi") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
@@ -21,6 +25,8 @@
 {{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
+# llama.cpp CUDA/ROCm/SYCL VLM. Deployment name == Release.Name (allowMultipleInstall).
+# Service name MUST be "llamacpp" (OCRAdapter LLAMACPP_URL default).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,6 +36,7 @@ metadata:
     io.kompose.service: llamacpp
   annotations:
     applications.app.bytetrade.io/gpu-inject: "llamacpp"
+    surya2ocr.io/engine-image: {{ $engineImage | quote }}
 spec:
   replicas: {{ .Values.workloads.surya2ocr.replicaCount }}
   selector:
@@ -42,6 +49,13 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: llamacpp
+{{- if $needDri }}
+      # AMD/Intel device plugins expose a card, not a VRAM resource. app-service
+      # reads these annotations to preserve the selected memory quota.
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -57,9 +71,35 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+{{- if $isAmdGpu }}
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+            type: CharDevice
+{{- end }}
+{{- if $needDri }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi
+{{- end }}
+{{- if $isAmdGpu }}
+      securityContext:
+        supplementalGroups:
+          - 44
+          - 992
+{{- end }}
       containers:
         - name: llamacpp
-          image: {{ include "surya2ocr.llamacppImage" . }}
+          image: {{ $engineImage | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]
           env:
@@ -73,6 +113,15 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: OCR_MAX_OUTPUT_TOKENS
+              value: "{{ $maxOutputTokens }}"
+            - name: OLARES_GPU_MODE
+              value: {{ $gpuType | quote }}
+{{- if $isAmdGpu }}
+            # HIP shares this graph switch with CUDA. Disable graph replay for RDNA4 stability.
+            - name: GGML_CUDA_DISABLE_GRAPHS
+              value: "1"
+{{- end }}
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
             - name: HF_HUB_CACHE
@@ -109,17 +158,29 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+{{- if $isAmdGpu }}
+            - name: kfd
+              mountPath: /dev/kfd
+{{- end }}
+{{- if $needDri }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---

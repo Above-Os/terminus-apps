@@ -1,0 +1,153 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $taskHostPath := printf "%s/embedding-tasks" .Values.userspace.appData -}}
+{{- $modelId := include "embeddinggemma2.modelId" . -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    io.kompose.service: embed-server
+spec:
+  replicas: {{ .Values.workloads.embeddinggemma2.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: embed-server
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: embed-server
+    spec:
+      restartPolicy: Always
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -c
+            - mkdir -p /var/lib/irembed/tasks && chown 1000:1000 /var/lib/irembed/tasks
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: task-data
+              mountPath: /var/lib/irembed/tasks
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: {{ printf "%s/huggingface" .Values.userspace.appCommon | quote }}
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: {{ $runStateHostPath | quote }}
+            type: DirectoryOrCreate
+        - name: task-data
+          hostPath:
+            path: {{ $taskHostPath | quote }}
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: embed-server-wrappers
+            defaultMode: 0555
+      containers:
+        - name: embed-server
+          image: docker.io/beclab/embed-server:{{ include "embeddinggemma2.embedTag" . }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: ["/bin/sh", "/llm-init/wrappers/embed.sh"]
+          env:
+            - name: MODEL_ID
+              value: {{ $modelId | quote }}
+            - name: ACCELERATOR
+              value: cpu
+            - name: EMBED_HOST
+              value: 0.0.0.0
+            - name: EMBED_PORT
+              value: "8080"
+            - name: EMBED_TASK_DIR
+              value: /var/lib/irembed/tasks
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: WAIT_TIMEOUT
+              value: "3600"
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: {{ $hfEndpoint | quote }}
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+{{- end }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: EMBED_SHARED_ENTRANCE_HOST
+              value: sharedentrances-api
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+              readOnly: true
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: task-data
+              mountPath: /var/lib/irembed/tasks
+            - name: wrappers
+              mountPath: /llm-init/wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 6Gi
+            limits:
+              cpu: "4"
+              memory: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: embed-server
+spec:
+  selector:
+    io.kompose.service: embed-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multimodalembed
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: embed-server
+spec:
+  selector:
+    io.kompose.service: embed-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

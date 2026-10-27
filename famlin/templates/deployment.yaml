@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: famlin
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.workloads.famlin.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: famlin
+  template:
+    metadata:
+      labels:
+        app: famlin
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+      - name: init-permissions
+        image: beclab/aboveos-busybox:1.37.0
+        command:
+        - sh
+        - -ec
+        - |
+          for d in /media /media/uploads /media/uploads/originals /media/library; do
+            mkdir -p "$d"
+            chown 1000:1000 "$d"
+          done
+        securityContext:
+          runAsUser: 0
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+        - name: media
+          mountPath: /media
+      containers:
+      - name: famlin
+        image: ghcr.io/timvanonckelen/famlin:0.7.0@sha256:88670a0117919a69f64bca68986b1c718e24e0d7f283ffff109bf2912933f7d2
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: PORT
+          value: '3000'
+        - name: TRUST_PROXY
+          value: 'true'
+        - name: UPLOADS_DIR
+          value: /app/uploads
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: famlin-database
+              key: DATABASE_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: famlin-auth
+              key: JWT_SECRET
+        ports:
+        - name: http
+          containerPort: 3000
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '2'
+            memory: 2Gi
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 30
+          failureThreshold: 3
+        volumeMounts:
+        - name: media
+          mountPath: /app/uploads
+          subPath: uploads
+        - name: media
+          mountPath: /media/library
+          subPath: library
+          readOnly: true
+      volumes:
+      - name: media
+        hostPath:
+          path: '{{ .Values.userspace.userData }}/Pictures/Famlin'
+          type: DirectoryOrCreate

@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.77** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.91** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -11,7 +11,7 @@ Current Chart version: **0.3.77** (must match `Chart.yaml` / `OlaresManifest.yam
 |------|-------------|
 | Olares | >= 1.12.6 |
 | GPU | NVIDIA (bind accelerator on install or resume) |
-| Arch | `amd64` |
+| Arch | `amd64`, `arm64` (GB10 uses `nvidia-gb10`) |
 | Suggested VRAM | >= 6 GiB free for lite image templates |
 
 Resource envelope (`spec.accelerator`; must cover business API + engine):
@@ -150,7 +150,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.77. This chart ships `docker.io/beclab/flowstudio:0.3.77` and `engine-1.0.8`.
+covers 0.3.91. This chart ships `docker.io/beclab/flowstudio:0.3.91`, `engine-1.0.9` (amd64), and `engine-1.0.9-arm64` (nvidia-gb10).
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout

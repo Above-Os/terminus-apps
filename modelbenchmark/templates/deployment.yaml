@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modelbenchmark
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    io.kompose.service: modelbenchmark
+spec:
+  replicas: {{ .Values.workloads.modelbenchmark.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      io.kompose.service: modelbenchmark
+  template:
+    metadata:
+      labels:
+        io.kompose.service: modelbenchmark
+        bytetrade.io/terminal: modelbenchmark
+    spec:
+      serviceAccountName: "{{ .Release.Name }}-benchmark-account"
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+      - name: init-permissions
+        image: docker.io/beclab/aboveos-busybox:1.37.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        - |
+          set -eu
+          for directory in \
+            /app/persist \
+            /app/persist/data \
+            /app/persist/datasets \
+            /app/persist/config \
+            /app/persist/home \
+            /app/persist/home/.config \
+            /app/persist/home/.local \
+            /app/persist/home/.local/share \
+            /app/cache \
+            /app/cache/huggingface; do
+            mkdir -p "$directory"
+            chown 1000:1000 "$directory"
+          done
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/persist
+        - name: app-cache
+          mountPath: /app/cache
+      containers:
+      - name: modelbenchmark
+        image: docker.io/beclab/olares-model-benchmark@sha256:5d1b3bf42838df48ce5ed5a7020c10e0d3b59d7e5872a0045884a661f945f900
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: HOME
+          value: /app/persist/home
+        - name: XDG_CONFIG_HOME
+          value: /app/persist/home/.config
+        - name: XDG_DATA_HOME
+          value: /app/persist/home/.local/share
+        - name: OLARES_CLI_HOME
+          value: /app/persist/home/.olares-cli
+        - name: BENCH_DATA_DIR
+          value: /app/persist/data
+        - name: BENCH_DATASET_DIR
+          value: /app/persist/datasets
+        - name: BENCH_CONFIG_DIR
+          value: /app/persist/config
+        - name: BENCH_CACHE_DIR
+          value: /app/cache
+        # Olares applications reach Router through its shared entrance. This
+        # hop authenticates the caller application and injects x-caller-appid;
+        # the per-user Router URL instead expects an interactive user JWT.
+        - name: BENCH_ROUTER_BASE_URL
+          value: http://3a77b15d.shared.olares.com
+        - name: BENCH_CREDENTIALS_SECRET
+          value: "{{ .Release.Name }}-credentials"
+        - name: BENCH_HF_TOKEN_FILE
+          value: /var/run/bench-secrets/huggingface-token
+        - name: HF_HOME
+          value: /app/cache/huggingface
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 6Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+        volumeMounts:
+        - name: app-data
+          mountPath: /app/persist
+        - name: app-cache
+          mountPath: /app/cache
+        - name: bench-secrets
+          mountPath: /var/run/bench-secrets
+          readOnly: true
+      volumes:
+      - name: app-data
+        hostPath:
+          path: "{{ .Values.userspace.appData }}"
+          type: DirectoryOrCreate
+      - name: app-cache
+        hostPath:
+          path: "{{ .Values.userspace.appCache }}"
+          type: DirectoryOrCreate
+      - name: bench-secrets
+        secret:
+          secretName: "{{ .Release.Name }}-credentials"
+          optional: true
+          defaultMode: 0444

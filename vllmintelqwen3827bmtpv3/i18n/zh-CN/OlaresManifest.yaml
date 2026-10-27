@@ -1,0 +1,50 @@
+metadata:
+  description: "Qwen3.8-27B（GPTQ-Int4）在 Intel Arc vLLM 上运行，开启 MTP 投机解码，针对 Arc Pro B70 调优。"
+  title: Qwen3.8-27B MTP（Intel vLLM）
+
+spec:
+  upgradeDescription: |
+    v1.0.1：修复在较老内核（如 6.14）上引擎无法启动的问题：给引擎容器加上 CAP_PERFMON 权限，让 xe 驱动能报告已用显存。缺少该权限时 vLLM 会按整张卡都空闲来分配 KV 缓存，结果显存不足启动失败。
+
+    v1.0.0：首个版本。Qwen3.8-27B GPTQ-Int4（保留 BF16 MTP 头），镜像 `beclab/llm-scaler-vllm:0.26.0-b2-pp-mtp-263b3a7`，仅支持 Intel 独显。MTP 草稿 3 个 token、草稿 lm_head 用 int4，V2 model runner，解码阶段用 XPU graph，KV 缓存用 fp8，128K 上下文，最多 64 个并发请求。
+  fullDescription: |
+    **模型简介**
+    Qwen3.8-27B 是阿里巴巴 Qwen 系列的视觉语言模型，基于 Qwen3.5 架构，支持思考、工具调用与图像理解。本应用用 vLLM 在 Intel Arc 上运行社区 GPTQ 版本 `SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16`（int4 权重、分组 128，保留 BF16 多 token 预测头）。
+
+    **适用硬件**
+    32GB 显存的 Intel 独显，在 **Intel Arc Pro B70** 上调优。安装时选择 **`intel-gpu`** 模式。本应用不支持其他显卡。
+
+    **预设配置**
+    - 引擎镜像：`beclab/llm-scaler-vllm:0.26.0-b2-pp-mtp-263b3a7` = `intel/llm-scaler-vllm:0.26.0-b2` 加上 V2 model runner 下的 MTP 修复（提示词恰好为 1 + 草稿长度个 token 时输出错误、TP 下草稿模型改为 eager）以及可选的 int4 草稿 lm_head。
+    - 投机解码：MTP，草稿 3 个 token，草稿 lm_head 用 int4（解码速度约为不开 MTP 的 2–3 倍）。
+    - 执行器：`VLLM_USE_V2_MODEL_RUNNER=1`、`VLLM_XPU_ENABLE_XPU_GRAPH=1`、`-cc.cudagraph_mode=FULL_DECODE_ONLY`。
+    - 上下文：128K（`--max-model-len 131072`），最多 64 个并发请求。KV 缓存用 fp8（`--kv-cache-dtype fp8`），总共约 19.1 万 token，够同时放 1.4 个满长度请求；Gated DeltaNet 的状态仍为 float32。
+    - 能力：思考、工具、视觉。
+    - 引擎参数：`--dtype float16 --gpu-memory-utilization 0.9 --max-model-len 131072 --kv-cache-dtype fp8 --max-num-batched-tokens 8192 --max-num-seqs 64 --block-size 64 --trust-remote-code --speculative-config.method=qwen3_5_mtp --speculative-config.num_speculative_tokens=3 --speculative-config.draft_lm_head_quantization=int4 -cc.mode=none -cc.cudagraph_mode=FULL_DECODE_ONLY --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3`
+    - 所需显存：`29Gi`（引擎使用 32GB 显卡的 90%）。
+
+    **调参建议**
+    - 单人使用：`--speculative-config.num_speculative_tokens=4` 在一次只有一个请求时快约 7%；8 个并发以上 3 更快。
+    - 保持 `--dtype float16`，不要加 `--quantization`（GPTQ 会从模型自动识别）。
+    - ENGINE_ARGS 里请用点号写法（`--speculative-config.key=value`），不要写内联 JSON。
+    - 不要把 `--gpu-memory-utilization` 调到 0.9 以上：0.93 时 15 万 token 的提示词在预填充阶段会显存不足。
+    - 去掉 `--kv-cache-dtype fp8` 后 KV 缓存只有约 8.3 万 token，此时请把 `--max-model-len` 降到 65536。
+
+    **单张 Arc Pro B70 实测**（本预设，贪心解码）
+    | 负载 | 速度 |
+    |---|---|
+    | 数学短问答，1 个请求 | 输出 80 tok/s |
+    | 数学短问答，8 个并发 | 输出 404 tok/s |
+    | 数学短问答，32 个并发 | 输出 421 tok/s |
+    | 3 万 token 提示词，1 个请求 | 1404 tok/s（输入 + 输出） |
+    | 13 万 token 提示词 | 预填充约 147 秒 |
+
+    **工作流程说明**
+    首先，Model Console 下载并准备模型，然后 vLLM 在模型准备好后启动服务。这两个部分独立运行但共享文件与进度信息。
+
+    **技术栈说明**
+    - **vLLM**（`beclab/llm-scaler-vllm:0.26.0-b2-pp-mtp-263b3a7`）：运行模型并通过 8000 端口提供 API 服务
+    - **Model Console**：下载模型，展示进度，并通过 8090 端口提供 OpenAI API，代理到 vLLM
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。

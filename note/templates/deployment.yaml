@@ -18,10 +18,22 @@ spec:
         app: note
       annotations:
         config.linkerd.io/skip-outbound-ports: "4222"
+        {{- if .Values.capture.bluetooth.enabled }}
+        # Pairing calls BlueZ over the host's system bus, which the runtime's
+        # default AppArmor profile forbids a container (hzydemo01: DENIED
+        # dbus_method_call). Unconfined lifts that one confinement; the
+        # container stays unprivileged. The annotation, not the securityContext
+        # field, so it holds on clusters older than Kubernetes 1.30.
+        container.apparmor.security.beta.kubernetes.io/note: unconfined
+        {{- end }}
     spec:
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
+        {{- if .Values.capture.usb.enabled }}
+        supplementalGroups:
+          - {{ .Values.capture.usb.audioGroup }}
+        {{- end }}
       initContainers:
         # Olares grants the appData mount but does not hand over ownership of
         # it, and kubelet creates a missing subPath as root. Each directory is
@@ -52,11 +64,43 @@ spec:
               containerPort: 8080
             - name: external
               containerPort: 8081
+          {{- if .Values.capture.usb.enabled }}
+          # The device cgroup only lets a privileged container open the
+          # host's sound devices; the group above is what the file modes ask.
+          securityContext:
+            privileged: true
+          {{- end }}
           env:
             - name: NOTE_PORT
               value: "8080"
+            {{- if or .Values.capture.usb.enabled .Values.capture.bluetooth.enabled }}
+            - name: NOTE_CAPTURE_ENABLED
+              value: "true"
+            # Without the USB switch nothing is mounted at /dev/snd, so there
+            # are no sound cards to look for.
+            - name: NOTE_CAPTURE_USB
+              value: {{ .Values.capture.usb.enabled | quote }}
+            {{- end }}
+            {{- if .Values.capture.bluetooth.enabled }}
+            - name: NOTE_CAPTURE_PULSE_SERVER
+              value: unix:/run/host-pulse/native
+            - name: NOTE_CAPTURE_SYSTEM_BUS
+              value: unix:path=/run/host-dbus/system_bus_socket
+            # Pairing goes to the host's Bluetooth helper while its socket is
+            # there; the system bus above is for a host an older Note set up.
+            - name: NOTE_CAPTURE_BT_HELPER
+              value: /run/host-bt/helper.sock
+            {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
+            # Where an API key's integrations reach that port: the note-api
+            # entrance's own label (app id and entrance index, as app-service
+            # names it), under the caller's zone as for Files below. The page
+            # cannot tell it reliably from the host it is served on.
+            {{- with index (.Values.domain | default dict) "note-api" }}
+            - name: NOTE_EXTERNAL_ORIGIN
+              value: {{ printf "https://%s.{user}.%s" (. | splitList "." | first) ($.Values.user.zone | splitList "." | rest | join ".") | quote }}
+            {{- end }}
             - name: NOTE_DATA_DIR
               value: /data
             - name: TZ
@@ -71,7 +115,9 @@ spec:
             - name: OLARES_APP_ID
               value: "note"
             # A shared reinstall can preserve recordings while recreating the
-            # middleware database. Give orphan recovery a deterministic owner.
+            # middleware database. Give orphan recovery a deterministic owner
+            # instead of leaving those recordings invisible when several users
+            # already exist in the Olares directory.
             - name: NOTE_OWNER
               value: {{ .Values.bfl.username | quote }}
             - name: NOTE_CATALOG_EVENTS_NATS_URL
@@ -109,6 +155,11 @@ spec:
             # their side of the network and nowhere in this cluster.
             - name: NOTE_FILES_BASE_URL
               value: {{ printf "https://files.{user}.%s" (.Values.user.zone | splitList "." | rest | join ".") | quote }}
+            # The directory app-data appears under in the user's Drive: the
+            # last element of the path app-service mounts, which is the name
+            # this app was installed under.
+            - name: NOTE_FILES_DRIVE_APP
+              value: {{ base .Values.userspace.appData | quote }}
             - name: NOTE_CPU_WORKERS
               value: {{ .Values.workers.cpu | quote }}
             - name: NOTE_GPU_WORKERS
@@ -153,11 +204,133 @@ spec:
           volumeMounts:
             - name: app-data
               mountPath: /data
+            {{- if .Values.capture.usb.enabled }}
+            - name: sound
+              mountPath: /dev/snd
+            {{- end }}
+            {{- if .Values.capture.bluetooth.enabled }}
+            # The relay's socket, not the host's: see pulse-relay below.
+            - name: pulse-relay
+              mountPath: /run/host-pulse
+              readOnly: true
+            - name: host-dbus
+              mountPath: /run/host-dbus
+              # Connecting to the bus's socket needs no write to the mount.
+              readOnly: true
+            - name: host-bt
+              mountPath: /run/host-bt
+              # Connecting needs no write to the mount either.
+              readOnly: true
+            {{- end }}
+        {{- if .Values.capture.bluetooth.enabled }}
+        # Carries Note's pulse connections to the host's sound server. Note
+        # has to run as 1000, the uid Olares fixes for apps and owns the
+        # userspace volumes with; the sound server runs as the user the box
+        # was installed with (1000 on some boxes, 1001 on the Ubuntu images
+        # with a desktop) and listens in /run/user/<uid>/pulse, which libpulse
+        # sets back to 0700 whenever that user starts a client, so opening it
+        # from the host does not hold. Root with DAC_OVERRIDE enters it
+        # whatever its mode. This is how the platform's own Bluetooth sidecar
+        # re-exposes the system bus (app-service injectBluetooth). It is Note's
+        # own binary, so the image is the one already trusted to run as root.
+        # The relay finds the socket again for every connection, so a sound
+        # server that starts after Note, or restarts, needs no restart here.
+        - name: pulse-relay
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args:
+            - pulse-relay
+            - -listen
+            - /run/pulse-relay/native
+            - -root
+            - /host
+          securityContext:
+            runAsUser: 0
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            # DAC_OVERRIDE alone: entering the 0700 directory and connecting
+            # to the socket are permission checks it covers. The relay's own
+            # socket is created 0666 in a directory kubelet makes 0777, so
+            # neither CHOWN nor FOWNER is needed.
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - DAC_OVERRIDE
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: pulse-relay
+              mountPath: /run/pulse-relay
+            - name: host-olares-audio
+              mountPath: /host/run/olares-audio
+              readOnly: true
+            # HostToContainer: /run/user/<uid> is a tmpfs of its own, mounted
+            # when the user's session starts; a session that starts after Note,
+            # or comes back, shows up here only if host mounts propagate.
+            - name: host-run-user
+              mountPath: /host/run/user
+              readOnly: true
+              mountPropagation: HostToContainer
+        {{- end }}
       volumes:
         - name: app-data
           hostPath:
             path: {{ .Values.userspace.appData }}
             type: DirectoryOrCreate
+        {{- if .Values.capture.usb.enabled }}
+        # Directory, not CharDevice: the cards come and go as the speakerphone
+        # is plugged in, and the directory is what stays. OrCreate, so a box
+        # with no sound card at all still starts Note: it lists no USB device,
+        # and one plugged in later appears in the directory the kernel uses.
+        - name: sound
+          hostPath:
+            path: /dev/snd
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.capture.bluetooth.enabled }}
+        # Where the relay listens and Note connects.
+        - name: pulse-relay
+          emptyDir: {}
+        # The host's audio setup links /run/olares-audio/pulse to the pulse
+        # directory of whichever user runs the sound server, so one package
+        # fits every box; the relay reads the link and connects under
+        # /run/user. Without the link it takes the one pulse socket under
+        # /run/user. The directories, not the socket: the server recreates the
+        # socket when the user's session restarts, and a mounted file would go
+        # stale. OrCreate, so a box not set up yet still starts Note; it just
+        # lists no Bluetooth devices until it is.
+        - name: host-olares-audio
+          hostPath:
+            path: /run/olares-audio
+            type: DirectoryOrCreate
+        - name: host-run-user
+          hostPath:
+            path: /run/user
+            type: DirectoryOrCreate
+        # The system bus, for pairing headsets through the host's BlueZ from
+        # the record dialog. The directory, for the same reason as above.
+        # OrCreate as well, now that Bluetooth is on by default: a host with no
+        # system bus still starts Note, which then finds no adapter.
+        - name: host-dbus
+          hostPath:
+            path: /run/dbus
+            type: DirectoryOrCreate
+        # The host's Bluetooth helper (olares-note-bt.socket, installed by the
+        # host audio job). The directory, as above: systemd makes the socket
+        # again when the unit restarts. OrCreate, so Note starts before the
+        # job has run; it asks again at each call.
+        - name: host-bt
+          hostPath:
+            path: /run/olares-audio/bt
+            type: DirectoryOrCreate
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

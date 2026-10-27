@@ -1,0 +1,104 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: v3
+metadata:
+  name: jevk5v3
+  appid: jevk5v3
+  title: JevK5 System One
+  description: Fast calibrated typed decisions powered by JevK5
+  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  version: 0.1.3
+  categories:
+    - AI
+    - models
+  tags:
+    - system-one
+    - decision-model
+entrances:
+  - name: jevk5api
+    host: download-svc
+    port: 8090
+    title: JevK5 Model Console
+    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    openMethod: window
+    authLevel: internal
+sharedEntrances:
+  - name: jevk5v3
+    host: sharedentrances-api
+    port: 0
+    title: JevK5
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+workloadReplicas:
+  jevk5v3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  runAsUser: true
+  versionName: "0.2.0"
+  fullDescription: |
+    JevK5 is a fast, calibrated System One model for typed decisions. It accepts
+    choice, score, and noul questions through the TypeSafe-compatible
+    /v1/systemone API. This deployment is English-only, allows at most 16 choice
+    options and 10 score levels, and uses a 16,384-token operational window.
+  developer: alibiserikbay
+  website: https://huggingface.co/alibiserikbay/JevK5
+  sourceCode: https://github.com/allebee/jevk5
+  submitter: Olares
+  locale:
+    - en-US
+  license:
+    - text: Apache-2.0
+      url: https://github.com/allebee/jevk5/blob/85238d7be5527370c43206fe54cd752eb3134c1b/LICENSE
+  supportArch:
+    - amd64
+  accelerator:
+    - mode: nvidia
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "2"
+      limitedCpu: "8"
+      requiredMemory: 12Gi
+      limitedMemory: 24Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 12Gi
+      limitedGPUMemory: 16Gi
+permission:
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  shared: true
+  LLMGatewaySupported: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: info
+    options:
+      - title: Debug
+        value: debug
+      - title: Info
+        value: info
+      - title: Warn
+        value: warn
+      - title: Error
+        value: error

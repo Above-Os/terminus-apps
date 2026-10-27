@@ -7,7 +7,7 @@ metadata:
   description: Text recognition and document parsing toolkit
   appid: paddleocrhybrid
   title: PaddleOCR Hybrid
-  version: '1.0.14'
+  version: '1.0.38'
   categories:
     - AI
     - models
@@ -37,7 +37,7 @@ entrances:
     invisible: true
     openMethod: window
     authLevel: internal
-#   paddleocrhybrid — llama.cpp CUDA VLM (== appid / Release.Name)
+#   paddleocrhybrid — llama.cpp CUDA/ROCm/SYCL VLM (== appid / Release.Name)
 #   llminit         — llm-init (ENGINE_KIND=ocr): download + /v1/ocr* proxy
 #   ocradapter      — OCRAdapter job worker (paddle-hybrid)
 #   layout          — PP-DocLayoutV3 ONNX (CPU)
@@ -54,7 +54,7 @@ spec:
 
     PaddleOCR Hybrid combines PP-DocLayoutV3 layout detection with PaddleOCR-VL-1.5 document recognition. It identifies regions on document images and PDF pages, then recognizes their content, including text, tables, and formulas, with support for multiple languages.
 
-    This Hybrid version runs layout detection on the CPU and document recognition on a supported NVIDIA GPU. It makes these capabilities available to compatible Olares applications.
+    This Hybrid version runs layout detection on the CPU and document recognition on a supported NVIDIA GPU or discrete AMD or Intel GPU. It makes these capabilities available to compatible Olares applications.
 
   developer: Baidu
   website: https://aistudio.baidu.com/paddleocr
@@ -74,17 +74,17 @@ spec:
       url: https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE
   accelerator:
     # Σ requests ≈ llamacpp(750m) + llminit(200m) + ocradapter(100m) + layout(1) = 2050m → requiredCpu 3.
-    # Σ limits ≈ llamacpp(4/6Gi) + llminit(1/2Gi) + ocradapter(0.5/512Mi) + layout(2/2Gi) ≤ 8 CPU / 12Gi.
-    # GPU: full-stack VRAM peak ~8.4Gi; requiredGPUMemory stays 8Gi (product quota).
+    # Σ limits ≈ llamacpp(4/12Gi) + llminit(1/2Gi) + ocradapter(0.5/1Gi) + layout(2/2Gi) ≤ 8 CPU / 20Gi.
+    # GPU: sustained real-document benchmark peak ~4.3Gi; reserve 6Gi for runtime headroom.
     - mode: nvidia
       requiredCpu: "3"
       limitedCpu: "8"
-      requiredMemory: "6Gi"
-      limitedMemory: "12Gi"
+      requiredMemory: "9Gi"
+      limitedMemory: "20Gi"
       requiredDisk: "5Gi"
       limitedDisk: "50Gi"
-      requiredGPUMemory: "8Gi"
-      limitedGPUMemory: "10Gi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
     - mode: nvidia-gb10
       requiredCpu: "3"
       limitedCpu: "8"
@@ -92,6 +92,24 @@ spec:
       limitedMemory: "20Gi"
       requiredDisk: "5Gi"
       limitedDisk: "50Gi"
+    - mode: amd-gpu
+      requiredCpu: "3"
+      limitedCpu: "8"
+      requiredMemory: "9Gi"
+      limitedMemory: "20Gi"
+      requiredDisk: "5Gi"
+      limitedDisk: "50Gi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
+    - mode: intel-gpu
+      requiredCpu: "3"
+      limitedCpu: "8"
+      requiredMemory: "9Gi"
+      limitedMemory: "20Gi"
+      requiredDisk: "5Gi"
+      limitedDisk: "50Gi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
 
   supportArch:
     - amd64
@@ -148,14 +166,14 @@ envs:
     editable: true
     applyOnChange: true
     default: "-ngl 99"
-    description: "llama.cpp flags on the engine Pod only (not llm-init). mmproj is auto-resolved next to the main GGUF."
+    description: "Additional llama.cpp flags on the engine Pod only (not llm-init). The runtime enforces one bounded context slot because OCRAdapter dispatches one inference at a time; mmproj is auto-resolved next to the main GGUF."
   - envName: LLAMACPP_REQUIRED_GPU_MEMORY
     required: true
     type: string
     editable: true
     applyOnChange: true
-    default: "8Gi"
-    description: "Per-instance GPU memory (nvidia.com/gpumem). Full-stack peak ~8.4Gi; Olares request fixed at 8Gi."
+    default: "6Gi"
+    description: "Per-instance GPU memory: NVIDIA uses nvidia.com/gpumem; AMD/Intel discrete GPUs use gpu-memory pod annotations. The 6Gi default includes headroom above the measured real-document workload peak."
   - envName: LLAMACPP_CPU_REQUEST
     required: false
     type: string
@@ -173,13 +191,13 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: "3Gi"
+    default: "6Gi"
   - envName: LLAMACPP_MEMORY_LIMIT
     required: false
     type: string
     editable: true
     applyOnChange: true
-    default: "6Gi"
+    default: "12Gi"
   - envName: LAYOUT_CPU_REQUEST
     required: false
     type: string
@@ -222,6 +240,20 @@ envs:
     editable: true
     applyOnChange: true
     default: "1"
+  - envName: OCR_MAX_OUTPUT_TOKENS
+    required: false
+    type: int
+    editable: true
+    applyOnChange: true
+    default: "4096"
+    description: "Maximum output tokens for one layout crop or whole-page fallback. Truncated crops fail the page instead of returning partial OCR."
+  - envName: OCR_VLM_REQUEST_TIMEOUT
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "90s"
+    description: "Maximum wall-clock time for one Paddle VLM crop request. This bounds pathological generation without changing the Router timeout."
   - envName: OCR_PDF_STRATEGY
     required: false
     type: string

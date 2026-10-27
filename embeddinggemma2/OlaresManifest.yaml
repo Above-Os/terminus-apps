@@ -1,0 +1,134 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: v3
+metadata:
+  name: embeddinggemma2
+  appid: embeddinggemma2
+  title: EmbeddingGemma 2
+  description: "Multimodal embeddings for text, images, audio, and video"
+  icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+  version: "1.0.1"
+  categories:
+    - AI
+    - models
+  tags:
+    - embedding
+    - multimodal
+sharedEntrances:
+  - name: embeddinggemma2
+    host: sharedentrances-api
+    port: 0
+    title: EmbeddingGemma 2 API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+entrances:
+  - name: embedclient
+    port: 8090
+    host: download-svc
+    title: EmbeddingGemma 2
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    openMethod: window
+    authLevel: internal
+  - name: embedapi
+    port: 8090
+    host: download-svc
+    title: EmbeddingGemma 2 API
+    icon: https://app.cdn.olares.com/appstore/embeddinggemmav3/icon.png
+    invisible: true
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  embeddinggemma2: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  runAsUser: true
+  versionName: embeddinggemma2-1.0.1
+  upgradeDescription: |
+    Prevents concurrent retries with the same Idempotency-Key from creating duplicate embedding tasks. Text, image, audio, and video embedding behavior is otherwise unchanged.
+  fullDescription: |
+    EmbeddingGemma 2 turns text, images, audio, video, and ordered combinations of text and media into normalized embedding vectors. Applications can use the vectors for semantic search, retrieval, clustering, and cross-modal matching.
+
+    Text and image requests use the synchronous embeddings API. Audio, video, and mixed requests use persisted asynchronous tasks with submit, poll, result, and cancel endpoints.
+  developer: Google DeepMind
+  website: https://ai.google.dev/gemma/docs/embeddinggemma
+  sourceCode: https://huggingface.co/onnx-community/embeddinggemma-2-ONNX
+  doc: https://ai.google.dev/gemma/docs/embeddinggemma
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  license:
+    - text: Gemma Terms of Use
+      url: https://ai.google.dev/gemma/terms
+  accelerator:
+    - mode: cpu
+      requiredCpu: 400m
+      limitedCpu: "6"
+      requiredMemory: 7Gi
+      limitedMemory: 12Gi
+      requiredDisk: 6Gi
+      limitedDisk: 50Gi
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  allowMultipleInstall: true
+  LLMGatewaySupported: true
+  shared: true
+  dependencies:
+    - name: olares
+      version: ">=1.12.7-0"
+      type: system
+envs:
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: embeddinggemma-2
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: embedding
+    options:
+      - title: Embedding
+        value: embedding
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: info
+    options:
+      - title: Debug
+        value: debug
+      - title: Info
+        value: info
+      - title: Warn
+        value: warn
+      - title: Error
+        value: error

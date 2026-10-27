@@ -1,0 +1,119 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: v3
+metadata:
+  name: layatypeddecisionsv3
+  appid: layatypeddecisionsv3
+  title: Laya Typed Decisions
+  description: A System One model for structured decisions from English text
+  icon: https://app.cdn.olares.com/appstore/layatypeddecisions/icon.png
+  version: 0.2.6
+  categories:
+    - AI
+    - models
+  tags:
+    - system-one
+    - decision-model
+entrances:
+  - name: layaapi
+    host: download-svc
+    port: 8090
+    title: Laya Typed Decisions API
+    icon: https://app.cdn.olares.com/appstore/layatypeddecisions/icon.png
+    invisible: true
+    authLevel: internal
+sharedEntrances:
+  - name: layatypeddecisionsv3
+    host: sharedentrances-api
+    port: 0
+    title: Laya Typed Decisions
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/layatypeddecisions/icon.png
+workloadReplicas:
+  layatypeddecisionsv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  runAsUser: true
+  versionName: "0.3.3"
+  fullDescription: |
+    Laya Typed Decisions evaluates English text and returns structured decisions: a selection from predefined options (choice), a rating on a defined scale (score), or the probability that a statement is true (noul). It is specialized for agent-trace analysis, customer service, invoice processing, and security incidents.
+
+    Compatible Olares applications can access the model through the TypeSafe-compatible /v1/systemone API. Callers must select it explicitly; it is not used for default Olares System One routing.
+
+    The model supports English only, with a 1,024-token context, up to 20 choice options, and up to 10 score levels. NVIDIA mode batches requests and accepts up to 100 in-flight requests. CPU mode is a functional fallback and does not offer the same concurrency or performance guarantees.
+
+  developer: Convai Innovations
+  website: https://huggingface.co/convaiinnovations/laya-typed-decisions
+  sourceCode: https://github.com/NandhaKishorM/laya
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - fr-FR
+    - de-DE
+    - ja-JP
+    - it-IT
+    - es-ES
+  license:
+    - text: Apache-2.0
+      url: https://github.com/NandhaKishorM/laya/blob/6a5819129eb220570792e417e49723d697efd76f/LICENSE
+  supportArch:
+    - amd64
+  accelerator:
+    - mode: cpu
+      requiredCpu: "2"
+      limitedCpu: "8"
+      requiredMemory: 3Gi
+      limitedMemory: 10Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+    - mode: nvidia
+      supportMultiCard: false
+      supportMultiNodes: false
+      requiredCpu: "2"
+      limitedCpu: "8"
+      requiredMemory: 3Gi
+      limitedMemory: 10Gi
+      requiredDisk: 2Gi
+      limitedDisk: 20Gi
+      requiredGPUMemory: 8Gi
+      limitedGPUMemory: 8Gi
+permission:
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  shared: true
+  LLMGatewaySupported: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_USER_HUGGINGFACE_TOKEN
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: info
+    options:
+      - title: Debug
+        value: debug
+      - title: Info
+        value: info
+      - title: Warn
+        value: warn
+      - title: Error
+        value: error

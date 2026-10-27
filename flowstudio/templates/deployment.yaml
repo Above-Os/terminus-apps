@@ -18,7 +18,7 @@ spec:
     spec:
       enableServiceLinks: false
       {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
-      # 给 lifespan 停表与任务协程拆下留足时间。
+      # preStop 应用停止收尾（≤100s）与 SIGTERM 后的正常退出共用这段预算。
       terminationGracePeriodSeconds: 120
       serviceAccountName: {{ (default dict .Values.dynamicEngine).serviceAccountName | default "flowstudio-engine-orchestrator" }}
       {{- end }}
@@ -107,8 +107,6 @@ spec:
           value: {{ (default dict .Values.dynamicEngine).gpuMemMiB | default 6144 | quote }}
         - name: ENGINE_MEM_LIMIT
           value: {{ (default dict .Values.dynamicEngine).memLimit | default "80Gi" | quote }}
-        - name: ENGINE_MEM_REQUEST_MAX
-          value: {{ (default dict .Values.dynamicEngine).memRequestMax | default "80Gi" | quote }}
         - name: ENGINE_IDLE_TTL
           value: {{ (default dict .Values.dynamicEngine).idleTtlSeconds | default 900 | quote }}
         - name: ENGINE_STARTUP_REAP
@@ -131,6 +129,9 @@ spec:
           value: "{{ .Values.bfl.username }}"
         - name: DEV_FAKE_IS_ADMIN
           value: "{{ if eq .Values.bfl.username .Values.admin }}true{{ else }}false{{ end }}"
+        # 与 lares 共用：解 Router 转来的 params.sref（终端用户）。
+        - name: SREF_KEY
+          value: {{ (default dict .Values.routerIdentity).key | quote }}
         - name: DB_AUTO_CREATE
           value: "true"
         - name: DATABASE_URL
@@ -160,6 +161,8 @@ spec:
           value: {{ (default dict .Values.network).pipIndexUrl | default "" | quote }}
         - name: USER_DATA_DIR
           value: /data/appData/userData
+        - name: USERSPACE_ROOT
+          value: /userspaces
         - name: MODELS_DIR
           value: /data/appCommon/comfyui/model
         - name: PUBLIC_BASE_URL
@@ -173,6 +176,8 @@ spec:
           mountPath: /data/appData
         - name: app-common
           mountPath: /data/appCommon
+        - name: userspaces
+          mountPath: /userspaces
         - name: app-data
           mountPath: /devsrc
           subPath: devsrc
@@ -204,6 +209,16 @@ spec:
           periodSeconds: 20
           timeoutSeconds: 3
           failureThreshold: 3
+        {{- if ne (toString (default dict .Values.dynamicEngine).enabled) "false" }}
+        # Olares 暂停只缩 chart 内 Deployment；fs-eng-* 的 owner 是本 Deployment，
+        # 暂停时它仍在，GC 不会回收引擎。preStop 让 API 判定 owner 是否为停止态
+        # （replicas=0 / 删除中），是则取消任务、中止初始化、暂停下载、回收引擎；
+        # 重启 / 驱逐 / 升级时不回收。uvicorn 热重载不触发 preStop。
+        lifecycle:
+          preStop:
+            exec:
+              command: ["python", "-m", "app.runtime.pod_stop_hook"]
+        {{- end }}
       volumes:
       - name: app-data
         hostPath:
@@ -213,3 +228,9 @@ spec:
         hostPath:
           path: {{ .Values.userspace.appCommon }}
           type: DirectoryOrCreate
+      # 每个用户的 Home 在各自的 userspace PVC 下。shared app 的 appData
+      # 只挂集群所有者的 Data，写不出子用户的 Files。
+      - name: userspaces
+        hostPath:
+          path: {{ (.Values.rootPath | default "/olares") }}/rootfs/userspace
+          type: Directory

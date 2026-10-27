@@ -17,8 +17,30 @@
 {{- /* Needs llm-init with ROLE=extra → extra_model_path (L6+). */ -}}
 {{- define "paddleocrhybrid.llmInitTag" -}}v1.7.21{{- end -}}
 {{- /* Needs OCRAdapter with paddle-hybrid pipeline (S11+). */ -}}
-{{- define "paddleocrhybrid.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.9{{- end -}}
-{{- define "paddleocrhybrid.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
+{{- define "paddleocrhybrid.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter@sha256:97c7b36be7415cb0e60600be0a8485c08251fb376880ce50d4087665e2f72668{{- end -}}
+{{- /* Olares accelerator mode selected at install time. */ -}}
+{{- define "paddleocrhybrid.gpuType" -}}
+{{- $gpuObj := .Values.GPU | default dict -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = $gpuObj.Type | default "nvidia" -}}
+{{- end -}}
+{{- $gpuType -}}
+{{- end -}}
+{{- /* Select CUDA for NVIDIA/GB10, ROCm for AMD dGPU, and SYCL for Intel dGPU. */ -}}
+{{- define "paddleocrhybrid.llamacppImage" -}}
+{{- $gpuType := include "paddleocrhybrid.gpuType" . -}}
+{{- $images := .Values.engine.images | default dict -}}
+{{- if eq $gpuType "amd-gpu" -}}
+{{- $images.amdGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-rocm-b10731" -}}
+{{- else if eq $gpuType "intel-gpu" -}}
+{{- $images.intelGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-intel-b10752" -}}
+{{- else if eq $gpuType "nvidia-gb10" -}}
+{{- $images.nvidiaGb10 | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143" -}}
+{{- else -}}
+{{- $images.nvidia | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143" -}}
+{{- end -}}
+{{- end -}}
 {{- define "paddleocrhybrid.layoutImage" -}}docker.io/beclab/ocr-layout:v0.0.1-onnx-cpu{{- end -}}
 
 {{- /* Whole-repo dual-source (no --include):

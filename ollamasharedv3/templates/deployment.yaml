@@ -1,0 +1,155 @@
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
+{{- end -}}
+{{- $unifiedMemory := eq $gpuType "nvidia-gb10" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "true"
+spec:
+  replicas: {{ .Values.workloads.ollamasharedv3.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ollama
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        ollamasharedv3.olares.com/chart-version: {{ .Chart.Version | quote }}
+      labels:
+        app.kubernetes.io/name: ollama
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        io.kompose.network/chrome-default: "true"
+        bytetrade.io/terminal: ollama
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: init-permissions
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for directory in /var/lib/ollama /var/lib/ollama/models /var/lib/ollama/.nv /var/lib/ollama/.nv/ComputeCache; do
+                mkdir -p "$directory"
+                chown 1000:1000 "$directory"
+              done
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: app-data
+              mountPath: /var/lib/ollama
+      containers:
+        - name: ollama
+          image: docker.io/ollama/ollama:0.33.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          envFrom:
+            - configMapRef:
+                name: ollama-env
+          env:
+            - name: HOME
+              value: /var/lib/ollama
+            - name: OLLAMA_HOST
+              value: 0.0.0.0:11434
+            - name: OLLAMA_MODELS
+              value: /var/lib/ollama/models
+            - name: CUDA_CACHE_PATH
+              value: /var/lib/ollama/.nv/ComputeCache
+          ports:
+            - name: http
+              containerPort: 11434
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 150m
+{{- if $unifiedMemory }}
+              memory: 32Gi
+{{- else }}
+              memory: 4Gi
+              nvidia.com/gpumem: 23552
+{{- end }}
+            limits:
+              cpu: "4"
+              memory: 38Gi
+{{- if not $unifiedMemory }}
+              nvidia.com/gpumem: 23552
+{{- end }}
+          volumeMounts:
+            - name: app-data
+              mountPath: /var/lib/ollama
+      volumes:
+        - name: app-data
+          hostPath:
+            path: {{ .Values.userspace.appData | quote }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+      protocol: TCP

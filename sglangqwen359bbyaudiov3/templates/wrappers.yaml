@@ -1,0 +1,113 @@
+# Engine wrapper script, mounted into the SGLang (engine) container at
+# /llm-init/wrappers. Sources the helpers llm-init publishes into RUN_DIR and
+# runs SGLang under supervise_engine, so Model Console can relaunch the engine
+# with updated model-card engine_args without restarting the Pod.
+#
+# SGLang's deployment model: llm-init downloads the HF model into the shared
+# /cache/hf/hub cache and writes a readiness sentinel under /run/llm-init; the
+# engine waits on the sentinel and loads --model-path from MODEL_NAME (the HF
+# owner/repo id), resolving against the shared cache.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: sglang
+data:
+  sglang.sh: |
+    #!/bin/sh
+    # SGLang engine wrapper.
+    #
+    # Waits for llm-init to publish the sentinel, then launches SGLang's
+    # OpenAI-compatible server with --model-path set to MODEL_NAME (HF
+    # owner/repo); SGLang resolves it against the shared /cache/hf/hub cache.
+    #
+    # ENGINE_ARGS contract (docs/engine-args.md): a cmdline-style string in
+    # SGLang's native flag syntax, preferring the Model Console model-card
+    # handoff at ${RUN_DIR}/engine_args over the chart env. Shell-word-split
+    # and appended after the --model-path / --served-model-name / --host /
+    # --port baseline. Example:
+    #   ENGINE_ARGS="--context-length 8192 --mem-fraction-static 0.8"
+    #
+    # --enable-metrics is set before ENGINE_ARGS so /api/diag/gpu can read
+    # sglang:kv_cache_usage_perc; operators may override via ENGINE_ARGS.
+    set -eu
+
+    ENGINE=sglang
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
+    # arrive late - the two containers are separate Deployments with no ordering
+    # between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    . "$WRAPPER_COMMON"
+
+    looks_like_hf_repo_id() {
+        s=$1
+        case "$s" in
+            ""|/*|./*|*://*) return 1 ;;
+        esac
+        case "$s" in
+            */*)
+                rest=${s#*/}
+                case "$rest" in
+                    */*|*:*) return 1 ;;
+                esac
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    wait_for_sentinel
+    wait_for_engine_args_handoff
+
+    if ! looks_like_hf_repo_id "${MODEL_NAME:-}"; then
+        log "MODEL_NAME must be owner/repo for --model-path (got ${MODEL_NAME:-<empty>})"
+        exit 1
+    fi
+
+    python3 /llm-init/wrappers/prepare.py
+
+    run_sglang() {
+        load_engine_args_from_handoff
+        # Chat turns thinking off by default: Qwen3.5 otherwise reasons before every
+        # answer, which costs a voice reply seconds and, under a small token budget, the
+        # whole reply. It is a launch default rather than part of ENGINE_ARGS because
+        # Model Console's card keeps the flags it was first seeded with across upgrades.
+        # Set before ENGINE_ARGS, so a card that sets the flag wins; a request can still
+        # turn thinking on with chat_template_kwargs.
+        chat_defaults='--default-chat-template-kwargs {"enable_thinking":false}'
+        case " ${ENGINE_ARGS:-} " in *" --is-embedding "*) chat_defaults= ;; esac
+        log "starting SGLang with model-path=$MODEL_NAME args=${chat_defaults:+$chat_defaults }${ENGINE_ARGS:-<empty>}"
+        # shellcheck disable=SC2086  # intentional word-splitting of chat_defaults and ENGINE_ARGS
+        exec python3 -m sglang.launch_server \
+            --model-path "$MODEL_NAME" \
+            --served-model-name "$MODEL_NAME" \
+            --host 0.0.0.0 \
+            --port "${SGLANG_PORT:-30000}" \
+            --enable-metrics \
+            $chat_defaults \
+            ${ENGINE_ARGS:-} \
+            --mem-fraction-static "$(cat /tmp/qwen-static-fraction)" \
+            "$@"
+    }
+
+    supervise_engine run_sglang "$@"
+  prepare.py: |
+    import torch
+    from pathlib import Path
+
+    # Keep the tested static budget when time slicing exposes the whole GPU. 12Gi leaves a 15Gi
+    # slice its 80%: what goes past 11Gi reaches the KV cache and the mamba state cache.
+    total = torch.cuda.get_device_properties(0).total_memory
+    fraction = min(0.80, (12 * 1024**3) / total)
+    Path("/tmp/qwen-static-fraction").write_text(f"{fraction:.5f}")
+    print(f"[qwen-memory] visible GPU total={total / 1024**3:.3f}Gi, static fraction={fraction:.5f}", flush=True)

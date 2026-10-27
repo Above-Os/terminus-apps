@@ -1,4 +1,4 @@
-image: docker.io/beclab/note:0.5.13
+image: docker.io/beclab/note:0.6.8
 imagePullPolicy: IfNotPresent
 
 bfl:
@@ -8,6 +8,12 @@ bfl:
 # so that a local `helm template` renders, and only its domain part is read.
 user:
   zone: owner.olares.com
+
+# Each entrance's host under the installing admin's zone, keyed by entrance
+# name. app-service overwrites it; the default is only so that a local
+# `helm template` renders, and only the first label is read.
+domain:
+  note-api: aad653ca1.owner.olares.com
 
 postgres:
   host: postgres
@@ -19,6 +25,52 @@ postgres:
 
 userspace:
   appData: /tmp/note
+
+# Recording from devices plugged into or paired with the box: two switches,
+# side by side. USB is off by default, Bluetooth on. With neither, Note
+# records from the browser's microphone only.
+capture:
+  # USB speakerphones and microphones. It mounts the host's /dev/snd and runs
+  # the container privileged, because the device cgroup gives an unprivileged
+  # container no sound devices; Olares 1.12.8's device.audio workload option
+  # is the way to drop that once boxes run it. audioGroup is the host's audio
+  # group id (29 on Ubuntu), which owns the device nodes.
+  usb:
+    enabled: false
+    audioGroup: 29
+  # Bluetooth headsets and speakerphones that can take calls. They go through
+  # the host's sound server (PipeWire, or PulseAudio on older hosts), not
+  # /dev/snd, so Note itself needs no privilege. A root sidecar, pulse-relay,
+  # reaches the host's sound server through /run/olares-audio/pulse and
+  # /run/user for it; Note mounts the system bus for pairing from the record
+  # dialog, and AppArmor's confinement of Note is lifted so the bus can be
+  # called. PipeWire takes the relay's connections; PulseAudio itself refuses
+  # them, since it authenticates a client by credentials or cookie and the
+  # relay passes neither. The host has to be set up first, once: an
+  # audio session without a desktop login, wideband speech, and the link at
+  # /run/olares-audio/pulse (olares-bt-audio.sh apply does all three). Which
+  # user runs the sound server is the host's business, not this chart's.
+  # On by default: a package installed from the market cannot have its values
+  # changed, so off would leave every such install without Bluetooth for
+  # good, while a host not set up yet only lists no devices (the mounts are
+  # DirectoryOrCreate) until it is set up.
+  bluetooth:
+    enabled: true
+  # Prepare the host's audio for Bluetooth recording at every install and
+  # upgrade of Note: a short-lived privileged job with the host's PIDs runs
+  # olares-bt-audio.sh on the host (templates/host-audio-setup.yaml). Off
+  # leaves the host to olares-bt-audio.sh by hand.
+  hostAudioSetup:
+    enabled: true
+  # On a box with olares-desktop, the host audio job also installs
+  # olares-note-host.sh (the desktop bridge): the desktop's own sound server has no
+  # Bluetooth headsets, so its browser gets an output "One" into the host
+  # session. Nothing happens on a box without the desktop. Temporary, until
+  # Olares handles Bluetooth audio itself. Off, or Note uninstalled, this Note
+  # stops using the bridge, which goes once no other Note on the host (a
+  # renamed preview) still uses it.
+  desktopBridge:
+    enabled: true
 
 workloads:
   note:
@@ -32,6 +84,6 @@ workers:
   gpu: 1
 
 diarization:
-  # evidence_v3 consumes the engine's frame-support reconstruction and audit
-  # trail. evidence_v2 remains available as the interval-based rollback path.
+  # evidence_v3 uses the engine's frame-support reconstruction and audit trail;
+  # evidence_v2 remains the interval-based rollback policy.
   postprocessStrategy: evidence_v3

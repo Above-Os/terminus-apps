@@ -1,12 +1,13 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "dotsocr.modelName" .) -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99" -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99 -c 16384 -np 1" -}}
+{{- $maxOutputTokens := $oe.OCR_MAX_OUTPUT_TOKENS | default "12288" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "1500m") -}}
 {{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "1Gi") -}}
 {{- $cpuLimit := trim ($oe.LLAMACPP_CPU_LIMIT | default "4") -}}
-{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "4Gi") -}}
+{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "12Gi") -}}
 {{- $gpuType := .Values.gpu | default "" -}}
 {{- if not $gpuType -}}
 {{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
@@ -15,7 +16,7 @@
        Installability is gated by OlaresManifest accelerator (nvidia / nvidia-gb10 only). */ -}}
 {{- $isCpuMode := or (eq $gpuType "cpu") (eq $gpuType "intel") -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
-{{- $gpuMiB := include "dotsocr.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "11Gi") -}}
+{{- $gpuMiB := include "dotsocr.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "7Gi") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
@@ -76,6 +77,8 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: OCR_MAX_OUTPUT_TOKENS
+              value: "{{ $maxOutputTokens }}"
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
             - name: HF_HUB_CACHE

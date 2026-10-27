@@ -1,0 +1,105 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $engineArgs := $oe.ENGINE_ARGS | default "" -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "llamacpp"
+spec:
+  replicas: {{ .Values.workloads.llamacppqwen359bggufv3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: llamacpp
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.service: llamacpp
+        app.kubernetes.io/instance: '{{ .Release.Name }}'
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: llamacpp
+          image: {{ .Values.engine.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]
+          env:
+            - name: ENGINE_KIND
+              value: llamacpp
+            - name: MODEL_NAME
+              value: {{ $oe.MODEL_NAME | quote }}
+            - name: MODEL_MODE
+              value: chat
+            - name: ENGINE_ARGS
+              value: {{ $engineArgs | quote }}
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+            - name: LLAMACPP_PORT
+              value: "8081"
+            - name: WAIT_TIMEOUT
+              value: "3600"
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: OLARES_GPU_MODE
+              value: nvidia
+{{- if $oe.HF_ENDPOINT }}
+            - name: HF_ENDPOINT
+              value: {{ $oe.HF_ENDPOINT | quote }}
+{{- end }}
+{{- if $oe.HF_TOKEN }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: HF_TOKEN
+{{- end }}
+          ports:
+            - containerPort: 8081
+          resources:
+            requests:
+              cpu: 200m
+              memory: 2Gi
+              nvidia.com/gpumem: 12288
+            limits:
+              cpu: "6"
+              memory: 35Gi
+              nvidia.com/gpumem: 12288
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+              readOnly: true
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /llm-init/wrappers
+              readOnly: true
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ $runStateHostPath }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: llm-init-wrappers
+            defaultMode: 0555
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llamacpp
+  namespace: '{{ .Release.Namespace }}'
+spec:
+  selector:
+    io.kompose.service: llamacpp
+  ports:
+    - port: 8081
+      targetPort: 8081

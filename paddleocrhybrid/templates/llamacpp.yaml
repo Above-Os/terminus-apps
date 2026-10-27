@@ -1,28 +1,31 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default (include "paddleocrhybrid.modelName" .) -}}
-{{- $engineArgs := $oe.ENGINE_ARGS | default "-ngl 99" -}}
+{{- $userEngineArgs := $oe.ENGINE_ARGS | default "-ngl 99" -}}
+{{- $engineArgs := printf "%s -np 1 -c 8192 --no-cache-prompt" $userEngineArgs -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $cpuRequest := trim ($oe.LLAMACPP_CPU_REQUEST | default "750m") -}}
-{{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "3Gi") -}}
+{{- $memRequest := trim ($oe.LLAMACPP_MEMORY_REQUEST | default "6Gi") -}}
 {{- $cpuLimit := trim ($oe.LLAMACPP_CPU_LIMIT | default "4") -}}
-{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "6Gi") -}}
-{{- $gpuType := .Values.gpu | default "" -}}
-{{- if not $gpuType -}}
-{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}
-{{- end -}}
+{{- $memLimit := trim ($oe.LLAMACPP_MEMORY_LIMIT | default "12Gi") -}}
+{{- $gpuType := include "paddleocrhybrid.gpuType" . -}}
+{{- $engineImage := include "paddleocrhybrid.llamacppImage" . -}}
 {{- /* Do not fail() on cpu/intel: Market check-chart helm-renders mode=cpu to extract images.
-       Installability is gated by OlaresManifest accelerator (nvidia / nvidia-gb10 only). */ -}}
+       Installability is gated by OlaresManifest accelerator. */ -}}
 {{- $isCpuMode := or (eq $gpuType "cpu") (eq $gpuType "intel") -}}
+{{- $isIntelGpu := eq $gpuType "intel-gpu" -}}
+{{- $isAmdGpu := eq $gpuType "amd-gpu" -}}
+{{- $needDri := or $isAmdGpu $isIntelGpu -}}
 {{- $unifiedMem := eq $gpuType "nvidia-gb10" -}}
-{{- $gpuMiB := include "paddleocrhybrid.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "8Gi") -}}
+{{- $needNvidiaGpumem := and (not $isCpuMode) (not $unifiedMem) (not $needDri) -}}
+{{- $gpuMiB := include "paddleocrhybrid.gpuMiB" ($oe.LLAMACPP_REQUIRED_GPU_MEMORY | default "6Gi") -}}
 {{- if $unifiedMem -}}
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
 ---
-# llama.cpp CUDA VLM. Deployment name == Release.Name (allowMultipleInstall).
+# llama.cpp CUDA/ROCm/SYCL VLM. Deployment name == Release.Name (allowMultipleInstall).
 # Service name MUST be "llamacpp" (OCRAdapter LLAMACPP_URL default).
 apiVersion: apps/v1
 kind: Deployment
@@ -33,6 +36,7 @@ metadata:
     io.kompose.service: llamacpp
   annotations:
     applications.app.bytetrade.io/gpu-inject: "llamacpp"
+    paddleocrhybrid.io/engine-image: {{ $engineImage | quote }}
 spec:
   replicas: {{ .Values.workloads.paddleocrhybrid.replicaCount }}
   selector:
@@ -45,6 +49,13 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: llamacpp
+{{- if $needDri }}
+      # AMD/Intel device plugins expose a card, not a VRAM resource. app-service
+      # reads these annotations to preserve the selected memory quota.
+      annotations:
+        gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
+        gpu.bytetrade.io/limited-gpu-memory: "{{ $gpuMiB }}Mi"
+{{- end }}
     spec:
       restartPolicy: Always
       volumes:
@@ -60,9 +71,35 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
+{{- if $isAmdGpu }}
+        - name: kfd
+          hostPath:
+            path: /dev/kfd
+            type: CharDevice
+{{- end }}
+{{- if $needDri }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi
+{{- end }}
+{{- if $isAmdGpu }}
+      securityContext:
+        supplementalGroups:
+          - 44
+          - 992
+{{- end }}
       containers:
         - name: llamacpp
-          image: {{ include "paddleocrhybrid.llamacppImage" . }}
+          image: {{ $engineImage | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "/llm-init/wrappers/llamacpp.sh"]
           env:
@@ -76,6 +113,8 @@ spec:
               value: "3600"
             - name: ENGINE_ARGS
               value: "{{ $engineArgs }}"
+            - name: OLARES_GPU_MODE
+              value: {{ $gpuType | quote }}
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
             - name: HF_HUB_CACHE
@@ -102,6 +141,19 @@ spec:
           ports:
             - name: llamacpp
               containerPort: 8081
+          # The current llama.cpp VLM build retains anonymous CPU memory across
+          # image requests. Recycle before the 12 GiB cgroup hard limit so the
+          # adapter can wait for a clean reload and retry the interrupted crop.
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - 'test "$(cat /sys/fs/cgroup/memory.current)" -lt 10737418240'
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 1
           volumeMounts:
             - name: hf-cache
               mountPath: /cache/hf/hub
@@ -112,17 +164,29 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
+{{- if $isAmdGpu }}
+            - name: kfd
+              mountPath: /dev/kfd
+{{- end }}
+{{- if $needDri }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
-{{- if and (not $isCpuMode) (not $unifiedMem) }}
+{{- if $needNvidiaGpumem }}
               nvidia.com/gpumem: {{ $gpuMiB }}
 {{- end }}
 ---

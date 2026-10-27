@@ -1,0 +1,86 @@
+apiVersion: v3
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+metadata:
+  name: lightcraft
+  appid: lightcraft
+  title: LightCraft
+  description: Lightroom-style photo library and raw developer in your browser
+  icon: https://raw.githubusercontent.com/beclab/lightcraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.lightcraft.png
+  version: 0.1.0
+  categories:
+    - Utilities_v112
+    - Creativity
+    - workspace
+permission:
+  userData:
+    - Home/LightCraft/
+spec:
+  versionName: "0.8.0"
+  runAsUser: true
+  fullDescription: |
+    ## Overview
+    LightCraft is an open-source, Lightroom-comparable photo library and
+    non-destructive raw developer written in Rust. This app serves its
+    WebAssembly build: importing, developing and exporting run entirely in
+    your browser, and photos never leave your device.
+
+    The web library (catalog, imported photos, thumbnails) lives in this
+    browser's storage for the site, which the browser may clear. Keep your
+    originals elsewhere and use File > Back Up Library regularly. Export
+    downloads files.
+
+    ## Agent access (MCP)
+    The app also runs LightCraft's headless engine as an MCP server over
+    Streamable HTTP. Its entrance is hidden from the desktop and listed in
+    Settings; it is reachable from your LAN or the LarePass VPN. Agents can
+    read and write files only in Home/LightCraft: put photos (JPEG, PNG,
+    TIFF, DNG and camera raws) there, ask the agent to import them, then
+    develop and export. Each agent session starts with an empty library, so
+    keep results by exporting them (or as XMP sidecars). To work on an
+    agent's result in the browser, download it from Files and import it.
+
+    ## Requirements
+    - A browser with WebGL2
+    - Arch: amd64, arm64
+  developer: storytold
+  submitter: beclab
+  website: https://github.com/storytold/lightcraft
+  sourceCode: https://github.com/beclab/lightcraft
+  license:
+    - text: MIT OR Apache-2.0
+      url: https://github.com/storytold/lightcraft/blob/main/LICENSE-MIT
+  locale:
+    - en-US
+    - zh-CN
+  requiredCpu: 150m
+  limitedCpu: "7"
+  requiredMemory: 384Mi
+  limitedMemory: 8704Mi
+  requiredDisk: 50Mi
+  limitedDisk: 2Gi
+  supportArch:
+    - amd64
+    - arm64
+entrances:
+  - name: lightcraft
+    host: lightcraft-svc
+    port: 8080
+    title: LightCraft
+    icon: https://raw.githubusercontent.com/beclab/lightcraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.lightcraft.png
+    authLevel: private
+    openMethod: window
+  - name: lightcraftmcp
+    host: lightcraft-svc
+    port: 8090
+    title: LightCraft MCP
+    icon: https://raw.githubusercontent.com/beclab/lightcraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.lightcraft.png
+    authLevel: internal
+    invisible: true
+options:
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+workloadReplicas:
+  lightcraft: 1

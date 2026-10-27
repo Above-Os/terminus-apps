@@ -14,34 +14,11 @@ spec:
     - Rate Limiting: Rate limiting e throttling integrati
     - Proxy Server: Distribuisci come AI Gateway/Proxy
     - Multi-tenant: Supporto per più utenti e team
+    Accesso amministratore: accedere con UI_USERNAME/UI_PASSWORD, creare un Proxy Admin separato in Internal Users e impostarne la password tramite il link di invito. Verificare l’accesso in una finestra privata, quindi attivare DISABLE_ENV_CREDENTIAL_LOGIN nelle variabili dell’app Olares. Dopo il riavvio, l’accesso condiviso e il relativo avviso rosso vengono disattivati. Mantenere false fino alla verifica; ripristinare false per recuperare l’accesso iniziale. Le chiavi API master restano valide.
+
   upgradeDescription: |
-    Sostituzione dell'immagine del reverse proxy da Bitnami OpenResty (`beclab/aboveos-bitnami-openresty:1.25.3-2`) all'immagine ufficiale OpenResty `openresty/openresty:1.29.2.5-bookworm-fat`.
-    
-    Allineamento dei mount della configurazione nginx e dei percorsi dei log al layout dell'immagine ufficiale (`/etc/nginx/conf.d/default.conf`, `/usr/local/openresty/nginx/logs/...`) e rimozione del cablaggio specifico Bitnami `OPENRESTY_CONF_FILE`.
-    
-    Aggiornamento a [v1.83.3-stable](https://github.com/BerriAI/litellm/releases/tag/v1.83.3-stable) (da v1.81.4).
-    
-    Sicurezza:
-    - Fix escalation di privilegi su /key/block, /key/unblock, /key/update max_budget
-    - Redazione globale dei secret via root logger e pattern matching basato sul nome chiave
-    - Hardening della supply chain: pin di tutte le dipendenze Docker/npm/pip, firma immagini cosign
-    
-    Provider:
-    - Anthropic: preservare thinking.summary quando si instrada a OpenAI Responses API; flag di opt-out per il summary di reasoning predefinito
-    - Gemini: fix sottoconteggio token immagine nei metadati usage; passare il modello al builder URL di context caching per api_base personalizzato
-    - Azure: auto-routing di gpt-5.4+ tools+reasoning a Responses API
-    - Bedrock: supporto cache_control_injection_points per tool_config; rispettare api_base in count_tokens
-    - OpenAI: round-trip di reasoning_items Responses API in chat completions; supporto day-0 GPT-5.4 mini/nano
-    
-    *Proxy & Core:*
-    - Supporto guardrail a livello di progetto
-    - Fix caching Redis cluster; enforcement budget cross-pod basato su Redis
-    - Fix race condition guardrail in streaming e cattura risposta post-call
-    - Affinità di deployment per gruppo modelli; rate limit per modello per i team
-    - Auto-recupero della sessione aiohttp condivisa quando chiusa
-    
-    UI:
-    - Migrazione componenti da Tremor ad Ant Design
-    - Modernizzazione gestione team; UI guardrail di team
-    - Fix filtro log (filtro vuoto non mostra più dati obsoleti); fix export CSV su Global Usage
-    - Ricerca team paginata nella pagina usage; ricerca per sottostringa alias chiave
+    Chart 1.0.24 corregge il mancato avvio negli aggiornamenti che mantengono la chiave master pubblica storica; LiteLLM resta 1.106.2.
+    Chiavi master, chiavi virtuali e credenziali dei provider restano invariate. Solo gli aggiornamenti Helm con quella chiave esatta attivano la compatibilità. Il rischio della chiave debole rimane; chiavi vuote o assenti non vengono ammesse.
+    Le nuove installazioni richiedono sk- seguito da almeno 32 lettere/cifre, senza compatibilità. Prima dell’avvio, il database esistente viene salvato in appData/backups/chart-1.0.24/litellm.dump. La rotazione delle chiavi è una manutenzione facoltativa separata.
+    Per rimuovere l’avviso rosso, creare e verificare un Proxy Admin indipendente, poi applicare DISABLE_ENV_CREDENTIAL_LOGIN=true in Olares. Questa opzione non cambia le chiavi API.
+    https://github.com/BerriAI/litellm/releases/tag/v1.106.2

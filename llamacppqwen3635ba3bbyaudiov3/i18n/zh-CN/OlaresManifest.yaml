@@ -1,0 +1,39 @@
+metadata:
+  description: "使用 llama.cpp 运行 Qwen3.6-35B-A3B（GGUF UD-IQ4_XS），面向语音：默认关闭思考，2 路并发共享 100K KV 缓存。"
+  title: Qwen3.6-35B-A3B by Audio
+
+spec:
+  upgradeDescription: |
+    v1.0.1: 新增 Intel 独显模式 `intel-gpu`（SYCL），显存请求和上限均为 22Gi。
+
+    v1.0.0：首个版本，基于 Qwen3.6-35B-A3B (llama.cpp) 1.0.25。默认关闭思考，单个请求可用 chat_template_kwargs {"enable_thinking": true} 打开；2 路并发共享一个 100K（102400 token）KV 缓存池（-np 2 -kvu），单个请求可用满整个窗口。
+
+  fullDescription: |
+    **模型简介**
+    Qwen3.6-35B-A3B 是阿里巴巴 Qwen 系列的 MoE 视觉语言模型，总参数量 35B、每次激活约 3B。内置视觉编码器，支持超长上下文，开箱即用支持思考、工具调用与视觉能力。本应用通过 llama.cpp 运行 `unsloth/Qwen3.6-35B-A3B-GGUF` 的 `UD-IQ4_XS` GGUF 量化版本。
+
+    适合需要长上下文与视觉理解的多模态工作负载。Qwen3.6 35B 系列原生支持扩展上下文窗口，并配备视觉编码器以处理图文任务。
+
+    **预设配置**
+    - 模型：`unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS`（含 `mmproj-F16.gguf` 视觉投影文件）
+    - 能力：思考、工具、视觉
+    - 引擎参数：`-c 102400 -ngl all -fa on -ctk q8_0 -ctv q8_0 -np 2 -kvu`（2 路并发共享一个 100K KV 缓存池，单个请求最多可用 100K；全量 GPU 卸载；KV 缓存量化为 q8_0）
+    - 思考：默认关闭（启动时带 `--reasoning off`）。该模型的模板不读取 `reasoning_effort`，如需思考请在请求中传 `chat_template_kwargs: {"enable_thinking": true}`
+    - 所需显存：`23Gi`
+
+    **加速器模式**
+    | 模式           | 设备             | 说明                                        |
+    |----------------|------------------|---------------------------------------------|
+    | `nvidia`       | GPU (CUDA)       | 使用 `23Gi` 显存，`-ngl all` 完全利用 GPU   |
+    | `nvidia-gb10`  | GPU (Spark)      | 类似上方，但显存由 pod 管理                  |
+    
+    **工作流程说明**
+    首先，Model Console 下载并准备模型，然后 `llama.cpp` 在模型准备好后启动服务。这两个部分独立运行但共享文件与进度信息。
+
+    **技术栈说明**
+    - **llama.cpp**：运行模型并通过 8081 端口提供 API 服务
+    - **Model Console**：下载模型，展示进度，并通过 8090 端口提供 OpenAI API，代理到 `llamacpp`
+
+    **模型存储**
+    所有模型文件存储在共享目录 `appCommon/huggingface`（挂载为 `/cache/hf/hub`），同类应用均使用此目录。
+

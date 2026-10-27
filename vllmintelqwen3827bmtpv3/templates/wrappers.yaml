@@ -1,0 +1,101 @@
+# Engine wrapper mounted into the vLLM container at /llm-init/wrappers. Sources
+# the helpers llm-init publishes into RUN_DIR and runs vLLM under
+# supervise_engine, so Model Console can relaunch the engine with updated
+# model-card engine_args without restarting the Pod. llm-init downloads the
+# model and writes model_download_finish under /run/llm-init; the wrapper waits
+# on it, then loads --model from MODEL_NAME (owner/repo).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: vllm
+data:
+  vllm.sh: |
+    #!/bin/bash
+    # Waits for llm-init's sentinel, then starts vLLM's OpenAI server with
+    # --model "$MODEL_NAME" (HF owner/repo). ENGINE_ARGS is word-split and
+    # appended after the baseline flags. Keep it free of quotes: use vLLM's
+    # dotted form (--speculative-config.method=...) instead of inline JSON.
+    # Do NOT pass --disable-log-stats (llm-init's /api/diag/gpu needs /metrics).
+    set -eu
+
+    ENGINE=vllm
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
+    # arrive late - the two containers are separate Deployments with no ordering
+    # between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    _wc=0
+    while [ ! -f "$WRAPPER_COMMON" ] && [ "$_wc" -lt "${WRAPPER_COMMON_WAIT:-3600}" ]; do
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    [ -f "$WRAPPER_COMMON" ] || { printf '[wrapper] %s never appeared\n' "$WRAPPER_COMMON" >&2; exit 1; }
+    unset _wc
+    . "$WRAPPER_COMMON"
+
+    looks_like_hf_repo_id() {
+        s=$1
+        case "$s" in
+            ""|/*|./*|*://*) return 1 ;;
+        esac
+        case "$s" in
+            */*)
+                rest=${s#*/}
+                case "$rest" in
+                    */*|*:*) return 1 ;;
+                esac
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    # Same environment as the image entrypoint: oneAPI (Level Zero / SYCL)
+    # plus the oneCCL 2021.15 the llm-scaler 0.26 torch build links against.
+    source_oneapi() {
+        set +u
+        if [ -f /opt/intel/oneapi/setvars.sh ]; then
+            log "sourcing /opt/intel/oneapi/setvars.sh"
+            # shellcheck disable=SC1091
+            . /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
+        else
+            log "WARN: /opt/intel/oneapi/setvars.sh missing; continuing without oneAPI env"
+        fi
+        if [ -f /opt/intel/oneapi/ccl/2021.15/env/vars.sh ]; then
+            # shellcheck disable=SC1091
+            . /opt/intel/oneapi/ccl/2021.15/env/vars.sh --force >/dev/null 2>&1 || true
+        fi
+        set -u
+    }
+
+    wait_for_sentinel
+    wait_for_engine_args_handoff
+
+    if ! looks_like_hf_repo_id "${MODEL_NAME:-}"; then
+        log "MODEL_NAME must be owner/repo for --model (got ${MODEL_NAME:-<empty>})"
+        exit 1
+    fi
+
+    source_oneapi
+
+    run_vllm() {
+        load_engine_args_from_handoff
+        # Olares env field is ENGINE_ARGS; value must be flags only (not "ENGINE_ARGS=...").
+        case "${ENGINE_ARGS:-}" in
+            ENGINE_ARGS=*) ENGINE_ARGS=${ENGINE_ARGS#ENGINE_ARGS=} ;;
+        esac
+        log "starting vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
+        # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
+        exec vllm serve \
+            --model "$MODEL_NAME" \
+            --served-model-name "$MODEL_NAME" \
+            --host 0.0.0.0 \
+            --port "${VLLM_PORT:-8000}" \
+            ${ENGINE_ARGS:-} \
+            "$@"
+    }
+
+    supervise_engine run_vllm "$@"

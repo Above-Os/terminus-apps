@@ -1,0 +1,83 @@
+apiVersion: v3
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+metadata:
+  name: photocraft
+  appid: photocraft
+  title: PhotoCraft
+  description: Photoshop-style image editor that runs in your browser
+  icon: https://raw.githubusercontent.com/beclab/photocraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png
+  version: 0.3.0
+  categories:
+    - Utilities_v112
+    - Creativity
+    - workspace
+permission:
+  userData:
+    - Home/PhotoCraft/
+spec:
+  versionName: "0.9.0"
+  runAsUser: true
+  fullDescription: |
+    ## Overview
+    PhotoCraft is an open-source, Photoshop-comparable image editor written
+    in Rust. This app serves its WebAssembly build: editing runs entirely in
+    your browser, and images never leave your device.
+
+    Open uses the browser file picker; Save and Export download files.
+    Save your work before closing or reloading the page.
+
+    ## Agent access (MCP)
+    The app also runs PhotoCraft's headless engine as an MCP server over
+    Streamable HTTP. Its entrance is hidden from the desktop and listed in
+    Settings; it is reachable from your LAN or the LarePass VPN. Agents can
+    read and write files only in Home/PhotoCraft. To keep editing an agent's
+    result in the browser, open it from Files with the browser file picker.
+
+    ## Requirements
+    - A browser with WebGPU or WebGL2
+    - Arch: amd64, arm64
+  upgradeDescription: |
+    Adds agent access: an MCP server, reachable from your LAN or the LarePass
+    VPN, that can read and write files in Home/PhotoCraft.
+  developer: storytold
+  submitter: beclab
+  website: https://github.com/storytold/photocraft
+  sourceCode: https://github.com/beclab/photocraft
+  license:
+    - text: MIT OR Apache-2.0
+      url: https://github.com/storytold/photocraft/blob/main/LICENSE-MIT
+  locale:
+    - en-US
+    - zh-CN
+  requiredCpu: 100m
+  limitedCpu: "5"
+  requiredMemory: 256Mi
+  limitedMemory: 4608Mi
+  requiredDisk: 50Mi
+  limitedDisk: 500Mi
+  supportArch:
+    - amd64
+    - arm64
+entrances:
+  - name: photocraft
+    host: photocraft-svc
+    port: 8080
+    title: PhotoCraft
+    icon: https://raw.githubusercontent.com/beclab/photocraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png
+    authLevel: private
+    openMethod: window
+  - name: photocraftmcp
+    host: photocraft-svc
+    port: 8090
+    title: PhotoCraft MCP
+    icon: https://raw.githubusercontent.com/beclab/photocraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png
+    authLevel: internal
+    invisible: true
+options:
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+workloadReplicas:
+  photocraft: 1

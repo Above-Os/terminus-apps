@@ -15,7 +15,7 @@
 {{- end -}}
 
 {{- define "dotsocr.llmInitTag" -}}v1.7.21{{- end -}}
-{{- define "dotsocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter:v0.0.9{{- end -}}
+{{- define "dotsocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter@sha256:97c7b36be7415cb0e60600be0a8485c08251fb376880ce50d4087665e2f72668{{- end -}}
 {{- define "dotsocr.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
 
 {{- /* Q8-only pair: comma dual-source, each one --include (single-file hf path).

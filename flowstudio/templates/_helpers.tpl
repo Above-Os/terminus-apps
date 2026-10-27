@@ -1,6 +1,5 @@
 {{- /* Olares accelerator mode picked at install. app-service injects both
-       .Values.gpu and .Values.GPU.Type from the selected resource mode;
-       nvidia is the only mode OlaresManifest declares today. */ -}}
+       .Values.gpu and .Values.GPU.Type from the selected resource mode. */ -}}
 {{- define "flowstudio.gpuType" -}}
 {{- $t := .Values.gpu | default "" -}}
 {{- if not $t -}}
@@ -12,11 +11,15 @@
 {{- /* ComfyUI engine image for the selected accelerator. This is the single
        source of truth: both the engine Deployment (which puts the image in
        the install-time pre-pull list) and the API's ENGINE_IMAGE read it, so
-       what gets pulled and what EngineManager launches cannot drift. */ -}}
+       what gets pulled and what EngineManager launches cannot drift.
+       nvidia-gb10 never falls back to the amd64 nvidia tag. */ -}}
 {{- define "flowstudio.engineImage" -}}
 {{- $img := (.Values.engine | default dict).images | default dict -}}
-{{- if eq (include "flowstudio.gpuType" .) "amd" -}}
+{{- $gpu := include "flowstudio.gpuType" . -}}
+{{- if eq $gpu "amd" -}}
 {{- $img.amdGpu | default "docker.io/beclab/flowstudio:engine-1.0.6-rocm" -}}
+{{- else if eq $gpu "nvidia-gb10" -}}
+{{- required "engine.images.nvidiaGb10 is required for nvidia-gb10" $img.nvidiaGb10 -}}
 {{- else -}}
 {{- $img.nvidia | default "docker.io/beclab/flowstudio:engine-1.0.7" -}}
 {{- end -}}
