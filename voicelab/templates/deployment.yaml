@@ -32,12 +32,25 @@ spec:
             - -c
             - |
               set -eu
-              for d in /data /data/media; do
-                mkdir -p "$d" && chown 1000:1000 "$d"
-              done
+              mkdir -p /data /data/media
+              chown 1000:1000 /data /data/media
+              {{ if .Values.dev.hotReload }}
+              mkdir -p /data/{{ .Values.dev.sourceSubPath }}
+              chown 1000:1000 /data/{{ .Values.dev.sourceSubPath }}
+              {{ end }}
           volumeMounts:
             - name: app-data
               mountPath: /data
+        {{- if .Values.dev.hotReload }}
+        - name: seed-devsrc
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/usr/local/bin/voice-entrypoint", "seed"]
+          volumeMounts:
+            - name: app-data
+              mountPath: /seed
+              subPath: {{ .Values.dev.sourceSubPath }}
+        {{- end }}
       containers:
         - name: voicelab
           image: {{ .Values.image }}
@@ -69,6 +82,10 @@ spec:
                   key: DB_PASSWORD
             - name: TZ
               value: Etc/UTC
+            {{- if .Values.dev.hotReload }}
+            - name: VOICE_HOT_RELOAD
+              value: "true"
+            {{- end }}
           # /healthz includes Router, which must not restart a healthy app.
           startupProbe:
             httpGet:
@@ -92,6 +109,11 @@ spec:
           volumeMounts:
             - name: app-data
               mountPath: /data
+            {{- if .Values.dev.hotReload }}
+            - name: app-data
+              mountPath: /app
+              subPath: {{ .Values.dev.sourceSubPath }}
+            {{- end }}
       volumes:
         - name: app-data
           hostPath:
@@ -101,7 +123,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: voicelab-svc
+  name: voicelablab-svc
   namespace: {{ .Release.Namespace }}
   labels:
     app: voicelab
