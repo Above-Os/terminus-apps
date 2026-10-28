@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: olaresdesign
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.workloads.olaresdesign.replicaCount }}
+  # SQLite on appData tolerates a single writer, so never overlap two pods.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: olaresdesign
+  template:
+    metadata:
+      labels:
+        app: olaresdesign
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+      # Olares grants the appData mount but leaves it root-owned, so the
+      # uid-1000 API cannot create its SQLite file without this. The overlay
+      # dir must exist and be owned before any subPath mount claims it.
+      - name: init-permissions
+        image: beclab/aboveos-busybox:1.37.0
+        command:
+        - sh
+        - -c
+        - |
+          set -eu
+          mkdir -p /data /data/devsrc
+          chown 1000:1000 /data
+          chown -R 1000:1000 /data/devsrc
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: app-data
+          mountPath: /data
+      containers:
+      - name: olaresdesign
+        image: {{ .Values.appImage }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        ports:
+        - name: web
+          containerPort: 3000
+        - name: api
+          containerPort: 8080
+        env:
+        - name: HARNESS__ENABLED
+          value: "true"
+        - name: HARNESS__DSH_HOME
+          value: /data/dsh-home
+        - name: HARNESS__PROFILE
+          value: design-host
+        - name: HARNESS__HOST_PROFILE_PATH
+          value: /app/api/harness-host
+        - name: HARNESS__HOST_PORT
+          value: "8765"
+        - name: HARNESS__WORKSPACE_ROOT
+          value: /data/agent-workspaces
+        - name: HARNESS__MODEL
+          value: default-chat
+        - name: HARNESS__INTERNAL_URL
+          value: http://127.0.0.1:8080
+        - name: ROUTER__BASE_URL
+          value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+        - name: ROUTER__CALLER_APP_ID
+          value: olaresdesign
+        - name: ROUTER__LLM_BASE_URL
+          value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+        # Other apps are reachable only through hosts in the namespace's
+        # olares-mesh-in-shared-hosts allowlist; 9ff9df3a = md5("flowstudio")[:8].
+        - name: FLOWSTUDIO__BASE_URL
+          value: {{ printf "https://9ff9df3a.%s" .Values.user.zone | quote }}
+        - name: FLOWSTUDIO__CALLER_APP_ID
+          value: router
+        - name: FILES__BASE_URL
+          value: {{ printf "https://files.%s" .Values.user.zone | quote }}
+        - name: STORAGE__DATA_DIR
+          value: /data
+        volumeMounts:
+        - name: app-data
+          mountPath: /data
+        - name: app-data
+          mountPath: /devsrc
+          subPath: devsrc
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        startupProbe:
+          exec:
+            command:
+            - node
+            - -e
+            - fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+          periodSeconds: 2
+          timeoutSeconds: 3
+          # overlay next-dev compiles on first request; image mode is ready much sooner.
+          failureThreshold: 180
+        readinessProbe:
+          exec:
+            command:
+            - node
+            - -e
+            - fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+          periodSeconds: 5
+          timeoutSeconds: 3
+        livenessProbe:
+          exec:
+            command:
+            - node
+            - -e
+            - fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+          periodSeconds: 20
+          # The probe starts a node process inside a 2-CPU limit. While an
+          # overnight agent is saturated, a 3s exec timeout fails three times
+          # and kubelet kills the run. 10s x 6 rides out that stall.
+          timeoutSeconds: 10
+          failureThreshold: 6
+      volumes:
+      - name: app-data
+        hostPath:
+          path: {{ .Values.userspace.appData }}
+          type: DirectoryOrCreate
