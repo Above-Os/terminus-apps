@@ -6,6 +6,10 @@ metadata:
   labels:
     app: note
 spec:
+  # Exactly one: progress and collaboration events, the per-recording locks
+  # and the device recorder all live in this process's memory
+  # (internal/events, api recordingGate). A second replica would drop the
+  # events published on the other one and let two of them record at once.
   replicas: {{ .Values.workloads.note.replicaCount }}
   selector:
     matchLabels:
@@ -64,6 +68,8 @@ spec:
               containerPort: 8080
             - name: external
               containerPort: 8081
+            - name: agents
+              containerPort: 8082
           {{- if .Values.capture.usb.enabled }}
           # The device cgroup only lets a privileged container open the
           # host's sound devices; the group above is what the file modes ask.
@@ -91,8 +97,19 @@ spec:
             - name: NOTE_CAPTURE_BT_HELPER
               value: /run/host-bt/helper.sock
             {{- end }}
+            {{- if .Values.devTools.perf.enabled }}
+            # Development performance records: on only in a preview
+            # installation. Absent, Note keeps none and the routes that
+            # report and read them answer 404.
+            - name: NOTE_PERF_DEV
+              value: "true"
+            {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
+            # Read-only REST and MCP for apps in the cluster, behind the
+            # internal shared entrance (sharedentrances-note below).
+            - name: NOTE_AGENT_PORT
+              value: "8082"
             # Where an API key's integrations reach that port: the note-api
             # entrance's own label (app id and entrance index, as app-service
             # names it), under the caller's zone as for Files below. The page
@@ -176,12 +193,17 @@ spec:
               value: {{ .Values.postgres.password | quote }}
             - name: POSTGRES_DB
               value: {{ .Values.postgres.databases.note | quote }}
+          # Migrations run before the server listens, and some build indexes
+          # over every transcript turn: 100k turns took a minute on a laptop.
+          # A restart mid-migration rolls that file back and starts it again,
+          # so this waits up to an hour rather than two and a half minutes.
+          # Liveness only starts once this has passed.
           startupProbe:
             httpGet:
               path: /healthz
               port: http
             periodSeconds: 5
-            failureThreshold: 30
+            failureThreshold: 720
           readinessProbe:
             httpGet:
               path: /readyz
@@ -350,4 +372,25 @@ spec:
     - name: external
       port: 8081
       targetPort: 8081
+      protocol: TCP
+---
+# The internal shared entrance: apps in the cluster reach the agent API at
+# http://7cb19ff3.shared.olares.com (md5(md5("note")[:8] + "shared")[:8])
+# through the app gateway, which verifies the caller's JWT and stamps
+# X-Caller-User and X-Caller-Appid, as they reach Router. Only the agent
+# listener is behind it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-note
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: note
+spec:
+  selector:
+    app: note
+  ports:
+    - name: agents
+      port: 80
+      targetPort: 8082
       protocol: TCP
