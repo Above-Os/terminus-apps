@@ -1,0 +1,268 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audioqwen3voicev3
+  icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+  description: Qwen3 text to speech with preset, cloned, and designed voices
+  appid: audioqwen3voicev3
+  title: Qwen3-TTS
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+  - text-to-speech
+  - audio
+
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audioqwen3voicev3api
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3-TTS API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audioqwen3voicev3
+    port: 8090
+    host: download-svc
+    title: Qwen3-TTS
+    icon: https://app.cdn.olares.com/appstore/audioengines/qwen/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audioqwen3voicev3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'Qwen/Qwen3-TTS-12Hz-1.7B'
+  fullDescription: |
+    **Model Overview**
+    One Qwen3-TTS application speaks built-in voices, clones a reference recording, and designs a voice from a written description.
+
+    **Configuration**
+    - Model: `Qwen/Qwen3-TTS-12Hz-1.7B`
+    - Resident weights: `Qwen/Qwen3-TTS-12Hz-1.7B-Base`
+    - Official speakers are baked once from `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` and are not shared with other TTS apps
+    - Design loads `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` for that request, then speaks the saved sample with Base
+    - Shared built-in voices: `zh-f`, `zh-m`, `en-f`, `en-m`
+    - Capabilities: `tts`, `tts_clone`, `tts_design`
+    - Required GPU memory: `6Gi`
+    - Engine: faster-qwen3-tts (in-process)
+
+    **How It Works**
+    Model Console (llm-init) downloads the three checkpoints, then the engine starts when the download sentinel appears. llm-init reverse-proxies `/v1/*` to the engine and serves its dashboard on `/`.
+
+    **Endpoints**
+    - ElevenLabs: `GET /v1/voices`, `POST /v1/text-to-speech/{voice_id}`, `POST /v1/voices/add`, `POST /v1/text-to-voice/design`, `POST /v1/text-to-voice`. `voice_settings` has five knobs: stability, similarity_boost, style, use_speaker_boost, speed. Defaults do not change the audio.
+    - OpenAI: `POST /v1/audio/speech`, `GET /v1/audio/voices`, `POST /v1/audio/voices`, `DELETE /v1/audio/voices/{voice_id}`, `POST /v1/audio/speech/clone`, `WS /v1/audio/speech/stream`. The same `voice_settings` object is accepted on the speech body.
+    - Add `?async=1` on the speaking POST routes for a task id.
+
+    **Stack**
+    - **audio engine**: faster-qwen3-tts in-process (port 8000)
+    - **Model Console (llm-init)**: downloads the models, OpenAI-compatible proxy on 8090
+
+  upgradeDescription: |
+    v1.0.0: One application for preset voices, cloning, and voice design.
+
+  developer: beclab
+  website: https://github.com/beclab/llm-init
+  sourceCode: https://github.com/beclab/audio-engines
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base
+
+  accelerator:
+    # Sum: engine request 4Gi / limit 20Gi + llm-init 256Mi/4Gi.
+    # nvidia-gb10 replaces the engine memory with the 6Gi GPU quota, so 6144Mi+4Gi = 10Gi.
+    - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "24Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "10Gi"
+      requiredMemory: "6400Mi"
+    # iGPU: engine request 6Gi / limit 32Gi + llm-init 256Mi/4Gi.
+    - mode: intel
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "36Gi"
+      requiredMemory: "6400Mi"
+    # Arc: engine request 4Gi / limit 20Gi + llm-init 256Mi/4Gi.
+    - mode: intel-gpu
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "24Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "6Gi"
+      limitedGPUMemory: "6Gi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://Qwen/Qwen3-TTS-12Hz-1.7B-Base,hf://Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice,hf://Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    description: "Comma-separated HuggingFace sources. The first is Base and stays loaded. CustomVoice is downloaded so the nine official speakers can be baked once. VoiceDesign is downloaded and loaded only while a design request runs."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "Qwen/Qwen3-TTS-12Hz-1.7B"
+    description: "Model id advertised to clients. One id covers preset speech, clone, and design."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts"
+    options:
+    - title: TTS
+      value: tts
+    description: "Speech synthesis. Router routes by mode. Requires an Olares whose Router and Model Console know `tts`."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts,tts_clone,tts_design"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: TTS (voices + speech)
+      value: tts
+    - title: TTS clone (save a reference as a voice_id)
+      value: tts_clone
+    - title: TTS design (build a voice from a written description)
+      value: tts_design
+    description: "All three are advertised on this one model. `tts` mounts list/speak; `tts_design` advertises `/v1/text-to-voice/*`; `tts_clone` mounts POST /v1/voices/add. OpenAI `/v1/audio/*` aliases use the same voice table."
+  - envName: TTS_SPEED_MIN
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "0.25"
+    description: "Minimum synthesis speed published in the model card."
+  - envName: TTS_SPEED_DEFAULT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "1.0"
+    description: "Normal synthesis speed published in the model card."
+  - envName: TTS_SPEED_MAX
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4.0"
+    description: "Maximum synthesis speed published in the model card."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6Gi"
+    description: "GPU memory required on NVIDIA and Intel Arc, the same 6Gi as the previous Qwen3-TTS 1.7B chart. The Intel iGPU mode does not use this field. `0` is not supported. On nvidia-gb10 this quota replaces the engine memory limit."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "20Gi"
+    description: "Engine memory limit on nvidia and intel-gpu. A design request loads a second checkpoint in this process, so the limit is 20Gi (20Gi + llm-init 4Gi = limitedMemory 24Gi). nvidia-gb10 replaces this with the 6Gi GPU quota. intel (iGPU) replaces the engine request with 6Gi and the limit with 32Gi (32Gi + llm-init 4Gi = limitedMemory 36Gi)."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use docker.io/beclab/audio-qwen3voice:v1.1.35; intel and intel-gpu use docker.io/beclab/audio-qwen3voice-ov:v1.1.35. Filling this replaces that image for every mode."
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "--max-seq-len 2048 --attn-implementation sdpa --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500"
+    description: "Engine-native flags (llm-init ENGINE_ARGS). Filling this replaces the whole string. --max-seq-len is the static cache (2048 covers about 2.8 minutes at 12 Hz). --attn-implementation sdpa is what this image has. --ref-min-seconds / --ref-max-seconds / --ref-max-mb reject a clone reference (0 = off). --design-min-chars / --design-max-chars reject a design description (0 = off)."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
