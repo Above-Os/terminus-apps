@@ -50,8 +50,8 @@
 {{- $in := . -}}
 {{- $args := trim ($in.Args | default "") -}}
 {{- $isCpu := $in.IsCpu | default false -}}
-{{- $args = regexReplaceAll ` ?OLLAMA_KEEP_ALIVE=[^ ]+` "" $args -}}
-{{- $args = regexReplaceAll ` +` " " $args -}}
+{{- $args = regexReplaceAll ` ?OLLAMA_KEEP_ALIVE=[^ ]+` $args "" -}}
+{{- $args = regexReplaceAll ` +` $args " " -}}
 {{- $args = trim $args -}}
 {{- if and $isCpu (not (contains "OLLAMA_NUM_GPU" $args)) -}}
 {{- if $args -}}
