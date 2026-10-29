@@ -1,0 +1,235 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiomingttsv3
+  icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+  description: "A 0.5B text-to-speech model with built-in voices, cloning, and description-based voices"
+  appid: audiomingttsv3
+  title: Ming TTS 0.5B
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+  - text-to-speech
+  - audio
+
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiomingttsv3api
+    host: sharedentrances-api
+    port: 0
+    title: Ming TTS 0.5B API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiomingttsv3
+    port: 8090
+    host: download-svc
+    title: Ming TTS 0.5B
+    icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiomingttsv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'inclusionAI/Ming-3.0-tts-0.5B'
+  fullDescription: |
+    Ming-3.0-tts-0.5B turns written text into spoken audio. One checkpoint can speak a built-in voice, copy a voice from a reference recording and its transcript, or create a voice from a written description.
+
+    **Key features**
+
+    - Speak with a built-in voice, including the model's own cast and the shared zh-f, zh-m, en-f, and en-m pack.
+    - Clone a voice from reference audio. The exact transcript of that audio is required.
+    - Create a voice from a natural-language description, with no reference audio.
+    - One request does one of those three things. Combining them is rejected.
+
+    A compatible NVIDIA or Intel GPU is required. Emotion, dialect, and speed controls are not wired on this build.
+
+    **Usage notes**
+
+    The model is MIT licensed. Do not use it to impersonate a real person. Label audio as synthetic when a listener could mistake it for a real recording.
+
+    See the [Ming-3.0-tts model card](https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B) for the voice list and license.
+  developer: inclusionAI
+  website: https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B
+  sourceCode: https://github.com/inclusionAI/Ming-3.0-tts
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B
+  license:
+    - text: MIT
+      url: https://github.com/inclusionAI/Ming-3.0-tts/blob/main/LICENSE
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). On nvidia-gb10 the engine's memory request AND limit become the GPU quota (unified memory).
+    - mode: nvidia
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "12Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "4Gi"
+      limitedGPUMemory: "4Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "8Gi"
+      requiredMemory: "4352Mi"
+    # Intel iGPU: engine request 6Gi / limit 32Gi + llm-init 256Mi/4Gi. No GPU-memory field.
+    - mode: intel
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "36Gi"
+      requiredMemory: "6400Mi"
+    # Intel Arc: request 2Gi, limit 16Gi + llm-init 256Mi/4Gi. GPU field stays 4Gi.
+    - mode: intel-gpu
+      limitedCpu: "5"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "2304Mi"
+      requiredGPUMemory: "4Gi"
+      limitedGPUMemory: "4Gi"
+
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://inclusionAI/Ming-3.0-tts-0.5B"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "inclusionAI/Ming-3.0-tts-0.5B"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts"
+    options:
+    - title: TTS
+      value: tts
+    description: "Speech synthesis. Router routes by mode. Requires an Olares whose Router and Model Console know `tts`."
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "tts,tts_clone,tts_design"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: TTS (voices + speech)
+      value: tts
+    - title: TTS clone (one-shot reference audio)
+      value: tts_clone
+    - title: TTS design (a written description)
+      value: tts_design
+    description: "One 0.5B checkpoint covers all three. OpenAI /v1/audio/speech carries exactly one of voice, ref_audio, or instructions."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4Gi"
+    description: "GPU memory required on NVIDIA and Intel Arc. The Intel iGPU mode does not use this field. `0` is not supported."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "2Gi"
+    description: "Engine memory request on CUDA and Intel Arc. 2Gi + llm-init 256Mi = requiredMemory 2304Mi. Intel iGPU ignores this value and uses 6Gi. 6Gi + llm-init 256Mi = requiredMemory 6400Mi."
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "4"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "8Gi"
+    description: "Engine container memory limit on CUDA. nvidia-gb10 replaces it with the GPU quota (4Gi). 8Gi + llm-init 4Gi = limitedMemory 12Gi. Intel Arc ignores this value and uses 16Gi. 16Gi + llm-init 4Gi = limitedMemory 20Gi. Intel iGPU ignores this value and uses 32Gi. 32Gi + llm-init 4Gi = limitedMemory 36Gi."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine image override. Left empty, nvidia and nvidia-gb10 use docker.io/beclab/audio-ming:v1.1.35; intel and intel-gpu use docker.io/beclab/audio-ming-ov:v1.1.35. Filling this replaces that choice for every mode."
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine-native flags. Left empty, the engine uses its built-in --voice-dir /data/voices. Filling this replaces the whole string."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
