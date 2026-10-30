@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: router-adapter
+  namespace: {{ .Release.Namespace | quote }}
+data:
+  nginx.conf: |
+    pid /tmp/nginx.pid;
+    events { worker_connections 256; }
+    http {
+      access_log /dev/stdout;
+      error_log /dev/stderr warn;
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+      server {
+        listen 127.0.0.1:8081;
+        # Expose only OpenAI chat capabilities. Router is not a Hermes gateway.
+        location = /health { default_type application/json; return 200 '{"status":"ok"}'; }
+        location = /v1/models { default_type application/json; return 200 '{"object":"list","data":[{"id":"default-chat","object":"model","owned_by":"Olares Router"}]}'; }
+        location = /v1/chat/completions {
+          proxy_pass https://router.{{ .Values.user.zone }};
+          proxy_set_header Host router.{{ .Values.user.zone }};
+          proxy_ssl_server_name on;
+          proxy_ssl_verify on;
+          proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+          proxy_http_version 1.1;
+          proxy_set_header Connection "";
+          proxy_buffering off;
+          proxy_read_timeout 600s;
+          client_max_body_size 20m;
+        }
+        location / { return 404; }
+      }
+    }

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: portable-chat-patch
+  namespace: {{ .Release.Namespace | quote }}
+data:
+  patch.cjs: |
+    const fs = require('fs');
+    const file='/app/dist/server/assets/router-CNYEqYhU.js';
+    let code=fs.readFileSync(file,'utf8');
+    function replaceOnce(before,after){if(code.split(before).length!==2)throw Error('Upstream patch context changed');code=code.replace(before,after);}
+    replaceOnce('sessions: [],\n            source: "unavailable",', 'sessions: listLocalSessions().map(ls => ({key:ls.id,id:ls.id,friendlyId:ls.id,title:ls.title||"Local Chat",label:ls.title||"Local Chat",derivedTitle:ls.title||"Local Chat",startedAt:ls.createdAt,updatedAt:ls.updatedAt,message_count:ls.messageCount,model:ls.model,source:"local"})),\n            source: "local",');
+    const start=code.indexOf('createFileRoute("/api/history")');
+    if(start<0)throw Error('History route missing');
+    const before=code.slice(0,start), rest=code.slice(start);
+    const marker='if (!capabilities2.sessions) {';
+    const pos=rest.indexOf(marker);if(pos<0)throw Error('History guard missing');
+    const end=rest.indexOf('\n        try {',pos);if(end<0)throw Error('History handler changed');
+    code=before+rest.slice(0,pos)+`if (!capabilities2.sessions) {
+              const key = new URL(request.url).searchParams.get('sessionKey')?.trim() || 'main';
+              const messages = key === 'new' ? [] : getLocalMessages(key);
+              return json({sessionKey:key,sessionId:key,source:'local',messages:messages.map((m,index)=>({id:m.id,role:m.role,text:m.content,sessionKey:key,__historyIndex:index,content:[{type:'text',text:m.content}],timestamp:m.timestamp,historyIndex:index}))});
+            }`+rest.slice(end);
+    fs.writeFileSync('/patched/router.js',code);
+    console.log('Portable session list and history patch applied');
