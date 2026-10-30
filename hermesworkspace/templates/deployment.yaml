@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hermesworkspace-auth
+  namespace: {{ .Release.Namespace | quote }}
+type: Opaque
+stringData:
+  HERMES_PASSWORD: {{ .Values.olaresEnv.WORKSPACE_PASSWORD | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermesworkspace
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: {{ .Values.workloads.hermesworkspace.replicaCount }}
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: hermesworkspace}}
+  template:
+    metadata:
+      labels: {app: hermesworkspace}
+      annotations:
+        olares.com/chart-version: {{ .Chart.Version | quote }}
+        checksum/portable-chat: {{ include (print $.Template.BasePath "/portable-chat-patch.yaml") . | sha256sum }}
+        checksum/router-adapter: {{ include (print $.Template.BasePath "/router-adapter.yaml") . | sha256sum }}
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext: {runAsUser: 1000, runAsGroup: 1000}
+      initContainers:
+      - name: init-permissions
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext: {runAsUser: 0}
+        command: [sh, -ec, 'mkdir -p /data/home /data/files /data/runtime; chown 1000:1000 /data /data/home /data/files /data/runtime']
+        volumeMounts: [{name: data, mountPath: /data}]
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+      - name: prepare-portable-chat
+        image: ghcr.io/outsourc-e/hermes-workspace@sha256:1ec05339750da7caaf1cd0183c8c3b188856918b377407b4ac1dafca67e42d88
+        command: [node, /patch-script/patch.cjs]
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {cpu: 200m, memory: 256Mi}
+        volumeMounts:
+        - {name: patch-script, mountPath: /patch-script, readOnly: true}
+        - {name: patched, mountPath: /patched}
+      containers:
+      - name: hermesworkspace
+        image: ghcr.io/outsourc-e/hermes-workspace@sha256:1ec05339750da7caaf1cd0183c8c3b188856918b377407b4ac1dafca67e42d88
+        command: [/usr/bin/tini, --, node, --max-old-space-size=2048, server-entry.js]
+        workingDir: /app
+        envFrom: [{secretRef: {name: hermesworkspace-auth}}]
+        env:
+        - {name: HOME, value: /data/home}
+        - {name: HERMES_HOME, value: /data/home/.hermes}
+        - {name: HERMES_WORKSPACE_DIR, value: /workspace}
+        - {name: HOST, value: '0.0.0.0'}
+        - {name: PORT, value: '3000'}
+        - {name: COOKIE_SECURE, value: '1'}
+        - {name: HERMES_API_URL, value: 'http://127.0.0.1:8081'}
+        - {name: CLAUDE_DEFAULT_MODEL, value: default-chat}
+        ports: [{name: http, containerPort: 3000}]
+        startupProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 60}
+        readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
+        resources:
+          requests: {cpu: 200m, memory: 512Mi}
+          limits: {cpu: '2', memory: 3Gi}
+        securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+        volumeMounts:
+        - {name: data, mountPath: /data/home, subPath: home}
+        - {name: data, mountPath: /workspace, subPath: files}
+        - {name: data, mountPath: /app/.runtime, subPath: runtime}
+        - {name: patched, mountPath: /app/dist/server/assets/router-CNYEqYhU.js, subPath: router.js, readOnly: true}
+      - name: router-adapter
+        image: nginx:1.27.5-alpine
+        command: [nginx, '-g', 'daemon off;']
+        resources:
+          requests: {cpu: 20m, memory: 32Mi}
+          limits: {cpu: 100m, memory: 128Mi}
+        securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+        volumeMounts: [{name: router-adapter, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true}]
+      volumes:
+      - name: patched
+        emptyDir: {}
+      - name: patch-script
+        configMap: {name: portable-chat-patch}
+      - name: router-adapter
+        configMap: {name: router-adapter}
+      - name: data
+        hostPath: {path: '{{ .Values.userspace.appData }}/data', type: DirectoryOrCreate}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermesworkspace
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  selector: {app: hermesworkspace}
+  ports: [{name: http, port: 3000, targetPort: http}]
+
