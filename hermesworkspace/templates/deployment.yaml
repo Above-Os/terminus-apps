@@ -6,6 +6,7 @@ metadata:
 type: Opaque
 stringData:
   HERMES_PASSWORD: {{ .Values.olaresEnv.WORKSPACE_PASSWORD | quote }}
+  HERMES_API_TOKEN: {{ .Values.olaresEnv.HERMES_API_TOKEN | default "" | quote }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,8 +59,13 @@ spec:
         - {name: HOST, value: '0.0.0.0'}
         - {name: PORT, value: '3000'}
         - {name: COOKIE_SECURE, value: '1'}
-        - {name: HERMES_API_URL, value: 'http://127.0.0.1:8081'}
+        - name: HERMES_API_URL
+          value: {{ .Values.olaresEnv.HERMES_GATEWAY_URL | default "http://127.0.0.1:8081" | quote }}
+        - name: HERMES_DASHBOARD_URL
+          value: {{ .Values.olaresEnv.HERMES_DASHBOARD_URL | default "http://127.0.0.1:9119" | quote }}
         - {name: CLAUDE_DEFAULT_MODEL, value: default-chat}
+        - name: HERMES_USE_RESPONSES
+          value: {{ if .Values.olaresEnv.HERMES_GATEWAY_URL }}"1"{{ else }}"0"{{ end }}
         ports: [{name: http, containerPort: 3000}]
         startupProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 60}
         readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
