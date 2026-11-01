@@ -100,7 +100,18 @@ spec:
         - {name: compat, mountPath: /app/servers/fastapi/api/v1/ppt/endpoints/presentation.py, subPath: presentation.py, readOnly: true}
         - {name: compat, mountPath: /app/servers/fastapi/utils/llm_config.py, subPath: llm_config.py, readOnly: true}
         - {name: compat, mountPath: /app/servers/fastapi/utils/llm_utils.py, subPath: llm_utils.py, readOnly: true}
+      - name: agent-api-proxy
+        image: docker.io/library/nginx:1.30.6-alpine
+        command: [nginx, -c, /agent-api/nginx.conf, -g, 'daemon off;']
+        ports: [{name: agent-api, containerPort: 8082}]
+        readinessProbe: {tcpSocket: {port: agent-api}, periodSeconds: 10}
+        resources:
+          requests: {cpu: 20m, memory: 32Mi}
+          limits: {cpu: 200m, memory: 64Mi}
+        volumeMounts: [{name: agent-api-config, mountPath: /agent-api, readOnly: true}]
       volumes:
+      - name: agent-api-config
+        configMap: {name: presenton-agent-api}
       - name: data
         hostPath: {path: '{{ .Values.userspace.appData }}/data', type: DirectoryOrCreate}
       - {name: run, emptyDir: {}}
@@ -116,4 +127,4 @@ metadata:
   namespace: {{ .Release.Namespace | quote }}
 spec:
   selector: {app: presenton}
-  ports: [{name: http, port: 3000, targetPort: http}]
+  ports: [{name: http, port: 3000, targetPort: http}, {name: agent-api, port: 3001, targetPort: agent-api}]
