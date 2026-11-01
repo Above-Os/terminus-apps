@@ -65,7 +65,18 @@ spec:
           requests: {cpu: 100m, memory: 128Mi}
           limits: {cpu: '1', memory: 1Gi}
         volumeMounts: [{name: data, mountPath: /meili_data, subPath: search}]
+      - name: agent-api-proxy
+        image: docker.io/library/nginx:1.30.6-alpine
+        command: [nginx, -c, /agent-api/nginx.conf, -g, 'daemon off;']
+        ports: [{name: agent-api, containerPort: 8082}]
+        readinessProbe: {tcpSocket: {port: agent-api}, periodSeconds: 10}
+        resources:
+          requests: {cpu: 20m, memory: 32Mi}
+          limits: {cpu: 200m, memory: 64Mi}
+        volumeMounts: [{name: agent-api-config, mountPath: /agent-api, readOnly: true}]
       volumes:
+      - name: agent-api-config
+        configMap: {name: linkwarden-agent-api}
       - name: data
         hostPath: {path: '{{ .Values.userspace.appData }}/data', type: DirectoryOrCreate}
 ---
@@ -76,4 +87,4 @@ metadata:
   namespace: {{ .Release.Namespace | quote }}
 spec:
   selector: {app: linkwarden}
-  ports: [{name: http, port: 3000, targetPort: http}]
+  ports: [{name: http, port: 3000, targetPort: http}, {name: agent-api, port: 3001, targetPort: agent-api}]
