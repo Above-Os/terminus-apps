@@ -4,6 +4,10 @@ kind: Deployment
 metadata:
   name: plex
   namespace: '{{ .Release.Namespace }}'
+  {{- if eq $gpu "nvidia" }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "plex"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.plex.replicaCount }}
   strategy:
@@ -17,9 +21,6 @@ spec:
         app: plex
     spec:
       enableServiceLinks: false
-      {{- if eq $gpu "nvidia" }}
-      runtimeClassName: nvidia
-      {{- end }}
       initContainers:
         - name: init-permissions
           image: beclab/aboveos-busybox:1.37.0
@@ -57,17 +58,9 @@ spec:
             requests:
               cpu: 500m
               memory: 1Gi
-              {{- if eq $gpu "nvidia" }}
-              nvidia.com/gpu: 1
-              nvidia.com/gpumem: 1024
-              {{- end }}
             limits:
               cpu: '4'
               memory: 4Gi
-              {{- if eq $gpu "nvidia" }}
-              nvidia.com/gpu: 1
-              nvidia.com/gpumem: 1024
-              {{- end }}
           startupProbe:
             tcpSocket:
               port: http
