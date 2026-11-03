@@ -37,32 +37,12 @@ spec:
             limits: {cpu: 100m, memory: 64Mi}
           volumeMounts:
             - {name: data, mountPath: /data}
-        - name: import-model
-          image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
-          command: [python3, /usr/local/libexec/colibri/tools/gguf_import.py]
-          args: [{{ .Values.olaresEnv.MODEL_GGUF | quote }}, /data/model, --mode, link]
-          env:
-            - {name: HOME, value: /data/home}
-            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
-            - {name: CUDA_VISIBLE_DEVICES, value: ''}
-          resources:
-            requests: {cpu: 100m, memory: 256Mi}
-            limits: {cpu: '2', memory: 2Gi}
-          volumeMounts:
-            - {name: data, mountPath: /data}
-            - {name: models, mountPath: /models, readOnly: true}
       containers:
         - name: colibri
           image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
           imagePullPolicy: IfNotPresent
-          command: [python3, /usr/local/bin/coli]
+          command: [python3, /usr/local/libexec/colibri/olares_models.py]
           args:
-            - web
-            - --host
-            - 127.0.0.1
-            - --port
-            - '8000'
-            - --no-browser
             - --ctx
             - '4096'
             - --ram
@@ -78,8 +58,8 @@ spec:
               value: '0'
             - name: COLI_CUDA_CHAIN
               value: '1'
-            - name: COLI_MODEL
-              value: /data/model
+            - name: MODEL_GGUF
+              value: {{ .Values.olaresEnv.MODEL_GGUF | default "" | quote }}
             - name: COLI_ALLOWED_HOSTS
               value: '{{ .Values.domain.colibri }},colibri,colibri.{{ .Release.Namespace }}.svc.cluster.local'
             - name: COLI_API_KEY
@@ -97,12 +77,12 @@ spec:
               memory: 24Gi
               nvidia.com/gpumem: '20480'
           startupProbe:
-            httpGet: {path: /health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
+            httpGet: {path: /olares-models/health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 720
           readinessProbe:
-            httpGet: {path: /health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
+            httpGet: {path: /olares-models/health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 10
             timeoutSeconds: 5
           securityContext:
@@ -150,4 +130,4 @@ spec:
         - name: models
           hostPath:
             path: {{ .Values.userspace.appCommon }}/huggingface
-            type: Directory
+            type: DirectoryOrCreate
