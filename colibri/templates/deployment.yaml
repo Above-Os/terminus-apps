@@ -1,14 +1,10 @@
-{{- $gpu := .Values.gpu | default ((.Values.GPU | default dict).Type) | default "cpu" -}}
-{{- $isNvidia := eq $gpu "nvidia" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: colibri
   namespace: '{{ .Release.Namespace }}'
-  {{- if $isNvidia }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "colibri"
-  {{- end }}
 spec:
   replicas: {{ .Values.workloads.colibri.replicaCount }}
   strategy:
@@ -75,14 +71,9 @@ spec:
             - {name: HOME, value: /data/home}
             - {name: PYTHONUNBUFFERED, value: '1'}
             - name: COLI_CUDA
-              value: {{ ternary "1" "0" $isNvidia | quote }}
-            {{- if $isNvidia }}
+              value: '1'
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
-            {{- else }}
-            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
-            - {name: CUDA_VISIBLE_DEVICES, value: ''}
-            {{- end }}
             - name: COLI_GPUS
               value: '0'
             - name: COLI_CUDA_CHAIN
@@ -100,15 +91,11 @@ spec:
             requests:
               cpu: 1000m
               memory: 18Gi
-              {{- if $isNvidia }}
               nvidia.com/gpumem: '20480'
-              {{- end }}
             limits:
               cpu: '8'
               memory: 24Gi
-              {{- if $isNvidia }}
               nvidia.com/gpumem: '20480'
-              {{- end }}
           startupProbe:
             httpGet: {path: /health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 10
