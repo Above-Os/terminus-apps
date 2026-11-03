@@ -1,0 +1,66 @@
+{{- $routerBase := .Values.olaresEnv.ROUTER_BASE_URL | default (printf "https://router.%s/v1" .Values.user.zone) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: colibri-proxy
+  namespace: '{{ .Release.Namespace }}'
+data:
+  nginx.conf: |
+    worker_processes 1;
+    pid /tmp/nginx.pid;
+    error_log /dev/stderr warn;
+    events { worker_connections 256; }
+    http {
+      access_log /dev/stdout;
+      client_body_temp_path /tmp/client-body;
+      proxy_temp_path /tmp/proxy-temp;
+      fastcgi_temp_path /tmp/fastcgi-temp;
+      uwsgi_temp_path /tmp/uwsgi-temp;
+      scgi_temp_path /tmp/scgi-temp;
+      client_max_body_size 20m;
+      server {
+        listen 8080;
+        location = /olares-config.json {
+          default_type application/json;
+          add_header Cache-Control "no-store";
+          return 200 '{"routerBaseUrl":{{ $routerBase | toJson }}}';
+        }
+        location = /router/health {
+          default_type application/json;
+          return 200 '{"status":"ok"}';
+        }
+        location = /router/profile {
+          default_type application/json;
+          return 200 '{"seq":0,"turns":[]}';
+        }
+        location = /router/experts {
+          default_type application/json;
+          return 200 '{"rows":0,"cols":0,"map":"","hits":"","seq":0}';
+        }
+        location /router/v1/ {
+          proxy_pass {{ $routerBase }}/;
+          proxy_ssl_server_name on;
+          proxy_ssl_verify on;
+          proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+          proxy_http_version 1.1;
+          proxy_set_header Host {{ $routerBase | trimPrefix "https://" | trimSuffix "/v1" }};
+          proxy_set_header Connection "";
+          proxy_set_header Authorization "";
+          proxy_buffering off;
+          proxy_request_buffering off;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+        }
+        location / {
+          proxy_pass http://127.0.0.1:8000;
+          proxy_http_version 1.1;
+          proxy_set_header Host $http_host;
+          proxy_set_header Connection "";
+          proxy_set_header Authorization "Bearer __COLI_TOKEN__";
+          proxy_buffering off;
+          proxy_request_buffering off;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+        }
+      }
+    }

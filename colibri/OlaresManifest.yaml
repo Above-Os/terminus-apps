@@ -1,0 +1,115 @@
+olaresManifest.version: 0.12.0
+olaresManifest.type: app
+apiVersion: v3
+metadata:
+  name: colibri
+  appid: colibri
+  title: Colibri
+  description: A local AI engine that loads model experts from disk for chat and compatible APIs
+  icon: https://cdn.olares.com/images/2026/11/0d7c6155e1f20ef56847d1ea2b1f365a.png
+  version: 0.2.6
+  categories:
+  - Developer Tools
+  - Utilities_v112
+  - models
+entrances:
+- name: colibri
+  host: colibri
+  port: 8000
+  title: Colibri
+  icon: https://cdn.olares.com/images/2026/11/0d7c6155e1f20ef56847d1ea2b1f365a.png
+  authLevel: private
+  openMethod: window
+spec:
+  versionName: 2.1.0
+  featuredImage: https://cdn.olares.com/images/2026/11/70d7e4420e11ab8f4c781789b0a2fdb4.png
+  promoteImage:
+  - https://cdn.olares.com/images/2026/11/70d7e4420e11ab8f4c781789b0a2fdb4.png
+  - https://cdn.olares.com/images/2026/11/d4cac52295afe30b4d444cb4b52c4205.png
+  - https://cdn.olares.com/images/2026/11/602c5d6ec45b4e6a3cff563e1d03f885.png
+  runAsUser: true
+  supportArch:
+  - amd64
+  accelerator:
+  - mode: nvidia
+    supportMultiCard: false
+    supportMultiNodes: false
+    requiredCpu: 1200m
+    limitedCpu: '11'
+    requiredMemory: 19Gi
+    limitedMemory: 27Gi
+    requiredDisk: 1Gi
+    limitedDisk: 5Gi
+    requiredGPUMemory: 20Gi
+    limitedGPUMemory: 22Gi
+  - mode: cpu
+    requiredCpu: 1200m
+    limitedCpu: '11'
+    requiredMemory: 19Gi
+    limitedMemory: 27Gi
+    requiredDisk: 1Gi
+    limitedDisk: 5Gi
+  fullDescription: |
+    Colibri is a local AI engine with a web interface for chatting with open models. For mixture-of-experts models, it can read the experts needed for each response from disk instead of keeping every expert in memory.
+
+    **Key features**
+
+    - Chat with streamed responses and use compatible OpenAI and Anthropic APIs.
+    - Inspect generation speed and the time spent in each inference phase.
+    - Run a supported GGUF model locally, or switch the interface to an installed Olares Router and its default-chat route.
+    - Open the private app through Olares sign-in without entering the app's internal API key in the browser.
+
+    **Before installing**
+
+    Provide an existing supported GGUF file from the shared Hugging Face model directory. Model weights are not bundled or downloaded automatically. The Router address is filled from the installing user's Olares domain and can be overridden.
+
+    This preview supports amd64 CPUs with AVX2 (x86-64-v3). The NVIDIA image is built for Blackwell sm_120 hardware and has been tested on an RTX 5090 Laptop GPU; it is not a general-purpose CUDA build for older GPUs. CPU mode remains selectable.
+
+    **Preview limitations**
+
+    Chat history and generation parameters are not retained when the page is refreshed; export conversations before refreshing. Long inputs can be slow, and automatic context compaction did not finish within the 300-second client limit in testing. The tested model does not support forced JSON output or image input.
+  developer: JustVugg
+  website: https://github.com/JustVugg/colibri
+  sourceCode: https://github.com/JustVugg/colibri
+  submitter: harveyff
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://github.com/JustVugg/colibri/blob/0a5504a1dc64f86fcd0fe7db298b0448c730e7e6/README.md
+  license:
+  - text: Apache-2.0
+    url: https://github.com/JustVugg/colibri/blob/0a5504a1dc64f86fcd0fe7db298b0448c730e7e6/LICENSE
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.7-0'
+workloadReplicas:
+  colibri: 1
+envs:
+- envName: ROUTER_BASE_URL
+  type: url
+  required: false
+  editable: true
+  applyOnChange: true
+  regex: ^https://[a-zA-Z0-9.-]+/v1$
+  description: Optional Router API override. Leave blank to use the installing user's Olares Router address.
+- envName: MODEL_GGUF
+  type: string
+  required: true
+  editable: true
+  applyOnChange: true
+  regex: ^/models/.+\.gguf$
+  description: Existing GGUF under /models, mapped to Common/huggingface. Imported in place without downloading or copying weights.
+- envName: RAM_GB
+  type: int
+  default: '16'
+  required: true
+  editable: true
+  applyOnChange: true
+  regex: ^([1-9]|1[0-8])$
+  description: Engine RAM budget in GB (1–18); larger models require increasing the chart memory resources first.

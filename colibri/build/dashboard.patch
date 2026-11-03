@@ -1,0 +1,97 @@
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 0a3824e..0900c4b 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button"
+ import { Input } from "@/components/ui/input"
+ import { Textarea } from "@/components/ui/textarea"
+ import {
+-  generateImage, generatesImages, getHealth, listModelInfo, streamChat,
++  configureRouterEndpoint, generateImage, generatesImages, getHealth, listModelInfo, streamChat,
+   type ChatMessage, type GeneratedImage, type HealthResponse, type StreamChatResult,
+ } from "@/lib/api"
+ import {
+@@ -61,15 +61,31 @@ const message = (role: ChatMessage["role"], content: string, images?: string[]):
+ 
+ export default function App() {
+   const { t, locale, setLocale, locales } = useLocale()
++  const olaresAuth = import.meta.env.VITE_OLARES_AUTH === "1"
+ 
+   const servedByEngine = typeof window !== "undefined" && window.location.port !== "5173" && window.location.protocol.startsWith("http")
+   const defaultBase = servedByEngine ? `${window.location.origin}/v1` : "http://127.0.0.1:8000/v1"
++  const [routerBase, setRouterBase] = useState("")
++  useEffect(() => {
++    if (!olaresAuth) return
++    const controller = new AbortController()
++    fetch('/olares-config.json', {signal: controller.signal})
++      .then(response => response.ok ? response.json() : Promise.reject())
++      .then((config: {routerBaseUrl?: string}) => {
++        if (!config.routerBaseUrl) return
++        configureRouterEndpoint(config.routerBaseUrl, `${window.location.origin}/router/v1`)
++        setRouterBase(config.routerBaseUrl)
++      }).catch(() => {})
++    return () => controller.abort()
++  }, [olaresAuth])
+   const [baseUrl, setBaseUrl] = useState(() => {
++    if (olaresAuth) return defaultBase
+     const saved = stored(localStorage, "colibri.baseUrl", defaultBase)
+     if (servedByEngine && saved === "http://127.0.0.1:8000/v1" && defaultBase !== saved) return defaultBase
+     return saved
+   })
+   const [apiKey, setApiKey] = useState("")
++  const usingRouter = !!routerBase && baseUrl === routerBase
+   const [models, setModels] = useState<string[]>([])
+   /* Models the server marks with the image_generation capability. With one of
+      them selected the conversation generates pictures instead of text. */
+@@ -230,7 +246,9 @@ export default function App() {
+     setConnecting(true)
+     setError("")
+     try {
+-      const info = await listModelInfo(baseUrl, apiKey, controller.signal)
++      const available = await listModelInfo(baseUrl, apiKey, controller.signal)
++      const info = usingRouter && !available.some(item => item.id === 'default-chat')
++        ? [{id: 'default-chat', capabilities: ['chat']}, ...available] : available
+       const found = info.map((item) => item.id)
+       setModels(found)
+       setImageModels(info.filter(generatesImages).map((item) => item.id))
+@@ -496,8 +514,14 @@ export default function App() {
+   const empty = messages.length === 0
+   const connectionControls = (<fieldset disabled={loading}><section className="side-section">
+           <div className="section-title"><Link2 className="size-3.5" /> {t("sidebar.connection")}</div>
+-          <label>{t("sidebar.endpoint")}<Input id="endpoint" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></label>
+-          <label>{t("sidebar.apiKey")}<div className="relative"><KeyRound className="field-icon" /><Input id="api-key" className="pl-9" type="password" value={apiKey} placeholder={t("sidebar.apiKeyPlaceholder")} onChange={(event) => setApiKey(event.target.value)} /></div><span className="field-help">{t("sidebar.apiKeyHelp")}</span></label>
++          {olaresAuth && <label>{locale.startsWith("zh") ? "连接服务" : "Connection service"}<select aria-label="Connection service" value={usingRouter ? "router" : "local"} onChange={event => {
++            setApiKey("")
++            setBaseUrl(event.target.value === "router" ? routerBase : defaultBase)
++            autoConnected.current = false
++          }}><option value="local">Colibri {locale.startsWith("zh") ? "本地推理（默认）" : "local engine (default)"}</option><option value="router" disabled={!routerBase}>Olares Router</option></select></label>}
++          <label>{t("sidebar.endpoint")}<Input id="endpoint" value={baseUrl} readOnly={olaresAuth} onChange={(event) => setBaseUrl(event.target.value)} /></label>
++          {olaresAuth ? <p className="field-help">{locale.startsWith("zh") ? "已使用 Olares 登录认证，无需填写 API key。" : "Authenticated by Olares. No API key required."}</p> : <label>{t("sidebar.apiKey")}<div className="relative"><KeyRound className="field-icon" /><Input id="api-key" className="pl-9" type="password" value={apiKey} placeholder={t("sidebar.apiKeyPlaceholder")} onChange={(event) => setApiKey(event.target.value)} /></div><span className="field-help">{t("sidebar.apiKeyHelp")}</span></label>}
++          {usingRouter && <p className="field-help">{locale.startsWith("zh") ? "Router 模式的回复不计入 Colibri 本地引擎统计。切换服务后建议新建对话。" : "Router replies do not appear in local Colibri engine statistics. Start a new chat after switching services."}</p>}
+           <Button type="button" variant="secondary" onClick={connect} disabled={connecting}>
+             {connecting ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+             {t("sidebar.probe")}
+diff --git a/web/src/lib/api.ts b/web/src/lib/api.ts
+index 047e64a..3859cea 100644
+--- a/web/src/lib/api.ts
++++ b/web/src/lib/api.ts
+@@ -119,8 +119,18 @@ export interface StreamChatResult {
+   compaction: Compaction | null
+ }
+ 
++let routerPublicRoot = ""
++let routerProxyRoot = ""
++export function configureRouterEndpoint(publicBase: string, proxyBase: string) {
++  routerPublicRoot = publicBase.replace(/\/v1\/?$/, "").replace(/\/+$/, "")
++  routerProxyRoot = proxyBase.replace(/\/v1\/?$/, "").replace(/\/+$/, "")
++}
++
+ export function endpoint(baseUrl: string, path: string) {
+-  return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
++  const base = baseUrl.replace(/\/+$/, "")
++  const mapped = routerPublicRoot && (base === routerPublicRoot || base.startsWith(routerPublicRoot + "/"))
++    ? routerProxyRoot + base.slice(routerPublicRoot.length) : base
++  return `${mapped}/${path.replace(/^\/+/, "")}`
+ }
+ 
+ export function serverEndpoint(baseUrl: string, path: string) {
