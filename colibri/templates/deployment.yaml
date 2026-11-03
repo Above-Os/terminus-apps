@@ -46,7 +46,7 @@ spec:
             - --ctx
             - '4096'
             - --ram
-            - {{ .Values.olaresEnv.RAM_GB | quote }}
+            - {{ if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}'4'{{ else }}{{ .Values.olaresEnv.RAM_GB | quote }}{{ end }}
           env:
             - {name: HOME, value: /data/home}
             - {name: PYTHONUNBUFFERED, value: '1'}
@@ -57,9 +57,11 @@ spec:
             - name: COLI_GPUS
               value: '0'
             - name: COLI_CUDA_CHAIN
-              value: '1'
-            - name: MODEL_GGUF
-              value: {{ .Values.olaresEnv.MODEL_GGUF | default "" | quote }}
+              value: {{ if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}'0'{{ else }}'1'{{ end }}
+            {{- if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}
+            - name: CUDA_EXPERT_GB
+              value: '2'
+            {{- end }}
             - name: COLI_ALLOWED_HOSTS
               value: '{{ .Values.domain.colibri }},colibri,colibri.{{ .Release.Namespace }}.svc.cluster.local'
             - name: COLI_API_KEY

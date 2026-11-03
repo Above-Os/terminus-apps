@@ -5,9 +5,9 @@ metadata:
   name: colibri
   appid: colibri
   title: Colibri
-  description: A local AI engine that loads model experts from disk for chat and compatible APIs
+  description: A local AI engine for running larger MoE models with less resident memory
   icon: https://cdn.olares.com/images/2026/11/0d7c6155e1f20ef56847d1ea2b1f365a.png
-  version: 0.2.17
+  version: 0.2.22
   categories:
   - Developer Tools
   - Utilities_v112
@@ -43,7 +43,7 @@ spec:
     requiredGPUMemory: 1Gi
     limitedGPUMemory: 22Gi
   fullDescription: |
-    Colibri is a local AI engine with a web interface for chatting with open models. For mixture-of-experts models, it can read the experts needed for each response from disk instead of keeping every expert in memory.
+    Colibri is a local AI engine with a web chat interface. It reads expert weights from disk as needed, allowing supported MoE models to run with less resident system memory and GPU memory. Choose low-memory mode to reduce resident resource use, at the cost of potentially slower replies. Actual requirements and speed depend on the model, quantization, and context length.
 
     **Key features**
 
@@ -90,6 +90,17 @@ options:
 workloadReplicas:
   colibri: 1
 envs:
+- envName: SYSTEM_LANGUAGE
+  valueFrom:
+    envName: OLARES_USER_LANGUAGE
+- envName: INFERENCE_PROFILE
+  type: string
+  default: standard
+  required: true
+  editable: true
+  applyOnChange: true
+  regex: ^(standard|low-memory-moe)$
+  description: 'Inference profile: standard uses RAM_GB; low-memory-moe uses a 4 GB RAM budget and 2 GiB expert-cache budget with staged GPU execution. These are engine budgets, not whole-app resource caps. Switching restarts the app.'
 - envName: ROUTER_BASE_URL
   type: url
   required: false
@@ -97,13 +108,6 @@ envs:
   applyOnChange: true
   regex: ^https://[a-zA-Z0-9.-]+/v1$
   description: Optional Router API override. Leave blank to use the installing user's Olares Router address.
-- envName: MODEL_GGUF
-  type: string
-  required: false
-  editable: true
-  applyOnChange: true
-  regex: ^(/models/.+\.gguf)?$
-  description: Optional initial GGUF under /models. Leave blank to scan and choose a model in the app. Saved app selection takes precedence.
 - envName: RAM_GB
   type: int
   default: '16'
