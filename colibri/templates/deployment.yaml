@@ -1,8 +1,14 @@
+{{- $gpu := .Values.gpu | default ((.Values.GPU | default dict).Type) | default "cpu" -}}
+{{- $isNvidia := eq $gpu "nvidia" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: colibri
   namespace: '{{ .Release.Namespace }}'
+  {{- if $isNvidia }}
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "colibri"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.colibri.replicaCount }}
   strategy:
@@ -41,6 +47,8 @@ spec:
           args: [{{ .Values.olaresEnv.MODEL_GGUF | quote }}, /data/model, --mode, link]
           env:
             - {name: HOME, value: /data/home}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
+            - {name: CUDA_VISIBLE_DEVICES, value: ''}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {cpu: '2', memory: 2Gi}
@@ -67,7 +75,14 @@ spec:
             - {name: HOME, value: /data/home}
             - {name: PYTHONUNBUFFERED, value: '1'}
             - name: COLI_CUDA
-              value: {{ ternary "1" "0" (eq .Values.GPU.Type "nvidia") | quote }}
+              value: {{ ternary "1" "0" $isNvidia | quote }}
+            {{- if $isNvidia }}
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            {{- else }}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
+            - {name: CUDA_VISIBLE_DEVICES, value: ''}
+            {{- end }}
             - name: COLI_GPUS
               value: '0'
             - name: COLI_CUDA_CHAIN
@@ -82,12 +97,17 @@ spec:
           ports:
             - {name: engine, containerPort: 8000}
           resources:
-            requests: {cpu: 1000m, memory: 18Gi}
+            requests:
+              cpu: 1000m
+              memory: 18Gi
+              {{- if $isNvidia }}
+              nvidia.com/gpumem: '20480'
+              {{- end }}
             limits:
               cpu: '8'
               memory: 24Gi
-              {{- if eq .Values.GPU.Type "nvidia" }}
-              nvidia.com/gpu: 1
+              {{- if $isNvidia }}
+              nvidia.com/gpumem: '20480'
               {{- end }}
           startupProbe:
             httpGet: {path: /health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
@@ -117,6 +137,8 @@ spec:
               config.chmod(0o600)
               os.execvp('nginx',['nginx','-c',str(config),'-g','daemon off;'])
           env:
+            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
+            - {name: CUDA_VISIBLE_DEVICES, value: ''}
             - name: COLI_API_KEY
               valueFrom:
                 secretKeyRef: {name: colibri-auth, key: API_KEY}
