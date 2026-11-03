@@ -91,8 +91,8 @@ Blocked / untested
 - OCR, STT/TTS, image/video generation and web search had no configured Router
   targets. OAuth/LDAP/SCIM, email, cloud drives, MCP/Open Terminal and external
   tool integrations had no configured test endpoints/credentials.
-- Future scheduled jobs, outgoing webhooks, hardware audio/video, multi-device
-  collaboration and load testing were not exercised.
+- Future scheduled jobs, outgoing webhooks, hardware audio/video, load testing were not exercised. Note collaboration was subsequently
+  covered in the supplemental test round below.
 - arm64 image availability was verified; no arm64 runtime test was performed.
 - Initial invalid non-UUID page requests and an unrefreshed new-model list were
   corrected and the affected tests passed. Original attempts remain in artifacts.
@@ -105,3 +105,71 @@ embedding test failure is a documented dependency blocker, not a passing case.
 All three temporary test apps and their generated data were removed, their
 Upload records deleted, and both installed/Upload lists checked for absence.
 No peer smoke test or production-market approval is claimed.
+
+
+Supplemental 0.12.5 feature regression — 2026-11-03
+Environment and chart/image are unchanged. Recreated isolated aliases on
+one@olares.fashion; original openwebui was not changed. This is additional
+coverage, not a replacement for the complete core test round above.
+
+Across both real old-version upgrades (0.12.4 and 0.12.3) and a clean 0.12.5:
+- PASS: legacy-shaped note text attachment and inline image normalize to the
+  first page; original file hashes stay identical; repeated save does not
+  duplicate links. The clean install checks legacy API-shape compatibility,
+  not an old database migration.
+- PASS: chat search text, pinned, tag and archived filters.
+- PASS: repeated usage snapshots in four OpenAI SSE chunks persist as one
+  snapshot: input 11, output 7, total 18 (not 72). Analytics session list,
+  token-range filter, detail and execution trace agree. This case uses a
+  loopback protocol fixture; it is not a Router billing measurement.
+- PASS: real Router default-chat native display_file call for uploaded
+  legacy.txt. Saved function_call is completed and function_call_output has
+  exists=true, displayed=true with the correct file ID. No embedding stub.
+- PASS: interface visibility boolean setting is persisted and restored;
+  a string instead of a boolean returns HTTP 422. This verifies config/API,
+  not ordinary-user control hiding in the browser.
+- PASS: final actual image v0.12.5; all containers Ready, zero restarts;
+  latest 300 main-container log lines contained no ERROR/Traceback.
+
+Additional browser / collaboration cases on the clean install:
+- PASS: model A -> B without sending, manually selected Code Interpreter,
+  A -> B again and reload retain B and the manual feature selection.
+  Regenerating the old response creates an assistant message for model B;
+  database confirms chat.models=[delta-model-b] and assistant.model=B.
+  Both presets use the same Router base model; output identity is not used
+  as evidence for preset selection.
+- PASS: Analytics overview, Sessions and session details render, including
+  the fixture's 18-token total.
+- PASS: note presence via two authenticated WebSocket sessions; second
+  user's page ID and cursor position are delivered; browser shows the
+  Delta collaborator avatar and clicking jumps to that exact page ID.
+  Leaving removes presence. User explicitly approved this ordinary test
+  account and read/write grants only for the one synthetic note. Grants
+  were revoked; account absence and empty note ACL were checked via API.
+- PASS: real Router display_file for a file attached to model knowledge;
+  completed tool call returns exists=true and displayed=true. Uploaded-file
+  browser view renders DELTA_LEGACY_ATTACHMENT_637 and download control.
+  This does not test vector indexing or knowledge retrieval.
+- PASS: manual Chinese chat rename survives reload.
+- PASS: remove New Chat keyboard binding, reload -> Unassigned; pressing
+  the former shortcut keeps the note open; Reset Defaults restores binding.
+- OBSERVED ONLY: provider connection edit fields and the administrator's
+  Visible controls categories render. Other providers and ordinary-user
+  visibility behavior are not claimed to pass.
+
+Corrections and remaining limits:
+- Initial collaboration attempt with write-only ACL could not read/join;
+  separate read grant was explicitly approved before the successful retry.
+- Initial display_file API request omitted session_id, so builtin tools
+  were intentionally not injected. A genuine authenticated UI WebSocket
+  session and waiting for asynchronous completion resolved the test.
+- Initial visibility assertion assumed nested config export; export uses
+  flat keys. Corrected assertion and roundtrip passed on all three paths.
+- Real IME composition plus Backspace remains unverified: browser automation
+  supports Unicode insertion, not actual OS input-method composition.
+- Embedding query/document prefixes and batching, OCR options, Open Terminal
+  timeout, MCP/OAuth and failure webhooks need configured services and remain
+  untested; earlier vector RAG/restart limitations still apply. No new claim
+  of arm64 runtime, load tests, peer smoke test or production approval.
+- No application/Chart changes were required by this supplemental round.
+  Evidence: local openwebui-new-feature-evidence.zip and screenshots.
