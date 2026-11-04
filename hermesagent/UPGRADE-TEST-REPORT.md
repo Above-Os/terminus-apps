@@ -1,6 +1,7 @@
 # Hermes Agent 0.22.7 — test-market validation
 
-Date: 2026-11-04 (Asia/Shanghai). Tested on Olares 1.12.7, linux/amd64.
+Initial validation: 2026-11-04 (Asia/Shanghai), Olares 1.12.7 / linux/amd64.
+Multi-architecture image follow-up: 2026-11-05 (Asia/Shanghai).
 Candidate: app 0.22.7 / Chart 1.3.51. This is a draft for the test market;
 reviewer smoke testing and full release acceptance remain pending.
 
@@ -8,20 +9,22 @@ reviewer smoke testing and full release acceptance remain pending.
 
 - Upgrade from the remote Chart 1.3.50 / app 0.22.2 baseline.
 - Retain the UID/GID 1000 compatibility overlay and hindsight-client 0.10.2.
-- Pin the verified compatible image; preserve existing mobile support.
+- Use the verified versioned image tag without a digest suffix; preserve mobile support.
 - Rename the entrance to **Hermes Dashboard**.
 - Synchronize the root and seven localized upgrade descriptions.
-- Declare **amd64 only**: this compatible image has no ARM64 build. This draft
-  narrows architecture coverage and must not be represented as a fully validated
-  replacement for the previous multi-architecture listing.
+- Provide compatible **amd64 and arm64** image manifests and declare both architectures.
+  ARM64 passed image-level checks and a Docker-emulated startup/Dashboard smoke;
+  native ARM64 Olares upgrade and full workflow testing remain unperformed.
 
 Image:
-`docker.io/beclab/harveyff-hermes-agent:v0.22.7-uid1000@sha256:28d44487202d0d46bc0c25e1dc6bcbaba3c08149cc20f36810f02311d420807a`
+`beclab/harveyff-hermes-agent:v0.22.7-uid1000-multiarch`
 
 The image was built and tested locally, pushed to the authorized harveyff source
 repository, and transferred through the Olares image-locker API. It was not
 pushed directly to beclab. Source and target image configs and all 41 ordered
-layer digests match; manifest digests differ after format conversion.
+layer digests match for **each architecture**; manifest/index digests may differ
+after format conversion. The amd64 config is unchanged from the image used for
+the original Olares deployment and workflow tests.
 
 ## Upgrade and fresh-install matrix
 
@@ -104,9 +107,30 @@ These eight checks do not establish full coverage of every upstream change or
 every UI renderer. Raw test records and screenshots are retained in the local
 run artifacts; no device hostname, credentials or private keys are committed.
 
+## ARM64 image follow-up (2026-11-05)
+
+- Built the same UID/GID 1000 and hindsight-client 0.10.2 overlay for linux/arm64.
+- Executed its ARM64 binaries under Docker emulation: machine aarch64, application
+  UID 1000, install stamp 0.22.7 / b200f5bc60e, Hindsight import 0.10.2.
+- Started s6/gateway/Dashboard using the Chart's loopback binding; Dashboard
+  returned HTTP 200 on 127.0.0.1:19119. No host ports were published.
+- Reused the already tested amd64 image unchanged and published one source tag
+  with amd64 and arm64 descriptors, then transferred through the Olares API.
+- The image-locker API refused overwriting the existing beclab tag, so the
+  verified content was transferred under the fresh -multiarch tag.
+- Verified both target platform configs/layer sequences against the source and
+  anonymous availability. All four auxiliary Chart images also provide both
+  architectures (busybox, brew/CLI base, nginx, terminal).
+- Restored supportArch to [amd64, arm64]. The Chart now references exactly
+  `beclab/harveyff-hermes-agent:v0.22.7-uid1000-multiarch`, without an @sha256 suffix.
+- Native ARM64 Olares installation/data migration/default-chat workflows were
+  not repeated; the existing full amd64 results remain valid for the unchanged
+  amd64 image content. Review smoke and the other listed limitations remain.
+
 ## Known limitations and remaining review
 
-- **amd64 only**. ARM64 compatible image and runtime validation are incomplete.
+- Full Olares deployment/migration/workflow tests were on amd64. ARM64 was
+  built and started under Docker emulation, not on a native ARM64 Olares device.
 - `/delegation` is unavailable in the current exposed clients: Dashboard reports
   it is not available on the shared gateway; classic CLI reports unknown command.
   Backend code existing in the image is not an end-to-end pass.

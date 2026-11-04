@@ -26,7 +26,8 @@
 #     --build-arg TARGET_UID=1000 \
 #     --build-arg TARGET_GID=1000 \
 #     --platform linux/amd64,linux/arm64 \
-#     -t beclab/harveyff-hermes-agent:v0.22.7-uid1000 --push .
+#     -t harveyff/hermes-agent:v0.22.7-uid1000-multiarch --push .
+# Then transfer the source image to beclab through the Olares image-locker API.
 #
 # Upgrades: pass the target --build-arg HERMES_VERSION and review upstream
 # image layout/toolchain changes before rebuilding.
