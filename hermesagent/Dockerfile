@@ -22,18 +22,18 @@
 #
 # Build (all args optional; defaults shown):
 #   docker buildx build \
-#     --build-arg HERMES_VERSION=v0.22.2 \
+#     --build-arg HERMES_VERSION=v0.22.7 \
 #     --build-arg TARGET_UID=1000 \
 #     --build-arg TARGET_GID=1000 \
 #     --platform linux/amd64,linux/arm64 \
-#     -t beclab/harveyff-hermes-agent:v0.22.2-uid1000 --push .
+#     -t beclab/harveyff-hermes-agent:v0.22.7-uid1000 --push .
 #
 # Upgrades: pass the target --build-arg HERMES_VERSION and review upstream
 # image layout/toolchain changes before rebuilding.
 # ---------------------------------------------------------------------------
 
 # Global ARG consumed by FROM. Must be declared before the first FROM.
-ARG HERMES_VERSION=v0.22.2
+ARG HERMES_VERSION=v0.22.7
 FROM nousresearch/hermes-agent:${HERMES_VERSION}
 
 # Re-declare after FROM to make these usable inside RUN below.
