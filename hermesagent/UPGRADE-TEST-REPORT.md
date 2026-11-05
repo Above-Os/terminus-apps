@@ -131,11 +131,13 @@ run artifacts; no device hostname, credentials or private keys are committed.
 
 The previous client-limit conclusion was incomplete: `/delegation` is supplied
 by the optional official `advanced-delegation` plugin, not enabled by this image
-by default. The chart now vendors version 1.0.0 at the official catalog-reviewed
-commit `e404b6816b20237a82f6fbe2749b5a576cf75dba`, with its MIT license and
-provenance. It seeds the plugin offline on first startup, preserves an existing
-plugin installation, and respects explicit plugin disablement. No core command
-or authentication bypass was added.
+by default. At the user's request, the chart does not vendor a files directory.
+For a missing plugin, initialization uses the official plugin installer pinned
+to commit `e404b6816b20237a82f6fbe2749b5a576cf75dba` (version1.0.0). This requires
+GitHub access on first installation. Existing plugin directories and explicit
+disablement are preserved. Installation errors stop initialization rather than
+silently leaving delegation unavailable. No core command or authentication
+bypass was added.
 
 Per explicit user choice, the chart adds **Hermes Webapp** (internal Olares
 entrance) and enables it when not explicitly configured otherwise. Its own
@@ -249,3 +251,28 @@ and upstream commit were used to verify the application version.
 The existing settings are retained in a private backup on the device. Local
 sanitized evidence is in deliverables/hermesagent-live-20261105. The deployed
 package SHA256 is `06cd2f4f18e8d1638b5840b888a443033477f668b6b1dd02f055ce99f96899ee`. Image tag and architectures are unchanged.
+
+## Remove chart files directory — 2026-11-05
+
+Per user instruction, the entire hermesagent/files directory is removed from
+the PR. No plugin source, license copy, provenance file or independent Python
+file is shipped in the chart. The plugin ConfigMap and projected mounts are
+removed. Missing plugins are installed through Hermes' official installer at
+the same immutable official revision, and the configuration is reloaded before
+Webapp defaults are saved. Existing installations and explicit opt-outs are
+preserved. The first plugin installation now requires GitHub access. Failures
+stop initialization; they are not silently treated as successful delegation.
+
+New Docker tests: fresh official installation on amd64 and emulated arm64,
+delegation CLI registration, gateway slash execution, refusal of an unconfigured
+model-map route, idempotence, unchanged login/config, malformed-config refusal
+and explicit opt-out preservation. Installed Python source matches the six
+previously tested upstream files byte-for-byte. Webapp anonymous API401 and
+authenticated API200 passed after another initialization with the existing
+plugin. The package contains no files directory or independent .py files.
+
+The working user installation was not reinstalled for this packaging change.
+The earlier native Olares functional tests and live deployment used the
+previous vendored initializer; native first-install GitHub access for the new
+installer was not separately exercised. Local evidence is retained in
+deliverables/hermesagent-no-files-20261105.
