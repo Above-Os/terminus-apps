@@ -1,13 +1,14 @@
-# Open Design on Olares, based on upstream open-design-v0.22.1 deploy/Dockerfile.
+# Open Design on Olares, based on upstream open-design-v0.27.0 deploy/Dockerfile.
 # Build context: this chart directory; source is fetched in a separate stage.
-# Adds pinned OpenCode and request-scoped support for user-configured providers.
+# Adds pinned OpenCode, the OpenDesign Cloud (AMR) `vela` CLI, and
+# request-scoped support for user-configured providers.
 # docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/opendesign:<new-tag> --load .
 # Smoke-test both architectures before pushing the new tag.
 
 ARG NODE_IMAGE=docker.io/library/node:24-alpine
 ARG RUNTIME_IMAGE=docker.io/library/node:24-alpine
 
-ARG OD_GIT_REF=open-design-v0.22.1
+ARG OD_GIT_REF=open-design-v0.27.0
 
 # Source files are architecture-independent; fetch once on the build host.
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS source
@@ -50,8 +51,14 @@ RUN corepack enable && \
     ONNXRUNTIME_NODE_INSTALL_CUDA=skip pnpm install --frozen-lockfile
 
 COPY --from=source /src/apps ./apps
+# The web type check includes tests that import bundled plugin manifests.
+COPY --from=source /src/plugins/_official ./plugins/_official
 COPY patches/apply-provider-hosts.mjs /tmp/apply-provider-hosts.mjs
 RUN node /tmp/apply-provider-hosts.mjs /app
+COPY patches/apply-local-delete.mjs /tmp/apply-local-delete.mjs
+RUN node /tmp/apply-local-delete.mjs /app
+COPY patches/apply-login-open.mjs /tmp/apply-login-open.mjs
+RUN node /tmp/apply-login-open.mjs /app
 RUN pnpm --filter @open-design/daemon build && \
     pnpm --filter @open-design/web build && \
     pnpm --filter @open-design/daemon deploy --legacy --prod /app/deploy/daemon && \
@@ -115,6 +122,14 @@ RUN apk add --no-cache tini poppler-utils bash git && \
 # placeholder until its pinned postinstall selects and verifies the native binary.
 RUN node /opt/opencode/lib/node_modules/opencode-ai/postinstall.mjs
 
+# OpenDesign Cloud sign-in, workspace context (required by the project delete
+# dialog) and stock search all shell out to `vela`. Its native binaries are
+# glibc-linked, so Alpine needs gcompat to load them.
+ARG VELA_CLI_VERSION=0.1.8
+RUN apk add --no-cache gcompat && \
+    npm install --global --prefix /opt/vela "@powerformer/vela-cli@${VELA_CLI_VERSION}" && \
+    npm cache clean --force
+
 WORKDIR /app
 COPY --from=build --chown=node:node /app/deploy/daemon ./apps/daemon
 COPY --from=build --chown=node:node /app/apps/web/out ./apps/web/out
@@ -135,20 +150,24 @@ COPY --from=build --chown=node:node /app/plugins/_official ./plugins/_official
 RUN mkdir -p /app/.od && \
     chown -R node:node /app
 
+ARG OD_APP_VERSION=0.27.0
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size=192
 ENV OD_BIND_HOST=0.0.0.0
 ENV OD_PORT=7456
+ENV OD_APP_VERSION=${OD_APP_VERSION}
+ENV OD_RELEASE_CHANNEL=stable
 
 EXPOSE 7456
 
 ENV HOME=/app/.od
-ENV PATH=/opt/opencode/bin:$PATH
+ENV PATH=/opt/opencode/bin:/opt/vela/bin:$PATH
+ENV VELA_BIN=/opt/vela/bin/vela
 ENV OD_DATA_DIR=/app/.od
 
 USER node
-# Verify the selected native binary works as the actual non-root runtime user.
-RUN opencode --version
+# Verify the selected native binaries work as the actual non-root runtime user.
+RUN opencode --version && vela --version
 COPY --chown=node:node patches/provider-hosts.test.mjs /tmp/provider-hosts.test.mjs
 RUN node --test /tmp/provider-hosts.test.mjs
 ENTRYPOINT ["/sbin/tini", "--"]
