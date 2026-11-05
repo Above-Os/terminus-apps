@@ -21,7 +21,7 @@ spec:
       - name: init-permissions
         image: docker.io/beclab/aboveos-busybox:1.37.0
         securityContext: {runAsUser: 0}
-        command: [sh, -ec, 'mkdir -p /storage/system /storage/data /storage/cache; chown 1000:1000 /storage /storage/system /storage/data /storage/cache /compat']
+        command: [sh, -ec, 'mkdir -p /storage/system /storage/data /storage/cache /storage/mcp; chown 1000:1000 /storage /storage/system /storage/data /storage/cache /storage/mcp /compat']
         volumeMounts: [{name: data, mountPath: /storage}, {name: compat, mountPath: /compat}]
       - name: init-live-events-compat
         resources:
@@ -87,6 +87,10 @@ spec:
         - name: MCP_API_KEY
           valueFrom:
             secretKeyRef: {name: cognee-app, key: MCP_API_KEY}
+        - name: DEFAULT_USER_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: cognee-app, key: DEFAULT_USER_PASSWORD}
+        - {name: MCP_AUTH_ENABLED, value: '{{ .Values.olaresEnv.MCP_AUTH_ENABLED | default "false" }}'}
         - {name: HOME, value: /tmp}
         - {name: COGNEE_API_AUTH_SCHEME, value: x-api-key}
         - {name: COGNEE_MCP_AGENT_SCOPED, value: 'false'}
@@ -106,9 +110,10 @@ spec:
         volumeMounts:
         - {name: mcp-config, mountPath: /mcp-config, readOnly: true}
         - {name: mcp-auth, mountPath: /mcp-auth}
+        - {name: data, mountPath: /mcp-state, subPath: mcp}
       - name: mcp-proxy
         image: docker.io/library/nginx:1.30.6-alpine
-        command: [sh, -ec, 'until test -s /mcp-auth/key.conf; do sleep 1; done; exec nginx -c /mcp-config/nginx.conf -g "daemon off;"']
+        command: [sh, -ec, 'until test -f /mcp-auth/ready; do sleep 1; done; exec nginx -c /mcp-config/nginx.conf -g "daemon off;"']
         ports: [{name: mcp-api, containerPort: 8083}]
         readinessProbe: {tcpSocket: {port: mcp-api}, periodSeconds: 10}
         resources:
