@@ -11,6 +11,7 @@ spec:
     metadata:
       labels: {app: cognee}
       annotations:
+        checksum/mcp: {{ include (print $.Template.BasePath "/mcp.yaml") . | sha256sum }}
         checksum/proxy: {{ include (print $.Template.BasePath "/proxy.yaml") . | sha256sum }}
     spec:
       enableServiceLinks: false
@@ -26,11 +27,11 @@ spec:
         resources:
           requests: {cpu: 50m, memory: 128Mi}
           limits: {cpu: 500m, memory: 256Mi}
-        image: docker.io/cognee/cognee@sha256:29427e968f8b273db0bb7b037a7bb119d7695d960f73a59d649f00c5111a85bd
+        image: docker.io/cognee/cognee:1.6.6
         command: [python, -c]
         args:
         - |
-          # Upstream 1.6.5 can mix aware session timestamps with a naive UTC cursor.
+          # Upstream 1.6.6 can mix aware session timestamps with a naive UTC cursor.
           # Normalize only the comparison; authorization and returned timestamps stay intact.
           from pathlib import Path
           source = Path('/app/cognee/api/v1/visualize/visualize.py').read_text()
@@ -41,7 +42,7 @@ spec:
         volumeMounts: [{name: compat, mountPath: /compat}]
       containers:
       - name: cognee
-        image: docker.io/cognee/cognee@sha256:29427e968f8b273db0bb7b037a7bb119d7695d960f73a59d649f00c5111a85bd
+        image: docker.io/cognee/cognee:1.6.6
         envFrom: [{secretRef: {name: cognee-app}}]
         env:
         - {name: ENV, value: production}
@@ -79,8 +80,45 @@ spec:
         volumeMounts:
         - {name: data, mountPath: /cognee-storage}
         - {name: compat, mountPath: /app/cognee/api/v1/visualize/visualize.py, subPath: visualize.py, readOnly: true}
+      - name: official-mcp
+        image: docker.io/cognee/cognee-mcp:main-df2b4fa@sha256:7b308820d37b21d8f64b2ec3db2fec6a12aee13c92e442b7ee3b240e027d7bdc
+        command: [/app/.venv/bin/python, /mcp-config/start.py]
+        env:
+        - name: MCP_API_KEY
+          valueFrom:
+            secretKeyRef: {name: cognee-app, key: MCP_API_KEY}
+        - {name: HOME, value: /tmp}
+        - {name: COGNEE_API_AUTH_SCHEME, value: x-api-key}
+        - {name: COGNEE_MCP_AGENT_SCOPED, value: 'false'}
+        ports: [{name: mcp, containerPort: 8001}]
+        startupProbe:
+          exec:
+            command: [/app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+          periodSeconds: 10
+          failureThreshold: 90
+        readinessProbe:
+          exec:
+            command: [/app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+          periodSeconds: 10
+        resources:
+          requests: {cpu: 50m, memory: 256Mi}
+          limits: {cpu: '1', memory: 1536Mi}
+        volumeMounts:
+        - {name: mcp-config, mountPath: /mcp-config, readOnly: true}
+        - {name: mcp-auth, mountPath: /mcp-auth}
+      - name: mcp-proxy
+        image: docker.io/library/nginx:1.30.6-alpine
+        command: [sh, -ec, 'until test -s /mcp-auth/key.conf; do sleep 1; done; exec nginx -c /mcp-config/nginx.conf -g "daemon off;"']
+        ports: [{name: mcp-api, containerPort: 8083}]
+        readinessProbe: {tcpSocket: {port: mcp-api}, periodSeconds: 10}
+        resources:
+          requests: {cpu: 20m, memory: 32Mi}
+          limits: {cpu: 200m, memory: 64Mi}
+        volumeMounts:
+        - {name: mcp-config, mountPath: /mcp-config, readOnly: true}
+        - {name: mcp-auth, mountPath: /mcp-auth, readOnly: true}
       - name: frontend
-        image: docker.io/cognee/cognee-ui@sha256:e8903024cb874079d2fefbeb3eca09803be257a35c5daaceae8b31310c9330f2
+        image: docker.io/cognee/cognee-ui:1.6.6
         env:
         - name: DEFAULT_USER_PASSWORD
           valueFrom:
@@ -111,6 +149,10 @@ spec:
           limits: {cpu: 200m, memory: 64Mi}
         volumeMounts: [{name: agent-api-config, mountPath: /agent-api, readOnly: true}]
       volumes:
+      - name: mcp-config
+        configMap: {name: cognee-mcp}
+      - name: mcp-auth
+        emptyDir: {medium: Memory}
       - name: agent-api-config
         configMap: {name: cognee-agent-api}
       - name: compat
@@ -127,4 +169,4 @@ metadata:
   namespace: {{ .Release.Namespace | quote }}
 spec:
   selector: {app: cognee}
-  ports: [{name: http, port: 3000, targetPort: http}, {name: agent-api, port: 3001, targetPort: agent-api}]
+  ports: [{name: http, port: 3000, targetPort: http}, {name: agent-api, port: 3001, targetPort: agent-api}, {name: mcp-api, port: 3002, targetPort: mcp-api}]

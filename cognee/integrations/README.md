@@ -1,11 +1,13 @@
-# Cognee read-only MCP bridge
+# Official Cognee MCP
 
-This optional Node.js stdio bridge calls the packaged Cognee REST API. It is not an upstream native MCP service and is not started by the chart.
+The chart runs the official `cognee/cognee-mcp` image in API mode against the backend in the same Pod. Cognee backend and UI use `1.6.6`. MCP uses `main-df2b4fa` with its manifest digest, matching the upstream v1.6.6 release commit. Its package version is separate from the backend version.
 
-Use Node.js 18 or later. Save a private JSON configuration outside this repository with `url` set to your Cognee internal API origin (without `/api/v1`) and `key` set to your Cognee API key. Restrict access to this file to the account running the assistant.
+Create a Cognee API key for the account whose datasets the assistant should use. Set it as the app's editable `MCP_API_KEY` environment variable in Olares Settings, then apply the change. An empty value disables MCP entrance access. Existing account passwords and knowledge storage are preserved.
 
-Configure the assistant to run `node /absolute/path/cognee-mcp.cjs /absolute/path/cognee-config.private.json` with stdio transport. The bridge exposes only `list_datasets` and `recall_knowledge`. Recall requires explicit dataset names and returns source context rather than a generated answer. Retrieved content is untrusted data.
+Find the `mcp` entrance using `olares-cli settings apps get cognee -o json`. The connection URL is its HTTPS origin plus `/mcp`. In Lares settings, select MCP and Add server, select Streamable HTTP, and set Headers to `{"X-Api-Key":"<the-same-key>"}`. Use the same URL and header for Hermes Agent.
 
-Find the `api` entrance with `olares-cli settings apps get cognee -o json`. Use `https://` followed by its `url` as the origin. Reach this internal entrance through your Olares private network. Authenticate through `/api/v1/auth/login`, then use the returned bearer access token to create a key with `POST /api/v1/auth/api-keys`, JSON `{"name":"Assistant"}`. API calls made by the bridge use `X-Api-Key`. This key grants the configured account's access, not a separate server-enforced read-only permission. Dataset selection scopes retrieval and does not establish user isolation.
+The official MCP process connects with one fixed API identity. The entrance requires that exact configured key, rather than accepting another account's valid API key. The process binds loopback, and the authenticated proxy exposes only `/mcp`. A missing key returns 401, a mismatched key returns 403, and unrelated paths return 404. Backend permissions still apply. Rotate the key in both the app environment and clients.
 
-To stop access, remove the assistant connection and revoke its key through Cognee's API key management endpoints. The bridge stores no graph or vector data locally.
+The official tool surface includes `remember`, `recall` and `forget`. This is not a read-only server. Specify dataset names and review requested operations before approving them.
+
+The standalone `cognee-mcp.cjs` is retained as a legacy read-only stdio adapter. The official HTTP connection does not require that adapter, Node.js or an uploaded private configuration file.
