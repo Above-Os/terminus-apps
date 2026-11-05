@@ -1,6 +1,7 @@
 # Wrapper so users can run `openclaw` directly in the container terminal.
 # Uses the pinned image entrypoint, ahead of persistent npm-global executables.
 # No runtime core installation or independent update lifecycle.
+{{- $appDomain := first (splitList "," .Values.domain.clawdbot) -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -23,4 +24,53 @@ data:
           ;;
       esac
     fi
-    cd /app && exec /usr/local/bin/node /app/openclaw.mjs "$@"
+    cd /app || exit 1
+    if [ "${1:-}" = "onboard" ]; then
+      exec /usr/local/bin/node --import /opt/olares/bin/olares-onboard-compat.mjs /app/openclaw.mjs "$@"
+    fi
+    exec /usr/local/bin/node /app/openclaw.mjs "$@"
+
+  # Only optional source discovery may degrade while Gateway owns live state.
+  # Explicit import/apply still uses upstream's exclusive ownership checks.
+  olares-onboard-compat.mjs: |
+    import { registerHooks } from 'node:module';
+    import { readFileSync } from 'node:fs';
+    const setupModule = '/app/dist/setup-BqJppoY4.mjs'; // OpenClaw 2026.11.1
+    const customModule = '/app/dist/onboard-custom-config-DayZpnx1.mjs';
+    const finalizeModule = '/app/dist/setup.finalize-ZYdGALAU.mjs';
+    const routerHost = 'router.' + {{ $appDomain | quote }}.split('.').slice(1).join('.');
+    const original = 'const migrationDiscovery = await detectSetupMigrationSources({\n\t\tconfig: baseConfig,\n\t\truntime\n\t});';
+    const replacement = 'const migrationDiscovery = await detectSetupMigrationSources({\n\t\tconfig: baseConfig,\n\t\truntime\n\t}).catch((error) => {\n\t\tif (error?.name !== "LocalStateOwnerError" || !error.message.includes("for migration providers") || !error.message.includes("This operation requires exclusive offline state ownership")) throw error;\n\t\truntime.log("Import auto-detection skipped while Gateway is running. Stop Gateway before importing another agent.");\n\t\treturn { detections: [], providerDescriptors: [] };\n\t});';
+    const customOriginal = 'const normalizedApiKey = normalizeOptionalProviderApiKey(params.apiKey) ?? normalizeOptionalProviderApiKey(existingApiKey);';
+    // Non-secret SDK marker; authHeader:false leaves authentication to Olares.
+    // Match this user's Router URL exactly and preserve all explicit credentials.
+    const customReplacement = 'const useOlaresIdentity = !normalizeOptionalProviderApiKey(params.apiKey) && !normalizeOptionalProviderApiKey(existingApiKey) && resolvedBaseUrl.replace(/\\/+$/, "") === ' + JSON.stringify('https://' + routerHost + '/v1') + ';\n\tconst normalizedApiKey = normalizeOptionalProviderApiKey(params.apiKey) ?? normalizeOptionalProviderApiKey(existingApiKey) ?? (useOlaresIdentity ? "olares-app-identity" : undefined);';
+    const authOriginal = '...isAzure ? { authHeader: false } : {},';
+    const memoryOriginal = 'await runSetupMemoryImportStep({\n\t\t\tconfig: nextConfig,\n\t\t\tprompter,\n\t\t\truntime\n\t\t});';
+    const memoryReplacement = 'await runSetupMemoryImportStep({\n\t\t\tconfig: nextConfig,\n\t\t\tprompter,\n\t\t\truntime\n\t\t}).catch((error) => {\n\t\t\tif (error?.name !== "LocalStateOwnerError" || !error.message.includes("for migration providers") || !error.message.includes("This operation requires exclusive offline state ownership")) throw error;\n\t\t\truntime.log("Memory import prompt skipped while Gateway is running. Stop Gateway before importing memory.");\n\t\t});';
+    const finalizeOriginal = 'if (containerWithoutUserSystemd && !opts.skipUi) sessionGateway = await startSessionGatewayForOnboarding({';
+    const finalizeReplacement = 'if (containerWithoutUserSystemd && !opts.skipUi && !(await probeGatewayReachable({ url: resolveLocalControlUiProbeLinks({ bind: "loopback", port: settings.port, tlsEnabled: nextConfig.gateway?.tls?.enabled === true }).wsUrl, token: settings.authMode === "token" ? settings.gatewayToken : undefined, password: probePassword })).ok) sessionGateway = await startSessionGatewayForOnboarding({';
+    const tuiOriginal = '}).wsUrl : displayLinks.wsUrl,';
+    const tuiReplacement = '}).wsUrl : resolveLocalControlUiProbeLinks(controlUiLinkOptions).wsUrl,';
+    const patches = new Map([
+      ['file://' + setupModule, [[original, replacement], [memoryOriginal, memoryReplacement]]],
+      ['file://' + finalizeModule, [[finalizeOriginal, finalizeReplacement], [tuiOriginal, tuiReplacement]]],
+      ['file://' + customModule, [[customOriginal, customReplacement], [authOriginal, '...isAzure || useOlaresIdentity ? { authHeader: false } : {},']]]
+    ]);
+    for (const [url, edits] of patches) {
+      const source = readFileSync(new URL(url), 'utf8');
+      for (const [before] of edits) if (source.split(before).length !== 2) throw new Error('Olares onboarding compatibility check failed: unexpected module ' + url);
+    }
+    registerHooks({
+      load(url, context, nextLoad) {
+        const result = nextLoad(url, context);
+        const edits = patches.get(url);
+        if (!edits) return result;
+        let source = typeof result.source === 'string' ? result.source : Buffer.from(result.source).toString('utf8');
+        for (const [before, after] of edits) {
+          if (source.split(before).length !== 2) throw new Error('Olares onboarding compatibility check failed: unexpected module ' + url);
+          source = source.replace(before, after);
+        }
+        return { ...result, source };
+      }
+    });
