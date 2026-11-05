@@ -9,6 +9,11 @@ data:
     const file='/app/dist/server/assets/router-CNYEqYhU.js';
     let code=fs.readFileSync(file,'utf8');
     function replaceOnce(before,after){if(code.split(before).length!==2)throw Error('Upstream patch context changed');code=code.replace(before,after);}
+    // Responses requests use store:false. Unlike chat/completions, this API
+    // does not restore history from X-Hermes-Session-Id or body.session_id.
+    // Replay Workspace's saved transcript on this stateless path only; keep
+    // chat/completions' server-side session binding and history policy intact.
+    replaceOnce('conversationHistory: effectiveHistory,', 'conversationHistory: persistedHistory.length > 0 ? persistedHistory : history2,');
     replaceOnce('sessions: [],\n            source: "unavailable",', 'sessions: listLocalSessions().map(ls => ({key:ls.id,id:ls.id,friendlyId:ls.id,title:ls.title||"Local Chat",label:ls.title||"Local Chat",derivedTitle:ls.title||"Local Chat",startedAt:ls.createdAt,updatedAt:ls.updatedAt,message_count:ls.messageCount,model:ls.model,source:"local"})),\n            source: "local",');
     const start=code.indexOf('createFileRoute("/api/history")');
     if(start<0)throw Error('History route missing');
