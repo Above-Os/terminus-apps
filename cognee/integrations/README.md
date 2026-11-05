@@ -1,6 +1,6 @@
 # Official Cognee MCP
 
-The chart runs the official `cognee/cognee-mcp` image in API mode against the backend in the same Pod. Cognee backend and UI use `1.6.6`. MCP uses `main-df2b4fa` with its manifest digest, matching the upstream v1.6.6 release commit. Its package version is separate from the backend version.
+The chart runs the official `cognee/cognee-mcp` image in API mode against the backend in the same Pod. Cognee backend and UI use `1.6.6`. MCP uses the explicit `main-df2b4fa` tag, matching the upstream v1.6.6 release commit. Its package version is separate from the backend version.
 
 Create a Cognee API key for the account whose datasets the assistant should use. Set it as the app's editable `MCP_API_KEY` environment variable in Olares Settings, then apply the change. An empty value disables MCP entrance access. Existing account passwords and knowledge storage are preserved.
 
