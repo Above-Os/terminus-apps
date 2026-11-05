@@ -38,7 +38,7 @@ spec:
           requests: {cpu: 10m, memory: 16Mi}
           limits: {cpu: 100m, memory: 64Mi}
       - name: prepare-portable-chat
-        image: ghcr.io/outsourc-e/hermes-workspace@sha256:1ec05339750da7caaf1cd0183c8c3b188856918b377407b4ac1dafca67e42d88
+        image: beclab/outsourc-e-hermes-workspace:latest
         command: [node, /patch-script/patch.cjs]
         resources:
           requests: {cpu: 10m, memory: 32Mi}
@@ -48,8 +48,8 @@ spec:
         - {name: patched, mountPath: /patched}
       containers:
       - name: hermesworkspace
-        image: ghcr.io/outsourc-e/hermes-workspace@sha256:1ec05339750da7caaf1cd0183c8c3b188856918b377407b4ac1dafca67e42d88
-        command: [/usr/bin/tini, --, node, --max-old-space-size=2048, server-entry.js]
+        image: beclab/outsourc-e-hermes-workspace:latest
+        command: [/usr/bin/tini, --, node, --max-old-space-size=3072, server-entry.js]
         workingDir: /app
         envFrom: [{secretRef: {name: hermesworkspace-auth}}]
         env:
@@ -70,8 +70,8 @@ spec:
         startupProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 60}
         readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
         resources:
-          requests: {cpu: 200m, memory: 512Mi}
-          limits: {cpu: '2', memory: 3Gi}
+          requests: {cpu: 300m, memory: 768Mi}
+          limits: {cpu: '3', memory: 4Gi}
         securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
         volumeMounts:
         - {name: data, mountPath: /data/home, subPath: home}
