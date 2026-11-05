@@ -127,15 +127,75 @@ run artifacts; no device hostname, credentials or private keys are committed.
   not repeated; the existing full amd64 results remain valid for the unchanged
   amd64 image content. Review smoke and the other listed limitations remain.
 
+## Webapp and delegation follow-up — 2026-11-05
+
+The previous client-limit conclusion was incomplete: `/delegation` is supplied
+by the optional official `advanced-delegation` plugin, not enabled by this image
+by default. The chart now vendors version 1.0.0 at the official catalog-reviewed
+commit `e404b6816b20237a82f6fbe2749b5a576cf75dba`, with its MIT license and
+provenance. It seeds the plugin offline on first startup, preserves an existing
+plugin installation, and respects explicit plugin disablement. No core command
+or authentication bypass was added.
+
+Per explicit user choice, the chart adds **Hermes Webapp** (internal Olares
+entrance) and enables it when not explicitly configured otherwise. Its own
+non-loopback listener keeps upstream Hermes authentication enabled. First-start
+initialization generates a random password, stores its scrypt hash in config,
+and saves the login information in `/opt/data/webapp/olares-login.txt` (0600).
+Open **Hermes CLI**, run `cat /opt/data/webapp/olares-login.txt`, then use those
+credentials at **Hermes Webapp**. Existing configured credentials and explicit
+Webapp opt-out are preserved; users with existing credentials keep using them.
+The first pre-change config is backed up privately before modification.
+
+The proxy preserves upstream authentication and CSP, supports WebSockets,
+compresses scripts/styles, and uses Pod-template checksums so ConfigMap updates
+restart the runtime and rerun initialization. Main image reference and both
+architectures remain unchanged; no new image publication was required.
+
+Validated on a separate `hermesweb227` Upload instance on the authorized Olares
+1.12.7/amd64 host; the installed market app was not modified. Test-only Chart
+revisions 1.3.52/1.3.53 exercised configuration upgrades without changing the
+release candidate's 1.3.51 version. These added integration checks do not claim
+that both historical-version upgrade matrices were repeated for this follow-up.
+
+- **CLI:** actual `hermes chat -q '/delegation model_map' --oneshot -Q`
+  exited 0 and reported the saved mode, rather than unknown command.
+- **Dashboard Chat:** browser `/delegation model_map --now` reported saved
+  and applied, with the configured `olares` route. Gateway RPC separately
+  covered default, saving model_map, apply-now and refusal of unconfigured routes.
+- **Webapp:** internal entrance → independent username/password sign-in →
+  workspace → Router **default-chat** returned `OLARES_WEBAPP_227 99303` for
+  `237 * 419`. The UI showed model custom/default-chat and low reasoning.
+  Anonymous `/api/config` returned 401; authenticated access returned 200.
+- **Real delegation:** the browser requested a named-route child. Stored
+  `delegate_task` arguments included `option: olares`; the child session's
+  source was `subagent`, model `default-chat`, and parent ID matched the Webapp
+  conversation. The child returned `OLARES_DELEGATION_227 38771` for `137 * 283`;
+  the parent received and displayed the completion. This was not a mock response.
+- **Persistence:** the native configuration upgrade kept the generated login
+  file byte-identical, preserved Router/routing configuration and both real
+  marker conversations, and SQLite integrity_check returned `ok`.
+- **ARM64 initialization:** Docker-emulated aarch64 bootstrap passed; repeated
+  initialization preserved password/config, malformed YAML failed without
+  overwrite, and explicit Webapp/plugin opt-out stayed intact. This does not
+  substitute for native ARM64 Olares workflow coverage.
+- **Final proxy:** authenticated script request with Accept-Encoding gzip
+  returned gzip content (4408 bytes; decompresses to the original 8264 bytes).
+
+Local evidence: `deliverables/hermesagent-webapp-20261105/`, including sanitized
+probe/CLI/database results, bootstrap checks, and browser screenshots
+`webapp-delegation.jpg` and `dashboard-delegation.jpg`. Generated credentials,
+session cookies and user config are excluded from this repository/PR.
+
 ## Known limitations and remaining review
 
 - Full Olares deployment/migration/workflow tests were on amd64. ARM64 was
   built and started under Docker emulation, not on a native ARM64 Olares device.
-- `/delegation` is unavailable in the current exposed clients: Dashboard reports
-  it is not available on the shared gateway; classic CLI reports unknown command.
-  Backend code existing in the image is not an end-to-end pass.
-- Gateway Webapp is default-off and is not a new entrance in this chart. Desktop
-  group-chat/lead-routing and related UI features are not validated here.
+- Official delegation `model_map` was tested end to end; `profile_routes` is
+  registered but cross-profile delegation was not exercised. Desktop group-chat,
+  lead-routing, remote Nous sign-in and optional Webapp integrations remain untested.
+- Webapp's first browser load was slow in the test browser. The final proxy
+  compresses scripts/styles; no cross-network performance guarantee is claimed.
 - Automatic title generation requests `reasoning_effort=none`, rejected by the
   current local model (low/medium/xhigh only). Main chat/continuation passes; the
   title helper warning also occurred on the old baseline.

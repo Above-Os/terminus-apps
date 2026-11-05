@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermesagent-webapp-bootstrap
+  namespace: "{{ .Release.Namespace }}"
+data:
+  bootstrap.py: |
+    import os, secrets, shutil, tempfile
+    from pathlib import Path
+    from hermes_cli.config import require_readable_config_before_write, save_config
+    from plugins.dashboard_auth.basic import hash_password
+
+    home = Path('/opt/data')
+    config = home / 'config.yaml'
+    raw = require_readable_config_before_write(config)
+    if not isinstance(raw, dict):
+        raise ValueError('config.yaml must be a mapping')
+    backup = home / 'olares-webapp-backup'
+    backup.mkdir(mode=0o700, exist_ok=True)
+    if config.exists() and not (backup / 'config.yaml').exists():
+        shutil.copy2(config, backup / 'config.yaml')
+        (backup / 'config.yaml').chmod(0o600)
+
+    plugin = home / 'plugins/advanced-delegation'
+    if not plugin.exists():
+        plugin.parent.mkdir(exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix='.olares-delegation-', dir=plugin.parent))
+        shutil.copytree('/opt/olares-bootstrap/advanced-delegation', staging, dirs_exist_ok=True)
+        staging.rename(plugin)
+    if (plugin / 'PROVENANCE').exists() and 'e404b6816b20237a82f6fbe2749b5a576cf75dba' in (plugin / 'PROVENANCE').read_text():
+        plugins = raw.setdefault('plugins', {})
+        if 'advanced-delegation' not in plugins.get('disabled', []):
+            enabled = plugins.setdefault('enabled', [])
+            if 'advanced-delegation' not in enabled:
+                enabled.append('advanced-delegation')
+
+    webapp = raw.setdefault('webapp', {})
+    webapp.setdefault('enabled', True)
+    # This packaged listener has a stable port; non-loopback engages Hermes sign-in.
+    webapp['host'] = '0.0.0.0'
+    webapp['port'] = 19120
+    auth = raw.setdefault('dashboard', {}).setdefault('basic_auth', {})
+    login_dir = home / 'webapp'
+    login_dir.mkdir(mode=0o700, exist_ok=True)
+    login_file = login_dir / 'olares-login.txt'
+    if not auth.get('username') or not (auth.get('password_hash') or auth.get('password')):
+        password = secrets.token_urlsafe(24)
+        auth.update(username='hermes', password_hash=hash_password(password))
+        # Persist before config: a startup interruption must not leave an unknown password.
+        fd = os.open(login_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write('Hermes Webapp login (private; do not share)\nUsername: hermes\nPassword: ' + password + '\n')
+    if not auth.get('secret'):
+        auth['secret'] = secrets.token_urlsafe(48)
+    save_config(raw, strip_defaults=False)
+    print('[init-webapp] Webapp configured; private login: /opt/data/webapp/olares-login.txt')
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermesagent-delegation-plugin
+  namespace: "{{ .Release.Namespace }}"
+data:
+{{ (.Files.Glob "files/advanced-delegation/*").AsConfig | indent 2 }}
