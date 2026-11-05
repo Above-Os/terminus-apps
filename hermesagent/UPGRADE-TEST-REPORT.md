@@ -174,7 +174,10 @@ that both historical-version upgrade matrices were repeated for this follow-up.
   the parent received and displayed the completion. This was not a mock response.
 - **Persistence:** the native configuration upgrade kept the generated login
   file byte-identical, preserved Router/routing configuration and both real
-  marker conversations, and SQLite integrity_check returned `ok`.
+  marker conversations, and SQLite integrity_check returned `ok`. A separate
+  full Market restart completed successfully; the pre-restart signed-in cookie
+  accessed `/api/config` with HTTP 200 without reauthentication. The login file
+  remained byte-identical after both native rollouts and restarts.
 - **ARM64 initialization:** Docker-emulated aarch64 bootstrap passed; repeated
   initialization preserved password/config, malformed YAML failed without
   overwrite, and explicit Webapp/plugin opt-out stayed intact. This does not
@@ -208,7 +211,9 @@ session cookies and user config are excluded from this repository/PR.
 - The declared manifest minimum Olares version predates the tested 1.12.7 host;
   minimum-version runtime compatibility was not tested in this run.
 
-All four dedicated test instances and their Upload records were removed after
-explicit user approval; data/backups were retained. The original installed
+The original four dedicated test instances and their Upload records were removed
+after explicit user approval. The follow-up `hermesweb227` was also uninstalled
+with delete-data=false and its Upload records deleted after validation; all
+data/backups and evidence were retained. Local task containers were stopped. The original installed
 market application remains on 0.22.2 with the same Pod UID and image. This draft
 does not claim reviewer smoke approval or authorize a merge/public release.
