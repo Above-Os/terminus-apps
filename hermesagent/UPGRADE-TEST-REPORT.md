@@ -249,4 +249,3 @@ and upstream commit were used to verify the application version.
 The existing settings are retained in a private backup on the device. Local
 sanitized evidence is in deliverables/hermesagent-live-20261105. The deployed
 package SHA256 is `06cd2f4f18e8d1638b5840b888a443033477f668b6b1dd02f055ce99f96899ee`. Image tag and architectures are unchanged.
-
