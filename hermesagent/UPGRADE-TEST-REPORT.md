@@ -214,6 +214,39 @@ session cookies and user config are excluded from this repository/PR.
 The original four dedicated test instances and their Upload records were removed
 after explicit user approval. The follow-up `hermesweb227` was also uninstalled
 with delete-data=false and its Upload records deleted after validation; all
-data/backups and evidence were retained. Local task containers were stopped. The original installed
-market application remains on 0.22.2 with the same Pod UID and image. This draft
-does not claim reviewer smoke approval or authorize a merge/public release.
+data/backups and evidence were retained. Local task containers were stopped.
+At the end of isolated validation, the original market application had been left
+on 0.22.2 with its original Pod UID and image. The subsequent explicitly
+authorized existing-instance deployment is recorded below. This draft does not
+claim reviewer smoke approval or authorize a merge/public release.
+
+
+## Authorized existing-instance deployment — 2026-11-05
+
+The user subsequently requested the upgrade of the existing installation and
+explicitly selected uninstall followed by Upload installation. Market rejected
+an in-place cross-source upgrade from market.olares to upload. After a private
+on-device full-home backup and consistent SQLite snapshots, the existing app was
+uninstalled with delete-data=false and the candidate installed under the same
+app name from upload. The original platform environment values were restored
+without publishing their contents. The new application and its Upload record
+are intentionally retained for the user, rather than treated as disposable tests.
+
+The Webapp entrance is appended after the existing hidden API entrance. This
+retains indexes terminal=0, dashboard=1, api=2 and assigns webapp=3. Before/after
+Settings URLs for all three original entrances were compared and are identical.
+This ordering prevents the existing Gateway API address from changing.
+
+Native amd64 checks passed: displayVersion 0.22.7 and the pinned upstream commit,
+UID1000, all original session IDs and message rows retained, five databases
+passing integrity_check, unchanged model configuration, successful default-chat
+conversation, registered delegation command, generated Webapp login at mode0600,
+anonymous Webapp API rejected with 401 and authenticated API/HTML returning200.
+The original API key is unchanged and authenticates /v1/models successfully. Updates to bundled skills matched their previous origin hashes. All other protected files were preserved apart from the expected config and bundle-manifest updates.
+Python project metadata uses the placeholder version0.0.0, so the release stamp
+and upstream commit were used to verify the application version.
+
+The existing settings are retained in a private backup on the device. Local
+sanitized evidence is in deliverables/hermesagent-live-20261105. The deployed
+package SHA256 is `06cd2f4f18e8d1638b5840b888a443033477f668b6b1dd02f055ce99f96899ee`. Image tag and architectures are unchanged.
+
