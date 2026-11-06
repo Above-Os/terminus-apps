@@ -17,6 +17,7 @@ spec:
       labels:
         app: yue2studio
       annotations:
+        checksum/gateway: {{ include (print $.Template.BasePath "/gateway-config.yaml") . | sha256sum }}
         checksum/huggingface: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       enableServiceLinks: false
@@ -39,7 +40,13 @@ spec:
       - name: yue2studio
         image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
         imagePullPolicy: IfNotPresent
+        command: [bash, /opt/olares/entrypoint.sh]
         env:
+        - name: YUE_STUDIO_MCP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: yue2studio-mcp
+              key: token
         - name: HF_ENDPOINT
           value: {{ .Values.olaresEnv.HF_ENDPOINT | quote }}
         - name: HF_TOKEN
@@ -49,6 +56,7 @@ spec:
               key: HF_TOKEN
         ports:
         - {name: http, containerPort: 8080}
+        - {name: api, containerPort: 8081}
         resources:
           requests: {cpu: 400m, memory: 1Gi}
           limits:
@@ -70,7 +78,11 @@ spec:
         volumeMounts:
         - {name: data, mountPath: /data}
         - {name: models, mountPath: /models}
+        - {name: gateway, mountPath: /opt/olares, readOnly: true}
       volumes:
+      - name: gateway
+        configMap:
+          name: yue2studio-gateway
       - name: data
         hostPath:
           path: {{ .Values.userspace.appData }}

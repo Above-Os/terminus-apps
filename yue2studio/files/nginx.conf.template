@@ -1,0 +1,64 @@
+worker_processes auto;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 1024; }
+http {
+    map_hash_bucket_size 128;
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log /dev/stdout;
+    client_body_temp_path /tmp/nginx-body;
+    proxy_temp_path /tmp/nginx-proxy;
+    fastcgi_temp_path /tmp/nginx-fastcgi;
+    uwsgi_temp_path /tmp/nginx-uwsgi;
+    scgi_temp_path /tmp/nginx-scgi;
+    client_max_body_size 256m;
+    map $http_authorization $api_authorized {
+        default 0;
+        "Bearer ${YUE_STUDIO_MCP_TOKEN}" 1;
+    }
+    server {
+        listen 8080;
+        root /opt/yue2/ui;
+        location / { try_files $uri $uri/ /index.html; }
+        location ~ ^/(v1|setup|engine|health|mcp)(/|$) {
+            proxy_pass http://127.0.0.1:8791;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-Host $http_host;
+            proxy_set_header Authorization "Bearer ${YUE_STUDIO_ACCESS_KEY}";
+            proxy_set_header Connection "";
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+    }
+    # This port is exposed only by the invisible internal entrance.
+    server {
+        listen 8081;
+        if ($api_authorized = 0) { return 401; }
+        location = /mcp {
+            proxy_pass http://127.0.0.1:8791;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-Host $http_host;
+            proxy_set_header Authorization "Bearer ${YUE_STUDIO_ACCESS_KEY}";
+            proxy_set_header Connection "";
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+        location /v1/ {
+            proxy_pass http://127.0.0.1:8791;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-Host $http_host;
+            proxy_set_header Authorization "Bearer ${YUE_STUDIO_ACCESS_KEY}";
+            proxy_set_header Connection "";
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+        location / { return 404; }
+    }
+}
