@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yue2studio
+  namespace: '{{ .Release.Namespace }}'
+spec:
+  replicas: {{ .Values.workloads.yue2studio.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: yue2studio
+  template:
+    metadata:
+      labels:
+        app: yue2studio
+      annotations:
+        checksum/huggingface: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+      - name: init-permissions
+        image: beclab/aboveos-busybox:1.37.0
+        command: [sh, -ec, 'mkdir -p /data /models; chown 1000:1000 /data /models']
+        securityContext:
+          runAsUser: 0
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+        - {name: models, mountPath: /models}
+      containers:
+      - name: yue2studio
+        image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: HF_ENDPOINT
+          value: {{ .Values.olaresEnv.HF_ENDPOINT | quote }}
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: yue2studio-hf
+              key: HF_TOKEN
+        ports:
+        - {name: http, containerPort: 8080}
+        resources:
+          requests: {cpu: 1500m, memory: 8Gi}
+          limits:
+            cpu: '8'
+            memory: 16Gi
+            nvidia.com/gpu: 1
+        startupProbe:
+          httpGet: {path: /health, port: http}
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          httpGet: {path: /health, port: http}
+          periodSeconds: 10
+          timeoutSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+        - {name: models, mountPath: /models}
+      volumes:
+      - name: data
+        hostPath:
+          path: {{ .Values.userspace.appData }}
+          type: DirectoryOrCreate
+      - name: models
+        hostPath:
+          path: {{ .Values.userspace.appCommon }}/huggingface/yue2studio
+          type: DirectoryOrCreate
