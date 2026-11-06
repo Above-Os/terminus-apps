@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: colibri
+  namespace: '{{ .Release.Namespace }}'
+  annotations:
+    applications.app.bytetrade.io/gpu-inject: "colibri"
+spec:
+  replicas: {{ .Values.workloads.colibri.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: colibri
+  template:
+    metadata:
+      labels:
+        app: colibri
+      annotations:
+        checksum/auth: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/proxy: {{ include (print $.Template.BasePath "/proxy.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      initContainers:
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          command: [sh, -ec, 'mkdir -p /data/home; chown 1000:1000 /data /data/home']
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      containers:
+        - name: colibri
+          image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
+          imagePullPolicy: IfNotPresent
+          command: [python3, /usr/local/libexec/colibri/olares_models.py]
+          args:
+            - --ctx
+            - '4096'
+            - --ram
+            - {{ if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}'4'{{ else }}{{ .Values.olaresEnv.RAM_GB | quote }}{{ end }}
+          env:
+            - {name: HOME, value: /data/home}
+            - {name: PYTHONUNBUFFERED, value: '1'}
+            - name: COLI_CUDA
+              value: '1'
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: COLI_GPUS
+              value: '0'
+            - name: COLI_CUDA_CHAIN
+              value: {{ if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}'0'{{ else }}'1'{{ end }}
+            {{- if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}
+            - name: CUDA_EXPERT_GB
+              value: '2'
+            {{- end }}
+            - name: COLI_ALLOWED_HOSTS
+              value: '{{ .Values.domain.colibri }},colibri,colibri.{{ .Release.Namespace }}.svc.cluster.local'
+            - name: COLI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: colibri-auth, key: API_KEY}
+          ports:
+            - {name: engine, containerPort: 8000}
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: '8'
+              memory: 24Gi
+          startupProbe:
+            httpGet: {path: /olares-models/health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 720
+          readinessProbe:
+            httpGet: {path: /olares-models/health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: models, mountPath: /models, readOnly: true}
+        - name: web-proxy
+          image: '{{ .Values.image.repository }}:{{ .Values.image.tag }}'
+          command: [python3, -c]
+          args:
+            - |
+              import os,pathlib
+              template=pathlib.Path('/etc/colibri/nginx.conf').read_text()
+              config=pathlib.Path('/tmp/nginx.conf')
+              config.write_text(template.replace('__COLI_TOKEN__',os.environ['COLI_API_KEY']))
+              config.chmod(0o600)
+              os.execvp('nginx',['nginx','-c',str(config),'-g','daemon off;'])
+          env:
+            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
+            - {name: CUDA_VISIBLE_DEVICES, value: ''}
+            - name: COLI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: colibri-auth, key: API_KEY}
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: proxy-config, mountPath: /etc/colibri, readOnly: true}
+      volumes:
+        - name: proxy-config
+          configMap: {name: colibri-proxy}
+        - name: data
+          hostPath:
+            path: {{ .Values.userspace.appData }}
+            type: DirectoryOrCreate
+        - name: models
+          hostPath:
+            path: {{ .Values.userspace.appCommon }}/huggingface
+            type: DirectoryOrCreate

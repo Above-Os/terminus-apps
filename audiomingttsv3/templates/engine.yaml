@@ -24,14 +24,14 @@
 {{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
 {{- end -}}
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-ming-ov:v1.1.35" "docker.io/beclab/audio-ming:v1.1.35" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-ming-ov:v1.1.39" "docker.io/beclab/audio-ming:v1.1.39" $isIntel) -}}
 {{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
 {{- if eq $gpuType "intel" -}}
 {{- /* iGPU only: request 6Gi, limit 32Gi. */ -}}
 {{- $memRequest = "6Gi" -}}
 {{- $memLimit = "32Gi" -}}
 {{- else if eq $gpuType "intel-gpu" -}}
-{{- /* Arc: request stays 2Gi. Limit 16Gi sits between the 8Gi OOM and the unmeasured 20Gi. */ -}}
+{{- /* Arc: request 2Gi, limit 16Gi. */ -}}
 {{- $memLimit = "16Gi" -}}
 {{- end -}}
 {{- if $wantGpu -}}
