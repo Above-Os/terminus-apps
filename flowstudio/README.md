@@ -3,7 +3,7 @@
 All-in-one AI workflow production on Olares: import ComfyUI workflows, resolve models
 and custom nodes, allocate GPU per project, and generate on PC / mobile.
 
-Current Chart version: **0.3.92** (must match `Chart.yaml` / `OlaresManifest.yaml`).
+Current Chart version: **0.3.93** (must match `Chart.yaml` / `OlaresManifest.yaml`).
 
 ## Requirements
 
@@ -93,6 +93,11 @@ that could name it could disagree with the catalogue Router built its model rows
 A generation started this way is owned by the end user Router forwards
 (``x-bfl-user`` / ``remote-user``). Without that header it falls back to the chart owner.
 
+Reference images: prefer ``params.images`` as ``{slotKey: drive/Home/…}`` when the
+workflow catalogue lists an ``images`` group (Qwen-Image 2.1 edit supports up to ten
+slots; at least ``image_1`` is required). Legacy ``inputImages`` accepts up to ten
+base64 data URLs in the same slot order; total decoded size is capped at 20 MiB.
+
 The OpenAI-shaped surface is a different consumer and is unchanged:
 
 | Purpose | Endpoint |
@@ -150,7 +155,7 @@ Bump together:
 After upgrading from Market: reopen the app; if GPU binding was lost, re-bind under Olares Accelerators, then start again.
 
 Manifest `upgradeDescription` tracks `spec.versionName`, the app release, and currently
-covers 0.3.92. This chart ships `docker.io/beclab/flowstudio:0.3.92`, `engine-1.0.9` (amd64), and `engine-1.0.9-arm64` (nvidia-gb10).
+covers 0.3.93. This chart ships `docker.io/beclab/flowstudio:0.3.93`, `engine-1.0.9` (amd64), and `engine-1.0.9-arm64` (nvidia-gb10).
 QA: [`../../docs/test-cases-v0.3.20.zh.md`](../../docs/test-cases-v0.3.20.zh.md) / [`../../docs/test-cases-v0.3.20.md`](../../docs/test-cases-v0.3.20.md).
 
 ## Chart layout
