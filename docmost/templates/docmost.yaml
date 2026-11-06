@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: docmost
@@ -29,14 +29,21 @@ spec:
               DEST=/new-data
               MARKER="${DEST}/.migration_from_appcache_done"
 
+              ensure_storage_dir() {
+                mkdir -p "$DEST/docmost"
+                chown 1000:1000 "$DEST/docmost"
+              }
+
               if [ -f "$MARKER" ]; then
                 echo "[migrate] marker present, skip."
+                ensure_storage_dir
                 exit 0
               fi
 
               if [ -n "$(ls -A "$DEST" 2>/dev/null | grep -v '^\.migration_from_appcache_done$' || true)" ]; then
                 echo "[migrate] appData already has data, skip."
                 echo "skipped existing dest at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
+                ensure_storage_dir
                 exit 0
               fi
 
@@ -49,6 +56,9 @@ spec:
                 echo "[migrate] no legacy data, fresh install."
                 echo "fresh install at $(date -Iseconds 2>/dev/null || date)" > "$MARKER"
               fi
+              ensure_storage_dir
+          securityContext:
+            runAsUser: 0
           volumeMounts:
             - name: docmost-data-legacy
               mountPath: /old-data
@@ -57,7 +67,7 @@ spec:
               mountPath: /new-data
       containers:
         - name: docmost
-          image: "docmost/docmost:0.95.0"
+          image: "docker.io/docmost/docmost:0.97.0"
           env:
             - name: PGID
               value: "1000"
