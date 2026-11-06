@@ -21,6 +21,14 @@ spec:
         - name: triliumnext
           image: "docker.io/triliumnext/trilium:v0.106.1"
           imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              node /olares-mcp/bootstrap.cjs
+              export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require=/olares-mcp/internal.cjs"
+              exec sh ./start-docker.sh
           env:
             - name: TRILIUM_DATA_DIR
               value: "/home/node/trilium-data"
@@ -35,11 +43,20 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            - name: mcp
+              containerPort: 18081
+              protocol: TCP
           volumeMounts:
+            - name: mcp-runtime
+              mountPath: /olares-mcp
+              readOnly: true
             - name: triliumnext-data
               mountPath: /home/node/trilium-data
       restartPolicy: Always
       volumes:
+        - name: mcp-runtime
+          configMap:
+            name: triliumnext-mcp-runtime
         - name: triliumnext-data
           hostPath:
             type: DirectoryOrCreate
@@ -54,6 +71,10 @@ metadata:
     io.kompose.service: triliumnext
 spec:
   ports:
+    - name: mcp
+      port: 18081
+      targetPort: 18081
+      protocol: TCP
     - name: http
       port: 8080
       targetPort: 8080

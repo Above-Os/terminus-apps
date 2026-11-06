@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triliumnext-mcp-runtime
+  namespace: {{ .Release.Namespace }}
+data:
+  bootstrap.cjs: |
+    // Upstream 0.106.1 has no unauthenticated MCP setting. Extend only its MCP
+    // access decision for a separate socket protected by Olares' internal entrance.
+    // No database, account, or ETAPI token is created or changed.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const crypto = require('node:crypto');
+    const root = '/usr/src/app/chunks';
+    const marker = 'MCP requires an ETAPI token.';
+    const files = fs.readdirSync(root).filter(name => name.endsWith('.mjs'))
+      .filter(name => fs.readFileSync(path.join(root, name), 'utf8').includes(marker));
+    if (files.length !== 1) throw new Error('Unsupported Trilium MCP build: expected one router chunk');
+    const file = path.join(root, files[0]);
+    const source = fs.readFileSync(file, 'utf8');
+    const original = /hasValidToken:([A-Za-z_$][\w$]*\.isValidAuthHeader\(([A-Za-z_$][\w$]*)\.headers\.authorization\))/g;
+    const patched = /hasValidToken:\(([A-Za-z_$][\w$]*)\.socket\.localPort===18081\|\|[A-Za-z_$][\w$]*\.isValidAuthHeader\(\1\.headers\.authorization\)\)/g;
+    const found = [...source.matchAll(original)];
+    const existing = [...source.matchAll(patched)];
+    if (existing.length === 1 && found.length === 0) {
+      console.log('Olares internal MCP socket rule already installed');
+    } else {
+      if (found.length !== 1 || existing.length !== 0 || !source.includes('getOptionOrNull("mcpEnabled")')) {
+        throw new Error('Unsupported Trilium MCP access guard; leaving application code unchanged');
+      }
+      const match = found[0];
+      const replacement = `hasValidToken:(${match[2]}.socket.localPort===18081||${match[1]})`;
+      const updated = source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length);
+      const mode = fs.statSync(file).mode;
+      const temp = file + '.olares-tmp';
+      fs.writeFileSync(temp, updated, { mode });
+      fs.renameSync(temp, file);
+      console.log('Olares internal MCP socket rule installed; source SHA256 ' + crypto.createHash('sha256').update(source).digest('hex'));
+    }
+  internal.cjs: |
+    const http = require('node:http');
+    const originalListen = http.Server.prototype.listen;
+    const installed = Symbol.for('olares.triliumnext.internal-mcp');
+    http.Server.prototype.listen = function (...args) {
+      const first = args[0];
+      const port = Number(first && typeof first === 'object' ? first.port : first);
+      if (port === 8080 && !this[installed]) {
+        this[installed] = true;
+        const application = this;
+        application.once('listening', () => {
+          const internal = http.createServer((req, res) => {
+            const pathname = new URL(req.url || '/', 'http://internal').pathname;
+            if (pathname !== '/mcp' || !['GET', 'POST', 'DELETE'].includes(req.method)) {
+              res.writeHead(404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+              res.end('Not found');
+              return;
+            }
+            // Forward the original request object: socket.localPort remains the
+            // kernel-provided 18081, never a client header or forwarded address.
+            application.emit('request', req, res);
+          });
+          internal.on('error', err => { console.error('Internal MCP listener failed:', err.message); process.exit(1); });
+          internal.listen(18081, '0.0.0.0', () => console.log('Olares internal MCP listener ready on port 18081 (MCP path only)'));
+          application.once('close', () => internal.close());
+        });
+      }
+      return Reflect.apply(originalListen, this, args);
+    };
