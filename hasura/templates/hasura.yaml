@@ -1,3 +1,12 @@
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "hasura" -}}
+{{- $hasuraAdminSecret := get (.Values.olaresEnv | default dict) "HASURA_ADMIN_SECRET" | default "" -}}
+{{- if not $hasuraAdminSecret -}}
+  {{- if and $existing $existing.data (index $existing.data "HASURA_GRAPHQL_ADMIN_SECRET") -}}
+    {{- $hasuraAdminSecret = index $existing.data "HASURA_GRAPHQL_ADMIN_SECRET" | b64dec -}}
+  {{- else -}}
+    {{- $hasuraAdminSecret = randAlphaNum 48 -}}
+  {{- end -}}
+{{- end -}}
 # https://stackoverflow.com/questions/54173581/combining-multiple-k8s-secrets-into-an-env-variable
 # Source: hasura/templates/serviceaccount.yaml
 apiVersion: v1
@@ -18,6 +27,8 @@ kind: Secret
 metadata:
   name: hasura
   namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     helm.sh/chart: hasura-2.10.0
     app.kubernetes.io/name: hasura
@@ -26,7 +37,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 type: Opaque
 stringData:
-  HASURA_GRAPHQL_ADMIN_SECRET: "qwer1234"
+  HASURA_GRAPHQL_ADMIN_SECRET: {{ $hasuraAdminSecret | quote }}
 ---
 # Source: hasura/templates/configmap.yaml
 apiVersion: v1
@@ -118,7 +129,7 @@ spec:
     metadata:
       annotations:
         checksum/configmap: 482a0d4b3aff0ad798596c4e3d9f4cc6241850aefaff6a4e15a67625e7c8eeea
-        checksum/secret: 41ff5801704dc7a109ae4404854a03050ebc16cdbf6ab4f5f705869abf1685be
+        checksum/secret: {{ $hasuraAdminSecret | sha256sum | quote }}
       labels:
         app.kubernetes.io/name: hasura
         app.kubernetes.io/instance: hasura

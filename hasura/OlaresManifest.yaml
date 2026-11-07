@@ -43,8 +43,8 @@ spec:
     - https://app.cdn.olares.com/appstore/hasura/3.webp
     - https://app.cdn.olares.com/appstore/hasura/4.webp
   fullDescription: |
-    **Default admin secret:**
-    qwer1234
+    **Console and API access:**
+    Set HASURA_ADMIN_SECRET during installation or in Settings > Applications > Hasura > Environment Variables, then use that secret to sign in. If you leave it blank on a new installation, a random secret is generated; set your own value in Settings before signing in. Existing installations keep their current secret unless you explicitly replace it.
 
     **What is Hasura?**
     The Hasura engine is an open source project which supercharges the building of modern applications by providing access to data via a single, composable, secure API endpoint.
@@ -87,6 +87,8 @@ spec:
   upgradeDescription: |
     Upgrade Hasura to 2.51.4. Fixes table-permission editing, OpenAPI imports and database reload feedback. OpenTelemetry SQL text now uses `db.query.text`; update monitors that reference `db.query`.
 
+    Existing installations retain their admin secret. Set HASURA_ADMIN_SECRET during installation or in Settings > Applications > Hasura > Environment Variables to choose a secret for console and API access. New installations no longer use a shared default secret; leaving the field blank generates a random one. Changing this setting requires API clients to use the replacement secret.
+
     Release notes: https://github.com/Hasura/graphql-engine/releases/tag/v2.51.4
 
   developer: Hasura Inc
@@ -119,3 +121,11 @@ options:
   - name: olares
     type: system
     version: '>=1.12.6-0'
+envs:
+- envName: HASURA_ADMIN_SECRET
+  type: password
+  required: false
+  editable: true
+  applyOnChange: true
+  regex: '^$|^.{16,}$'
+  description: Set an admin secret of at least 16 characters for console and API access. Leave blank to preserve the existing secret; a new installation generates a random secret. Setting a replacement invalidates the previous secret for API clients.
