@@ -22,10 +22,13 @@ data:
     const patched = /hasValidToken:\(([A-Za-z_$][\w$]*)\.socket\.localPort===18081\|\|[A-Za-z_$][\w$]*\.isValidAuthHeader\(\1\.headers\.authorization\)\)/g;
     const found = [...source.matchAll(original)];
     const existing = [...source.matchAll(patched)];
+    if (!source.includes('getOptionOrNull("mcpEnabled")')) {
+      throw new Error('Unsupported Trilium MCP enable switch; leaving application code unchanged');
+    }
     if (existing.length === 1 && found.length === 0) {
       console.log('Olares internal MCP socket rule already installed');
     } else {
-      if (found.length !== 1 || existing.length !== 0 || !source.includes('getOptionOrNull("mcpEnabled")')) {
+      if (found.length !== 1 || existing.length !== 0) {
         throw new Error('Unsupported Trilium MCP access guard; leaving application code unchanged');
       }
       const match = found[0];
@@ -49,7 +52,14 @@ data:
         const application = this;
         application.once('listening', () => {
           const internal = http.createServer((req, res) => {
-            const pathname = new URL(req.url || '/', 'http://internal').pathname;
+            let pathname;
+            try {
+              pathname = new URL(req.url || '/', 'http://internal').pathname;
+            } catch {
+              res.writeHead(400, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+              res.end('Bad request');
+              return;
+            }
             if (pathname !== '/mcp' || !['GET', 'POST', 'DELETE'].includes(req.method)) {
               res.writeHead(404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
               res.end('Not found');
