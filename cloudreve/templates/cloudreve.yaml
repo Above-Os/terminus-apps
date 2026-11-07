@@ -1,4 +1,4 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
@@ -18,9 +18,78 @@ spec:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: cloudreve
     spec:
+      initContainers:
+        - name: preserve-legacy-database
+          image: docker.io/beclab/busybox:1.37
+          securityContext:
+            runAsUser: 0
+          command: [sh, -ec]
+          args:
+            - |
+              mkdir -p /database-mode
+              chown 1000:1000 /database-mode
+              if [ -s /data/cloudreve.db ]; then
+                [ "$(head -c 15 /data/cloudreve.db)" = "SQLite format 3" ] || { echo "Unrecognized legacy database; stopping."; exit 1; }
+                DEST=/data/backups/chart-1.0.21
+                if [ ! -f "$DEST/.backup_complete" ]; then
+                  mkdir -p "$DEST"
+                  cp -p /data/cloudreve.db "$DEST/"
+                  for suffix in -wal -shm; do
+                    [ ! -f "/data/cloudreve.db$suffix" ] || cp -p "/data/cloudreve.db$suffix" "$DEST/"
+                  done
+                  [ -s "$DEST/cloudreve.db" ]
+                  touch "$DEST/.backup_complete"
+                fi
+              fi
+          volumeMounts:
+            - name: backend-data
+              mountPath: /data
+            - name: database-mode
+              mountPath: /database-mode
+        - name: select-existing-database
+          image: docker.io/postgres:17.5-alpine
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command: [sh, -ec]
+          args:
+            - |
+              if [ -s /data/cloudreve.db ]; then
+                TABLES=$(psql -XAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_tables WHERE schemaname='public'")
+                [ "$TABLES" = "0" ] || { echo "Both legacy SQLite and PostgreSQL data exist; refusing to choose automatically."; exit 1; }
+                echo sqlite > /database-mode/type
+                echo "Keeping the existing SQLite database."
+              else
+                echo postgres > /database-mode/type
+                echo "Using the configured PostgreSQL database."
+              fi
+          env:
+            - name: PGHOST
+              value: "{{ .Values.postgres.host }}"
+            - name: PGPORT
+              value: "{{ .Values.postgres.port }}"
+            - name: PGUSER
+              value: "{{ .Values.postgres.username }}"
+            - name: PGPASSWORD
+              value: "{{ .Values.postgres.password }}"
+            - name: PGDATABASE
+              value: "{{ .Values.postgres.databases.cloudreve }}"
+          volumeMounts:
+            - name: backend-data
+              mountPath: /data
+              readOnly: true
+            - name: database-mode
+              mountPath: /database-mode
       containers:
-        - image: cloudreve/cloudreve:4.18.0
+        - image: "docker.io/cloudreve/cloudreve:4.19.1"
           name: cloudreve
+          command: [sh, -ec]
+          args:
+            - |
+              if [ "$(cat /database-mode/type)" = sqlite ]; then
+                exec env 'CR_CONF_Database.Type=sqlite' 'CR_CONF_Database.DBFile=/cloudreve/data/cloudreve.db' sh ./entrypoint.sh
+              fi
+              exec sh ./entrypoint.sh
           ports:
             - containerPort: 5212
           env:
@@ -72,6 +141,9 @@ spec:
               mountPath: /data
             - name: backend-data
               mountPath: /cloudreve/data
+            - name: database-mode
+              mountPath: /database-mode
+              readOnly: true
           startupProbe:
             httpGet:
               path: /
@@ -103,6 +175,8 @@ spec:
             - name: temp-data
               mountPath: /data
       volumes:
+        - name: database-mode
+          emptyDir: {}
         - name: temp-data
           emptyDir: { }
         - name: config
