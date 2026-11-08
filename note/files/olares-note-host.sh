@@ -543,6 +543,7 @@ uninstall_bt() {
 
 # The Bluetooth audio setup's script, as the host audio job copies it.
 BT_AUDIO=${OLARES_NOTE_BT_AUDIO:-/var/lib/olares-bt-audio/olares-bt-audio.sh}
+STEP_UNIT=/etc/systemd/system/olares-note-audio@.service
 
 uninstall() {
   uninstall_bt
@@ -552,6 +553,9 @@ uninstall() {
   if [ -f "$BT_AUDIO" ]; then timeout -k 2 40 bash "$BT_AUDIO" remove </dev/null; fi
   [ -f "$SBIN" ] && rm -f "$SBIN" && echo "removed $SBIN"
   rm -rf "/var/lib/$NAME"
+  # The unit the chart's jobs run their steps in. The last one is this very
+  # step, which keeps running; nothing starts the unit again.
+  if [ -f "$STEP_UNIT" ]; then rm -f "$STEP_UNIT"; systemctl daemon-reload; echo "removed $STEP_UNIT"; fi
   # Nothing of Note is left: the old name need not be held down any more.
   if [ -L "$OLD_UNIT" ]; then systemctl unmask "$OLD.service" >/dev/null 2>&1; rm -f "$OLD_UNIT"; systemctl daemon-reload; fi
   rm -f "$OLD_SBIN"; rm -rf "/var/lib/$OLD" "/run/$OLD"

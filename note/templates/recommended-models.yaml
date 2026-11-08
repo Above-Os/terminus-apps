@@ -1,0 +1,27 @@
+# The Olares applications Note requires, one per model step, read by the note
+# container at /config/recommended-models/recommended-models.json
+# (internal/recommend). Keys are the capabilities plus translate. An entry
+# names the Market application to install (app, on source) and the id Router
+# lists its model under (model, empty where not pinned). The chat model is not
+# listed: any chat model on this machine will do. min_version is the oldest
+# version of app that serves Note correctly. A key left out keeps the table
+# built into the image. version is the version of the list as a whole: raise it
+# when the set of required applications changes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-recommended-models
+  namespace: {{ .Release.Namespace }}
+data:
+  recommended-models.json: |
+    {
+      "version": 1,
+      "models": {
+        "stt": {"app": "audioqwen3asrv3", "name": "Qwen3-ASR 1.7B", "source": "market.olares", "min_version": "1.0.21", "model": "Olares/Qwen/Qwen3-ASR-1.7B"},
+        "align": {"app": "audioqwenalignerv3", "name": "Qwen3 Forced Aligner", "source": "market.olares", "model": "Olares/Qwen/Qwen3-ForcedAligner-0.6B"},
+        "diar": {"app": "audionemotrondiarv3", "name": "Nemotron 3 Diarization", "source": "market.olares"},
+        "speaker_embed": {"app": "audiopyannoteembedv3", "name": "Pyannote Embedding", "source": "market.olares"},
+        "vad": {"app": "audiosilerovadv3", "name": "Silero VAD V5", "source": "market.olares", "model": "Olares/onnx-community/silero-vad"},
+        "translate": {"app": "llamacpphymt218bggufv3", "name": "Hy-MT2-1.8B", "source": "market.olares", "model": "Olares/tencent/Hy-MT2-1.8B-GGUF:Q4_K_M"}
+      }
+    }
