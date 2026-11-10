@@ -70,11 +70,68 @@ class ChartContractTest(unittest.TestCase):
         self.assertNotIn("ACESTEP_ON_DEMAND_MODEL_LOAD", server)
         self.assertNotIn("models--ACE-Step--acestep-v15-xl-turbo", server)
         self.assertNotIn("hf://ACE-Step/acestep-v15-xl-turbo", downloader)
-        for name in ("ACESTEP_API_WORKERS", "ACESTEP_QUEUE_WORKERS"):
-            self.assertRegex(
-                server,
-                rf"name: {re.escape(name)}\s+value: \"1\"",
-            )
+        self.assertRegex(server, r'name: ACESTEP_API_WORKERS\s+value: "1"')
+        self.assertIn('value: "{{ $queueWorkers }}"', server)
+        self.assertIn('value: "{{ $queueWorkers }}"', downloader)
+        helper = (CHART_ROOT / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
+        self.assertIn('define "acestepmusicv3.queueWorkers" -}}1', helper)
+
+    def test_downloads_only_required_components(self):
+        downloader = (CHART_ROOT / "templates" / "download.yaml").read_text(encoding="utf-8")
+        source = re.search(r'name: MODEL_SOURCE\s+value: "([^"]+)"', downloader).group(1)
+        sources = source.split(',')
+        self.assertEqual(len(sources), 3)
+        self.assertIn('--exclude acestep*/*', sources[0])
+        self.assertNotIn('--include', source)
+        import fnmatch
+        for name in ['acestep-v15-turbo/model.safetensors', 'acestep-5Hz-lm-1.7B/model.safetensors']:
+            self.assertTrue(fnmatch.fnmatch(name, 'acestep*/*'))
+        for name in ['Qwen3-Embedding-0.6B/model.safetensors', 'vae/diffusion_pytorch_model.safetensors']:
+            self.assertFalse(fnmatch.fnmatch(name, 'acestep*/*'))
+        server = (CHART_ROOT / "templates" / "server.yaml").read_text(encoding="utf-8")
+        self.assertIn('for name in Qwen3-Embedding-0.6B vae;', server)
+        self.assertNotIn('"$MAIN_SNAP"/*', server)
+
+    def test_native_readiness_requires_both_models_then_allows_offloading(self):
+        launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(encoding="utf-8")
+        start = launcher.index('    def startup_ready():')
+        end = launcher.index('    if __name__', start)
+        import textwrap
+        from types import SimpleNamespace
+        state = SimpleNamespace(_initialized=False, _llm_initialized=False)
+        scope = {'app': SimpleNamespace(state=state), 'JSONResponse': lambda body, status_code: status_code}
+        exec(textwrap.dedent(launcher[start:end]), scope)
+        ready = scope['startup_ready']
+        self.assertEqual(ready(), 503)
+        state._initialized = True
+        self.assertEqual(ready(), 503)
+        state._llm_initialized = True
+        self.assertEqual(ready(), 200)
+        state._llm_initialized = False
+        self.assertEqual(ready(), 200)
+        state._llm_init_error = 'failed'
+        self.assertEqual(ready(), 503)
+
+    def test_precheck_requires_only_bundled_components_without_downloading_turbo(self):
+        import tempfile
+        import textwrap
+        launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(encoding="utf-8")
+        start = launcher.index('    def _require_bundled_models(')
+        end = launcher.index('    InitServiceDownloadsMixin._ensure_models_present', start)
+        scope = {'DEFAULT_VAE_VARIANT': 'official'}
+        exec(textwrap.dedent(launcher[start:end]), scope)
+        check = scope['_require_bundled_models']
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            kwargs = dict(checkpoint_path=root, config_path='acestep-v15-xl-sft', prefer_source=None)
+            self.assertEqual(check(None, **kwargs)[1], False)
+            for name in ['acestep-v15-xl-sft', 'acestep-5Hz-lm-4B', 'Qwen3-Embedding-0.6B', 'vae']:
+                (root / name).mkdir()
+                (root / name / 'model.safetensors').write_bytes(b'test')
+            self.assertIsNone(check(None, **kwargs))
+            self.assertIsNone(check(None, **kwargs, vae_variant='official'))
+            self.assertFalse((root / 'acestep-v15-turbo').exists())
+            self.assertEqual(check(None, **kwargs, vae_variant='other')[1], False)
 
     def test_xl_sft_generation_forces_dcw_off(self):
         launcher = (CHART_ROOT / "templates" / "stage-configmap.yaml").read_text(

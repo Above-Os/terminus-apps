@@ -726,6 +726,12 @@ def _persist_alignment(task_id: str, file_url: str, duration: float) -> bool:
 
 @app.get("/v1/models")
 def models() -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(NATIVE_BASE + "/startup-ready", timeout=3) as response:
+            if response.status != 200:
+                raise _error(503, "model_not_ready", "Music models are not ready.")
+    except (urllib.error.URLError, TimeoutError):
+        raise _error(503, "model_not_ready", "Music models are not ready.")
     return {
         "object": "list",
         "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "ACE-Step"}],
@@ -1127,7 +1133,7 @@ def _wait_native(process: subprocess.Popen[Any], timeout: int = 1800) -> None:
         if process.poll() is not None:
             raise RuntimeError(f"ACE-Step native API exited with status {process.returncode}")
         try:
-            with urllib.request.urlopen(NATIVE_BASE + "/health", timeout=5) as response:
+            with urllib.request.urlopen(NATIVE_BASE + "/startup-ready", timeout=5) as response:
                 if response.status == 200:
                     return
         except (urllib.error.URLError, TimeoutError):

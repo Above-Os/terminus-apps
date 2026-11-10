@@ -25,6 +25,24 @@ data:
 
     import torch
 
+    # The upstream main-model check requires Turbo even when XL-SFT is selected.
+    # Provisioning belongs to llm-init; validate only this app's four components
+    # and never fall back to downloading the full default repository.
+    from acestep.core.generation.handler.init_service_downloads import InitServiceDownloadsMixin
+    from acestep.model_downloader import DEFAULT_VAE_VARIANT
+
+    def _require_bundled_models(self, *, checkpoint_path, config_path, prefer_source, vae_variant=None):
+        if config_path != "acestep-v15-xl-sft" or vae_variant not in (None, "", DEFAULT_VAE_VARIANT):
+            return "ERROR: This app uses XL-SFT and the bundled VAE only", False
+        for name in ("acestep-v15-xl-sft", "acestep-5Hz-lm-4B", "Qwen3-Embedding-0.6B", "vae"):
+            directory = checkpoint_path / name
+            weights = list(directory.glob("*.safetensors"))
+            if not weights or any(not file.is_file() or file.stat().st_size == 0 for file in weights):
+                return f"ERROR: Required checkpoint is missing or incomplete: {name}", False
+        return None
+
+    InitServiceDownloadsMixin._ensure_models_present = _require_bundled_models
+
     # nano-vLLM's CUDA graph capture is unstable with the RTX 5090 Blackwell
     # driver behind Olares' time-sliced GPU runtime. Keep the vLLM backend and
     # KV cache, but force eager execution so initialization cannot corrupt the
@@ -376,6 +394,20 @@ data:
     route_setup.register_sample_format_routes = _register_sample_format_routes_with_rearm
 
     from acestep.api_server import main
+    from acestep.api_server import app
+    from fastapi.responses import JSONResponse
+
+    @app.get("/startup-ready")
+    def startup_ready():
+        state = app.state
+        if getattr(state, "_init_error", None) or getattr(state, "_llm_init_error", None):
+            return JSONResponse({"ready": False}, status_code=503)
+        if getattr(state, "_initialized", False) and getattr(state, "_llm_initialized", False):
+            state._olares_startup_ready = True
+        # Stage offloading deliberately unloads the LM after successful startup.
+        # Keep that normal operation distinct from an incomplete initialization.
+        ready = bool(getattr(state, "_olares_startup_ready", False))
+        return JSONResponse({"ready": ready}, status_code=200 if ready else 503)
 
     if __name__ == "__main__":
         main()
