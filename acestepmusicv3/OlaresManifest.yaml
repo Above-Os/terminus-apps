@@ -3,22 +3,28 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: acestepmusicv3
-  description: Music generation from text descriptions and lyrics
+  description: An AI music studio for creating songs from ideas and lyrics
   icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
   appid: acestepmusicv3
-  version: '0.1.66'
-  title: ACE-Step Music XL-SFT
+  version: '0.1.75'
+  title: Music Studio
   categories:
-  - Creativity
-  - AI
-  - models
+  - homelab
   tags:
   - text-to-audio
 
 entrances:
+  - name: music
+    port: 8440
+    host: music-svc
+    title: Music Studio
+    icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
+    authLevel: private
+    openMethod: window
   - name: modelconsole
     port: 8090
     host: download-svc
+    invisible: true
     title: ACE-Step Model Console
     icon: https://app.cdn.olares.com/appstore/acestep/icon2.png
     authLevel: internal
@@ -42,6 +48,7 @@ sharedEntrances:
 workloadReplicas:
   acestepmusicv3: 1
   llminit: 1
+  music: 1
 
 permission:
   appData: true
@@ -52,19 +59,27 @@ permission:
 
 spec:
   versionName: 'ACE-Step/acestep-v15-xl-sft'
+  featuredImage: https://cdn.olares.com/images/2026/11/3502943c4a6d508ef8affa6a5c4dd180.jpg
+  promoteImage:
+    - https://cdn.olares.com/images/2026/11/3502943c4a6d508ef8affa6a5c4dd180.jpg
+    - https://cdn.olares.com/images/2026/11/1b7a99d0f03909c7759871048fc721ad.jpg
+    - https://cdn.olares.com/images/2026/11/69097258c3403fa5f4dc2aca6827d968.jpg
   fullDescription: |
-    ACE-Step Music XL-SFT generates songs with vocals or instrumental music from text descriptions and lyrics. It provides the ACE-Step 1.5 XL-SFT model and a 4B language model to compatible Olares music applications.
+    Music Studio turns your ideas and lyrics into songs with vocals or instrumental music. Create music with ACE-Step XL-SFT, refine selected sections, and save finished tracks in your library.
 
     **Key features**
 
-    - Draft song descriptions and lyrics from a short idea.
-    - Generate music with controls for style, tempo, key, and vocal language.
-    - Regenerate a selected section of existing audio.
-    - Provide lyric timing for newly generated vocal songs.
+    - Draft lyrics and song descriptions from a short idea.
+    - Shape your music with style, tempo, key, and vocal language controls.
+    - Regenerate a selected section of a track.
+    - View synchronized lyrics for supported vocal tracks.
+    - Play, download, and organize finished tracks in your library.
 
-    This app requires Olares 1.12.7 or later and is configured for an NVIDIA GPU with 24 GiB of memory on an amd64 system. Open Model Console to download the models and check their status, then use a compatible music application to create songs.
+    On first use, Music Studio downloads the required models, totaling approximately 30 GB. You can follow download and loading progress on screen. The creation page opens automatically when the models are ready.
 
-  developer: ACE-Step
+    Requires Olares 1.12.7 or later and an amd64 system with an NVIDIA GPU with 24 GiB of memory.
+
+  developer: ACE-Step / beclab
   website: https://huggingface.co/ACE-Step/acestep-v15-xl-sft
   sourceCode: https://github.com/ace-step/ACE-Step-1.5
   submitter: Olares
@@ -85,8 +100,8 @@ spec:
   # nvidia — discrete GPU; GPU memory via nvidia.com/gpumem. amd64 only.
   - mode: nvidia
     requiredCpu: "2"
-    limitedCpu: "12"
-    requiredMemory: 12Gi
+    limitedCpu: "14"
+    requiredMemory: 13Gi
     limitedMemory: 32Gi
     requiredDisk: 40Gi
     limitedDisk: 100Gi
@@ -103,7 +118,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22,hf://ACE-Step/acestep-v15-xl-sft --revision d06de46b4622f781cf07f4a013a67d591ca52819,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
+    default: "hf://ACE-Step/Ace-Step1.5 --revision 19671f406d603126926c1b7e2adc169acbcade22 --exclude acestep*/*,hf://ACE-Step/acestep-v15-xl-sft --revision d06de46b4622f781cf07f4a013a67d591ca52819,hf://ACE-Step/acestep-5Hz-lm-4B --revision 0a3ec94b557aea7d508da38b31cfe7341f6ff737"
     regex: "^hf://"
   - envName: MODEL_NAME
     required: true
@@ -140,3 +155,13 @@ options:
     - name: olares
       type: system
       version: '>=1.12.7-0'
+    - name: router
+      type: application
+      version: '>=1.0.0'
+
+middleware:
+  postgres:
+    username: acestepmusic
+    databases:
+      - name: music
+        distributed: false
