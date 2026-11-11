@@ -1,10 +1,38 @@
+{{- /* Manifest requires MEMORY_LIMIT at install time. This fallback only permits
+structural chart lint before app-service supplies required environment values. */ -}}
+{{- $memoryLimit := .Values.olaresEnv.MEMORY_LIMIT | default "24Gi" | toString | trim -}}
+{{- if not (regexMatch "^[1-9][0-9]{0,6}(Mi|Gi)$" $memoryLimit) -}}
+{{- fail "MEMORY_LIMIT must be a positive whole Mi or Gi quantity, such as 48Gi" -}}
+{{- end -}}
+{{- $limitBytes := mul (regexReplaceAll "(Mi|Gi)$" $memoryLimit "" | int64) (ternary 1073741824 1048576 (hasSuffix "Gi" $memoryLimit)) -}}
+{{- if lt $limitBytes 2147483648 -}}
+{{- fail "MEMORY_LIMIT must be at least 2Gi" -}}
+{{- end -}}
+{{- /* --ram takes decimal GB; Kubernetes Mi/Gi quantities are binary. */ -}}
+{{- $ramGB := div (mul $limitBytes 3) 4000000000 -}}
+{{- $gpuLimit := .Values.olaresEnv.GPU_MEMORY_LIMIT | default "16Gi" | toString | trim -}}
+{{- if not (regexMatch "^(0|0Mi|0Gi|[1-9][0-9]{0,6}(Mi|Gi))$" $gpuLimit) -}}
+{{- fail "GPU_MEMORY_LIMIT must be 0 for CPU or a positive whole Mi/Gi quantity" -}}
+{{- end -}}
+{{- $gpuMiB := int64 0 -}}
+{{- if not (regexMatch "^0(Mi|Gi)?$" $gpuLimit) -}}
+{{- $gpuMiB = mul (regexReplaceAll "(Mi|Gi)$" $gpuLimit "" | int64) (ternary 1024 1 (hasSuffix "Gi" $gpuLimit)) -}}
+{{- end -}}
+{{- $cpuOnly := or (eq $gpuMiB 0) (eq (.Values.GPU.Type | default "nvidia") "cpu") -}}
+{{- if and (not $cpuOnly) (lt $gpuMiB 4096) -}}
+{{- fail "Positive GPU_MEMORY_LIMIT must be at least 4Gi; use 0 for CPU" -}}
+{{- end -}}
+
+{{- $gpuPlacementGiB := divf (max 0 (sub $gpuMiB 2048)) 1024 -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: colibri
   namespace: '{{ .Release.Namespace }}'
+  {{- if not $cpuOnly }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "colibri"
+  {{- end }}
 spec:
   replicas: {{ .Values.workloads.colibri.replicaCount }}
   strategy:
@@ -17,6 +45,10 @@ spec:
       labels:
         app: colibri
       annotations:
+        {{- if not $cpuOnly }}
+        gpu.bytetrade.io/required-gpu-memory: {{ printf "%dMi" $gpuMiB | quote }}
+        gpu.bytetrade.io/limited-gpu-memory: {{ printf "%dMi" $gpuMiB | quote }}
+        {{- end }}
         checksum/auth: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         checksum/proxy: {{ include (print $.Template.BasePath "/proxy.yaml") . | sha256sum }}
     spec:
@@ -46,21 +78,30 @@ spec:
             - --ctx
             - {{ .Values.olaresEnv.CONTEXT_LENGTH | default "16384" | quote }}
             - --ram
-            - {{ if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}'4'{{ else }}{{ .Values.olaresEnv.RAM_GB | quote }}{{ end }}
+            - {{ $ramGB | quote }}
           env:
             - {name: HOME, value: /data/home}
             - {name: PYTHONUNBUFFERED, value: '1'}
             - name: COLI_CUDA
-              value: '1'
+              value: {{ ternary "0" "1" $cpuOnly | quote }}
+            {{- if $cpuOnly }}
+            - {name: CUDA_VISIBLE_DEVICES, value: ''}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: void}
+            {{- else }}
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
             - name: COLI_GPUS
               value: '0'
+            {{- end }}
+            - name: COLIBRI_GPU_QUOTA_MIB
+              value: {{ $gpuMiB | quote }}
+            {{- if not $cpuOnly }}
+            - name: CUDA_DEVICE_MEMORY_LIMIT_0
+              value: {{ printf "%dm" $gpuMiB | quote }}
             - name: COLI_CUDA_CHAIN
               value: {{ if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}'0'{{ else }}'1'{{ end }}
-            {{- if eq (.Values.olaresEnv.INFERENCE_PROFILE | default "standard") "low-memory-moe" }}
             - name: CUDA_EXPERT_GB
-              value: '2'
+              value: {{ printf "%.6f" $gpuPlacementGiB | quote }}
             {{- end }}
             - name: COLI_ALLOWED_HOSTS
               value: '{{ .Values.domain.colibri }},colibri,colibri.{{ .Release.Namespace }}.svc.cluster.local'
@@ -73,9 +114,15 @@ spec:
             requests:
               cpu: 500m
               memory: 256Mi
+              {{- if not $cpuOnly }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+              {{- end }}
             limits:
               cpu: '8'
-              memory: 24Gi
+              memory: {{ $memoryLimit | quote }}
+              {{- if not $cpuOnly }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+              {{- end }}
           startupProbe:
             httpGet: {path: /olares-models/health, port: 8080, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 10
