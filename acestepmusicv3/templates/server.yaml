@@ -1,5 +1,5 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
-{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
 {{- $queueWorkers := include "acestepmusicv3.queueWorkers" . -}}
 ---
 apiVersion: apps/v1
@@ -60,19 +60,24 @@ spec:
               set -e
               CACHE=/cache/hf/hub
               WRAPPER_COMMON=/run/llm-init/wrappers/common.sh
-              elapsed=0
-              until [ -f "$WRAPPER_COMMON" ]; do
-                if [ "$elapsed" -ge 3600 ]; then
-                  echo "[music-wrapper] timed out waiting for $WRAPPER_COMMON" >&2
-                  exit 1
-                fi
-                echo "[music-wrapper] waiting for Model Console handoff"
-                sleep 5
-                elapsed=$((elapsed + 5))
-              done
               ENGINE=music
               export ENGINE WRAPPER_COMMON
-              . "$WRAPPER_COMMON"
+              # Shared storage can briefly report a file that cannot yet be opened.
+              _common_copy=$(mktemp "${TMPDIR:-/tmp}/llm-common.XXXXXX")
+              _wc=0
+              while ! cp "$WRAPPER_COMMON" "$_common_copy" 2>/dev/null; do
+                  if [ "$_wc" -ge "${WRAPPER_COMMON_WAIT:-3600}" ]; then
+                      rm -f "$_common_copy"
+                      printf '[wrapper] %s could not be read\n' "$WRAPPER_COMMON" >&2
+                      exit 1
+                  fi
+                  printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+                  sleep 5
+                  _wc=$((_wc + 5))
+              done
+              . "$_common_copy"
+              rm -f "$_common_copy"
+              unset _wc _common_copy
               wait_for_sentinel
 
               # Use the exact revisions verified by llm-init, never another cached snapshot.
