@@ -18,7 +18,7 @@ structural chart lint before app-service supplies required environment values. *
 {{- if not (regexMatch "^0(Mi|Gi)?$" $gpuLimit) -}}
 {{- $gpuMiB = mul (regexReplaceAll "(Mi|Gi)$" $gpuLimit "" | int64) (ternary 1024 1 (hasSuffix "Gi" $gpuLimit)) -}}
 {{- end -}}
-{{- $cpuOnly := or (eq $gpuMiB 0) (eq (.Values.GPU.Type | default "nvidia") "cpu") -}}
+{{- $cpuOnly := eq $gpuMiB 0 -}}
 {{- if and (not $cpuOnly) (lt $gpuMiB 4096) -}}
 {{- fail "Positive GPU_MEMORY_LIMIT must be at least 4Gi; use 0 for CPU" -}}
 {{- end -}}

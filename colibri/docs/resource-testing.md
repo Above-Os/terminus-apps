@@ -6,7 +6,7 @@ This chart lets users choose system RAM and GPU-memory limits. The listing keeps
 
 - `MEMORY_LIMIT` is required at installation, has no default and remains editable. Enter whole `Mi` or `Gi` quantities, for example `32Gi` or `48Gi`. The chart accepts a minimum of `2Gi`; model requirements can be much higher. Changes restart the app and reload its saved model.
 - The main container reserves a fixed `256Mi`. The engine RAM budget is calculated automatically as `floor(limit_bytes * 0.75 / 1_000_000_000)` decimal GB: `32Gi` becomes 25 GB and `48Gi` becomes 38 GB. Users no longer need `RAM_GB` or `MEMORY_REQUEST`. The remaining headroom is a starting policy, not a guarantee against running out of memory.
-- `GPU_MEMORY_LIMIT` is required without a default. Choose NVIDIA mode and a whole `Mi`/`Gi` quota of at least `4Gi`, or choose CPU mode and enter `0`. CPU mode requests no NVIDIA resource and disables CUDA.
+- `GPU_MEMORY_LIMIT` is required without a default. The chart has one NVIDIA installation entry. Enter a whole `Mi`/`Gi` quota of at least `4Gi`, or enter `0` to disable CUDA and run inference on the CPU. There is no separate CPU compute-mode option. The zero path requests no NVIDIA resource in the pod, while Olares still records an NVIDIA device binding and requires an NVIDIA-capable node.
 - Olares receives the entire positive GPU quota. The engine placement budget subtracts a fixed `2Gi` for CUDA/runtime buffers. This placement budget is shared by weights and expert cache; the allocation is not necessarily occupied immediately.
 - GPU allocation is installation-time only and is read-only afterward. To change it, uninstall **with data retained** and reinstall with the new quota; changing an engine environment variable alone does not reallocate the GPU.
 - Both `standard` and `low-memory-moe` use these resource budgets. Standard enables CUDA chain execution; low-memory MoE uses staged execution. The former fixed low-memory RAM/GPU preset has been removed.
@@ -23,7 +23,7 @@ This chart lets users choose system RAM and GPU-memory limits. The listing keeps
 
 ## GPU quota comparison
 
-Measured with chart 0.2.32, before the CPU-only option was added. RAM limit is fixed at `48Gi` (engine budget 38 decimal GB). The positive-GPU budget policy is retained in 0.2.33.
+Measured with chart 0.2.32, before the CPU-only option was added. RAM limit is fixed at `48Gi` (engine budget 38 decimal GB). The positive-GPU budget policy is retained in 0.2.34.
 
 | GPU quota | Placement budget | TTFT, first / second (s) | Decode, first / second (token/s) |
 |---|---|---:|---:|
@@ -67,3 +67,11 @@ A separate 20Gi-GPU, 48Gi-RAM test of 14,786 input tokens and 128 output tokens 
 - The 75% RAM policy was retained. Successful completion of these requests does not prove that it is optimal or safe for all workloads.
 
 After testing, the app was restored to chart 0.2.33, standard mode, `48Gi` RAM, `20Gi` GPU and a 16K context limit; the saved model was healthy.
+
+## Single installation entry (0.2.34)
+
+The standalone CPU resource-mode declaration is removed. Users enter RAM and GPU-memory limits through the same NVIDIA installation entry. A GPU quota of `0` selects CPU inference at runtime. The GPU quota must be at least `4Gi` when positive.
+
+The preceding 0.2.33 NVIDIA-mode/zero-quota installation completed two 1,034-input/128-output-token requests. TTFT was 17.30 / 8.70 s and decode was 18.03 / 20.14 token/s. CUDA was disabled, the pod requested no NVIDIA resource and exposed no NVIDIA devices. Olares nevertheless retained a NVIDIA binding. The updated package is also checked without explicitly supplying a compute mode, to verify the single-entry installation path.
+
+This is a runtime CPU fallback on an NVIDIA installation, not an installation option for hosts without an NVIDIA device. Test installations are removed with data retained, restoring the initial uninstalled state and original model selection.
