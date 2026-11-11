@@ -1,9 +1,11 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) mit SGLang, 15Gi (15360Mi) GPU-Speicher, damit es neben Audiomodellen läuft. llm-init und die Inferenz-Engine teilen sich einen Knoten und den lokalen Laufzeitstatus."
+  description: "Qwen3.5-9B (AWQ-4bit) mit SGLang, 15Gi (15360Mi) GPU-Speicher, damit es neben Audiomodellen läuft. llm-init und die Inferenz-Engine teilen den Laufzeitstatus über Common und können auf unterschiedlichen Knoten ausgeführt werden."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.6: Der Laufzeitstatus wird in Common gespeichert, um den Betrieb über mehrere Knoten zu ermöglichen. Vorhandene Konfigurationen in Common haben Vorrang. Andernfalls wird der bisherige lokale Cache migriert oder der Status in Common initialisiert. Beim Start der Engine wird das Lesen gemeinsam genutzter Hilfsskripte bei Fehlern wiederholt.
+
     v1.0.5: Reserviert 15360Mi (15Gi) GPU-Speicher und hebt die Obergrenze des statischen Pools auf min(0.80, 12Gi / sichtbarer GPU-Speicher) an. Auf einer speichergeteilten Karte geht der zusätzliche Speicher an den KV-Cache und den Mamba-Zustandscache, dessen wenige Plätze den langen Prompt eines Sprach-Agenten nicht zwischen den Zügen im Cache hielten. Zeitgeteilte Installationen erhalten ebenfalls 12Gi statt 11Gi statischen Pool.
     v1.0.4: Ausgeschaltetes Denken greift jetzt auch nach einem Upgrade: Der Engine-Wrapper startet mit --default-chat-template-kwargs {"enable_thinking":false} vor den Engine-Argumenten der Modellkarte, die Model Console über Upgrades hinweg behält und die das Flag aus v1.0.3 verloren hatten. Eine Karte, die das Flag setzt, hat weiterhin Vorrang.
 
