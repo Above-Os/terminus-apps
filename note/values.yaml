@@ -1,4 +1,4 @@
-image: docker.io/beclab/note:0.6.9
+image: docker.io/beclab/note:0.6.12
 imagePullPolicy: IfNotPresent
 
 bfl:
@@ -57,8 +57,10 @@ capture:
   bluetooth:
     enabled: true
   # Prepare the host's audio for Bluetooth recording at every install and
-  # upgrade of Note: a short-lived privileged job with the host's PIDs runs
-  # olares-bt-audio.sh on the host (templates/host-audio-setup.yaml). Off
+  # upgrade of Note: a short-lived privileged job, which reaches the host
+  # through its /proc, runs olares-bt-audio.sh there
+  # (templates/host-audio-setup.yaml). It uses neither hostPID nor
+  # hostNetwork, which an app in the market may not set. Off
   # leaves the host to olares-bt-audio.sh by hand.
   hostAudioSetup:
     enabled: true
@@ -84,10 +86,21 @@ devTools:
   # read them answer 404.
   perf:
     enabled: false
+  # How much of what belongs to the people using Note the log may carry:
+  #   off         every released installation; the log says only how much
+  #               was left out.
+  #   diagnostic  internal testing: other services' failure messages, drive
+  #               paths and addresses. Not what a model wrote.
+  #   full        a preview whose users are the testers: model output and
+  #               whole bodies other services sent back as well.
+  logContent:
+    level: "off"
+  # How much the log says: error, warning, info, debug or verbose. Empty is info.
+  logLevel: ""
 
 workloads:
   note:
-    # Must stay 1: events and recording locks live in this process.
+    # Must stay 1; the chart refuses anything else (templates/deployment.yaml).
     replicaCount: 1
 
 # One GPU consumer, because Olares time-slices the accelerator across the

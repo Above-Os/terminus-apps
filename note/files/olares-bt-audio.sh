@@ -417,7 +417,8 @@ check() {
   local server; server=$(pulse_server)
   case "$server" in
     *PipeWire*) ok "pulse served by PipeWire ($server)" ;;
-    "") no "nothing answers on the pulse socket" ;;
+    "") if pulseaudio_not_answering; then bad "PulseAudio is installed without pipewire-pulse: apply would replace it; decide first"
+        else no "nothing answers on the pulse socket"; fi ;;
     *) bad "pulse served by $server, not PipeWire: apply would replace it; decide first" ;;
   esac
   command -v wireplumber >/dev/null || no "wireplumber not installed (the config written assumes 0.4 until it is)"
@@ -727,7 +728,17 @@ reconnect() {
 # (Ubuntu 22.04's default), which changes sound for everything on the host.
 # Note records through either since it stopped matching PipeWire's names, so
 # this is a choice, not a requirement.
-is_pulseaudio_host() { local s; s=$(pulse_server); [ -n "$s" ] && [[ "$s" != *PipeWire* ]]; }
+# An answer names the server. No answer proves nothing: PulseAudio may belong
+# to another user, or the session or pactl may not be there yet, so without
+# one the packages decide. dpkg -s would also pass a package that was removed
+# and left its config behind.
+pkg_installed() { [ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" = installed ]; }
+pulseaudio_not_answering() { pkg_installed pulseaudio && ! pkg_installed pipewire-pulse; }
+is_pulseaudio_host() {
+  local s; s=$(pulse_server)
+  if [ -n "$s" ]; then [[ "$s" != *PipeWire* ]]; else pulseaudio_not_answering; fi
+}
+pulse_owner() { local s; s=$(pulse_server); echo "${s:-PulseAudio (installed, not answering)}"; }
 
 # Changes only what differs and restarts only what a change needs: the whole
 # audio session only when the PipeWire stack was just installed; WirePlumber
@@ -738,7 +749,7 @@ apply_changes() {
   local persist=$1 replace=$2 shared=$3 connected p missing=() session="" wp="" pp=""
   sd_reachable || { echo "$NO_SD: nothing changed"; exit 5; }
   if is_pulseaudio_host && [ -z "$replace" ]; then
-    echo "pulse is served by $(pulse_server). apply would replace it with PipeWire."
+    echo "pulse is served by $(pulse_owner). apply would replace it with PipeWire."
     echo "Rerun with --replace-pulseaudio to do that; this script does not prepare a PulseAudio host."
     exit 3
   fi
@@ -748,11 +759,13 @@ apply_changes() {
   for p in "${PKGS[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   if [ ${#missing[@]} -gt 0 ]; then
     echo "installing ${missing[*]}"
+    # --no-remove: nobody is here to see what a dependency would take away, so
+    # such an install fails instead, and is reported like any other.
     # Offline, or apt locked: what needs no package is set up all the same
     # (linger, the WirePlumber fragment, the link, wideband), and the next
     # setup installs the packages; check lists them as missing until then.
     if DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-remove "${missing[@]}"; then
       case " ${missing[*]} " in *" pipewire "*|*" pipewire-pulse "*|*" wireplumber "*) session=1 ;; esac
       case " ${missing[*]} " in *" libspa-0.2-bluetooth "*) wp=1 ;; esac
     else
@@ -854,7 +867,7 @@ setup() {
     echo "$NO_SD: nothing changed"
     return 5
   fi
-  server=$(pulse_server)
+  server=$(pulse_owner)
   if is_pulseaudio_host && [ -z "$replace" ]; then
     echo
     echo "== Result"

@@ -10,7 +10,12 @@ spec:
   # and the device recorder all live in this process's memory
   # (internal/events, api recordingGate). A second replica would drop the
   # events published on the other one and let two of them record at once.
-  replicas: {{ .Values.workloads.note.replicaCount }}
+  # More than one is refused; 0 is let through because the market's upload
+  # check renders the chart with replicaCount 0 to see that it is read.
+  {{- if gt (int .Values.workloads.note.replicaCount) 1 }}
+  {{- fail "workloads.note.replicaCount must be 1: events and recording locks are in-process" }}
+  {{- end }}
+  replicas: {{ int .Values.workloads.note.replicaCount }}
   selector:
     matchLabels:
       app: note
@@ -103,6 +108,18 @@ spec:
             # report and read them answer 404.
             - name: NOTE_PERF_DEV
               value: "true"
+            {{- end }}
+            {{- /* An unquoted off in a values file is YAML's false. */}}
+            {{- if not (has (toString .Values.devTools.logContent.level) (list "off" "false" "")) }}
+            # User content in the log: diagnostic for internal testing, full
+            # for a preview only. Absent, the log says how much it left out.
+            - name: NOTE_LOG_CONTENT
+              value: {{ .Values.devTools.logContent.level | quote }}
+            {{- end }}
+            {{- with .Values.devTools.logLevel }}
+            # How much is said: error, warning, info, debug or verbose.
+            - name: NOTE_LOG_LEVEL
+              value: {{ . | quote }}
             {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
@@ -226,6 +243,11 @@ spec:
           volumeMounts:
             - name: app-data
               mountPath: /data
+            # Which application to suggest for each model step. No subPath,
+            # so an upgraded table reaches the running pod without a restart.
+            - name: recommended-models
+              mountPath: /config/recommended-models
+              readOnly: true
             {{- if .Values.capture.usb.enabled }}
             - name: sound
               mountPath: /dev/snd
@@ -306,6 +328,9 @@ spec:
           hostPath:
             path: {{ .Values.userspace.appData }}
             type: DirectoryOrCreate
+        - name: recommended-models
+          configMap:
+            name: {{ .Release.Name }}-recommended-models
         {{- if .Values.capture.usb.enabled }}
         # Directory, not CharDevice: the cards come and go as the speakerphone
         # is plugged in, and the directory is what stays. OrCreate, so a box

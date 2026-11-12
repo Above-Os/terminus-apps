@@ -1,5 +1,5 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
-{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
 {{- $queueWorkers := include "acestepmusicv3.queueWorkers" . -}}
 ---
 apiVersion: apps/v1
@@ -60,39 +60,44 @@ spec:
               set -e
               CACHE=/cache/hf/hub
               WRAPPER_COMMON=/run/llm-init/wrappers/common.sh
-              elapsed=0
-              until [ -f "$WRAPPER_COMMON" ]; do
-                if [ "$elapsed" -ge 3600 ]; then
-                  echo "[music-wrapper] timed out waiting for $WRAPPER_COMMON" >&2
-                  exit 1
-                fi
-                echo "[music-wrapper] waiting for Model Console handoff"
-                sleep 5
-                elapsed=$((elapsed + 5))
-              done
               ENGINE=music
               export ENGINE WRAPPER_COMMON
-              . "$WRAPPER_COMMON"
+              # Shared storage can briefly report a file that cannot yet be opened.
+              _common_copy=$(mktemp "${TMPDIR:-/tmp}/llm-common.XXXXXX")
+              _wc=0
+              while ! cp "$WRAPPER_COMMON" "$_common_copy" 2>/dev/null; do
+                  if [ "$_wc" -ge "${WRAPPER_COMMON_WAIT:-3600}" ]; then
+                      rm -f "$_common_copy"
+                      printf '[wrapper] %s could not be read\n' "$WRAPPER_COMMON" >&2
+                      exit 1
+                  fi
+                  printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+                  sleep 5
+                  _wc=$((_wc + 5))
+              done
+              . "$_common_copy"
+              rm -f "$_common_copy"
+              unset _wc _common_copy
               wait_for_sentinel
 
-              snap() {
-                repo="$1"
-                ref="$CACHE/$repo/refs/main"
-                if [ -f "$ref" ]; then
-                  printf '%s\n' "$CACHE/$repo/snapshots/$(cat "$ref")"
-                else
-                  find "$CACHE/$repo/snapshots" -mindepth 1 -maxdepth 1 -type d | head -1
-                fi
-              }
-              MAIN_SNAP="$(snap models--ACE-Step--Ace-Step1.5)"
-              XL_SFT_SNAP="$(snap models--ACE-Step--acestep-v15-xl-sft)"
-              LM_SNAP="$(snap models--ACE-Step--acestep-5Hz-lm-4B)"
-              [ -d "$MAIN_SNAP" ] && [ -d "$XL_SFT_SNAP" ] && [ -d "$LM_SNAP" ]
-              for file in "$MAIN_SNAP"/* "$MAIN_SNAP"/.[!.]*; do
-                [ -e "$file" ] || continue
-                ln -sfn "$file" "/app/checkpoints/$(basename "$file")"
+              # Use the exact revisions verified by llm-init, never another cached snapshot.
+              MAIN_SNAP="$CACHE/models--ACE-Step--Ace-Step1.5/snapshots/19671f406d603126926c1b7e2adc169acbcade22"
+              XL_SFT_SNAP="$CACHE/models--ACE-Step--acestep-v15-xl-sft/snapshots/d06de46b4622f781cf07f4a013a67d591ca52819"
+              LM_SNAP="$CACHE/models--ACE-Step--acestep-5Hz-lm-4B/snapshots/0a3ec94b557aea7d508da38b31cfe7341f6ff737"
+              for name in Qwen3-Embedding-0.6B vae; do
+                [ -d "$MAIN_SNAP/$name" ]
+                ln -sfn "$MAIN_SNAP/$name" "/app/checkpoints/$name"
               done
-              ln -sfn "${XL_SFT_SNAP%/}" /app/checkpoints/acestep-v15-xl-sft
+              # ACE-Step updates model-side Python code to match its engine.
+              # Keep that code local while the large immutable weights stay shared.
+              mkdir -p /app/checkpoints/acestep-v15-xl-sft
+              for file in "$XL_SFT_SNAP"/*; do
+                [ -e "$file" ] || continue
+                case "$file" in
+                  *.py) cp "$file" "/app/checkpoints/acestep-v15-xl-sft/$(basename "$file")" ;;
+                  *) ln -sfn "$file" "/app/checkpoints/acestep-v15-xl-sft/$(basename "$file")" ;;
+                esac
+              done
               ln -sfn "${LM_SNAP%/}" /app/checkpoints/acestep-5Hz-lm-4B
 
               python3 - /app/checkpoints/acestep-v15-xl-sft /app/checkpoints/acestep-5Hz-lm-4B <<'PY'
@@ -138,6 +143,10 @@ spec:
               value: acestep-v15-xl-sft
             - name: LM_CODE_MAX_ATTEMPTS
               value: "2"
+            - name: ACESTEP_NO_INIT
+              value: "false"
+            - name: HF_HUB_OFFLINE
+              value: "1"
             - name: ACESTEP_INIT_SERVICE
               value: "true"
             - name: ACESTEP_INIT_LLM
@@ -167,18 +176,24 @@ spec:
           envFrom:
             - configMapRef:
                 name: acestep-config
+          # The primary workload must not keep the app in Installing while
+          # weights download: users need to open Music's setup page immediately.
+          # Router and Music use /v1/models, not pod readiness, for serving health.
           livenessProbe:
-            httpGet:
-              path: /v1/models
-              port: 8001
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  [ -f /run/llm-init/model_download_finish ] || exit 0
+                  python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8001/v1/models", timeout=3)'
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 60
           readinessProbe:
-            httpGet:
-              path: /v1/models
-              port: 8001
+            exec:
+              command: ["/bin/bash", "-c", "kill -0 1"]
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 5
@@ -195,6 +210,7 @@ spec:
               mountPath: /app/checkpoints
             - name: hf-cache
               mountPath: /cache/hf/hub
+              readOnly: true
             - name: app-data
               mountPath: /app/data
             - name: runtime-cache
