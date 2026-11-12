@@ -18,7 +18,7 @@ spec:
       - name: init-permissions
         image: docker.io/beclab/aboveos-busybox:1.37.0
         securityContext: {runAsUser: 0}
-        command: [sh, -ec, 'mkdir -p /data/pg17; chown 1000:1000 /data/pg17; chmod 700 /data/pg17']
+        command: [sh, -ec, 'mkdir -p /data/pg17 /data/state/database; chown 1000:1000 /data/pg17 /data/state /data/state/database; chmod 700 /data/pg17 /data/state/database']
         volumeMounts: [{name: data, mountPath: /data}]
         resources:
           requests: {cpu: 10m, memory: 16Mi}
@@ -26,6 +26,7 @@ spec:
       containers:
       - name: postgres
         image: docker.io/postgres:17-bookworm@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5
+        command: [sh, /olares/database-env.sh, docker-entrypoint.sh, postgres]
         args: [-c, wal_level=logical, -c, max_replication_slots=5, -c, max_wal_senders=5, -c, max_slot_wal_keep_size=1024MB, -c, shared_buffers=128MB]
         envFrom: [{secretRef: {name: wgersync-auth}}]
         env:
@@ -41,6 +42,8 @@ spec:
         volumeMounts:
         - {name: data, mountPath: /var/lib/postgresql/data, subPath: pg17}
         - {name: scripts, mountPath: /docker-entrypoint-initdb.d/10-wger.sh, subPath: pg-bootstrap.sh, readOnly: true}
+        - {name: scripts, mountPath: /olares/database-env.sh, subPath: database-env.sh, readOnly: true}
+        - {name: data, mountPath: /run/wger-db, subPath: state/database}
       volumes:
       - name: data
         hostPath: {path: '{{ .Values.userspace.appData }}/data', type: DirectoryOrCreate}
@@ -98,23 +101,24 @@ spec:
       containers:
       - name: powersync
         image: docker.io/journeyapps/powersync-service@sha256:d7a99817057a42dae9e6d8fe0c70b49d99105dcac8b8ab0e9ed3cf1ff0978b8b
+        command: [sh, /config/database-env.sh, node, /app/service/lib/entry.js]
         args: [start, -r, unified]
         env:
         - {name: POWERSYNC_CONFIG_PATH, value: /config/powersync.yaml}
         - {name: PS_PORT, value: '8080'}
         - {name: PS_JWKS_URL, value: 'http://wger:8080/api/v2/powersync-keys'}
-        - name: PS_DATABASE_URI
-          valueFrom: {secretKeyRef: {name: wgersync-auth, key: PS_DATABASE_URI}}
-        - name: PS_STORAGE_PG_URI
-          valueFrom: {secretKeyRef: {name: wgersync-auth, key: PS_STORAGE_PG_URI}}
         ports: [{name: sync, containerPort: 8080}]
         startupProbe: {httpGet: {path: /probes/liveness, port: sync}, periodSeconds: 10, failureThreshold: 60}
         readinessProbe: {httpGet: {path: /probes/readiness, port: sync}, periodSeconds: 10}
         resources:
           requests: {cpu: 100m, memory: 256Mi}
           limits: {cpu: '1', memory: 1Gi}
-        volumeMounts: [{name: scripts, mountPath: /config, readOnly: true}]
+        volumeMounts:
+        - {name: scripts, mountPath: /config, readOnly: true}
+        - {name: data, mountPath: /run/wger-db, subPath: state/database, readOnly: true}
       volumes:
+      - name: data
+        hostPath: {path: '{{ .Values.userspace.appData }}/data', type: DirectoryOrCreate}
       - name: scripts
         configMap: {name: wger-files}
 ---

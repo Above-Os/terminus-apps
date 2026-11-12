@@ -4,6 +4,26 @@ metadata:
   name: wger-files
   namespace: {{ .Release.Namespace | quote }}
 data:
+  database-env.sh: |
+    #!/bin/sh
+    set -eu
+    credentials=/run/wger-db/current
+    if [ ! -d "$credentials" ]; then
+      # Only PostgreSQL has seed credentials and a writable mount.
+      : "${WGER_DB_PASSWORD:?Database credentials have not been initialized}"
+      umask 077
+      staging=$(mktemp -d /run/wger-db/.credentials.XXXXXX)
+      trap 'rm -rf "$staging"' EXIT
+      for key in POSTGRES_PASSWORD WGER_DB_PASSWORD PS_SOURCE_PASSWORD PS_STORAGE_PASSWORD PS_DATABASE_URI PS_STORAGE_PG_URI; do
+        printenv "$key" > "$staging/$key"
+      done
+      mv "$staging" "$credentials"
+      trap - EXIT
+    fi
+    for key in POSTGRES_PASSWORD WGER_DB_PASSWORD PS_SOURCE_PASSWORD PS_STORAGE_PASSWORD PS_DATABASE_URI PS_STORAGE_PG_URI; do
+      export "$key=$(cat "$credentials/$key")"
+    done
+    exec "$@"
   pg-bootstrap.sh: |
     #!/usr/bin/env bash
     set -euo pipefail
@@ -254,6 +274,17 @@ data:
     import os
     from pathlib import Path
     import sys
+
+    # Database credentials live alongside the data, surviving namespace removal.
+    import time
+    db_password = Path('/home/wger/state/database/current/WGER_DB_PASSWORD')
+    for attempt in range(120):
+        if db_password.exists():
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError('Persistent database credentials are not ready')
+    os.environ['DJANGO_DB_PASSWORD'] = db_password.read_text().strip()
 
     os.umask(0o077)
     keys = Path('/home/wger/state/signing.private')
