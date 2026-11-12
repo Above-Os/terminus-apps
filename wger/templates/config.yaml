@@ -4,29 +4,26 @@ metadata:
   name: wger-files
   namespace: {{ .Release.Namespace | quote }}
 data:
-  pg-refresh-passwords.sh: |
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # The namespace Secret can be recreated while the database volume survives.
-    # Wait for the final TCP server, not the temporary initdb socket-only server.
-    for attempt in $(seq 1 120); do
-      if pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
-        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
-    \getenv admin_password POSTGRES_PASSWORD
-    \getenv app_password WGER_DB_PASSWORD
-    \getenv repl_password PS_SOURCE_PASSWORD
-    \getenv storage_password PS_STORAGE_PASSWORD
-    SELECT format('ALTER ROLE wger_admin PASSWORD %L', :'admin_password') \gexec
-    SELECT format('ALTER ROLE wger PASSWORD %L', :'app_password') \gexec
-    SELECT format('ALTER ROLE wger_repl PASSWORD %L', :'repl_password') \gexec
-    SELECT format('ALTER ROLE powersync_storage PASSWORD %L', :'storage_password') \gexec
-    SQL
-        exit 0
-      fi
-      sleep 2
+  database-env.sh: |
+    #!/bin/sh
+    set -eu
+    credentials=/run/wger-db/current
+    if [ ! -d "$credentials" ]; then
+      # Only PostgreSQL has seed credentials and a writable mount.
+      : "${WGER_DB_PASSWORD:?Database credentials have not been initialized}"
+      umask 077
+      staging=$(mktemp -d /run/wger-db/.credentials.XXXXXX)
+      trap 'rm -rf "$staging"' EXIT
+      for key in POSTGRES_PASSWORD WGER_DB_PASSWORD PS_SOURCE_PASSWORD PS_STORAGE_PASSWORD PS_DATABASE_URI PS_STORAGE_PG_URI; do
+        printenv "$key" > "$staging/$key"
+      done
+      mv "$staging" "$credentials"
+      trap - EXIT
+    fi
+    for key in POSTGRES_PASSWORD WGER_DB_PASSWORD PS_SOURCE_PASSWORD PS_STORAGE_PASSWORD PS_DATABASE_URI PS_STORAGE_PG_URI; do
+      export "$key=$(cat "$credentials/$key")"
     done
-    echo 'PostgreSQL did not become ready for credential reconciliation' >&2
-    exit 1
+    exec "$@"
   pg-bootstrap.sh: |
     #!/usr/bin/env bash
     set -euo pipefail
@@ -277,6 +274,17 @@ data:
     import os
     from pathlib import Path
     import sys
+
+    # Database credentials live alongside the data, surviving namespace removal.
+    import time
+    db_password = Path('/home/wger/state/database/current/WGER_DB_PASSWORD')
+    for attempt in range(120):
+        if db_password.exists():
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError('Persistent database credentials are not ready')
+    os.environ['DJANGO_DB_PASSWORD'] = db_password.read_text().strip()
 
     os.umask(0o077)
     keys = Path('/home/wger/state/signing.private')
