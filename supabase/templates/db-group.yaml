@@ -33,9 +33,11 @@ spec:
         command:
         - sh
         - -ec
-        - chown 1000:1000 /runtime; chown 1000:1000 /prepare/postgres; chown 1000:1000 /prepare/postgres-config; chown 1000:1000 /prepare/pg-run;
+        - chown 1000:1000 /credentials; chmod 700 /credentials; chown 1000:1000 /runtime; chown 1000:1000 /prepare/postgres; chown 1000:1000 /prepare/postgres-config; chown 1000:1000 /prepare/pg-run;
           chown 1000:1000 /prepare/pg-log
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: db-runtime
           mountPath: /runtime
         - name: db-data-postgres
@@ -86,6 +88,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: db-runtime
           mountPath: /runtime
         - name: db-runtime-config
@@ -123,14 +127,6 @@ spec:
       - name: db
         image: supabase/postgres:17.6.1.136
         imagePullPolicy: IfNotPresent
-        lifecycle:
-          postStart:
-            exec:
-              command:
-              - /runtime/busybox
-              - sh
-              - -c
-              - /runtime/busybox sh /config/sync-roles.sh > /runtime/role-sync.log 2>&1 &
         command:
         - /runtime/busybox
         - sh
@@ -189,10 +185,6 @@ spec:
           subPath: roles.sql
           readOnly: true
         - name: db-db-init
-          mountPath: /config/sync-roles.sh
-          subPath: sync-roles.sh
-          readOnly: true
-        - name: db-db-init
           mountPath: /docker-entrypoint-initdb.d/init-scripts/99-jwt.sql
           subPath: jwt.sql
           readOnly: true
@@ -229,10 +221,13 @@ spec:
         startupProbe:
           exec: &id002
             command:
-            - /runtime/busybox
-            - sh
-            - -ec
-            - test -f /runtime/roles-synced && pg_isready -U supabase_admin -d postgres -h 127.0.0.1
+            - pg_isready
+            - -U
+            - supabase_admin
+            - -d
+            - postgres
+            - -h
+            - 127.0.0.1
           timeoutSeconds: 5
           periodSeconds: 5
           failureThreshold: 120
@@ -247,6 +242,10 @@ spec:
           periodSeconds: 30
           failureThreshold: 5
       volumes:
+      - name: credentials
+        hostPath:
+          path: '{{ .Values.userspace.appData }}/credentials'
+          type: DirectoryOrCreate
       - name: db-runtime
         emptyDir: {}
       - name: db-runtime-config

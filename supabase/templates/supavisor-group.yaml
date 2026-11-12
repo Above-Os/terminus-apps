@@ -33,8 +33,10 @@ spec:
         command:
         - sh
         - -ec
-        - chown 1000:1000 /runtime
+        - chown 1000:1000 /credentials; chmod 700 /credentials; chown 1000:1000 /runtime
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: supavisor-runtime
           mountPath: /runtime
         resources:
@@ -77,6 +79,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: supavisor-runtime
           mountPath: /runtime
         - name: supavisor-runtime-config
@@ -185,6 +189,10 @@ spec:
           periodSeconds: 30
           failureThreshold: 5
       volumes:
+      - name: credentials
+        hostPath:
+          path: '{{ .Values.userspace.appData }}/credentials'
+          type: DirectoryOrCreate
       - name: supavisor-runtime
         emptyDir: {}
       - name: supavisor-runtime-config
