@@ -25,7 +25,7 @@
 {{- end -}}
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
 {{- $unifiedMem := and $wantGpu (or (eq $gpuType "nvidia-gb10") (eq $gpuType "intel")) -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-breeze-ov:v1.1.38" "docker.io/beclab/audio-breeze:v1.1.38" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-breeze-ov:v1.1.40" "docker.io/beclab/audio-breeze:v1.1.40" $isIntel) -}}
 {{- if $wantGpu -}}
 {{- $gpuMiB = include "llmbase.gpuMiB" $gpuRaw -}}
 {{- if $unifiedMem -}}
@@ -42,7 +42,7 @@
 {{- /* Engine-native flags in llm-init's one channel. Filling ENGINE_ARGS replaces the whole string. */ -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
 {{- if eq $engineArgs "" -}}
-{{- $engineArgs = "--cfg-scale 1 --design-cfg 4 --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500 --max-new-tokens 1500 --max-seq-len 2048" -}}
+{{- $engineArgs = "--cfg-scale 1 --design-cfg 4 --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500 --max-new-tokens 1500 --max-seq-len 2048 --shared-voice-dir /data/shared-voices" -}}
 {{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
@@ -88,6 +88,10 @@ spec:
         - name: voices
           hostPath:
             path: "{{ .Values.userspace.appData }}/voices"
+            type: DirectoryOrCreate
+        - name: shared-voices
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/tts/voices"
             type: DirectoryOrCreate
         - name: run-state
           hostPath:
@@ -174,6 +178,8 @@ spec:
               mountPath: /tmp
             - name: voices
               mountPath: /data/voices
+            - name: shared-voices
+              mountPath: /data/shared-voices
             - name: run-state
               mountPath: /run/llm-init
               readOnly: true

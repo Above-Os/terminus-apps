@@ -25,7 +25,7 @@
 {{- end -}}
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
 {{- /* No manifest default: a filled ENGINE_IMAGE pins every mode to one image. */ -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen3voice-ov:v1.1.38" "docker.io/beclab/audio-qwen3voice:v1.1.38" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-qwen3voice-ov:v1.1.40" "docker.io/beclab/audio-qwen3voice:v1.1.40" $isIntel) -}}
 {{- if eq $gpuType "intel" -}}
 {{- /* iGPU: request 6Gi, limit 32Gi. OpenVINO compile plus a second checkpoint on a design call. */ -}}
 {{- $memRequest = "6Gi" -}}
@@ -44,7 +44,7 @@
 {{- end -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
 {{- if eq $engineArgs "" -}}
-{{- $engineArgs = "--max-seq-len 2048 --attn-implementation sdpa --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500" -}}
+{{- $engineArgs = "--max-seq-len 2048 --attn-implementation sdpa --ref-min-seconds 3 --ref-max-seconds 30 --ref-max-mb 5 --design-min-chars 3 --design-max-chars 500 --shared-voice-dir /data/shared-voices" -}}
 {{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
@@ -90,6 +90,10 @@ spec:
         - name: voices
           hostPath:
             path: "{{ .Values.userspace.appData }}/voices"
+            type: DirectoryOrCreate
+        - name: shared-voices
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/tts/voices"
             type: DirectoryOrCreate
         - name: run-state
           hostPath:
@@ -176,6 +180,8 @@ spec:
               mountPath: /tmp
             - name: voices
               mountPath: /data/voices
+            - name: shared-voices
+              mountPath: /data/shared-voices
             - name: run-state
               mountPath: /run/llm-init
               readOnly: true
