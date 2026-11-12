@@ -26,6 +26,10 @@ spec:
       containers:
       - name: postgres
         image: docker.io/postgres:17-bookworm@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5
+        lifecycle:
+          postStart:
+            exec:
+              command: [bash, /olares/pg-refresh-passwords.sh]
         args: [-c, wal_level=logical, -c, max_replication_slots=5, -c, max_wal_senders=5, -c, max_slot_wal_keep_size=1024MB, -c, shared_buffers=128MB]
         envFrom: [{secretRef: {name: wgersync-auth}}]
         env:
@@ -41,6 +45,7 @@ spec:
         volumeMounts:
         - {name: data, mountPath: /var/lib/postgresql/data, subPath: pg17}
         - {name: scripts, mountPath: /docker-entrypoint-initdb.d/10-wger.sh, subPath: pg-bootstrap.sh, readOnly: true}
+        - {name: scripts, mountPath: /olares/pg-refresh-passwords.sh, subPath: pg-refresh-passwords.sh, readOnly: true}
       volumes:
       - name: data
         hostPath: {path: '{{ .Values.userspace.appData }}/data', type: DirectoryOrCreate}

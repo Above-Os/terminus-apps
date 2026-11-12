@@ -4,6 +4,29 @@ metadata:
   name: wger-files
   namespace: {{ .Release.Namespace | quote }}
 data:
+  pg-refresh-passwords.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The namespace Secret can be recreated while the database volume survives.
+    # Wait for the final TCP server, not the temporary initdb socket-only server.
+    for attempt in $(seq 1 120); do
+      if pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+    \getenv admin_password POSTGRES_PASSWORD
+    \getenv app_password WGER_DB_PASSWORD
+    \getenv repl_password PS_SOURCE_PASSWORD
+    \getenv storage_password PS_STORAGE_PASSWORD
+    SELECT format('ALTER ROLE wger_admin PASSWORD %L', :'admin_password') \gexec
+    SELECT format('ALTER ROLE wger PASSWORD %L', :'app_password') \gexec
+    SELECT format('ALTER ROLE wger_repl PASSWORD %L', :'repl_password') \gexec
+    SELECT format('ALTER ROLE powersync_storage PASSWORD %L', :'storage_password') \gexec
+    SQL
+        exit 0
+      fi
+      sleep 2
+    done
+    echo 'PostgreSQL did not become ready for credential reconciliation' >&2
+    exit 1
   pg-bootstrap.sh: |
     #!/usr/bin/env bash
     set -euo pipefail
