@@ -36,6 +36,31 @@ data:
     ALTER USER supabase_functions_admin WITH PASSWORD :'pgpass';
     ALTER USER supabase_storage_admin WITH PASSWORD :'pgpass';
     ALTER USER supabase_read_only_user WITH PASSWORD :'pgpass';
+  sync-roles.sh: |
+    #!/bin/sh
+    set -eu
+
+    # A retained database keeps its role passwords when a new installation
+    # generates a different POSTGRES_PASSWORD. Wait for PostgreSQL to accept
+    # local connections, then synchronize only the package's service roles.
+    attempts=0
+    until psql -h /var/run/postgresql -p "${POSTGRES_PORT}" -U supabase_admin -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; do
+      attempts=$((attempts + 1))
+      if [ "$attempts" -ge 120 ]; then
+        echo 'Timed out waiting for PostgreSQL before synchronizing service roles' >&2
+        exit 1
+      fi
+      sleep 2
+    done
+
+    printf '%s\n' \
+      '\getenv pgpass POSTGRES_PASSWORD' \
+      "SELECT format('ALTER ROLE %I WITH PASSWORD %L', rolname, :'pgpass')" \
+      "FROM pg_roles WHERE rolname IN ('supabase_admin', 'authenticator', 'pgbouncer', 'supabase_auth_admin'," \
+      "'supabase_functions_admin', 'supabase_storage_admin', 'supabase_read_only_user') \gexec" \
+      | psql -h /var/run/postgresql -p "${POSTGRES_PORT}" -U supabase_admin -d postgres -v ON_ERROR_STOP=1 >/dev/null
+
+    touch /runtime/roles-synced
   webhooks.sql: |
     BEGIN;
       -- Create pg_net extension

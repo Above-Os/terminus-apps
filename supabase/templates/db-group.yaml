@@ -123,6 +123,14 @@ spec:
       - name: db
         image: supabase/postgres:17.6.1.136
         imagePullPolicy: IfNotPresent
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /runtime/busybox
+              - sh
+              - -c
+              - /runtime/busybox sh /config/sync-roles.sh > /runtime/role-sync.log 2>&1 &
         command:
         - /runtime/busybox
         - sh
@@ -181,6 +189,10 @@ spec:
           subPath: roles.sql
           readOnly: true
         - name: db-db-init
+          mountPath: /config/sync-roles.sh
+          subPath: sync-roles.sh
+          readOnly: true
+        - name: db-db-init
           mountPath: /docker-entrypoint-initdb.d/init-scripts/99-jwt.sql
           subPath: jwt.sql
           readOnly: true
@@ -217,13 +229,10 @@ spec:
         startupProbe:
           exec: &id002
             command:
-            - pg_isready
-            - -U
-            - supabase_admin
-            - -d
-            - postgres
-            - -h
-            - 127.0.0.1
+            - /runtime/busybox
+            - sh
+            - -ec
+            - test -f /runtime/roles-synced && pg_isready -U supabase_admin -d postgres -h 127.0.0.1
           timeoutSeconds: 5
           periodSeconds: 5
           failureThreshold: 120
