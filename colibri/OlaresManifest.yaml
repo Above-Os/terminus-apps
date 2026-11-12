@@ -7,7 +7,7 @@ metadata:
   title: Colibri
   description: A local AI engine for running larger MoE models with less resident memory
   icon: https://cdn.olares.com/images/2026/11/0d7c6155e1f20ef56847d1ea2b1f365a.png
-  version: 0.2.24
+  version: 0.2.34
   categories:
   - Developer Tools
   - Utilities_v112
@@ -36,14 +36,16 @@ spec:
     supportMultiNodes: false
     requiredCpu: 600m
     limitedCpu: '11'
-    requiredMemory: 512Mi
-    limitedMemory: 27Gi
+    requiredMemory: "-1"
+    limitedMemory: "-1"
     requiredDisk: 512Mi
     limitedDisk: 5Gi
-    requiredGPUMemory: 1Gi
-    limitedGPUMemory: 22Gi
+    requiredGPUMemory: "-1"
+    limitedGPUMemory: "-1"
   fullDescription: |
-    Colibri is a local AI engine with a web chat interface. It reads expert weights from disk as needed, allowing supported MoE models to run with less resident system memory and GPU memory. Choose low-memory mode to reduce resident resource use, at the cost of potentially slower replies. Actual requirements and speed depend on the model, quantization, and context length.
+    Colibri is a local AI engine with a web chat interface. It reads MoE expert weights from disk as needed.
+
+    Colibri lets you set system RAM and GPU memory limits. Set the GPU-memory limit to 0 to run entirely on the CPU. You can try running larger supported MoE models with limited resources, but the wait for the first response and generation speed may worsen significantly, especially with long inputs. More RAM or GPU memory can generally improve performance. Actual performance depends on the model, quantization and input length.
 
     **Key features**
 
@@ -57,9 +59,11 @@ spec:
 
     Choose a supported GGUF from the shared Hugging Face model directory in the app. Installation can complete before a model is selected. Model weights are not bundled or downloaded automatically. The Router address is filled from the installing user's Olares domain and can be overridden.
 
-    This preview requires an NVIDIA GPU and a CUDA 13.0-compatible NVIDIA driver. It targets Blackwell sm_120 and has been tested on an RTX 5090 Laptop GPU. The host must use amd64 with AVX2 (x86-64-v3). Older NVIDIA GPU architectures are not supported by this build.
+    Install on an amd64 host with AVX2 (x86-64-v3) and an NVIDIA device. GPU acceleration requires a CUDA 13.0-compatible driver and targets Blackwell sm_120; it has been tested on an RTX 5090 Laptop GPU. Set the GPU-memory limit to 0 for CPU inference through the same installation entry. Olares still records an NVIDIA device binding in that case.
 
     **Preview limitations**
+
+    Low-memory mode prioritizes running supported MoE models with limited memory. Its default resource settings can make responses much slower than standard mode, especially with long inputs, and requests may time out. When resources allow, choose standard mode for better responsiveness. Shorter inputs can help reduce waiting times.
 
     Chat history and generation parameters are not retained when the page is refreshed; export conversations before refreshing. Long inputs can be slow, and automatic context compaction did not finish within the 300-second client limit in testing. The tested model does not support forced JSON output or image input.
   developer: JustVugg
@@ -105,7 +109,7 @@ envs:
     value: standard
   - title: Low-memory MoE
     value: low-memory-moe
-  description: 'Inference profile: standard uses RAM_GB; low-memory-moe uses a 4 GB RAM budget and 2 GiB expert-cache budget with staged GPU execution. These are engine budgets, not whole-app resource caps. Switching restarts the app.'
+  description: 'Both modes use GPU_MEMORY_LIMIT for GPU allocation and MEMORY_LIMIT for RAM. Standard enables CUDA chain execution; low-memory MoE uses staged execution. The former fixed 2 GiB GPU budget is removed. Switching restarts the app.'
 - envName: CONTEXT_LENGTH
   type: int
   default: '16384'
@@ -130,11 +134,34 @@ envs:
   applyOnChange: true
   regex: ^https://[a-zA-Z0-9.-]+/v1$
   description: Optional Router API override. Leave blank to use the installing user's Olares Router address.
-- envName: RAM_GB
-  type: int
-  default: '16'
+- envName: MEMORY_LIMIT
+  type: string
   required: true
   editable: true
   applyOnChange: true
-  regex: ^([1-9]|1[0-8])$
-  description: Engine RAM budget in GB (1–18); larger models require increasing the chart memory resources first.
+  regex: ^[1-9][0-9]{0,6}(Mi|Gi)$
+  description: |
+    设置 Colibri 整个容器的内存上限（系统内存，不是 GPU 显存）。它不是预先占用或保证预留的内存。
+    填写带单位的正整数，例如 32Gi、48Gi 或 49152Mi；1Gi = 1024Mi。不能填写 48GB 或只填 48。配置最低接受 2Gi，但模型实际所需内存可能远高于此值。
+    应用自动将上限的 75% 换算为引擎预算（十进制 GB，向下取整）：32Gi 对应 25 GB，48Gi 对应 38 GB，64Gi 对应 51 GB；无需再设置 RAM_GB。
+    其余部分作为运行时、上下文和文件缓存的余量。75% 是保守起点，不保证所有模型或长上下文都能运行。调度预留固定为 256Mi，不需要填写 MEMORY_REQUEST。
+    请结合机器可用内存和其他应用用量设置。填写更大的值不会增加物理内存；达到容器上限时，系统可能终止进程。该设置不会改变 GPU 显存分配。
+    保存修改后会重启应用并重新加载已选择的模型，请先保存需要的对话。
+
+    Total system-RAM limit for the Colibri container, not GPU memory or a preallocated reservation.
+    Enter a positive whole-number quantity such as 32Gi, 48Gi or 49152Mi (1Gi = 1024Mi), not 48GB or a bare 48. The minimum accepted setting is 2Gi; a model may require much more.
+    The engine budget is calculated as floor(limit bytes x 0.75 / 1,000,000,000) GB: 32Gi -> 25 GB, 48Gi -> 38 GB, 64Gi -> 51 GB. RAM_GB is automatic. Scheduling reservation is fixed at 256Mi.
+    The remaining headroom is for runtime overhead, context and file cache; 75% is a conservative starting policy, not a guarantee for every model or context. Stay within available machine resources. Exceeding the container limit may terminate the process. Saving changes restarts the app and reloads the selected model; save important conversations first.
+- envName: GPU_MEMORY_LIMIT
+  type: string
+  required: true
+  editable: false
+  applyOnChange: false
+  regex: ^(0|0Mi|0Gi|[1-9][0-9]{0,6}(Mi|Gi))$
+  description: |
+    分配给 Colibri 的总显存额度，例如 8Gi、16Gi 或 16384Mi。显存填 0 时关闭 CUDA 并使用 CPU 推理，无需另选 CPU 模式；平台仍会记录 NVIDIA 设备绑定。正数必须填写单位，最低4Gi；请勿超过所选显卡的可用显存。此项与系统内存 MEMORY_LIMIT 相互独立。
+    该额度用于整个应用的GPU分配，包含模型权重、专家缓存和计算缓冲区，不会启动后立即占满，也不是额外的一份专家缓存。设置16Gi时，Olares按16Gi分配；内部暂留2Gi给CUDA及临时缓冲，其余用于引擎放置模型。
+    显存额度在安装时确定，安装后不可直接编辑；改变额度需保留数据重装，以便平台重新分配。模型、架构及上下文会影响实际占用；应通过实际运行验证，显存不足可能导致加载或生成失败。
+
+    Use the NVIDIA installation entry for all settings. Set 0 to disable CUDA and run CPU inference; there is no separate CPU install mode. Olares still records an NVIDIA device binding. Positive total GPU-memory allocation, e.g. 8Gi, 16Gi or 16384Mi (minimum 4Gi), separate from system RAM. Do not exceed the selected GPU's available memory.
+    Olares receives the full allocation. Two GiB are kept as fixed runtime/buffer headroom; the remaining placement budget is passed to the engine. Model weights and expert cache share that budget; memory is not necessarily occupied immediately. This is install-time only; changing the allocation requires a data-preserving reinstall so Olares recalculates the GPU requirement. Actual use depends on model family and context; other families require validation.

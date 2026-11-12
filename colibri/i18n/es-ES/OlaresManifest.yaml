@@ -3,7 +3,9 @@ metadata:
   description: Un motor de IA local para modelos MoE más grandes con menos memoria residente
 spec:
   fullDescription: |
-    Colibri es un motor de IA local con una interfaz web de chat. Lee los pesos de los expertos del disco según se necesitan, lo que permite ejecutar modelos MoE compatibles con menos memoria residente del sistema y de la GPU. El modo de bajo consumo de memoria reduce los recursos residentes, pero las respuestas pueden ser más lentas. Los requisitos reales y la velocidad dependen del modelo, la cuantización y la longitud del contexto.
+    Colibri es un motor de IA local con una interfaz web de chat. Lee los pesos de los expertos de los modelos MoE del disco según se necesitan.
+
+    Colibri permite establecer los límites de memoria del sistema y de la GPU. Con un límite de memoria GPU de 0, la inferencia se ejecuta solo en la CPU. Puede intentar ejecutar modelos MoE compatibles de mayor tamaño con recursos limitados, pero la espera hasta la primera respuesta y la velocidad de generación pueden empeorar considerablemente, sobre todo con entradas largas. Aumentar la memoria del sistema o de la GPU suele ayudar a mejorar el rendimiento. El rendimiento real depende del modelo, la cuantización y la longitud de la entrada.
 
     **Funciones principales**
 
@@ -17,8 +19,10 @@ spec:
 
     Seleccione en la aplicación un GGUF compatible del directorio compartido de modelos de Hugging Face. La instalación puede completarse antes de elegir un modelo. Los pesos de los modelos no se incluyen ni se descargan automáticamente. La dirección del Router se rellena a partir del dominio Olares del usuario que instala la aplicación y se puede sustituir.
 
-    Esta versión preliminar requiere una GPU NVIDIA y un controlador NVIDIA compatible con CUDA 13.0. Está compilada para Blackwell sm_120 y se ha probado en una RTX 5090 Laptop GPU. El equipo debe usar amd64 con AVX2 (x86-64-v3). Esta compilación no admite arquitecturas de GPU NVIDIA más antiguas.
+    La instalación requiere un equipo amd64 con AVX2 (x86-64-v3) y un dispositivo NVIDIA. La aceleración GPU necesita un controlador compatible con CUDA 13.0, está compilada para Blackwell sm_120 y se ha probado en una RTX 5090 Laptop GPU. Establezca el límite de memoria GPU en 0 para ejecutar la inferencia en la CPU desde la misma entrada de instalación. Olares sigue registrando una vinculación con un dispositivo NVIDIA.
 
     **Limitaciones de la versión preliminar**
+
+    El modo de bajo consumo de memoria prioriza la ejecución de modelos MoE compatibles con memoria limitada. La configuración de recursos predeterminada puede hacer que las respuestas sean mucho más lentas que en el modo estándar, especialmente con entradas largas, y las solicitudes pueden agotar el tiempo de espera. Si dispone de recursos suficientes, elija el modo estándar para mejorar la respuesta. Las entradas más cortas también pueden reducir la espera.
 
     El historial de chat y los parámetros de generación no se conservan al recargar la página. Exporte las conversaciones antes de recargar. Las entradas largas pueden procesarse lentamente. En las pruebas, la compresión automática del contexto no terminó dentro del límite de 300 segundos del cliente. El modelo probado no admite la salida JSON forzada ni las imágenes de entrada.
