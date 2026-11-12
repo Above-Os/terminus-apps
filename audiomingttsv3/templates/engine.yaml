@@ -24,7 +24,7 @@
 {{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
 {{- end -}}
 {{- $isIntel := or (eq $gpuType "intel") (eq $gpuType "intel-gpu") -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-ming-ov:v1.1.39" "docker.io/beclab/audio-ming:v1.1.39" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-ming-ov:v1.1.40" "docker.io/beclab/audio-ming:v1.1.40" $isIntel) -}}
 {{- $unifiedMem := and $wantGpu (eq $gpuType "nvidia-gb10") -}}
 {{- if eq $gpuType "intel" -}}
 {{- /* iGPU only: request 6Gi, limit 32Gi. */ -}}
@@ -41,8 +41,11 @@
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
 {{- end -}}
-{{- /* Empty ENGINE_ARGS leaves the engine defaults. A filled value replaces them. */ -}}
+{{- /* Filling ENGINE_ARGS replaces the complete default string. */ -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
+{{- if eq $engineArgs "" -}}
+{{- $engineArgs = "--shared-voice-dir /data/shared-voices" -}}
+{{- end -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
 {{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
@@ -87,6 +90,10 @@ spec:
         - name: voices
           hostPath:
             path: "{{ .Values.userspace.appData }}/voices"
+            type: DirectoryOrCreate
+        - name: shared-voices
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/tts/voices"
             type: DirectoryOrCreate
         - name: run-state
           hostPath:
@@ -175,6 +182,8 @@ spec:
               mountPath: /tmp
             - name: voices
               mountPath: /data/voices
+            - name: shared-voices
+              mountPath: /data/shared-voices
             - name: run-state
               mountPath: /run/llm-init
               readOnly: true
