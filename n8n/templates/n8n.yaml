@@ -1,4 +1,20 @@
-﻿---
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-runtime" .Release.Name) -}}
+{{- $runnerToken := randAlphaNum 64 -}}
+{{- if and $existing $existing.data (index $existing.data "N8N_RUNNERS_AUTH_TOKEN") -}}
+  {{- $runnerToken = index $existing.data "N8N_RUNNERS_AUTH_TOKEN" | b64dec -}}
+{{- end -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-runtime
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  N8N_RUNNERS_AUTH_TOKEN: {{ $runnerToken | quote }}
+  DB_POSTGRESDB_PASSWORD: {{ .Values.postgres.password | quote }}
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -28,6 +44,8 @@ spec:
     type: Recreate      
   template:
     metadata:
+      annotations:
+        checksum/runner-token: {{ $runnerToken | sha256sum | quote }}
       labels:
         app: n8n
     spec:
@@ -51,13 +69,16 @@ spec:
             - mountPath: /data
               name: n8n-config
       volumes:
+        - name: runner-tmp
+          emptyDir:
+            sizeLimit: 256Mi
         - name: n8n-config
           hostPath:
             type: DirectoryOrCreate
             path: '{{ .Values.userspace.appData }}/'
       containers:
         - name: n8n
-          image: "docker.io/n8nio/n8n:2.40.7"
+          image: "docker.io/n8nio/n8n:2.46.6"
           securityContext:
             runAsNonRoot: true
           resources:
@@ -72,6 +93,50 @@ spec:
           envFrom:
             - configMapRef:
                 name: n8n-config
+          env:
+            - name: N8N_RUNNERS_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-runtime
+                  key: N8N_RUNNERS_AUTH_TOKEN
+            - name: DB_POSTGRESDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-runtime
+                  key: DB_POSTGRESDB_PASSWORD
           volumeMounts:
             - mountPath: /home/node/.n8n
               name: n8n-config
+        - name: task-runners
+          image: "docker.io/n8nio/runners:2.46.6"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: N8N_RUNNERS_TASK_BROKER_URI
+              value: "http://127.0.0.1:5679"
+            - name: N8N_RUNNERS_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-runtime
+                  key: N8N_RUNNERS_AUTH_TOKEN
+            - name: N8N_RUNNERS_TASK_TIMEOUT
+              value: "300"
+            - name: N8N_RUNNERS_MAX_CONCURRENCY
+              value: "2"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          volumeMounts:
+            - name: runner-tmp
+              mountPath: /tmp
