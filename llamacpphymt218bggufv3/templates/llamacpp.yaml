@@ -92,20 +92,6 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
-{{- if $isIntelGpu }}
-        - name: dri
-          hostPath:
-            path: /dev/dri
-            type: Directory
-        - name: drm
-          hostPath:
-            path: /sys/class/drm
-            type: Directory
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 10Gi
-{{- end }}
       containers:
         - name: llamacpp
           image: "{{ $engineImage }}"
@@ -162,14 +148,6 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
-{{- if $isIntelGpu }}
-            - name: dri
-              mountPath: /dev/dri
-            - name: drm
-              mountPath: /sys/class/drm
-            - name: dshm
-              mountPath: /dev/shm
-{{- end }}
           resources:
             # nvidia.com/gpumem is the per-instance GPU memory quota read by the
             # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).
