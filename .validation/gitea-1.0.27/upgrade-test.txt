@@ -1,0 +1,74 @@
+Gitea 1.0.27 / 28.3.0 validation — 2026-11-13
+
+Change:
+- gitea/gitea:28.2.0 -> docker.io/gitea/gitea:28.3.0.
+- Chart and Manifest 1.0.26 -> 1.0.27; localized release notes updated.
+- /etc/timezone and /etc/localtime mounts changed from readOnly:false to true.
+- Existing data paths, middleware database mappings and resource budgets preserved.
+- No OAC execution; colleague validation remains pending. No public Market PR or merge.
+
+Provenance:
+Upstream latest stable release API confirmed v28.3.0, published 2026-11-01.
+https://blog.gitea.com/release-of-28.3.0/
+https://docs.gitea.com/installation/upgrade-from-gitea/
+https://docs.gitea.com/administration/backup-and-restore/
+Official Docker Hub tag supports linux/amd64 and linux/arm64 (both checked; runtime tested only amd64).
+Registry amd64 manifest digest: sha256:411af83e9be78029c0047a5f5a72f1d91b7c793ba5e5813b4e70a6bb8e4a0738.
+Remote main rechecked before commit: Gitea remains Chart 1.0.26 / app 28.2.0.
+No .suspend or .remove on the remote Gitea directory.
+Formal/test catalogs both showed Chart 1.0.26 / app 28.2.0.
+Target: one.olares.fashion. No Gitea installation existed before this task.
+
+Validation matrix:
+1. 28.2.0 / Chart 1.0.26 -> 28.3.0 / Chart 1.0.27 (Upload, app gitea):
+   Functional persistence checks passed, with setup/backup exceptions below.
+   Same test user could authenticate via API and in-app browser after upgrade.
+   Private repo ID 1, issue ID 2 / number 2, and before.txt content and Git blob SHA preserved.
+   Blob SHA: 7385fa9ee0ec648c35a14af063546cafc2cb2dc0.
+   Pre-upgrade commit: 4d2b00b203468e959faf7a05ca9766b7b734654c.
+   Post-upgrade Issue edit verified by subsequent read.
+   Runtime version 28.3.0; timezone/localtime mount flags both ro; UTC +0000.
+   /api/healthz database and cache checks pass.
+   Exception: automated old-version install-form submission panicked in db collation initialization.
+   CLI initialization was used. A configuration edit then produced an invalid INI, recovered from the saved original using the Files API while the workload was scaled down.
+   Exception: attempted pre-upgrade s6/gitea-dump backup did not produce an archive. The following upgrade command nevertheless executed. This is a test-process defect; this path does NOT establish a verified pre-upgrade recovery point.
+   A native PostgreSQL plus file backup was subsequently taken on 28.3.0. It cannot replace the missing 28.2.0 pre-upgrade backup.
+
+2. 1.27.3 / Chart 1.0.25 -> 28.3.0 / Chart 1.0.27 (Upload, isolated alias giteaoacold):
+   Historical chart source: above-os/terminus-apps @ 69709e0b701fb589107d93dc2cef640e9328a0a3.
+   Test alias changes: Chart name, Manifest metadata.name and appid. Runtime identity/database/storage isolated by the platform; no image or internal data-path renaming.
+   Initialized 1.27.3 through the in-app browser, created test user, private repository, Issue, committed file and attachments.
+   Native PostgreSQL 18 client installed only in test container. With Gitea processes paused, pg_dump -Fc and file tar completed; pg_restore -l and local archive reads validated the outputs before upgrade.
+   Backups downloaded to private local work/gitea-backups/old (not committed). Restore was NOT rehearsed.
+   Upgrade used same alias, Upload source, database and data paths; no uninstall between old and new.
+   Actual app version 28.3.0 verified. Startup logs showed migrations through 357 and normal HTTP startup; inspected pod Ready with zero container restarts.
+   Repo ID 1, issue ID 2 / number 2, before.txt blob/content and attachment IDs/UUIDs/sizes preserved.
+   Test attachments IDs 1 and 2, each 39 bytes; SHA256 both before-content expectation and post-upgrade file read:
+   29e5e8aaf7d80276f7cc973b9f73be5674d1bbdca2a63a605c63c7960274990c.
+   Actual HTTP Git clone returned pre-upgrade HEAD 6ff379c4eeec4724a1dcfac7f03c4ee92cd2609b.
+   New after.txt committed and pushed successfully; resulting HEAD a5efeccf95b4eddfe322c14aeb906dd49353f172.
+   In-app browser showed before.txt, after.txt, 3 commits and version 28.3.0 after upgrade.
+   /api/healthz passed. Both timezone files mounted ro.
+
+3. Fresh 28.3.0 / Chart 1.0.27 (platform clone giteae809fc):
+   Separate generated app identity, PostgreSQL database and persistent directory.
+   In-app browser install wizard completed successfully (no CLI configuration workaround).
+   Test administrator logged in and created private repo oac-fresh-20261113 with initialized README and initial commit.
+   Screenshot records repo and app version. No external CI runners, OAuth or SMTP tested.
+
+Transport observations:
+Some container-exec requests returned failure although subsequent readback proved the operation completed. Duplicate Issues/attachments were observed during API seeding. Evidence uses actual read-back IDs and content, not mutation exit status alone; cause was not established.
+
+Checks:
+olares-cli chart lint gitea: PASS.
+git diff --check: PASS after removing trailing blank lines in localized notes.
+The final whitespace-only cleanup does not change tested deployment behavior.
+No OAC pass claimed. Local source inspection indicates read-only timezone mounts have an exception in the checker, but colleague must confirm using the agreed OAC commit/policy.
+
+Limitations:
+28.2.0 upgrade has the documented initialization and missing pre-upgrade-backup exceptions.
+Backup restore not rehearsed. ARM runtime, SSH Git transport, LFS, Actions runners, external integrations and destructive data operations not tested.
+For upgrades from 1.27.x review upstream 28.0 changes (eg Git egress controls, Actions validation/retention and configuration changes). Do not downgrade a migrated database without restoring an appropriate backup.
+No test credentials or database dumps are included in the repository or public artifacts.
+
+Cleanup: all three task-created installations (gitea, giteaoacold, giteae809fc) uninstalled and verified absent. Both task-created Upload app records removed and verified absent. No --delete-data used; persistent test directories were not deliberately purged. Native backup copies remain in private local work/gitea-backups.
