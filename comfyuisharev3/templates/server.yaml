@@ -654,25 +654,6 @@ spec:
               mountPath: /root/ComfyUI/output
             - name: input
               mountPath: /root/ComfyUI/input
-{{- if $isIntel }}
-            # Intel Arc: the accelerator binding owns the device cgroup entry for
-            # the assigned render node (there is no Intel device plugin, and
-            # `privileged: true` is NOT required — the sibling intel-gpu apps on
-            # this platform run unprivileged). What the binding does not do is
-            # create the nodes inside the container, so the chart mounts them.
-            # /sys/class/drm is mounted alongside /dev/dri because Level-Zero
-            # reads card name and topology from sysfs, not from the node alone.
-            - name: dri
-              mountPath: /dev/dri
-            - name: drm
-              mountPath: /sys/class/drm
-              readOnly: true
-            # Default /dev/shm in a container is 64MiB. ComfyUI's loader and
-            # several custom nodes use shared memory; tmpfs-backed emptyDir is
-            # what the other Intel apps on this platform do.
-            - name: dshm
-              mountPath: /dev/shm
-{{- end }}
           # Entrances route via comfyuientrance Service (8080->8190, 8081->8080 gateway).
           # Gate readiness on the Launcher ComfyUI proxy (:8190) so Olares does not
           # publish the entrance before the "please start" page can be served.
@@ -741,24 +722,6 @@ spec:
           configMap:
             name: script
             defaultMode: 420
-{{- if $isIntel }}
-        # Intel Arc device passthrough (same shape as the platform's other
-        # intel-gpu apps: vllmintelqwen359bv3, audioqwen3asr06v3).
-        # type: Directory (not DirectoryOrCreate) — the host must really have
-        # these; creating an empty dir would silently hide a missing driver.
-        - name: dri
-          hostPath:
-            path: /dev/dri
-            type: Directory
-        - name: drm
-          hostPath:
-            path: /sys/class/drm
-            type: Directory
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 10Gi
-{{- end }}
 
 ---
 apiVersion: v1
