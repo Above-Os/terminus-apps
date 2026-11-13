@@ -1,0 +1,34 @@
+Chromium upgrade validation — 2026-11-13
+Target: one.olares.fashion (existing application; no uninstall).
+Source: market.test. Chart 1.0.17 -> 1.0.18.
+Browser: 150.0.7871.114 -> 156.0.8078.79.
+Image after: docker.io/beclab/harveyff-chromium:7b8e918f-ls63.
+Result: PASS for the scoped in-place upgrade and basic functional checks below. OAC NOT RUN; pending colleague.
+
+Using Codex in-app browser, created pre-upgrade bookmark and history:
+https://example.org/?oac-chromium-before-20261113
+Bookmark GUID: 2d41495b-62f2-4fcf-ad3b-cc014dc4942c (unchanged after upgrade).
+Profile: /config/.config/chromium/Default
+Created /config/Downloads/oac-chromium-upgrade-20261113/before-upgrade.txt
+SHA256 before and after: 9c7114f04b75931da8e2cf04e59ed2202ffabb63d58431460a6ecb9aa8487e60
+Hot profile backup: /config/Downloads/oac-chromium-upgrade-20261113/profile-before.tar.gz (restore not tested).
+
+After upgrade, the in-app browser displayed the Chromium desktop. A 'Chromium did not shut down correctly / Restore pages?' prompt appeared. Clicking Restore recovered the pre-upgrade test tab; page and bookmark star displayed correctly. Session restoration therefore required one manual click, rather than occurring silently.
+Created new bookmark/history through browser UI:
+https://example.net/?oac-chromium-after-20261113
+New bookmark GUID: bd46b0de-7e38-45ad-b5e9-653e44a3ae0c.
+Bookmarks UI displayed both pre-upgrade and post-upgrade bookmarks (see screenshot).
+History snapshot contained both test URLs; SQLite PRAGMA quick_check returned ok.
+UID 1000 created/read after-upgrade.txt in the same Downloads test directory.
+Internal HTTP port 3000 returned 200. Application pod Ready, zero restarts at inspection.
+Direct Windows TCP probe to 192.168.50.163:30001: before timeout, after connection refused. The before timeout does not establish previous reachability. Live Service object not inspected; packaged Service template has no NodePort/type NodePort declaration.
+
+Package provenance:
+Downloaded actual market.test 1.0.18 package SHA256:
+320eff3588fab498a481b6dc3e03c3ab37189846cf959905c21eebaf476edf64
+Repository base 92f65c082a5fd253319c161a290d70db96bbe9da already includes Chromium 1.0.18 (#4472).
+All repository chart files match downloaded package after BOM/line-ending normalization, except Chart.yaml packaging serialization/comments (same chart/app versions and fields). Market package also includes generated image metadata.
+olares-cli chart lint chromium: PASS.
+An initial upgrade request against upload returned 404 without changing the application; using the installed source market.test succeeded.
+
+Scope: existing installation on this Olares One only. Fresh install, other historical versions, ARM hardware, multimedia/GPU behavior and full security audit were not tested. Application and test data retained. No OAC pass is claimed.
