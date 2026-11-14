@@ -1,0 +1,27 @@
+metadata:
+  description: "Qwen3.8-27B (NVFP4 GGUF with MTP) served with llama.cpp on NVIDIA Blackwell GPUs (RTX 50 series)."
+  title: Qwen3.8-27B NVFP4 (llama.cpp)
+
+spec:
+  fullDescription: |
+    **Model Overview**
+    Qwen3.8-27B is a vision-language model from the Qwen series (Alibaba), built on the Qwen3.5 architecture. It supports thinking, tool-calling, and native image/video understanding, with a 256K context window. This app serves the NVFP4 `MTP-LOW` GGUF build from `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF` (quantized from `unsloth/Qwen3.8-27B-NVFP4`) via llama.cpp.
+
+    **Hardware Requirements**
+    NVFP4 runs natively only on NVIDIA Blackwell GPUs, such as the RTX 50 series. It needs 23Gi of GPU memory, so a 24 GB card is the minimum. Older NVIDIA GPUs cannot run this app; use the GGUF Q4 version of Qwen3.8-27B instead.
+
+    **Preset Configuration**
+    - Model: `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW` (with `mmproj-BF16.gguf` projector for vision)
+    - Capabilities: thinking, tools, vision
+    - Engine args: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024` (102K context shared by 4 slots, MTP speculative decoding with draft depth 4)
+    - Required GPU memory: `23Gi`
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda13-b11718`): Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.

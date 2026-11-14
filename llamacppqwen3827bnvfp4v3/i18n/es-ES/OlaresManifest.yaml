@@ -1,0 +1,26 @@
+metadata:
+  description: "Qwen3.8-27B (GGUF NVFP4 con MTP) servido con llama.cpp en GPU NVIDIA Blackwell (serie RTX 50)."
+  title: Qwen3.8-27B NVFP4 (llama.cpp)
+spec:
+  fullDescription: |
+    **Descripción del modelo**
+    Qwen3.8-27B es un modelo de visión y lenguaje de la serie Qwen (Alibaba), basado en la arquitectura Qwen3.5. Admite razonamiento, llamadas a herramientas y comprensión nativa de imágenes y vídeo, con una ventana de contexto de 256K. Esta app sirve con llama.cpp la versión GGUF NVFP4 `MTP-LOW` de `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF` (cuantizada a partir de `unsloth/Qwen3.8-27B-NVFP4`).
+
+    **Requisitos de hardware**
+    NVFP4 solo se ejecuta de forma nativa en GPU NVIDIA Blackwell, como la serie RTX 50. Necesita 23Gi de memoria de GPU, por lo que se requiere una tarjeta de al menos 24 GB. Las GPU NVIDIA anteriores no pueden ejecutar esta app; use en su lugar la versión GGUF Q4 de Qwen3.8-27B.
+
+    **Configuración predeterminada**
+    - Modelo: `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW` (con el proyector `mmproj-BF16.gguf` para visión)
+    - Capacidades: razonamiento, herramientas, visión
+    - Argumentos del motor: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024` (contexto de 102K compartido por 4 slots, decodificación especulativa MTP con profundidad de borrador 4)
+    - Memoria de GPU requerida: `23Gi`
+
+    **Cómo funciona**
+    Primero, Model Console descarga el modelo y lo prepara; después, `llama.cpp` empieza a servir el modelo cuando está listo. Estas dos partes se ejecutan por separado, pero comparten archivos e información de progreso.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda13-b11718`): ejecuta el modelo y atiende las solicitudes de la API (puerto 8081)
+    - **Model Console**: descarga el modelo, muestra el progreso y ofrece la API de OpenAI en el puerto 8090, redirigiendo a `llamacpp`.
+
+    **Almacenamiento de modelos**
+    Todos los archivos de modelo se guardan en una carpeta compartida en `appCommon/huggingface`, montada como `/cache/hf/hub`. Todas las apps similares usan esta ubicación para los modelos.

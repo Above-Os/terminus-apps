@@ -1,0 +1,26 @@
+metadata:
+  description: "Qwen3.8-27B (GGUF NVFP4 avec MTP) servi avec llama.cpp sur GPU NVIDIA Blackwell (série RTX 50)."
+  title: Qwen3.8-27B NVFP4 (llama.cpp)
+spec:
+  fullDescription: |
+    **Présentation du modèle**
+    Qwen3.8-27B est un modèle vision-langage de la série Qwen (Alibaba), basé sur l'architecture Qwen3.5. Il prend en charge le raisonnement, l'appel d'outils et la compréhension native des images et des vidéos, avec une fenêtre de contexte de 256K. Cette app sert via llama.cpp la version GGUF NVFP4 `MTP-LOW` de `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF` (quantifiée à partir de `unsloth/Qwen3.8-27B-NVFP4`).
+
+    **Configuration matérielle requise**
+    NVFP4 ne s'exécute nativement que sur les GPU NVIDIA Blackwell, comme la série RTX 50. Il faut 23Gi de mémoire GPU, donc une carte d'au moins 24 Go. Les GPU NVIDIA plus anciens ne peuvent pas exécuter cette app ; utilisez plutôt la version GGUF Q4 de Qwen3.8-27B.
+
+    **Configuration prédéfinie**
+    - Modèle : `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW` (avec le projecteur `mmproj-BF16.gguf` pour la vision)
+    - Capacités : raisonnement, outils, vision
+    - Arguments du moteur : `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024` (contexte de 102K partagé par 4 slots, décodage spéculatif MTP avec une profondeur de brouillon de 4)
+    - Mémoire GPU requise : `23Gi`
+
+    **Fonctionnement**
+    Model Console télécharge d'abord le modèle et le prépare, puis `llama.cpp` commence à servir le modèle une fois prêt. Ces deux parties s'exécutent séparément mais partagent les fichiers et les informations de progression.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda13-b11718`) : exécute le modèle et traite les requêtes API (port 8081)
+    - **Model Console** : télécharge le modèle, affiche la progression et fournit l'API OpenAI sur le port 8090, en relayant vers `llamacpp`.
+
+    **Stockage des modèles**
+    Tous les fichiers de modèle sont stockés dans un dossier partagé `appCommon/huggingface`, monté sous `/cache/hf/hub`. Toutes les apps similaires utilisent cet emplacement pour les modèles.
