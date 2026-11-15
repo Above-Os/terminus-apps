@@ -1,0 +1,214 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: ollamaqwen3635ba3bv3
+  icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
+  description: "A local chat model that rewrites prompts for Studio apps and unloads after each answer"
+  appid: ollamaqwen3635ba3bv3
+  title: Qwen3.6 35B A3B for Studios
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+    - llm
+sharedEntrances:
+  - name: ollamaqwen3635ba3bv3
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3.6 35B A3B for Studios
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
+entrances:
+  - name: ollamaclient
+    port: 8090
+    host: download-svc
+    title: Qwen3.6 35B A3B for Studios
+    icon: https://app.cdn.olares.com/appstore/llm/ollama/llm/qwen3-14b.png
+    openMethod: window
+    authLevel: internal
+#   ollamaqwen3635ba3bv3 — engine Deployment (== appid / Release.Name)
+#   llminit          — llm-init / entrance Deployment
+workloadReplicas:
+  ollamaqwen3635ba3bv3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'qwen3.6:35b-a3b'
+
+  fullDescription: |
+    Qwen3.6 35B A3B is a vision-language model from the Qwen team. This app is made mainly for apps such as Qwen Image 2.1 Studio and FastH3 Studio, which use it to rewrite prompts and look at your reference images when you press AI optimize.
+
+    It unloads the model from GPU memory after every answer, so the image or video model keeps the GPU. The next answer takes a few seconds longer while the model loads again.
+
+    **Key features**
+
+    - Rewrites and translates prompts, and answers questions about images.
+    - Thinking mode for harder rewrites; apps that do not need it turn it off per request.
+    - Tool calling in compatible applications that provide tools.
+
+    **Using the model on Olares**
+
+    The app downloads `qwen3.6:35b-a3b` from the Ollama library. Model Console shows download progress and lists the model in Router for compatible Olares applications. The default context window is 32K tokens.
+
+    For general chat where repeated answers should be fast, set `OLLAMA_KEEP_ALIVE` to a longer value (for example `30m` or `-1`) in `ENGINE_ARGS` or the Model Console, or use an app that keeps the model loaded.
+
+    [Qwen3.6 on Ollama](https://ollama.com/library/qwen3.6)
+
+  developer: Qwen
+  website: https://ollama.com/library/qwen3.6
+  sourceCode: https://github.com/ollama/ollama
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/Qwen/Qwen3.6-35B-A3B/blob/main/LICENSE
+    - text: MIT
+      url: https://github.com/ollama/ollama#MIT-1-ov-file
+
+  accelerator:
+    #   nvidia       — discrete GPU; OLLAMA_REQUIRED_GPU_MEMORY -> gpumem
+    #   nvidia-gb10  — DGX Spark unified memory; same env -> pod memory
+    - mode: nvidia
+      limitedCpu: "15360m"
+      requiredCpu: "1300m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # Engine MEMORY_REQUEST 6Gi + llm-init <= requiredMemory 7Gi; MEMORY_LIMIT 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+      limitedMemory: "32Gi"
+      requiredMemory: "7Gi"
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "24Gi"
+    - mode: nvidia-gb10
+      limitedCpu: "15360m"
+      requiredCpu: "1300m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "45Gi"
+      requiredMemory: "30Gi"
+  supportArch:
+    - amd64
+    - arm64
+permission:
+  # appCache holds the shared RUN_DIR handoff dir
+  # (<appCache>/llm-init-run/<release>), same as the llamacpp charts.
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.6-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE        # example: ollama://qwen3.5:2b
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "ollama://qwen3.6:35b-a3b"
+    description: "Example: ollama://qwen3.5:2b. The Ollama library source to pull your model. Use `ollama://<model>:<tag>` format. Browse models at https://ollama.com/library."
+    regex: "^ollama://"
+  - envName: MODEL_NAME          # example: qwen3.5:2b
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "qwen3.6:35b-a3b"
+    description: "Example: qwen3.5:2b. The name of your model — use the string after `ollama://` in MODEL_SOURCE. This is also used as the OpenAI alias."
+  - envName: MODEL_MODE
+    required: true
+    default: "chat"
+    type: string
+    editable: true
+    applyOnChange: true
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: "thinking,tools,vision"
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "The model capabilities. Pick what your model supports; check ollama.com/library for details. If no extra capabilities, pick None."
+  - envName: ENGINE_ARGS         # example: OLLAMA_KEEP_ALIVE=-1 OLLAMA_CONTEXT_LENGTH=65536 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1
+    required: true
+    default: "OLLAMA_KEEP_ALIVE=0 OLLAMA_PRELOAD=false OLLAMA_CONTEXT_LENGTH=32768 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1"
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Example: OLLAMA_KEEP_ALIVE=0 OLLAMA_CONTEXT_LENGTH=32768 .... KEEP_ALIVE is ollama-daemon-only. This app defaults to 0 (unload after every answer) with OLLAMA_PRELOAD=false; -1 keeps the model in VRAM."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: OLLAMA_CPU_REQUEST    # default: 200m
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_REQUEST # sum with llm-init <= requiredMemory 7Gi
+    required: true
+    default: "6Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_CPU_LIMIT      # default: 6
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_MEMORY_LIMIT   # 30Gi + llm-init 2Gi <= limitedMemory 32Gi
+    required: true
+    default: "30Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: OLLAMA_REQUIRED_GPU_MEMORY  # GPU modes: 8Gi/8192/8192Mi -> bare-MiB gpumem; cpu: ignored
+    required: true
+    default: "23Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+    description: "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. On NVIDIA this sets `nvidia.com/gpumem` in MiB. On Spark it sets pod memory."
+    regex: "^[0-9]+(Gi|Mi)?$"
