@@ -4,6 +4,24 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.2.48：将 NVIDIA vLLM 从 v0.29.0 升级至 v0.33.0。NVIDIA amd64、arm64 和 Spark/GB10 统一使用 `vllm/vllm-openai:v0.33.0`。ROCm 保持 v0.28.0，Intel XPU 保持 0.21.0-ubuntu24.04-20260805。
+
+    v0.29.0 至 v0.33.0 更新摘要：
+    - v0.30.0：新增 DeepSeek-V4.1-Flash、GLM-5.3-Flash；引入可选的 Fast Start GPU 权重缓存和 HiSparse 主机 KV 卸载；优化 CUDA Graph 捕获以及流水线并行下的推测解码。
+    - v0.31.0：新增 `vllm preload` 和实验性引擎快照；优化 DeepSeek-V4.1 NVFP4 KV 缓存、DFlash 异步调度、自适应验证及 MoE 显存估算。
+    - v0.32.0：新增通用 HuggingFace 工具/推理解析器，扩大 NVFP4 KV 缓存支持，支持 EmbeddingGemma 2、MiniCPM-V 4.7；优化内核下载、本地 tokenizer 加载和 API worker 负载均衡。
+    - v0.33.0：新增 Beam-1.0、Muse Spark Open、Step-5 Preview；升级 PyTorch 2.14、Triton 3.8；优化 NVIDIA 解码和推测解码；新增 `/v1/decisions` 及支持可选延迟分块的 token 嵌入。
+
+    NVIDIA 升级兼容性说明：
+    - 发布镜像仅使用 CUDA 13.0，不再支持 Python 3.10。CORS 默认策略收紧，浏览器直接访问时请检查允许的来源。
+    - 移除 GPTQ 激活排序（`g_idx`）、`mamba_cache_mode=all`、级联注意力、Medusa 和 MLP 推测器；请检查自定义 `ENGINE_ARGS`，`--mamba-cache-mode` 已弃用。
+    - Responses API 推理事件名称发生变化；生成暂停期间的生成请求返回 HTTP 503。本 Chart 不会自动启用上述可选功能。
+
+    https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.31.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.32.0
+    https://github.com/vllm-project/vllm/releases
+
     v1.2.47: 运行状态迁移到 Common，支持跨节点运行。优先使用 Common 中的配置，否则迁移本节点旧 Cache，或在 Common 初始化。 启动时重试读取共享脚本。
 
     v1.2.45: Model Console（llm-init）版本更新为 v1.7.21。

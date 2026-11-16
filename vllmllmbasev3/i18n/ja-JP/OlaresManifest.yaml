@@ -3,6 +3,24 @@ metadata:
   description: "汎用 vLLM エンジンベース。インストール時に env で任意の HuggingFace Safetensors モデルを選択. llm-init と推論エンジンは Common を介して実行状態を共有し、異なるノードで動作できます。"
 spec:
   upgradeDescription: |
+    v1.2.48: NVIDIA vLLM を v0.29.0 から v0.33.0 に更新。NVIDIA amd64、arm64、Spark/GB10 は `vllm/vllm-openai:v0.33.0` を使用します。ROCm は v0.28.0、Intel XPU は 0.21.0-ubuntu24.04-20260805 を維持します。
+
+    v0.29.0 から v0.33.0 までの更新：
+    - v0.30.0: DeepSeek-V4.1-Flash と GLM-5.3-Flash に対応。Fast Start GPU 重みキャッシュと HiSparse ホスト KV オフロードをオプションで追加。CUDA Graph 捕捉とパイプライン並列での投機的デコードを改善。
+    - v0.31.0: `vllm preload` と実験的なエンジンスナップショットを追加。DeepSeek-V4.1 NVFP4 KV キャッシュ、DFlash 非同期スケジューリング、適応的検証、MoE メモリ推定を改善。
+    - v0.32.0: 汎用 HuggingFace ツール/推論パーサー、NVFP4 KV 対応拡充、EmbeddingGemma 2、MiniCPM-V 4.7 を追加。カーネル取得、ローカル tokenizer 読み込み、API ワーカー負荷分散を改善。
+    - v0.33.0: Beam-1.0、Muse Spark Open、Step-5 Preview に対応。PyTorch 2.14、Triton 3.8 に更新。NVIDIA と投機的デコードを改善。`/v1/decisions` とオプションの late chunking に対応するトークン埋め込みを追加。
+
+    NVIDIA 更新時の互換性：
+    - リリースイメージは CUDA 13.0 のみとなり、Python 3.10 対応を終了。CORS の既定値が厳しくなるため、ブラウザーから直接アクセスする場合は許可するオリジンを確認してください。
+    - GPTQ 活性化順序（`g_idx`）、`mamba_cache_mode=all`、cascade attention、Medusa、MLP speculator を削除。独自の `ENGINE_ARGS` を確認してください。`--mamba-cache-mode` は非推奨です。
+    - Responses API の推論イベント名を変更。生成を一時停止中の生成リクエストには HTTP 503 を返します。本チャートはオプション機能を自動では有効化しません。
+
+    https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.31.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.32.0
+    https://github.com/vllm-project/vllm/releases
+
     v1.2.47: 実行時の状態を Common に保存し、ノードをまたぐ動作に対応します。Common に既存の設定がある場合は優先して使用します。ない場合は、このノードの従来の Cache から移行するか、Common で状態を初期化します。 エンジン起動時に共有ヘルパースクリプトの読み取りに失敗した場合は、再試行します。
 
     v1.2.45: Model Console（llm-init）を v1.7.21 に更新しました。

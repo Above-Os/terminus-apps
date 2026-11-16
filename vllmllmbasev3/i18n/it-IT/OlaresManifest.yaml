@@ -3,6 +3,24 @@ metadata:
   description: "Base generica del motore vLLM. Scegli qualsiasi modello HuggingFace Safetensors all'installazione tramite env. llm-init e il motore di inferenza condividono lo stato di esecuzione tramite Common e possono essere eseguiti su nodi diversi."
 spec:
   upgradeDescription: |
+    v1.2.48: NVIDIA vLLM aggiornato da v0.29.0 a v0.33.0. NVIDIA amd64, arm64 e Spark/GB10 usano `vllm/vllm-openai:v0.33.0`. ROCm resta a v0.28.0 e Intel XPU a 0.21.0-ubuntu24.04-20260805.
+
+    Novità da v0.29.0 a v0.33.0:
+    - v0.30.0: DeepSeek-V4.1-Flash e GLM-5.3-Flash; cache opzionale dei pesi GPU Fast Start e offload KV sull'host con HiSparse; miglioramenti ai grafi CUDA e alla decodifica speculativa con parallelismo pipeline.
+    - v0.31.0: `vllm preload` e snapshot sperimentali del motore; miglioramenti alla cache KV NVFP4 di DeepSeek-V4.1, a DFlash asincrono, alla verifica adattiva e alla profilazione della memoria MoE.
+    - v0.32.0: Parser generici HuggingFace per strumenti/ragionamento, supporto KV NVFP4 esteso, EmbeddingGemma 2 e MiniCPM-V 4.7; miglioramenti a download dei kernel, tokenizer locali e bilanciamento dei worker API.
+    - v0.33.0: Beam-1.0, Muse Spark Open e Step-5 Preview; PyTorch 2.14 e Triton 3.8; miglioramenti alla decodifica NVIDIA e speculativa; `/v1/decisions` ed embedding dei token con late chunking opzionale.
+
+    Compatibilità dell'aggiornamento NVIDIA:
+    - Le immagini usano solo CUDA 13.0; Python 3.10 non è più supportato. CORS è più restrittivo; verificare le origini consentite per l'accesso diretto dal browser.
+    - Rimossi ordine di attivazione GPTQ (`g_idx`), `mamba_cache_mode=all`, cascade attention, Medusa e speculatore MLP. Verificare `ENGINE_ARGS`; `--mamba-cache-mode` è deprecato.
+    - Cambiano i nomi degli eventi di ragionamento della Responses API; le richieste di generazione ricevono HTTP 503 durante una pausa. Il chart non attiva automaticamente le funzionalità opzionali.
+
+    https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.31.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.32.0
+    https://github.com/vllm-project/vllm/releases
+
     v1.2.47: Lo stato di esecuzione viene memorizzato in Common per consentire il funzionamento su più nodi. La configurazione esistente in Common ha la priorità. In caso contrario, viene migrato il Cache locale precedente oppure lo stato viene inizializzato in Common. All’avvio del motore, la lettura degli script di supporto condivisi viene ritentata in caso di errore.
 
     v1.2.45: Model Console (llm-init) è stato aggiornato alla versione v1.7.21.
