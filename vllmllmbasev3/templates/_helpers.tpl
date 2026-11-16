@@ -63,11 +63,11 @@ amd64
 {{- else if $isIntelGpu -}}
 {{- $img.intelGpu | default "docker.io/intel/vllm:0.21.0-ubuntu24.04-20260805" -}}
 {{- else if $isGb10 -}}
-{{- $img.nvidiaGb10 | default "docker.io/vllm/vllm-openai:v0.27.1-aarch64" -}}
+{{- $img.nvidiaGb10 | default "docker.io/vllm/vllm-openai:v0.33.0-aarch64" -}}
 {{- else if eq $arch "arm64" -}}
-{{- $img.nvidiaArm64 | default "docker.io/vllm/vllm-openai:v0.27.1-aarch64" -}}
+{{- $img.nvidiaArm64 | default "docker.io/vllm/vllm-openai:v0.33.0-aarch64" -}}
 {{- else -}}
-{{- $img.nvidia | default "docker.io/vllm/vllm-openai:v0.27.1" -}}
+{{- $img.nvidia | default "docker.io/vllm/vllm-openai:v0.33.0" -}}
 {{- end -}}
 {{- end -}}
 {{- /* Spark/GB10: detect from GPU.Type or node hardware (install-time .Values.nodes). */ -}}

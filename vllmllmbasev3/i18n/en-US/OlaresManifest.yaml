@@ -4,6 +4,24 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.2.48: Upgrade NVIDIA vLLM from v0.29.0 to v0.33.0. NVIDIA amd64 uses `vllm/vllm-openai:v0.33.0`; arm64 and Spark/GB10 use `vllm/vllm-openai:v0.33.0-aarch64`. ROCm remains v0.28.0; Intel XPU remains 0.21.0-ubuntu24.04-20260805.
+
+    Highlights from v0.29.0 to v0.33.0:
+    - v0.30.0: Adds DeepSeek-V4.1-Flash and GLM-5.3-Flash; introduces optional Fast Start GPU weight caching and HiSparse host KV offload; improves CUDA graph capture and speculative decoding with pipeline parallelism.
+    - v0.31.0: Adds `vllm preload` and experimental engine snapshots; improves DeepSeek-V4.1 NVFP4 KV cache, DFlash async scheduling, adaptive verification and MoE memory profiling.
+    - v0.32.0: Adds generic HuggingFace tool/reasoning parsers, broader NVFP4 KV-cache support, EmbeddingGemma 2 and MiniCPM-V 4.7; improves kernel downloads, local tokenizer loading and API-worker load balancing.
+    - v0.33.0: Adds Beam-1.0, Muse Spark Open and Step-5 Preview; upgrades to PyTorch 2.14 and Triton 3.8; improves NVIDIA and speculative decoding; adds `/v1/decisions` and token embeddings with optional late chunking.
+
+    Compatibility notes for the NVIDIA upgrade:
+    - Release images now use CUDA 13.0 only; Python 3.10 support is removed. CORS defaults are more restrictive; review allowed origins for direct browser access.
+    - GPTQ activation ordering (`g_idx`), `mamba_cache_mode=all`, cascade attention, Medusa and the MLP speculator are removed. Review custom `ENGINE_ARGS`; `--mamba-cache-mode` is deprecated.
+    - Responses API reasoning event names changed; generation requests receive HTTP 503 while generation is paused. Optional upstream features are not enabled automatically by this chart.
+
+    https://github.com/vllm-project/vllm/releases/tag/v0.30.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.31.0
+    https://github.com/vllm-project/vllm/releases/tag/v0.32.0
+    https://github.com/vllm-project/vllm/releases
+
     v1.2.47: Store runtime state in Common for cross-node operation. Prefer existing Common configuration; otherwise migrate local legacy Cache or initialize in Common. Retry shared helper reads during engine startup.
 
     v1.2.45: Model Console (llm-init) updated to v1.7.21.
