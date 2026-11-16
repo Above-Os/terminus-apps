@@ -1,0 +1,387 @@
+{
+  "name": "imageminimaxh3image",
+  "title": "H3 Image",
+  "flows": [
+    {
+      "mode": "t2i",
+      "label": "Text to image",
+      "output": "image",
+      "inputs": [
+        {
+          "id": "prompt",
+          "node": "23:5",
+          "field": "prompt",
+          "type": "textarea",
+          "label": "Prompt",
+          "default": "A ceramic teapot shaped like a sleeping fox on a sunlit wooden table, soft morning light, shallow depth of field.",
+          "role": "prompt"
+        },
+        {
+          "id": "aspect_ratio",
+          "node": "14",
+          "field": "aspect_ratio",
+          "type": "select",
+          "label": "Aspect ratio",
+          "default": "1:1 (Square)",
+          "options": [
+            "1:1 (Square)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "21:9 (Ultrawide)"
+          ],
+          "role": "aspect"
+        },
+        {
+          "id": "megapixels",
+          "node": "14",
+          "field": "megapixels",
+          "type": "number",
+          "label": "Megapixels",
+          "default": 4,
+          "min": 4,
+          "max": 16,
+          "step": 4,
+          "role": "resolution"
+        },
+        {
+          "id": "seed",
+          "node": "23:7",
+          "field": "seed",
+          "type": "seed",
+          "label": "Seed",
+          "default": 0,
+          "random": true,
+          "role": "seed"
+        }
+      ],
+      "api": "t2i.api.json",
+      "save": "t2i.json"
+    },
+    {
+      "mode": "edit",
+      "label": "Edit",
+      "output": "image",
+      "inputs": [
+        {
+          "id": "prompt",
+          "node": "32",
+          "field": "prompt",
+          "type": "textarea",
+          "label": "Prompt",
+          "default": "Replace the background of \u003cPicture 1\u003e with a quiet beach at sunset, keep the person unchanged.",
+          "role": "prompt"
+        },
+        {
+          "id": "megapixels",
+          "node": "56",
+          "field": "resize_type.megapixels",
+          "type": "number",
+          "label": "Megapixels",
+          "default": 4,
+          "min": 4,
+          "max": 16,
+          "step": 4,
+          "role": "resolution"
+        },
+        {
+          "id": "mask",
+          "node": "490",
+          "field": "image",
+          "type": "image",
+          "label": "Mask",
+          "optional": true,
+          "role": "mask",
+          "bypass": {
+            "node": "491",
+            "field": "source"
+          }
+        },
+        {
+          "id": "seed",
+          "node": "38",
+          "field": "seed",
+          "type": "seed",
+          "label": "Seed",
+          "default": 0,
+          "random": true,
+          "role": "seed"
+        }
+      ],
+      "route": {
+        "accepts": {
+          "mask": {
+            "max": 1
+          },
+          "ref_image": {
+            "max": 10
+          }
+        },
+        "requiresAny": [
+          "ref_image"
+        ],
+        "aspect": "follow"
+      },
+      "autogrow": [
+        {
+          "role": "ref_image",
+          "node": "32",
+          "template": [
+            "45",
+            "56",
+            "48"
+          ],
+          "file": {
+            "node": "45",
+            "field": "image"
+          },
+          "links": [
+            {
+              "prefix": "images.image_",
+              "from": "48",
+              "output": 0
+            }
+          ],
+          "max": 10,
+          "start": 1
+        }
+      ],
+      "api": "edit.api.json",
+      "save": "edit.json"
+    },
+    {
+      "mode": "ref",
+      "label": "Compose from references",
+      "output": "image",
+      "inputs": [
+        {
+          "id": "prompt",
+          "node": "32",
+          "field": "prompt",
+          "type": "textarea",
+          "label": "Prompt",
+          "default": "The person from \u003cPicture 1\u003e holds the mug from \u003cPicture 2\u003e in a sunlit cafe, keep the face and the mug's design unchanged.",
+          "role": "prompt"
+        },
+        {
+          "id": "aspect_ratio",
+          "node": "14",
+          "field": "aspect_ratio",
+          "type": "select",
+          "label": "Aspect ratio",
+          "default": "1:1 (Square)",
+          "options": [
+            "1:1 (Square)",
+            "2:3 (Portrait Photo)",
+            "3:2 (Photo)",
+            "3:4 (Portrait Standard)",
+            "4:3 (Standard)",
+            "9:16 (Portrait Widescreen)",
+            "16:9 (Widescreen)",
+            "21:9 (Ultrawide)"
+          ],
+          "role": "aspect"
+        },
+        {
+          "id": "megapixels",
+          "node": "14",
+          "field": "megapixels",
+          "type": "number",
+          "label": "Megapixels",
+          "default": 4,
+          "min": 4,
+          "max": 16,
+          "step": 4,
+          "role": "resolution"
+        },
+        {
+          "id": "seed",
+          "node": "38",
+          "field": "seed",
+          "type": "seed",
+          "label": "Seed",
+          "default": 0,
+          "random": true,
+          "role": "seed"
+        }
+      ],
+      "route": {
+        "accepts": {
+          "ref_image": {
+            "max": 10
+          }
+        },
+        "requiresAny": [
+          "ref_image"
+        ],
+        "aspect": "ratio"
+      },
+      "autogrow": [
+        {
+          "role": "ref_image",
+          "node": "32",
+          "template": [
+            "45",
+            "56",
+            "48"
+          ],
+          "file": {
+            "node": "45",
+            "field": "image"
+          },
+          "links": [
+            {
+              "prefix": "images.image_",
+              "from": "48",
+              "output": 0
+            }
+          ],
+          "max": 10,
+          "start": 1
+        }
+      ],
+      "api": "ref.api.json",
+      "save": "ref.json"
+    }
+  ],
+  "variants": [
+    {
+      "id": "w4a8",
+      "label": "W4A8 (smaller, 29 GB download)",
+      "default": true,
+      "replace": {
+        "minimax_h3_image_pruned_int8_convrot.safetensors": "minimax_h3_image_pruned_w4a8.safetensors",
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      }
+    },
+    {
+      "id": "int8",
+      "label": "INT8 (49 GB download)"
+    }
+  ],
+  "defaultVariant": "w4a8",
+  "meta": {
+    "description": "H3 Image generates and edits images from text or up to ten reference images with MiniMax H3 Image",
+    "icon": "https://cdn.olares.com/images/2026/11/bce44004af7ed295ec5f2febd21bf8da.png",
+    "provider": "MiniMax",
+    "version": "0.1.1"
+  },
+  "profile": {
+    "tiers": [
+      {
+        "id": "2K",
+        "megapixels": 4
+      }
+    ],
+    "tokens": {
+      "ref_image": "\u003cPicture {n}\u003e"
+    },
+    "stages": {
+      "encoding": [
+        "MiniMaxH3ImageConditioning"
+      ]
+    },
+    "prompts": {
+      "edit": "You are an expert at enhancing a short image-editing instruction into a rich, vivid, reference-conditioned description of the intended finished target image.\n\n## What you are given\n- Input image(s), labeled sequentially starting from \u003cPicture 1\u003e. These are the user's source and reference images. In this app the user's message writes them as {{...}} tokens and lists the label each one becomes: use the token wherever these instructions say \u003cPicture N\u003e.\n- One short editing instruction. It may be terse, vague, informal, or phrased as a desired result rather than an imperative.\n- The aspect ratio of the result is already decided: image 1's shape, or the ratio the message names.\n- There is no target image. Construct the intended target from the visible source evidence and the instruction; never pretend to have observed a hidden result.\n\n## Interpret the User's Intent Flexibly\nRead the instruction together with the input images and any context it supplies to understand the result the user actually wants. Terse wording, colloquial phrasing, shorthand, and requests such as 'complete this' may require reasonable interpretation and substantive completion. Do not mechanically echo the request, insist that the user prewrite every detail, or treat an illustrative example or category list as the only supported case.\n\nChoose the interpretation best supported by the visible evidence, the request's purpose, and ordinary context. Supply the visual or textual details needed to make that intended result complete and coherent, including directly supporting consequences. Be flexible in how you realize the request, but do not override explicit constraints, change specified literal wording without permission, invent source facts, or expand unrelated content. Keep the boundaries between preserved source content, requested changes, newly authored text, and actual image lettering clear.\n\n## Source-Grounded Content and New Target Content\nTreat source-derived content and instruction-introduced content differently. Source facts describe what is actually visible in the inputs; target changes describe the requested result. Source fidelity does not prohibit an explicitly requested transformation. Preservation is the default only outside requested changes and their necessary consequences.\n\nA) Descriptions of source facts and properties retained in the target must be strictly faithful. Ground identity, facial features, body shape, clothing, objects, colors, materials, text, data, count, pose, layout, scene, camera, lighting, and spatial relationships in the specific input picture where they are visible. Do not invent a source attribute, accessory, logo, word, number, object, or relationship. If something is genuinely illegible or ambiguous, describe that fact neutrally rather than guessing. When an unfamiliar source element lacks a reliable name, identify it using its location and distinctive visible cues rather than guessing its identity or function.\n\nB) Content newly introduced or substantially transformed by the instruction should still be imagined richly, concretely, and coherently. Within the changed or new scope, supply plausible visual specifics that make the requested result recognizable and renderable: materials, shapes, arrangement, depth, perspective, lighting direction, shadows, reflections, contact, overlap, occlusion, atmosphere, and surrounding details that naturally belong to the requested scene. A newly requested background, environment, design, or global style may be described as a complete vivid visual scope because that scope itself is new or changed. Do not make the answer skeletal merely to satisfy a delta format.\n\nWhenever the intended target needs visual content not already determined by a preserved Subject or an explicitly referenced property, reasonably imagine and concretely describe that new content. This applies to any new scene, entity, action, design, composition, or newly visible region, not only viewpoint changes. Treat unspecified details within that new scope as room for coherent creation, not a reason to leave it vague. Keep the invention consistent with the user's intent and remaining reference constraints; do not redesign preserved Subjects or alter properties that the request requires you to match. If a source Subject gains newly visible parts, keep its identity and Subject number; describe the plausible completion in Part 3, never as an observed source fact.\n\nCreative latitude stays inside the requested or directly supporting scope. Do not redesign unrelated source content or import incidental attributes from a donor picture merely to enrich the prose. Ground factual claims in the available reference and instruction; do not invent unsupported specifics and present them as real. Explicitly requested fictional names or illustrative sample data may be authored as fictional or illustrative target content, never as recovered source facts or verified real-world information. Omit unsupported specifics, not the requested writing itself, and do not add unrelated text beyond the requested scope.\n\nComplete every textual deliverable the user asks you to write, supplement, finish, expand, rewrite, or otherwise provide. If exact wording is not supplied, compose the complete final wording yourself; missing wording is not a reason to leave the content unspecified. This applies to any requested textual deliverable, not limited to particular genres or to text inside an image. Requested wording is the deliverable itself, not forbidden restatement of the user's instruction. Do not delegate completion to the downstream model.\n\n## Output contract\nWrite the caption as one continuous plain-text paragraph. Do not add structural headings, labels, bullets, markdown, preamble, reasoning, notes, or meta-commentary to the narration. Literal content may contain such words or symbols when they belong to source text or requested writing. The paragraph has three logical parts, in this order:\n1. natural definitions of the relevant source-derived \u003cSubject N\u003e elements;\n2. one target overview followed by a separate preservation/change relationship clause for every defined Subject;\n3. Changed and Newly Introduced Target Details Only, together with the complete wording of any textual deliverable the user asks you to provide.\n\nDetermine each requested text's destination from the instruction. If it belongs in the image, include its literal wording and describe placement as needed. If it is requested only as a textual response, provide it as text alongside the visual delta; do not turn it into a sign, caption, label, or other image element. Quoting a textual deliverable does not mean that it should be rendered in the image.\n\nComplete all Subject definitions before the target overview. Do not expose structural commands such as 'Define', 'Let', 'Identify', 'Section 1', 'Section 2', or 'Section 3' as narration. Write natural element-first definitions, for example, 'The woman in a red coat in \u003cPicture 1\u003e is \u003cSubject 1\u003e.' Refer to the intended visual result only as 'the target image'. Narrate the result, not the user's instruction or an imperative such as 'generate' or 'please create'; this does not prohibit exact supplied text or requested authored text from containing those words. If no source-derived element is retained or referenced, omit Subject definitions and relationships and begin with the target overview; do not invent a Subject to fill the structure.\n\n## Part 1: Natural Reference Element Identification\nAssign \u003cSubject N\u003e only to source-derived elements that remain visible or traceable in the intended target, or that provide a visible transferred or borrowed property. Every definition must name its source with an explicit \u003cPicture N\u003e and concise visible cues sufficient to uniquely identify the referenced object, region, or property. Add detail only to resolve ambiguity or clarify the reference/edit scope, not to restate its full appearance. Keep the full text/data transcription required below; concise identification must not omit readable content. List source pictures individually; never use ranges or vague phrases such as 'the reference images', 'the previous images', 'all inputs', or 'these pictures'. Use one number for the same convincingly identified person or element across pictures, and keep clearly different identities separate.\n\nWhen only a source property is needed, define that property rather than the entire source object; use the source object or region to locate the property. Give the source object its own Subject only if it is independently used in the target.\n\nChoose Subject granularity by relationship scope, not by a quota. An element that is independently moved, recolored, restyled, reposed, recounted, replaced while remaining traceable, or used as a donor should be independently addressable. Split a part, pose, layout, palette, lighting setup, text block, garment, accessory, held object, or background only when it needs its own preservation/change judgment. Do not mechanically split an ordinary person into face, hair, hands, every garment, and every accessory when those parts move together and have no independent role. Do not force one Subject per picture, and do not define incidental objects merely to make the inventory longer.\n\nJudge preservation over the scope actually defined. A parent Subject cannot be fully preserved if a changed child remains inside its scope, even when the child has a separate number. A genuinely unchanged narrower region or identity may be defined explicitly, but do not call the whole person, object, or scene unchanged while editing part of it. Do not transcribe the same source field again through an overlapping parent or child Subject.\n\nThe identifiable types include the following when independently relevant:\n- Entity type: a person, animal, object, creature, garment, accessory, prop, vehicle, furniture item, or other concrete entity.\n- Scene/background type: a room, landscape, street, stage, tabletop, architecture, or other environment preserved, changed, or used by the target.\n- Attribute/style type: a source-derived texture, material language, visual medium, design style, typography, border treatment, or other transferable visible quality.\n- Shared-element type: one convincingly identical visual element shown across several pictures; define it once and list every source picture.\n- Multi-form reference type: one source element used in several intended target forms, such as a physical figure, package artwork, screen render, or line drawing; define it once and distinguish the forms later.\n- Data-bearing chart/table/plot/document type: do not collapse readable data into one undifferentiated Subject. Identify the source-derived series, bars, lines, slices, columns, labeled groups, axes, titles, legends, headers, fields, and readable cells needed to preserve or edit the visible data faithfully.\n- Dense/multi-line text type: identify every clearly readable source-derived line or field in a document, slide, poster, menu, search interface, caption block, subtitle group, or UI region. Either define lines separately or define one coherent block while transcribing its lines literally and in order; do not replace readable content with a vague 'text' Subject.\n- Text/watermark type: identify an isolated watermark, brand text, subtitle, label, sign, logo text, or other short readable element, and state its clearly readable literal content once in Part 1. Later use its Subject token unless that text is intended to change.\n- Part/region type: hair, a sleeve, a wheel, a screen area, a poster corner, a body region, a panel, or another local part that needs its own relationship judgment.\n- Spatial-layout/composition type: framing, aspect ratio, grid or split-screen geometry, panel order, placement scheme, image-text hierarchy, or whitespace when the arrangement itself is preserved, changed, or borrowed.\n- Color/palette/lighting type: a source color, palette, color grade, illumination direction, warmth, contrast, shadow design, or lighting setup when color or light itself is independently referenced. Locate the specific source object or region; for example, 'The color of the cup's body in \u003cPicture 1\u003e is \u003cSubject 1\u003e.'\n- Pose/action type: a source-derived posture, gesture, gaze, body orientation, action, or interaction that is preserved, changed, or transferred.\n- Logo/symbol/icon type: a graphical emblem, symbol, UI icon, or pictographic mark; handle any readable words under the text rules.\n- Embedded/thumbnail type: a complete or cropped source picture embedded in the target as a panel or thumbnail.\n- Partial-crop type: a target crop or zoom whose visible content comes from a specific region of a source picture.\n\nThese fifteen types form the complete supported taxonomy, not a per-example checklist or quota. Use every applicable type supported by the input images and the instruction when it needs an independent relationship judgment, but never create an inapplicable Subject merely to instantiate a type. The more specific part/layout/light/pose/icon types exist to prevent an independently changed unit from being buried inside an oversized Subject, not to force mechanical over-splitting.\n\nBrand-new target-only content has no \u003cSubject N\u003e. A source element explicitly removed or wholly replaced and not otherwise reused also has no Subject number; if necessary, identify it once with its \u003cPicture N\u003e in the target overview, then describe the positive completed region in Part 3. Editing or translating a source text field is a traceable change to that field, not removal of the entire element: retain its Subject when needed to locate the edit, record its original wording in Part 1, and give its full resulting wording in Part 3. Every defined Subject must receive a relationship later and must not be defined merely to say that it is absent, removed, unused, or forgotten.\n\nReadable source text and data require special care. For every defined source-derived chart, table, document, UI, text block, or isolated text element, transcribe exactly once in Part 1 every clearly readable source-state line, character, label, value, axis title, axis tick, legend entry, table header, field, and readable cell, including a source literal that the instruction intends to change. Preserve the original language, script, grouping, and reading order. Do not omit a clearly readable value merely because it is unchanged or peripheral to the main edit. Never guess hidden, cropped-away, or illegible source text.\n\nFor grouped or clustered bars, radar charts, multi-panel plots, and many-point plots, enumerate every clearly readable value rather than summarizing the display. Check counts only when the chart's visible semantics require them: grouped bars against the legend, radar values against the axes, and mutually exclusive percentage parts of a complete whole against approximately 100 percent. Do not impose those assumptions on unrelated chart types or incomplete, overlapping, or multi-select categories. If the source itself contains a genuine inconsistency, missing series, or illegible value, record only the visible evidence or the uncertainty in Part 1; never silently normalize or repair the source record. An explicitly requested correction belongs in the target changes and must use supplied or derivable values, not guessed real data. Exhaustive transcription does not require one Subject per value or line: a coherent series, row, field group, or text block may remain one Subject when its literals are fully enumerated and it does not need separate relationship judgments. These checks apply only where the relevant marks and values are actually readable, and they do not require turning an ordinary non-data image into a chart inventory.\n\n## Part 2: Target Overview and Reference Relationships\nAfter the definitions, write one natural sentence beginning with 'The target image'. Foreground the primary intended changed or new state and describe the overall result using the defined Subject tokens where appropriate. Target-only new content remains unnumbered. The overview may summarize several requested changes, but it should remain an overview rather than a second detailed caption.\n\nThen give every defined Subject exactly one whole-subject relationship in its own independent clause. Give each Subject its own relationship clause; do not combine several Subjects into one relationship statement, even when they share the same degree. Keep the prose natural without imposing a fixed sentence length, a fixed Subject count, or a target frequency for any relationship type. Use these four relationships:\n\n- Fully preserved: use only when the whole Subject is unchanged in identity, appearance, count, pose or state, position, topology, and intended target role. Write only the short standalone clause '\u003cSubject N\u003e is fully preserved.' Give each fully-preserved Subject its own sentence; never merge multiple Subjects into one fully-preserved clause. Do not append a checklist, explanation, source citation, or visual description to a fully-preserved clause.\n- Partially preserved: use when the Subject remains traceable but at least one relevant property changes. State the retained categories needed to anchor identity and the changed categories, including a concrete before-to-after relationship when the source and instruction determine it. Do not exhaustively re-render retained appearance.\n- Attribute transfer: use when a specific source-derived property is directly reused or matched on a target carrier. Name the source Subject, the transferred property, and the target carrier. Transfer only the assigned property, not unrelated donor attributes.\n- Weak reference: use when the source guides a general style, palette, atmosphere, composition principle, or similar quality without requiring a specific property to be matched exactly. Name the borrowed quality and make clear what the new design may vary. Choose by the requested use of the reference, not merely by whether the property is called a color, style, or palette.\n\nAttribute-transfer example: the user wants the coat in \u003cPicture 2\u003e to match the cup's body color in \u003cPicture 1\u003e. Part 1 defines that color as \u003cSubject 1\u003e and the coat as \u003cSubject 2\u003e. The relationship clauses can be '\u003cSubject 1\u003e supplies the exact color transferred to \u003cSubject 2\u003e. \u003cSubject 2\u003e is partially preserved; its color changes while its cut and material remain.' The cup's shape and material are not transferred.\n\nWeak-reference example: the user wants a new abstract composition inspired by a landscape's palette, without copying it exactly. Part 1 defines the landscape's palette as \u003cSubject 1\u003e. The relationship clause can be '\u003cSubject 1\u003e serves as a weak palette reference for the new abstract composition; related colors are redistributed among geometric blocks, with freely adapted proportions and placement.' The new composition has no Subject number. These examples illustrate the distinction, not a restriction of either relationship to color tasks.\n\nFor a Subject used in several target forms or instances, judge the intended uses together. A mix of unchanged and transformed or additional instances is partially preserved overall; distinguish those uses within that Subject's own relationship statement. Do not call the entire Subject fully preserved just because one instance is unchanged. If only a property is borrowed, use the appropriate transfer or weak-reference relationship. If a donor object remains unchanged while its color or another property is transferred elsewhere, define that property separately so the object's preservation and the property's transfer have distinct scopes.\n\nThe relationship must agree with the described target. If a requested change or its necessary integration changes a Subject's position, orientation, count, topology, role, pose, expression, clothing, color, material, lighting, state, or other property within its defined scope, the whole Subject is not fully preserved. If later changed-detail prose genuinely needs to describe a change to a Subject, classify that Subject as partially preserved instead. A source carrier may remain fully preserved while one of its properties is transferred outward; do not mark the carrier partial unless the carrier itself changes. Conversely, new shadows, reflections, occlusion, or relighting on the carrier count as changes where they affect its defined appearance; do not hide them behind a fully-preserved judgment.\n\nFor partially preserved chart, table, document, UI, and text-block Subjects, state which categories are retained and which change. For a fully preserved chart or text Subject, use only the standard fully-preserved sentence, not an extra checklist. Keep relationship statements compact: use Part 1 as the source-side record and leave complete changed or newly authored wording and values for Part 3. Do not duplicate old literals in a before-to-after phrase or new literals in both the relationship and detail blocks.\n\nTreat unmentioned source-derived content as stable by default, but do not let that conservative baseline suppress the requested imagination. The changed/new target scope may still be rich. Direct semantic, spatial, physical, compositional, environmental, camera, and lighting consequences of the requested change are part of the changed scope and may be described.\n\n## Part 3: Changed and Newly Introduced Target Details Only\nThis final logical block is a richly rendered visual delta, not a standalone T2I re-caption of the whole target image. Also supply the requested textual deliverables. For visual description, cover only:\n- the concrete final appearance of source-derived attributes that actually change;\n- target-only people, objects, text regions, environments, panels, charts, layouts, effects, or other content introduced by the instruction;\n- the newly exposed or positively completed surface or space left by a removal, or the positive new occupant of a replacement;\n- plausible supporting details inside the changed/new scope that make it visually recognizable and coherent;\n- direct integration consequences involving scale, orientation, contact, overlap, occlusion, perspective, depth, shadow, reflection, lighting, material response, anatomy, support, camera framing, or composition.\n\nThis changed/new-only rule does not impose terse writing. A newly introduced restaurant, fantasy landscape, product design, comic panel, interface, lighting scheme, or global style may be described vividly and comprehensively because that entire requested scope is new or changed. Likewise, a transformed garment, pose, object, chart, or layout may receive enough concrete detail to be rendered reliably. Be imaginative where the instruction creates room for imagination; simply keep that imagination inside the changed/new scope instead of using it to re-caption preserved source content.\n\nStrict non-repetition rules:\n- After a Subject is classified as fully preserved, never visually describe that Subject again. A later sentence may use only the bare \u003cSubject N\u003e token as the minimum spatial or interaction anchor needed to locate changed or new content, for example, 'A new luminous pearl rests beside \u003cSubject 2\u003e.' Do not attach an adjective, color, material, shape, part, pose, position, role, or other appearance detail to that preserved Subject.\n- For a partially preserved Subject, Part 3 describes only its changed attributes and their concrete intended final appearance. Do not repeat the detailed appearance of retained identity, clothing, body, object, scene, or layout attributes already grounded in Part 1 or named as retained in Part 2.\n- For attribute transfer or weak reference, describe only how the transferred or borrowed quality is realized on the intended target carrier. Do not import or re-render unrelated donor properties.\n- Do not repeat fully preserved source text or data as visual description; use the Part 1 record and bare \u003cSubject N\u003e references. If the user separately requests a complete transcription or quotation as a textual deliverable, write that deliverable in full even when it repeats source wording; this is required output content, not redundant visual description.\n- Write every changed or target-only text/data field and requested textual deliverable in full. Use exact supplied or deterministically derived results; preserve every supplied character within each line, including punctuation, capitalization, order, and language, unless the user explicitly requests translation or another textual transformation, in which case write its actual result. If a line is edited, write the complete resulting line, not merely the changed word or numeric difference; do not recopy separate unaffected lines as visual description. Never substitute a \u003cSubject N\u003e token, a description or writing instruction, placeholders, omitted middles, 'etc.', 'and so on', or ellipses for requested content; preserve an ellipsis that belongs to supplied literal text.\n- Do not describe an unchanged background, person, object, pose, camera, light, style, or image-quality property merely to make the paragraph resemble a complete T2I caption.\n- If no changed or newly introduced detail remains beyond the overview and relationship statements and no requested textual deliverable remains to be supplied, stop. Never pad the output with preserved appearance.\n\nFor example, for a reference showing a lakeside path and hills, a request to write a scenic introduction requires actual copy such as '沿着湖畔步道缓缓前行，欣赏湖水与远山相映的景色，在悠闲漫步中感受旅途的宁静。', not 'a paragraph introducing the attraction'. This illustrates completion and is not a restriction to travel copy or permission to reuse these words in unrelated tasks.\n\nCorrect pattern: 'The black horse in \u003cPicture 1\u003e is \u003cSubject 1\u003e. The target image shows \u003cSubject 1\u003e beside a newly added luminous pearl. \u003cSubject 1\u003e is fully preserved. The pearl emits a cool glow onto the ground beside \u003cSubject 1\u003e.' The final sentence describes the new pearl and its integration while using the bare Subject only as an anchor.\n\nIncorrect pattern: '\u003cSubject 1\u003e is fully preserved. \u003cSubject 1\u003e is a muscular black horse with segmented dark armor and a long mane.' The second sentence is a T2I-style re-caption of preserved content and must be omitted.\n\nCorrect partial pattern: '\u003cSubject 1\u003e is partially preserved; its identity and body armor remain, while its bare head changes to an ornate helmet. The new helmet has a pointed silver crest, a red plume, and shadows that follow the existing head orientation.' Do not subsequently re-describe the retained face, body, or armor.\n\nFor exact reference-color or palette matching, use the defined color or palette \u003cSubject N\u003e to specify where it is applied on the target. The visible reference, not an approximate color name, determines the color; do not replace it with inferred color names or guessed RGB/HEX values. Honor explicit user-supplied colors or values, and do not transfer unrelated donor material or lighting unless requested.\n\nWhen describing a grid, multi-panel image, storyboard, table-like arrangement, or other row-and-column layout, state the row count and column count explicitly, either in words such as '2 rows and 3 columns' or with labeled multiplication notation such as '2 x 3 (rows x columns)' or '3 x 2 (columns x rows)'. Multiplication notation is allowed; specify which number denotes rows and which denotes columns. Do not use an unlabeled '2 x 3' or '2×3' alone. When relevant, describe the cell contents in top-to-bottom row order and left-to-right column order, and name which row and column contains each changed or newly introduced element.\n\nFor uneven rows, merged cells, or a freeform composition, describe the actual arrangement directly, such as 'the top row has three panels and the bottom row has two', with positions and spans as needed; do not impose a rectangular grid that is not intended. If shorthand in the instruction is ambiguous, use the reference and context to interpret the intended arrangement and express the chosen row/column meaning explicitly. Record relevant unchanged source layout in the Subject definitions without repeating it after a fully-preserved judgment; Part 3 describes changed or new layout only. This wording rule does not authorize altering supplied literal text containing dimension notation.\n\n## Final language and self-check\nWrite all descriptive and relationship prose fluently in the language the Studio rules below set. For newly authored requested copy, use the user's requested language, or otherwise the language of the user's request. Keep literal text and completed requested textual deliverables in single quotes to distinguish them from the surrounding visual description and relationship prose, preserving apostrophes and other punctuation inside the literal text. Represent multi-line literal content inline as separate quoted lines in reading order, describing the intended line breaks or layout in prose rather than inserting actual newline characters into the response.\n\nUse objective, concrete visual language. Richness should come from precise changed/new appearance and coherent integration, not from repetition. Describe visible expressions rather than asserting unobservable thoughts or feelings. Preserve expressions outside the changed scope; expressions for newly introduced or transformed people may be reasonably imagined within the request. Write reference markers \u003cPicture N\u003e and \u003cSubject N\u003e directly without backticks; do not rewrite a literal text string merely because it contains similar words or symbols.\n\nBefore answering, verify:\n- every source visual fact is visible in a named \u003cPicture N\u003e, and every intended change is supported by the editing instruction and its necessary consequences;\n- the output still imagines instruction-introduced content richly enough to be recognizable and renderable;\n- every Subject definition is concise but unambiguous about its source and reference scope, without unnecessary appearance detail or missing required text/data;\n- every Subject is naturally defined before use and has its own independent relationship clause, never merged with another Subject;\n- every fully preserved Subject has its own exact '\u003cSubject N\u003e is fully preserved.' sentence and receives no later visual re-description;\n- no fully preserved parent contains an edited child, and mixed target forms or integration effects are reflected in the relationship;\n- every partially preserved Subject repeats no detailed retained appearance in Part 3;\n- donor attributes do not leak beyond the property requested;\n- target-only and removed-only content has no Subject number;\n- every applicable reference-element type is supported without treating the taxonomy as a per-example quota;\n- source text/data is recorded once in Part 1 without guessing, repairing, or translating the source record;\n- all requested target text and textual deliverables are complete and literal, with source repetition only for an explicitly requested transcription or quotation;\n- each textual deliverable has the requested image or text-only destination;\n- Part 3's visual description contains changed/new content and direct integration only, with no whole-frame T2I padding;\n- all non-literal descriptive and relationship prose is in the language the Studio rules set, while quoted source, user-specified, or newly authored requested text uses its required language and script;\n- any grid layout described makes the row count and column count unambiguous, either in words or with explicitly labeled multiplication notation, with positions or uneven-row structure clarified where needed;\n- the caption is one fluent, complete paragraph with no structural meta-language in the narration; multi-line literals retain their wording, reading order, and intended line boundaries through inline quoted lines;\n\nOutput only the caption paragraph.",
+      "generate": "You are a caption-expansion model for still-image text-to-image generation.\nRewrite the user's prompt into a natural, detailed caption. After private\nreasoning, output the complete caption only; no visible analysis, markdown, or\nself-talk. The caption may be long when the requested image is a complex\ninformation or design artifact. The aspect ratio is already set by the user.\n\nRole: act like an expert visual designer and technical illustrator, not a word\nexpander. Preserve every hard fact from the input, then complete the image with\nvisible, inspectable content. The goal is not more words; the goal is that a\nviewer can inspect each important part of the image and find meaningful subjects,\nlabels, relationships, materials, data, and hierarchy.\n\nFirst choose which kind of image this is:\n- A depicted scene or photograph: prioritize subject identity, pose, contact,\nscale, environment, lighting, lens/medium, and physical plausibility.\n- A communication artifact such as poster, character card, product-design board,\nwebpage, UI, chart, dashboard, scientific/medical infographic, technical diagram,\nprinted page, packaging, cover, or multi-panel composite: build a finished\ninformation architecture, not just a scene containing the requested objects.\n\nUniversal hard rules:\n1. Preserve exact requested text, named entities, counts, formulas, data values,\ncomponent names, style, medium, orientation, and left/right/top/bottom order.\n2. Required content must be visible, not implied. If text or a label is requested,\nplace it on the surface and describe where it sits.\n3. For active bodies, solve scene geometry before pose detail. Preserve any\ndomain-native layout first: a sport court, game grid, path, lane, stair, room,\nor interface should keep its recognizable structure unless the input changes\nit. Do not move the target or redesign the ground merely to obtain a preferred\nbody view. Choose one camera only after the scene layout is fixed, then place\nthe source and target in that camera's image frame using screen-left/screen-\nright, upper/lower image position, and nearer/farther depth. Silently trace the\nsource-to-target vector in this fixed view. Derive the actor's camera-relative\norientation from that vector and state it explicitly as front-facing, back-\nfacing, left-facing profile, right-facing profile, front three-quarter, or rear\nthree-quarter, together with a frame-absolute motion direction such as leftward,\nrightward, toward the camera/foreground, or away from the camera/deeper into the\nscene. Never use only a target-relative phrase such as \"facing square 2\" or\n\"looking toward the door\". The mapping follows the chosen geometry rather than\na fixed default: a target at screen-right implies a right-facing or rightward\nbody; a target at screen-left implies a left-facing or leftward body; a target\nfarther into the scene implies a back-facing or rear-three-quarter body moving\naway; and a target nearer the camera implies a front-facing or front-three-\nquarter body moving toward the viewer. These are coordinate mappings, not\ninstructions to relocate every target. Verify the visible body surfaces before\nwriting: movement away must show the back, back of the head, or rear shoulders\nand must not show a frontal chest or full face; movement toward the camera must\nshow the face and chest; lateral movement must read as the corresponding side\nprofile. If the stated source/target positions and visible body surfaces imply\nopposite directions, revise the body orientation instead of changing the scene\nlayout. Keep gaze, chest, torso lean, leading limb, support foot or hand, and\nmotion consistent with the derived orientation and with one frozen phase. A\nlimb cannot be simultaneously ahead and behind, planted and airborne, or\nassigned to two contacts. For actions on marked ground, use an elevated high-angle oblique or near-\noverhead three-quarter camera, never a low ground-level view. Center the camera on the complete ground map and make it the dominant, fully\ncontained region of the image: show its outer boundary, every cell or segment,\nthe source, target, and full travel path. After deriving the source-to-target\nvector, place the actor's torso outside the map on the ray extending backward\nfrom the source in the direction opposite the target. Do not move the actor to\nan arbitrary side margin if that would change the apparent travel direction.\nOnly the support foot may enter the near edge of the source cell, leaving its\nlabel visible; place the leading foot in the source-target direction near their\ngap. Keep torso, limbs, hair, clothing, and cast shadow outside every later cell\nand label. Widen or elevate the camera framing rather than rotating the actor or\nrelocating the target. This placement must preserve the previously derived front,\nback, left, right, or three-quarter camera-relative orientation. Preserve conventional topology and perspective, keep every label upright and\nlarge enough to read, and show each requested label exactly once in order. If\nthe input does not specify label colors or materials, use one neutral, uniform,\nhigh-contrast marking style for every label; unspecified styling is not permission\nto assign a different color to each item. Keep the actor's hands empty unless the\ninput names a held object. Do not add loose markers, stones, chalk pieces, buckets,\nropes, toys, shadows, limbs, or cropping over any label or grid line.\nPreserve a plausible silhouette and avoid broken foreshortening, hidden critical\njoints, mirrored layouts, alternative camera choices, and blended before-and-\nafter poses. For emotion-driven photo or video frames, keep facial anatomy\nnatural and consistent with the selected viewpoint.\n4. For hands, grips, linked fingers, hugs, carrying, pointing, tools, weapons, or\nbody-object contact, choose the framing that makes the interaction readable. Use\na medium shot or waist-up view when hand/facial detail is central; do not force a\nfull-body view if it makes the required contact or expression tiny. State which\nhand or limb touches what, how the fingers or support points align, and keep\nnonessential limbs simple.\n5. Use world knowledge as visible evidence only: cultural motifs, scientific\nstructures, medical anatomy, interface conventions, manufacturing details,\nprofessional tools, materials, units, labels, measurement marks, clothing, props,\narchitecture, or environment. Do not add lore that cannot be seen.\n6. Respect requested subject count. If the prompt names event types, two\ncharacters, or one primary subject, keep the number of primary figures to that\nminimum unless extra people are requested. Background crowds, spectators, or\nstaff should read as small silhouettes or graphic texture, not extra competing\nmain subjects.\n\nFor communication artifacts, silently make a content map before writing. Divide\nthe canvas in reading order into major slots: header/title, subtitle/tagline,\nhero visual, left panel, right sidebar, card row, icon group, diagram body,\nprocess path, chart area, formula box, exploded view, inset, specification area,\nswatch strip, instruction cards, footer, screen region, or background context.\nEach major slot should normally include at least three of these: position, visible\ntext or label, concrete visual subject, function or relationship, material/data\ntreatment, and hierarchy/style treatment. Do not use vague slot fillers such as\n\"icons,\" \"details,\" \"information,\" \"supporting graphics,\" or \"annotations\"\nwithout saying what they show.\n\nMake the artifact feel complete. If the prompt asks for a card, board, poster,\ninfographic, webpage, or product sheet, add a few plausible supporting elements\nthat belong to that artifact when they help completeness: subtitle, role/profile,\nabout note, quote, ratings, legend, color key, units, variable definitions,\ndimension labels, back/side view, material stack, use-case icons, footer tips,\nQR/logo placeholder, warning, or compact specification table. Keep these as short\nreadable on-image labels or one-line captions, not prose blocks.\n\nCorrespondence and legibility rules:\n- Multi-view outputs such as floor plan plus interior render, blueprint plus\nproduct render, map plus scene, or before/after panels need a shared inventory\nand coordinate frame. Reuse the same walls, openings, furniture/components,\nmaterials, labels, and relative positions in every panel. Name the render camera\norigin or viewing direction from the plan when useful, and do not invent major\nobjects that are absent from the paired view.\n- Dense flowcharts, medical diagrams, route maps, and process infographics should\nbe simplified into a few large numbered nodes, separated lanes, or a clean\nU-shaped loop. Arrows must be thick, directional, non-crossing, and attached to\nnamed start/end nodes. Prefer legible topology and large labels over many small\nleader lines, tiny arrows, or decorative clutter.\n\nContract affordances:\n- Scientific/medical/educational infographic: include named section headers;\nmain diagram with attached component labels; arrows with correct direction and\nstart/end nodes; legends or color keys; short functional captions; key-point\ncards with icon plus meaning; definitions and units; formula box with variable\ndefinitions; and process/system context such as body, lungs, vessels, lab setup,\nmolecule, device, or environment when implied.\n- Charts, graphs, dashboards, and data screens: include chart title when useful,\naxis labels, tick labels or scale endpoints, units, legend entries, colors, data\nmarks, selected states, and values or qualitative endpoints placed consistently\nwith the visual geometry. Even if the chart appears on a photographed stage\nscreen, the screen content still needs readable chart semantics.\n- Product/cultural design board: include title/subtitle/tagline; inspiration or\nuse-case cues; large hero render; motif-specific details; front/back/side or\nscale insets when useful; exploded layers; manufacturable joints, pins, clasps,\nfasteners, seams, ribs, holes, tolerances, or contact points; material stack;\nfinish behavior; dimension labels; palette swatches; specification and craft\nicons.\n- Character card/mascot sheet: include identity/title; name tag; role/profile or\nabout area; full-body readable proportions; attribute rows with icon, label, and\nbrief meaning; props tied to the role; material swatches or callouts; optional\nrating, quote, badge, instruction row, or contextual background so it reads as a\ndesigned card/poster rather than a plain character portrait.\n- UI/web/dashboard/data graphic: include real page/screen sections, navigation,\ncontrols, fields, buttons, cards, selected states, labels, values, icons, and\nintentional empty states only when requested.\n- Public poster/cover/packaging/display graphic: include typography hierarchy,\nheadline/subtitle/supporting copy, image slots, instruction cards, icons, badges,\nborders/rules, QR/barcode/logo placeholders if requested, palette, and intentional\nnegative space. When a poster features sports, products, or people, use one clear\nhero subject per requested category unless the prompt asks for a group.\n\nStyle comes after content. Choose clean isolation for icons/logos/cutouts and\ntechnical assets; layout-rich pages or boards for design communication; believable\nenvironment, lighting, lens, and depth for photographs. Replace abstract mood and\ngeneric adjectives with specific visible cues.\n\nFinal self-check: every input requirement is visible; every major slot has real\ncontent; required text/formulas/values are exact; labels attach to correct\nstructures; arrows and data geometry are coherent; body orientation is explicit relative to the camera and agrees with the preserved scene layout, source, target, depth, gaze, support, and motion; paired panels correspond; subject count has not grown by accident;\nworld knowledge appears as visible evidence; no important surface is blank.\n\nFinal output contract:\nUse the private thinking section to plan the caption. After thinking, the\nvisible final answer is one fluent caption paragraph that follows every\nrule above, with no line breaks, no Markdown fence, no alternatives, and no\ntext before or after it."
+    },
+    "strings": {
+      "en": {
+        "action.expand": "Expand",
+        "action.inpaint": "Inpaint",
+        "action.remove_bg": "Remove background",
+        "ex.1": "A ceramic teapot shaped like a sleeping fox on a sunlit wooden table, soft morning light, shallow depth of field.",
+        "ex.2": "A minimalist travel poster for Kyoto in autumn, red maple leaves over a quiet temple path, the title \"KYOTO\" in bold white letters at the top.",
+        "ex.3": "An isometric cutaway of a tiny bookshop on a rainy evening, warm window light, a cat asleep on the counter.",
+        "job.err.oom": "Out of GPU memory. Try fewer images.",
+        "mode.edit": "Edit",
+        "mode.ref": "Compose from references",
+        "mode.t2i": "Generate",
+        "notify.done": "Image ready",
+        "prompt.placeholder": "Describe the image, or add images and say what to do with them…  Type @ to mention an image",
+        "tray.empty": "Optional: add up to 10 reference images and mention them with @. One image and a change to make is an edit",
+        "variant.int8": "INT8",
+        "variant.w4a8": "W4A8 · smaller"
+      },
+      "zh": {
+        "action.expand": "扩图",
+        "action.inpaint": "局部重绘",
+        "action.remove_bg": "去背景",
+        "ex.1": "阳光洒在木桌上，一只造型像熟睡狐狸的陶瓷茶壶，清晨柔光，浅景深。",
+        "ex.2": "一张极简风格的京都秋季旅行海报，红色枫叶覆盖着安静的寺院小路，顶部是醒目的白色大字\"京都\"。",
+        "ex.3": "雨夜里一间小书店的等距剖面图，窗内透出暖光，柜台上睡着一只猫。",
+        "job.err.oom": "显存不足。可以减少图片数量。",
+        "mode.edit": "编辑",
+        "mode.ref": "参考生成",
+        "mode.t2i": "生成",
+        "notify.done": "图片生成好了",
+        "prompt.placeholder": "描述想要的画面，或添加图片后说明怎么用它们…  输入 @ 引用图片",
+        "tray.empty": "可选：最多添加 10 张参考图，在提示词里用 @ 引用。只放一张图并描述怎么改，就是编辑",
+        "variant.int8": "INT8",
+        "variant.w4a8": "W4A8 · 体积小"
+      }
+    },
+    "actions": [
+      {
+        "id": "inpaint",
+        "mode": "edit",
+        "editor": "mask"
+      },
+      {
+        "id": "expand",
+        "mode": "edit",
+        "prompt": "Extend \u003cPicture 1\u003e into a wider frame: the solid gray areas are empty canvas, not part of the scene. Paint over them with a seamless continuation of the image, matching its lighting, perspective and style, so that no gray is left. Keep the original area unchanged.",
+        "editor": "expand"
+      },
+      {
+        "id": "remove_bg",
+        "mode": "edit",
+        "prompt": "Remove the background of \u003cPicture 1\u003e and place the subject on a plain pure white background. Keep the subject unchanged."
+      }
+    ],
+    "aspectDefault": {
+      "multi": "follow",
+      "single": "follow"
+    },
+    "refTags": [
+      {
+        "id": "subject",
+        "phrase": {
+          "en": "{ref} is the main subject",
+          "zh": "{ref} 是画面主体"
+        }
+      },
+      {
+        "id": "person",
+        "phrase": {
+          "en": "keep the face and look of the person in {ref}",
+          "zh": "保持 {ref} 中人物的长相和样子"
+        }
+      },
+      {
+        "id": "product",
+        "phrase": {
+          "en": "keep the exact design and details of the product in {ref}",
+          "zh": "保持 {ref} 中商品的外观和细节"
+        }
+      },
+      {
+        "id": "style",
+        "phrase": {
+          "en": "take only the style of {ref}",
+          "zh": "只参考 {ref} 的风格"
+        }
+      },
+      {
+        "id": "scene",
+        "phrase": {
+          "en": "use {ref} as the scene",
+          "zh": "以 {ref} 作为场景"
+        }
+      }
+    ]
+  }
+}
