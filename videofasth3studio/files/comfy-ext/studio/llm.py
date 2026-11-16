@@ -312,10 +312,13 @@ class Llm:
         self.ready, self.checked, self.probing = ready, time.time(), None
         return ready
 
-    async def rewrite(self, prompt, system, user=None, images=(), fields=None, timeout=180):
+    async def rewrite(self, prompt, system, user=None, images=(), fields=None, timeout=180, labels=None):
         """user: the message text (default: prompt); images: (token,
         data URL) pairs attached after it. A model that turns the images
-        down gets the text alone."""
+        down gets the text alone. labels: what the image model sees for
+        each token ({"<Picture 1>": "{{id}}"}); an app prompt written
+        around those labels makes the chat model write them, so they are
+        turned back into tokens."""
         if not self.base or not self.ready:
             raise LlmError("llm_unavailable", "No chat model is available", 503)
         model = self.model
@@ -329,6 +332,8 @@ class Llm:
                 raise
             log.info("studio: llm %s refused images (%s), retrying with text", model, e.message)
             out = await self._chat(model, system, user or prompt, (), fields, timeout)
+        for label in sorted(labels or {}, key=len, reverse=True):
+            out = out.replace(label, labels[label])
         lost = set(REF.findall(prompt)) - set(REF.findall(out))
         if lost:
             raise LlmError("refs_lost", "The rewrite dropped asset references", 422)

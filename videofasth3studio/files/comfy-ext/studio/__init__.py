@@ -610,7 +610,8 @@ class Studio:
         t0 = time.time()
         try:
             fields = llm.sampling(mode, self.kind, task, self.llm.model, self.llm.effort, self.llm.info())
-            out = await self.llm.rewrite(text, system, user, images, fields)
+            labels = {a["label"]: a["token"] for a in assets if a.get("label")}
+            out = await self.llm.rewrite(text, system, user, images, fields, labels=labels)
         except LlmError as e:
             log.info("studio: rewrite %s/%s failed after %.1fs: %s", mode, flow or task, time.time() - t0, e.code)
             return self.err(e.status, e.code, e.message)
