@@ -4,6 +4,26 @@ metadata:
 
 spec:
   upgradeDescription: |
+    v1.2.42：将 SGLang 从 v0.5.18-cu130 升级至 v0.5.23（CUDA 13）。
+
+    v0.5.19–v0.5.23 更新摘要：
+    - v0.5.19：新增 DFlash2，支持多适配器 LoRA 与推测解码组合；优化预填充 CUDA Graph，引入 DeepEP v2。
+    - v0.5.20：降低 CUDA Graph 显存开销，优化 DeepSeek-V4 注意力与 MoE 执行；修复 Qwen3.8 CUDA 流持续增长和推测解码状态处理问题。
+    - v0.5.21：支持流水线并行与 EAGLE/MTP 组合，为 SM100 增加 NVFP4 KV 缓存支持；统一 radix 缓存默认使用 Rust 核心，不支持的配置自动回退 Python。
+    - v0.5.22：优化 DFlash 解码与 Qwen3.8 预填充计算图，修复推测验证错误及混合并行启动问题。
+    - v0.5.23：新增 Muse Spark Open、Beam-1.0、MiniMax-M3.1-Flash 和 MiniCPM-V 4.7；优化 DeepSeek-V4.1 预填充及 MoE 首 token 延迟；增加可选的 Paged Experts 和 FP8/NVFP4 MoE LoRA 支持。
+
+    升级注意事项：
+    - NVIDIA 镜像使用 CUDA 13，要求 Python 3.11+；本应用采用`v0.5.23-cu130` 镜像标签。
+    - 响应存储需显式启用 `--enable-response-store`；请求自带聊天模板需启用 `--trust-request-chat-template`。已弃用的 `--enable-dp-attention` 应改为 `--attn-dp-size N`。
+    - DeepSeek-V4/V4.1 改用官方编码器，客户端需拼接流式工具调用参数片段；V4 不再接受数值型 `reasoning_effort`。V4.1 默认启用有界 SWA 重放，需要完整预填充数值行为时设置 `--no-enable-decoder-swa-bounded-replay`。
+
+    https://github.com/sgl-project/sglang/releases/tag/v0.5.19
+    https://github.com/sgl-project/sglang/releases/tag/v0.5.20
+    https://github.com/sgl-project/sglang/releases/tag/v0.5.21
+    https://github.com/sgl-project/sglang/releases/tag/v0.5.22
+    https://github.com/sgl-project/sglang/releases/tag/v0.5.23
+
     v1.2.41: 运行状态迁移到 Common，支持跨节点运行。优先使用 Common 中的配置，否则迁移本节点旧 Cache，或在 Common 初始化。 启动时重试读取共享脚本。
 
     v1.2.39: Model Console（llm-init）版本更新为 v1.7.21。
