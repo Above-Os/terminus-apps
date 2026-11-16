@@ -11,7 +11,7 @@
        mode (nvidia): the FreeToken image is amd64 CUDA-13 only, so there is no
        gb10 unified-memory branch and no CPU branch — FreeToken requires a GPU. */ -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" ($oe.FREETOKEN_REQUIRED_GPU_MEMORY | default "23552") -}}
-{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
 ---
 # FreeToken engine Deployment. wrappers/freetoken.sh blocks on the sentinel
 # (download ready), prepares/reuses FTW, then starts `ft serve`.
@@ -43,10 +43,6 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: freetoken
-        # Target of the llm-init Pod's podAffinity (it must run on this Pod's
-        # node to hand over run-state). Keep this label OFF the llm-init Pod
-        # template - see the note there.
-        app.kubernetes.io/instance: '{{ .Release.Name }}'
     spec:
       restartPolicy: Always
       volumes:

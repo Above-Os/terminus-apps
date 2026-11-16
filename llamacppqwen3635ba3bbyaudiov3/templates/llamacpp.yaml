@@ -32,7 +32,7 @@
 {{- $memRequest = printf "%sMi" $gpuMiB -}}
 {{- $memLimit = printf "%sMi" $gpuMiB -}}
 {{- end -}}
-{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name -}}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
 ---
 # llama.cpp engine Deployment. wrappers/llamacpp.sh blocks on the sentinel
 # (download ready), then execs llama-server -hf "$MODEL_NAME".
@@ -64,10 +64,6 @@ spec:
       labels:
         io.kompose.network/chrome-default: "true"
         io.kompose.service: llamacpp
-        # Target of the llm-init Pod's podAffinity (it must run on this Pod's
-        # node to hand over run-state). Keep this label OFF the llm-init Pod
-        # template - see the note there.
-        app.kubernetes.io/instance: '{{ .Release.Name }}'
 {{- if $isIntelGpu }}
       annotations:
         gpu.bytetrade.io/required-gpu-memory: "{{ $gpuMiB }}Mi"
@@ -88,20 +84,6 @@ spec:
           configMap:
             name: llm-init-wrappers
             defaultMode: 0555
-{{- if $isIntelGpu }}
-        - name: dri
-          hostPath:
-            path: /dev/dri
-            type: Directory
-        - name: drm
-          hostPath:
-            path: /sys/class/drm
-            type: Directory
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 10Gi
-{{- end }}
       containers:
         - name: llamacpp
 {{- if $isIntelGpu }}
@@ -162,14 +144,6 @@ spec:
             - name: wrappers
               mountPath: /llm-init/wrappers
               readOnly: true
-{{- if $isIntelGpu }}
-            - name: dri
-              mountPath: /dev/dri
-            - name: drm
-              mountPath: /sys/class/drm
-            - name: dshm
-              mountPath: /dev/shm
-{{- end }}
           resources:
             # nvidia.com/gpumem is the per-instance GPU memory quota read by the
             # Olares gpu-inject webhook (accelerator is -1/auto, can't carry it).

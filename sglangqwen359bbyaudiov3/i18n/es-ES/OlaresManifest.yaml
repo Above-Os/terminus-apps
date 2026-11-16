@@ -1,9 +1,11 @@
 metadata:
-  description: "Qwen3.5-9B (AWQ-4bit) servido con SGLang, con 15Gi (15360Mi) de memoria GPU para ejecutarse junto a modelos de audio. llm-init y el motor de inferencia comparten nodo y estado local."
+  description: "Qwen3.5-9B (AWQ-4bit) servido con SGLang, con 15Gi (15360Mi) de memoria GPU para ejecutarse junto a modelos de audio. llm-init y el motor de inferencia comparten el estado de ejecución mediante Common y pueden ejecutarse en nodos distintos."
   title: Qwen3.5-9B by Audio
 
 spec:
   upgradeDescription: |
+    v1.0.6: El estado de ejecución se almacena en Common para permitir el funcionamiento entre nodos. Se da prioridad a la configuración existente en Common. Si no existe, se migra el Cache local anterior o se inicializa el estado en Common. Al iniciar el motor, se reintenta la lectura de los scripts auxiliares compartidos si falla.
+
     v1.0.5: Reserva 15360Mi (15Gi) de memoria GPU y eleva el límite del pool estático a min(0.80, 12Gi / memoria GPU visible). En una tarjeta con memoria dividida, la memoria extra va a la caché KV y a la caché de estados mamba, cuyos pocos huecos impedían que el prompt largo de un Agent de voz siguiera en caché entre turnos. Las instalaciones con tiempo compartido también pasan a un pool estático de 12Gi en lugar de 11Gi.
     v1.0.4: El razonamiento desactivado ahora llega también a las instalaciones actualizadas: el wrapper del motor arranca con --default-chat-template-kwargs {"enable_thinking":false} antes de los argumentos de la tarjeta del modelo, que Model Console conserva entre actualizaciones y que habían perdido el indicador de v1.0.3. Una tarjeta que lo indique sigue teniendo prioridad.
 

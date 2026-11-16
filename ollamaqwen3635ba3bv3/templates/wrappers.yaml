@@ -1,0 +1,191 @@
+# Engine wrapper script, mounted into the Ollama daemon container at
+# /llm-init/wrappers.
+#
+# Shape follows deploy/wrappers/ollama.sh in the llm-init repo: source the
+# helpers llm-init publishes into RUN_DIR, wait for the model-card handoff,
+# then run `ollama serve` under supervise_engine so a Model Console edit to
+# engine_args relaunches the daemon. Only the VRAM preload below is this
+# chart's own -- supervise_engine itself is not something a chart copy should
+# own (see docs/architecture/engine-boot.html#restart).
+#
+# The container sets WRAPPER_COMMON=/run/llm-init/wrappers/common.sh, so this
+# ConfigMap deliberately carries no fallback copy: the helpers ship with the
+# llm-init image (>= v1.5.0) and are rewritten into RUN_DIR on every boot.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: ollama
+data:
+  ollama.sh: |
+    #!/bin/sh
+    # Ollama wrapper.
+    #
+    # ENGINE_ARGS is a KEY=VALUE list of OLLAMA_* daemon env. The chart env is
+    # only the fallback: when llm-init has published ${RUN_DIR}/engine_args the
+    # card wins, and supervise_engine reloads it before every launch. The card
+    # never carries OLLAMA_KEEP_ALIVE (llm-init strips it -- it forwards the
+    # value on /api/chat instead), so the -1 default is re-applied below on
+    # each launch rather than inherited from the chart env.
+
+    # shellcheck disable=SC2034
+    ENGINE=ollama
+    # Source the shared helpers: the sibling copy by default, or the one
+    # llm-init publishes into RUN_DIR when WRAPPER_COMMON says so. That copy
+    # can arrive late — the two containers are separate Deployments with no
+    # ordering between them — so waiting here is the normal path.
+    # Keep this block byte-identical across wrappers (tests/wrappers checks).
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    # Shared storage can briefly report a file that cannot yet be opened.
+    _common_copy=$(mktemp "${TMPDIR:-/tmp}/llm-common.XXXXXX")
+    _wc=0
+    while ! cp "$WRAPPER_COMMON" "$_common_copy" 2>/dev/null; do
+        if [ "$_wc" -ge "${WRAPPER_COMMON_WAIT:-3600}" ]; then
+            rm -f "$_common_copy"
+            printf '[wrapper] %s could not be read\n' "$WRAPPER_COMMON" >&2
+            exit 1
+        fi
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    . "$_common_copy"
+    rm -f "$_common_copy"
+    unset _wc _common_copy
+
+    export OLLAMA_HOST="${OLLAMA_HOST:-0.0.0.0:11434}"
+
+    # Ollama names are model:tag. MODEL_SOURCE (ollama://qwen3.5:4b) is authoritative;
+    # MODEL_NAME may use a hyphen (qwen3.5-4b) which show/run will not resolve.
+    add_model_candidate() {
+        cand="$1"
+        [ -z "$cand" ] && return 0
+        case " ${OLLAMA_MODEL_CANDIDATES:-} " in
+            *" ${cand} "*) return 0 ;;
+        esac
+        OLLAMA_MODEL_CANDIDATES="${OLLAMA_MODEL_CANDIDATES:+${OLLAMA_MODEL_CANDIDATES} }${cand}"
+    }
+
+    normalize_keep_alive() {
+        case "${OLLAMA_KEEP_ALIVE:-}" in
+            '-1s$1') export OLLAMA_KEEP_ALIVE=-1 ;;
+        esac
+    }
+
+    build_model_candidates() {
+        OLLAMA_MODEL_CANDIDATES=""
+        case "${MODEL_SOURCE:-}" in
+            ollama://*)
+                ref="${MODEL_SOURCE#ollama://}"
+                ref="${ref%% *}"
+                add_model_candidate "$ref"
+                ;;
+        esac
+        add_model_candidate "${MODEL_NAME:-}"
+        mn="${MODEL_NAME:-}"
+        case "$mn" in
+            *:*) ;;
+            *)
+                base="${mn%-*}"
+                tag="${mn##*-}"
+                if [ -n "$base" ] && [ -n "$tag" ] && [ "$base" != "$mn" ]; then
+                    add_model_candidate "${base}:${tag}"
+                fi
+                ;;
+        esac
+        log "preload candidates: ${OLLAMA_MODEL_CANDIDATES:-<none>}"
+    }
+
+    find_ready_model() {
+        for cand in $OLLAMA_MODEL_CANDIDATES; do
+            if ollama show "$cand" >/dev/null 2>&1; then
+                printf '%s' "$cand"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    preload_via_api() {
+        model="$1"
+        case "${MODEL_MODE:-chat}" in
+            embedding|embed)
+                if ollama embed "$model" "warmup" >/dev/null 2>&1; then
+                    return 0
+                fi
+                ;;
+        esac
+        # Load weights into VRAM; keep_alive inherits OLLAMA_KEEP_ALIVE (default 0).
+        ollama run "$model" "Hello" >/dev/null 2>&1
+    }
+
+    # preload_model polls until `ollama show` resolves a candidate (the daemon is
+    # up AND llm-init has finished the pull), then warms VRAM. It runs beside the
+    # daemon rather than before it: supervise_engine has to end up tracking the
+    # `ollama serve` PID itself, so run_ollama execs and cannot wait for anything
+    # afterwards. Bounded by OLLAMA_PRELOAD_TIMEOUT so a launch that never gets a
+    # model does not leave a poller behind.
+    preload_model() {
+        case "${OLLAMA_PRELOAD:-true}" in
+            false|FALSE|0|no|NO|off|OFF)
+                log "preload disabled (OLLAMA_PRELOAD=$OLLAMA_PRELOAD)"
+                return 0
+                ;;
+        esac
+        if [ -z "${OLLAMA_MODEL_CANDIDATES:-}" ]; then
+            log "preload skipped: no model candidates (set MODEL_SOURCE / MODEL_NAME)"
+            return 0
+        fi
+
+        timeout="${OLLAMA_PRELOAD_TIMEOUT:-3600}"
+        elapsed=0
+        ready_model=""
+        log "waiting for model (ollama show, llm-init pull, timeout=${timeout}s)..."
+        while [ -z "$ready_model" ]; do
+            ready_model=$(find_ready_model 2>/dev/null || true)
+            if [ -n "$ready_model" ]; then
+                break
+            fi
+            if [ "$elapsed" -ge "$timeout" ]; then
+                log "WARN: preload timed out after ${timeout}s (model not ready)"
+                return 0
+            fi
+            sleep 5
+            elapsed=$((elapsed + 5))
+        done
+        log "model $ready_model ready after ${elapsed}s"
+
+        log "preloading $ready_model (mode=${MODEL_MODE:-chat})..."
+        start=$(date +%s)
+        set +e
+        preload_via_api "$ready_model"
+        rc=$?
+        set -e
+        end=$(date +%s)
+        if [ "$rc" -eq 0 ]; then
+            log "preload completed in $((end - start))s"
+        else
+            log "WARN: preload failed (exit $rc); daemon still running"
+        fi
+    }
+
+    build_model_candidates
+
+    # No download sentinel for Ollama; still wait for model-card handoff so we
+    # do not briefly serve with chart ENGINE_ARGS while llm-init reconciles.
+    wait_for_engine_args_handoff
+
+    run_ollama() {
+        engine_args_export_env
+        normalize_keep_alive
+        export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-0}"
+        # Re-run on every launch: a card edit relaunches the daemon, which drops
+        # what was resident in VRAM.
+        preload_model &
+        log "starting ollama serve on $OLLAMA_HOST"
+        exec ollama serve "$@"
+    }
+
+    supervise_engine run_ollama "$@"

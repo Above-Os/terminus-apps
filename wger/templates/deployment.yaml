@@ -33,9 +33,6 @@ spec:
         command: [python3, /olares/launch.py, init]
         workingDir: /home/wger/src
         envFrom: [{configMapRef: {name: wger-env}}, {secretRef: {name: wger-auth}}]
-        env:
-        - name: DJANGO_DB_PASSWORD
-          valueFrom: {secretKeyRef: {name: wgersync-auth, key: WGER_DB_PASSWORD}}
         resources:
           requests: {cpu: 200m, memory: 512Mi}
           limits: {cpu: '2', memory: 2Gi}
@@ -50,9 +47,6 @@ spec:
         command: [python3, /olares/launch.py, gunicorn, 'wger.wsgi:application', --bind, '0.0.0.0:8000', --workers, '2', --threads, '2', --timeout, '240']
         workingDir: /home/wger/src
         envFrom: [{configMapRef: {name: wger-env}}, {secretRef: {name: wger-auth}}]
-        env:
-        - name: DJANGO_DB_PASSWORD
-          valueFrom: {secretKeyRef: {name: wgersync-auth, key: WGER_DB_PASSWORD}}
         ports: [{name: web, containerPort: 8000}]
         startupProbe: {httpGet: {path: /api/v2/version/, port: web}, periodSeconds: 10, failureThreshold: 60}
         readinessProbe: {httpGet: {path: /api/v2/version/, port: web}, periodSeconds: 10}
@@ -69,9 +63,6 @@ spec:
         command: [python3, /olares/launch.py, celery, -A, wger, worker, -l, INFO, --concurrency, '2']
         workingDir: /home/wger/src
         envFrom: [{configMapRef: {name: wger-env}}, {secretRef: {name: wger-auth}}]
-        env:
-        - name: DJANGO_DB_PASSWORD
-          valueFrom: {secretKeyRef: {name: wgersync-auth, key: WGER_DB_PASSWORD}}
         resources:
           requests: {cpu: 100m, memory: 320Mi}
           limits: {cpu: '1', memory: 1280Mi}
@@ -84,9 +75,6 @@ spec:
         command: [python3, /olares/launch.py, celery, -A, wger, beat, -l, INFO, --schedule, /home/wger/state/celerybeat-schedule, --pidfile, /tmp/celerybeat.pid]
         workingDir: /home/wger/src
         envFrom: [{configMapRef: {name: wger-env}}, {secretRef: {name: wger-auth}}]
-        env:
-        - name: DJANGO_DB_PASSWORD
-          valueFrom: {secretKeyRef: {name: wgersync-auth, key: WGER_DB_PASSWORD}}
         resources:
           requests: {cpu: 50m, memory: 128Mi}
           limits: {cpu: 500m, memory: 512Mi}

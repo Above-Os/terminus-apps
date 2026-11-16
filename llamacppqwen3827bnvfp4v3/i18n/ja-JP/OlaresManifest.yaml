@@ -1,0 +1,26 @@
+metadata:
+  description: "NVIDIA Blackwell GPU（RTX 50 シリーズ）上で llama.cpp により Qwen3.8-27B（MTP 付き NVFP4 GGUF）を提供します。"
+  title: Qwen3.8-27B NVFP4 (llama.cpp)
+spec:
+  fullDescription: |
+    **モデル概要**
+    Qwen3.8-27B は Alibaba の Qwen シリーズに属する視覚言語モデルで、Qwen3.5 アーキテクチャをベースにしています。思考、ツール呼び出し、ネイティブな画像・動画理解に対応し、コンテキストウィンドウは 256K です。このアプリは `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF` の NVFP4 `MTP-LOW` GGUF ビルド（`unsloth/Qwen3.8-27B-NVFP4` から量子化）を llama.cpp で提供します。
+
+    **ハードウェア要件**
+    NVFP4 は RTX 50 シリーズなどの NVIDIA Blackwell GPU でのみネイティブに動作します。23Gi の GPU メモリが必要なため、24 GB 以上のカードが必要です。それより前の NVIDIA GPU ではこのアプリを実行できません。代わりに Qwen3.8-27B の GGUF Q4 版を使用してください。
+
+    **プリセット構成**
+    - モデル：`esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW`（視覚用プロジェクター `mmproj-BF16.gguf` 付き）
+    - 機能：思考、ツール、視覚
+    - エンジン引数：`-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024`（102K コンテキストを 4 スロットで共有、ドラフト深さ 4 の MTP 投機的デコード）
+    - 必要な GPU メモリ：`23Gi`
+
+    **仕組み**
+    まず Model Console がモデルをダウンロードして準備し、準備ができると `llama.cpp` がモデルの提供を開始します。この 2 つは別々に動作しますが、ファイルと進捗情報を共有します。
+
+    **スタック**
+    - **llama.cpp**（`server-cuda13-b11718`）：モデルを実行し、API リクエストを処理します（ポート 8081）
+    - **Model Console**：モデルをダウンロードし、進捗を表示し、ポート 8090 で OpenAI API を提供して `llamacpp` にプロキシします。
+
+    **モデルの保存場所**
+    すべてのモデルファイルは共有フォルダー `appCommon/huggingface` に保存され、`/cache/hf/hub` としてマウントされます。同種のアプリはすべてこの場所をモデルに使用します。

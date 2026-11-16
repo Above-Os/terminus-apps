@@ -1,0 +1,239 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: llamacppqwen3827bnvfp4v3
+  icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+  description: "Qwen3.8-27B (NVFP4 GGUF with MTP) served with llama.cpp on NVIDIA Blackwell GPUs (RTX 50 series)."
+  appid: llamacppqwen3827bnvfp4v3
+  title: Qwen3.8-27B NVFP4 (llama.cpp)
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+    - llm
+sharedEntrances:
+  - name: llamacppqwen3827bnvfp4v3
+    host: sharedentrances-api
+    port: 0
+    title: Qwen3.8-27B NVFP4
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+entrances:
+  - name: llamacppclient
+    port: 8090
+    host: download-svc
+    title: Qwen3.8-27B NVFP4
+    icon: https://app.cdn.olares.com/appstore/llm/llamacpp/qwen.png
+    openMethod: window
+    authLevel: internal
+#   llamacppqwen3827bnvfp4v3 — engine Deployment (== appid / Release.Name)
+#   llminit                   — llm-init / entrance Deployment
+workloadReplicas:
+  llamacppqwen3827bnvfp4v3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: 'esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW'
+  fullDescription: |
+    **Model Overview**
+    Qwen3.8-27B is a vision-language model from the Qwen series (Alibaba), built on the Qwen3.5 architecture. It supports thinking, tool-calling, and native image/video understanding, with a 256K context window. This app serves the NVFP4 `MTP-LOW` GGUF build from `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF` (quantized from `unsloth/Qwen3.8-27B-NVFP4`) via llama.cpp.
+
+    **Hardware Requirements**
+    NVFP4 runs natively only on NVIDIA Blackwell GPUs, such as the RTX 50 series. It needs 23Gi of GPU memory, so a 24 GB card is the minimum. Older NVIDIA GPUs cannot run this app; use the GGUF Q4 version of Qwen3.8-27B instead.
+
+    **Preset Configuration**
+    - Model: `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW` (with `mmproj-BF16.gguf` projector for vision)
+    - Capabilities: thinking, tools, vision
+    - Engine args: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024` (102K context shared by 4 slots, MTP speculative decoding with draft depth 4)
+    - Required GPU memory: `23Gi`
+
+    **How It Works**
+    First, Model Console downloads the model and gets it ready, then `llama.cpp` starts serving the model when it's ready. These two parts run separately but share files and progress info.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda13-b11718`): Runs the model and serves API requests (port 8081)
+    - **Model Console**: Downloads the model, shows progress, and provides the OpenAI API on port 8090, proxying to `llamacpp`.
+
+    **Model Storage**
+    All model files are stored in a shared folder at `appCommon/huggingface`, mounted as `/cache/hf/hub`. All similar apps use this location for models.
+
+  developer: Alibaba
+  website: https://qwen.ai/home
+  sourceCode: https://github.com/QwenLM/Qwen3
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+    - de-DE
+    - es-ES
+    - it-IT
+    - fr-FR
+    - ja-JP
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF
+
+  accelerator:
+    #   nvidia — discrete Blackwell GPU; LLAMACPP_REQUIRED_GPU_MEMORY -> gpumem
+    - mode: nvidia
+      limitedCpu: "15360m"
+      requiredCpu: "1100m"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      # MEMORY_LIMIT 48Gi = anon under 1Gi + the 23Gi gpumem that mode-2 eviction
+      # spills into host RAM as unreclaimable UVM pages + GGUF page cache headroom.
+      # Engine MEMORY_REQUEST 7Gi + llm-init 256Mi <= requiredMemory 8Gi;
+      # MEMORY_LIMIT 48Gi + llm-init 2Gi <= limitedMemory 50Gi.
+      limitedMemory: "50Gi"
+      requiredMemory: "8Gi"
+      requiredGPUMemory: "23Gi"
+      limitedGPUMemory: "23Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  # Model is preset for this app; these values are fixed and not user-editable.
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF --include Qwen3.8-27B-NVFP4-MTP-LOW.gguf,hf://esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF --include mmproj-BF16.gguf"
+    description:  "Example: hf://unsloth/Qwen3-0.6B-GGUF --include Qwen3-0.6B-Q4_K_M.gguf. The source to download your model. For models with split files, only include the first part; for vision-language models, add the projector with a comma, like `hf://<repo> --include model.gguf,hf://<repo> --include mmproj-F16.gguf`."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW"
+    description:  "Example: unsloth/Qwen3-0.6B-GGUF:Q4_K_M. The name of your model in `owner/repo:quant` format"
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "chat"
+    options:
+    - title: Chat
+      value: chat
+    - title: Embedding
+      value: embedding
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "thinking,tools,vision"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description:  "The model capabilities. Pick what your model supports, if no extra capabilities, pick None."
+  # Not editable: which levels exist is a fact of this model and this chat
+  # template, not a preference. The template raises on anything outside
+  # low / medium / xhigh, so an extra level would turn into a failed
+  # request for whichever client read the levels off the model card.
+  - envName: MODEL_REASONING_EFFORT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "low,medium,xhigh"
+    description:  "The reasoning_effort levels this model accepts, published on the model card so clients can read them instead of guessing."
+  # The level llama.cpp's template already uses when a request carries no
+  # reasoning_effort. It is published, never injected: nothing in the chain
+  # writes it into a request, so it has to match the engine's real default.
+  - envName: MODEL_REASONING_EFFORT_DEFAULT
+    required: false
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "xhigh"
+    description:  "The level this model uses when a request does not ask for one."
+  - envName: ENGINE_ARGS
+    required: true
+    default: "-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024"
+    type: string
+    editable: true
+    applyOnChange: true
+    description:  "Example: -c 8192 -ngl all -fa on. Extra llama.cpp options, to fully use GPU, add `-ngl all`. You can also use values like `LLAMA_ARG_*=val`."
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: LLAMACPP_CPU_REQUEST
+    required: true
+    default: "200m"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_REQUEST
+    required: true
+    default: "7Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_CPU_LIMIT
+    required: true
+    default: "6"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_MEMORY_LIMIT
+    required: true
+    default: "48Gi"
+    type: string
+    editable: false
+    applyOnChange: false
+  - envName: LLAMACPP_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "23Gi"
+    description:  "Example: `8Gi`, `8192`, or `8192Mi`. GPU memory required for the model. Sets `nvidia.com/gpumem` in MiB."
+    regex: "^[0-9]+(Gi|Mi)?$"

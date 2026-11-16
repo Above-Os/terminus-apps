@@ -10,7 +10,7 @@
 {{- $logLevel := $olaresEnv.LOG_LEVEL | default (get $manifestEnvs "LOG_LEVEL") | default .Values.logLevel }}
 {{- $hfEndpoint := $olaresEnv.HF_ENDPOINT | default .Values.hf.endpoint }}
 {{- $hfToken := $olaresEnv.HF_TOKEN | default "" }}
-{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCache .Release.Name }}
+{{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -33,6 +33,10 @@ spec:
     spec:
       restartPolicy: Always
       volumes:
+        - name: legacy-run-state
+          hostPath:
+            path: "{{ .Values.userspace.appCache }}/llm-init-run/{{ .Release.Name }}"
+            type: DirectoryOrCreate
         - name: hf-cache
           hostPath:
             path: {{ .Values.userspace.appCommon }}/huggingface
@@ -42,6 +46,38 @@ spec:
             path: {{ $runStateHostPath }}
             type: DirectoryOrCreate
       initContainers:
+        - name: migrate-run-state
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command:
+            - sh
+            - -ec
+            - |
+              mkdir -p /run/llm-init
+              chown 1000:1000 /run/llm-init
+              if [ -f /run/llm-init/model-spec.json ]; then
+                exit 0
+              fi
+              if [ -f /legacy-run-state/model-spec.json ]; then
+                # Publish the config last so an interrupted copy can be retried.
+                stage=/run/llm-init/.legacy-migration
+                mkdir -p "$stage"
+                cp -a /legacy-run-state/. "$stage/"
+                mv "$stage/model-spec.json" /run/llm-init/.model-spec.migrating
+                cp -a "$stage/." /run/llm-init/
+                rm -rf "$stage"
+                mv /run/llm-init/.model-spec.migrating /run/llm-init/model-spec.json
+              fi
+          volumeMounts:
+            - name: legacy-run-state
+              mountPath: /legacy-run-state
+              readOnly: true
+            - name: run-state
+              mountPath: /run/llm-init
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
         - name: init-chown
           image: docker.io/beclab/aboveos-busybox:1.37.0
           command:

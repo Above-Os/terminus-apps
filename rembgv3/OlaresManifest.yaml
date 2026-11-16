@@ -6,7 +6,7 @@ metadata:
   description: Rembg is a tool to remove images background
   icon: https://app.cdn.olares.com/appstore/rembg/icon.png
   appid: rembgv3
-  version: '1.1.17'
+  version: '1.1.18'
   title: Rembg
   categories:
   - AI
@@ -44,7 +44,7 @@ permission:
   - Home
 
 spec:
-  versionName: '2.0.68'
+  versionName: '2.0.87'
   fullDescription: |
     **IMPORTANT NOTE**
     This is a shared app. Only one service will be installed across the entire Olares system. Every user can install a desktop entry to access or use the shared entrance to call the service API.
@@ -57,6 +57,17 @@ spec:
     `/root/.u2net` before the rembg server starts. No Hugging Face token is required.
 
   upgradeDescription: |
+    Upgraded Rembg from 2.0.68 to 2.0.87.
+
+    - **Default model**: `bria-rmbg` is now the default model and is bundled in the image.
+    - **New models**: added `birefnet-general-fp16` (faster on CUDA) and `withoutbg`.
+    - **Edge quality**: added optional ViTMatte edge refinement and soft-edge color
+      decontamination.
+    - **Security**: hardened the HTTP server and raised minimum versions of
+      vulnerable dependencies.
+    - **Runtime**: rebuilt the GPU image on CUDA 13 and Ubuntu 24.04.
+    - **Accelerator**: declared the `nvidia` accelerator mode with a 2Gi–12Gi GPU
+      memory envelope, so the rembg engine can run on an NVIDIA GPU.
 
     Run the official OpenResty entrance as UID/GID 1000 with writable runtime paths.
     Give the model download Job a release-revision suffix so upgrades create a new Job instead of mutating its immutable pod template.
@@ -103,12 +114,23 @@ spec:
   - amd64
   onlyAdmin: true
 
-  requiredCpu: "1"
-  limitedCpu: "5"
-  requiredMemory: 6Gi
-  limitedMemory: 20Gi
-  requiredDisk: 8Gi
-  limitedDisk: 20Gi
+  accelerator:
+  - mode: nvidia
+    requiredCpu: "1"
+    limitedCpu: "5"
+    requiredMemory: 6Gi
+    limitedMemory: 20Gi
+    requiredDisk: 8Gi
+    limitedDisk: 20Gi
+    requiredGPUMemory: 2Gi
+    limitedGPUMemory: 12Gi
+  - mode: cpu
+    requiredCpu: "1"
+    limitedCpu: "5"
+    requiredMemory: 6Gi
+    limitedMemory: 20Gi
+    requiredDisk: 8Gi
+    limitedDisk: 20Gi
 options:
   shared: true
   apiTimeout: 0

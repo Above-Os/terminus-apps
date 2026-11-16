@@ -1,0 +1,26 @@
+metadata:
+  description: "Qwen3.8-27B (GGUF NVFP4 con MTP) servito con llama.cpp su GPU NVIDIA Blackwell (serie RTX 50)."
+  title: Qwen3.8-27B NVFP4 (llama.cpp)
+spec:
+  fullDescription: |
+    **Panoramica del modello**
+    Qwen3.8-27B è un modello visione-linguaggio della serie Qwen (Alibaba), basato sull'architettura Qwen3.5. Supporta ragionamento, chiamate a strumenti e comprensione nativa di immagini e video, con una finestra di contesto di 256K. Questa app serve tramite llama.cpp la versione GGUF NVFP4 `MTP-LOW` di `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF` (quantizzata da `unsloth/Qwen3.8-27B-NVFP4`).
+
+    **Requisiti hardware**
+    NVFP4 funziona in modo nativo solo su GPU NVIDIA Blackwell, come la serie RTX 50. Richiede 23Gi di memoria GPU, quindi serve una scheda da almeno 24 GB. Le GPU NVIDIA precedenti non possono eseguire questa app; usa invece la versione GGUF Q4 di Qwen3.8-27B.
+
+    **Configurazione predefinita**
+    - Modello: `esatapedico/Qwen3.8-27B-NVFP4-MTP-GGUF:MTP-LOW` (con il proiettore `mmproj-BF16.gguf` per la visione)
+    - Funzionalità: ragionamento, strumenti, visione
+    - Argomenti del motore: `-c 104448 -ngl all -fa on -ctk q8_0 -ctv q8_0 --jinja -np 4 -kvu --spec-type draft-mtp --spec-draft-n-max 4 -ub 1024` (contesto di 102K condiviso da 4 slot, decodifica speculativa MTP con profondità di bozza 4)
+    - Memoria GPU richiesta: `23Gi`
+
+    **Come funziona**
+    Prima Model Console scarica il modello e lo prepara, poi `llama.cpp` inizia a servire il modello quando è pronto. Queste due parti vengono eseguite separatamente, ma condividono file e informazioni sull'avanzamento.
+
+    **Stack**
+    - **llama.cpp** (`server-cuda13-b11718`): esegue il modello e gestisce le richieste API (porta 8081)
+    - **Model Console**: scarica il modello, mostra l'avanzamento e fornisce l'API OpenAI sulla porta 8090, inoltrando a `llamacpp`.
+
+    **Archiviazione dei modelli**
+    Tutti i file del modello sono archiviati in una cartella condivisa in `appCommon/huggingface`, montata come `/cache/hf/hub`. Tutte le app simili usano questa posizione per i modelli.

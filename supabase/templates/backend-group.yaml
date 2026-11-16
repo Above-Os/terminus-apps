@@ -33,8 +33,10 @@ spec:
         command:
         - sh
         - -ec
-        - chown 1000:1000 /runtime
+        - chown 1000:1000 /credentials; chmod 700 /credentials; chown 1000:1000 /runtime
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: auth-runtime
           mountPath: /runtime
         resources:
@@ -77,6 +79,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: auth-runtime
           mountPath: /runtime
         - name: auth-runtime-config
@@ -141,6 +145,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: rest-runtime
           mountPath: /runtime
         - name: rest-runtime-config
@@ -205,6 +211,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: realtime-runtime
           mountPath: /runtime
         - name: realtime-runtime-config
@@ -271,6 +279,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: storage-runtime
           mountPath: /runtime
         - name: storage-runtime-config
@@ -337,6 +347,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: imgproxy-runtime
           mountPath: /runtime
         - name: imgproxy-runtime-config
@@ -401,6 +413,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: meta-runtime
           mountPath: /runtime
         - name: meta-runtime-config
@@ -469,6 +483,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: functions-runtime
           mountPath: /runtime
         - name: functions-runtime-config
@@ -1044,6 +1060,10 @@ spec:
           periodSeconds: 30
           failureThreshold: 5
       volumes:
+      - name: credentials
+        hostPath:
+          path: '{{ .Values.userspace.appData }}/credentials'
+          type: DirectoryOrCreate
       - name: auth-runtime
         emptyDir: {}
       - name: auth-runtime-config

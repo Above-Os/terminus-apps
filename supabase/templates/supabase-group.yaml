@@ -34,8 +34,10 @@ spec:
         command:
         - sh
         - -ec
-        - chown 1000:1000 /runtime; chown 1000:1000 /prepare/snippets; chown 1000:1000 /prepare/functions
+        - chown 1000:1000 /credentials; chmod 700 /credentials; chown 1000:1000 /runtime; chown 1000:1000 /prepare/snippets; chown 1000:1000 /prepare/functions
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: studio-runtime
           mountPath: /runtime
         - name: studio-data-snippets
@@ -82,6 +84,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: studio-runtime
           mountPath: /runtime
         - name: studio-runtime-config
@@ -146,6 +150,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: api-gw-runtime
           mountPath: /runtime
         - name: api-gw-runtime-config
@@ -338,6 +344,10 @@ spec:
           periodSeconds: 30
           failureThreshold: 5
       volumes:
+      - name: credentials
+        hostPath:
+          path: '{{ .Values.userspace.appData }}/credentials'
+          type: DirectoryOrCreate
       - name: studio-runtime
         emptyDir: {}
       - name: studio-runtime-config

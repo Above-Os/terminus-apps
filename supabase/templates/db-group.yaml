@@ -33,9 +33,11 @@ spec:
         command:
         - sh
         - -ec
-        - chown 1000:1000 /runtime; chown 1000:1000 /prepare/postgres; chown 1000:1000 /prepare/postgres-config; chown 1000:1000 /prepare/pg-run;
+        - chown 1000:1000 /credentials; chmod 700 /credentials; chown 1000:1000 /runtime; chown 1000:1000 /prepare/postgres; chown 1000:1000 /prepare/postgres-config; chown 1000:1000 /prepare/pg-run;
           chown 1000:1000 /prepare/pg-log
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: db-runtime
           mountPath: /runtime
         - name: db-data-postgres
@@ -86,6 +88,8 @@ spec:
         - secretRef:
             name: supabase-secrets
         volumeMounts:
+        - name: credentials
+          mountPath: /credentials
         - name: db-runtime
           mountPath: /runtime
         - name: db-runtime-config
@@ -238,6 +242,10 @@ spec:
           periodSeconds: 30
           failureThreshold: 5
       volumes:
+      - name: credentials
+        hostPath:
+          path: '{{ .Values.userspace.appData }}/credentials'
+          type: DirectoryOrCreate
       - name: db-runtime
         emptyDir: {}
       - name: db-runtime-config
