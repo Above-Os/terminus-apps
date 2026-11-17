@@ -13,3 +13,11 @@
 {{- int $g -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* Both Deployments must agree on this render's cleanup, even after reinstall. */ -}}
+{{- define "audio.runStateGeneration" -}}
+{{- if not (hasKey .Values "_audioRunStateGeneration") -}}
+{{- $_ := set .Values "_audioRunStateGeneration" (randAlphaNum 32) -}}
+{{- end -}}
+{{- .Values._audioRunStateGeneration -}}
+{{- end -}}
