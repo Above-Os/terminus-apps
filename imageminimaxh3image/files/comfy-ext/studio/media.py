@@ -30,7 +30,7 @@ def ffmpeg():
 
 
 def probe(path):
-    """{kind, mime, ext, width, height, duration, has_audio} or MediaError."""
+    """{kind, mime, ext, width, height, duration, has_audio, fps} or MediaError."""
     try:
         with Image.open(path) as im:
             fmt = im.format
@@ -38,7 +38,7 @@ def probe(path):
                 w, h = ImageOps.exif_transpose(im).size
                 ext = {"JPEG": ".jpg", "MPO": ".jpg"}.get(fmt, "." + fmt.lower())
                 return {"kind": "image", "mime": IMAGE_MIME[fmt], "ext": ext, "width": w, "height": h,
-                        "duration": None, "has_audio": False}
+                        "duration": None, "has_audio": False, "fps": None}
     except Exception:
         pass
     if av is None:
@@ -58,7 +58,8 @@ def probe(path):
                 if rot in (90, 270):
                     w, h = h, w
                 return {"kind": "video", "mime": mime, "ext": ".webm" if mime == "video/webm" else (".mov" if path.lower().endswith(".mov") else ".mp4"),
-                        "width": w, "height": h, "duration": dur, "has_audio": a is not None}
+                        "width": w, "height": h, "duration": dur, "has_audio": a is not None,
+                        "fps": float(v.average_rate) if v.average_rate else None}
             if a is not None:
                 mime = AUDIO_MIME.get(fmt)
                 if not mime:
@@ -66,7 +67,7 @@ def probe(path):
                 ext = {"audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/flac": ".flac", "audio/ogg": ".ogg",
                        "audio/mp4": ".m4a", "audio/aac": ".aac"}[mime]
                 return {"kind": "audio", "mime": mime, "ext": ext, "width": None, "height": None,
-                        "duration": dur, "has_audio": True}
+                        "duration": dur, "has_audio": True, "fps": None}
     except MediaError:
         raise
     except Exception:
@@ -192,6 +193,29 @@ def needs_normalize(path, info):
             return _rotation(v) != 0
     except Exception:
         return False
+
+
+def join(parts, source, dst, start, duration):
+    """One video from segment results: parts are (path, skip, keep) frames
+    to take from each (keep None for the rest), with the audio of source
+    from start for duration seconds."""
+    if not ffmpeg():
+        raise MediaError("ffmpeg_missing")
+    args = [ffmpeg(), "-v", "error", "-y"]
+    for path, _, _ in parts:
+        args += ["-i", path]
+    args += ["-ss", "%.3f" % start, "-t", "%.3f" % duration, "-i", source]
+    chains = []
+    for i, (_, skip, keep) in enumerate(parts):
+        end = ":end_frame=%d" % (skip + keep) if keep is not None else ""
+        chains.append("[%d:v]trim=start_frame=%d%s,setpts=PTS-STARTPTS[v%d]" % (i, skip, end, i))
+    graph = ";".join(chains) + ";" + "".join("[v%d]" % i for i in range(len(parts))) + "concat=n=%d:v=1:a=0[v]" % len(parts)
+    args += ["-filter_complex", graph, "-map", "[v]", "-map", "%d:a:0?" % len(parts),
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", dst]
+    r = subprocess.run(args, capture_output=True, timeout=max(600, duration * 120))
+    if r.returncode != 0 or not os.path.exists(dst):
+        raise MediaError("join_failed: " + r.stderr.decode(errors="replace")[-300:])
 
 
 def trim(src, dst, start, end):
