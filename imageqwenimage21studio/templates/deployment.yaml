@@ -6,7 +6,9 @@
 #            the compute mode chosen at install)
 # Models live in the cluster-wide appCommon tree FlowStudio uses, so weights
 # are shared with it and with every other comfyapp app; outputs go to appData
-# so they show up in Files.
+# so they show up in Files. Studio apps keep uploads and outputs in
+# Common/Studio/<app>/.users/<user>/ instead: a tree per app, because
+# ComfyUI's asset scanner walks its whole input and output directories.
 {{- $xpu := eq (.Values.GPU.Type | default .Values.gpu | default "nvidia") "intel-gpu" }}
 {{- $root := ternary "/llm/ComfyUI" "/opt/ComfyUI" $xpu }}
 apiVersion: apps/v1
@@ -56,9 +58,10 @@ spec:
           for d in clip diffusion_models vae .llm-init-verified; do
             mkdir -p "$root/$d" && chown 1000:1000 "$root/$d"
           done
-          for d in output db input studio console; do
+          for d in output db studio console; do
             mkdir -p /data/appData/$d && chown 1000:1000 /data/appData/$d
           done
+          mkdir -p /data/appCommon/Studio/imageqwenimage21studio && chown 1000:1000 /data/appCommon/Studio/imageqwenimage21studio
         volumeMounts:
         - name: app-common
           mountPath: /data/appCommon
@@ -157,7 +160,7 @@ spec:
           && exec python -c "import sys,runpy,torch; torch.xpu.init(); sys.argv=['main.py']+sys.argv[1:]; runpy.run_path('main.py', run_name='__main__')"
           --listen 0.0.0.0 --port 8188 --disable-auto-launch --cache-none
           --extra-model-paths-config /etc/comfyapp/extra_model_paths.yaml
-          --output-directory /data/appData/output --input-directory /run/comfyui/input
+          --output-directory /data/studio --input-directory /data/studio --max-upload-size 512
           --temp-directory /run/comfyui/temp --user-directory /run/comfyui/user
           --enable-assets --database-url sqlite:////data/appData/db/comfyui.db
         {{- else }}
@@ -187,7 +190,7 @@ spec:
           --listen 0.0.0.0 --port 8188 --disable-auto-launch
           --use-ck-attention "$@"
           --extra-model-paths-config /opt/ComfyUI/extra_model_paths.yaml /etc/comfyapp/extra_model_paths.yaml
-          --output-directory /data/appData/output --input-directory /data/appData/input --max-upload-size 512
+          --output-directory /data/studio --input-directory /data/studio --max-upload-size 512
           --temp-directory /run/comfyui/temp --user-directory /run/comfyui/user
           --enable-assets --database-url sqlite:////data/appData/db/comfyui.db
         {{- end }}
@@ -205,6 +208,15 @@ spec:
           value: /data/appData
         - name: STUDIO_DEVICE
           value: {{ .Values.deviceName | default "" | quote }}
+        # Owns jobs that arrive without X-Bfl-User; decides admin rights
+        # while LLDAP is unreachable.
+        - name: STUDIO_ADMIN
+          value: {{ .Values.admin | default (.Values.bfl | default dict).username | default "" | quote }}
+        # Olares users and lldap_admin, read like Router (studio-rbac.yaml).
+        - name: STUDIO_LLDAP_URL
+          value: http://lldap-provider-svc.os-framework:28080
+        - name: STUDIO_SA_TOKEN
+          value: /var/run/secrets/kubernetes.io/serviceaccount/token
         {{- $oe := .Values.olaresEnv | default dict }}
         - name: STUDIO_LLM_BASE_URL
           value: {{ $oe.STUDIO_LLM_BASE_URL | default (printf "https://router.%s/v1" (.Values.user | default dict).zone) | quote }}
@@ -238,6 +250,8 @@ spec:
           mountPath: /data/appData
         - name: comfy-run
           mountPath: /run/comfyui
+        - name: studio-files
+          mountPath: /data/studio
         - name: files
           mountPath: {{ $root }}/custom_nodes/comfyapp/web/workflow.json
           subPath: workflow.json
@@ -263,6 +277,9 @@ spec:
           mountPath: {{ $root }}/custom_nodes/comfyapp/studio/__init__.py
           subPath: studio-__init__.py
         - name: files
+          mountPath: {{ $root }}/custom_nodes/comfyapp/studio/directory.py
+          subPath: studio-directory.py
+        - name: files
           mountPath: {{ $root }}/custom_nodes/comfyapp/studio/graph.py
           subPath: studio-graph.py
         - name: files
@@ -271,6 +288,9 @@ spec:
         - name: files
           mountPath: {{ $root }}/custom_nodes/comfyapp/studio/media.py
           subPath: studio-media.py
+        - name: files
+          mountPath: {{ $root }}/custom_nodes/comfyapp/studio/projects.py
+          subPath: studio-projects.py
         - name: files
           mountPath: {{ $root }}/custom_nodes/comfyapp/studio/store.py
           subPath: studio-store.py
@@ -318,3 +338,9 @@ spec:
       - name: studio
         configMap:
           name: imageqwenimage21studio-studio
+      # kubelet creates this as root; fix-perms gives it to uid 1000 (app-service
+      # only does that for spec.runAsUser apps).
+      - name: studio-files
+        hostPath:
+          path: {{ .Values.userspace.appCommon }}/Studio/imageqwenimage21studio
+          type: DirectoryOrCreate
