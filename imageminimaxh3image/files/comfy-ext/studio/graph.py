@@ -8,10 +8,12 @@ import math
 import random
 import re
 
-# mask: white where an edit may change the first ref_image.
-ASSET_ROLES = ("first_frame", "last_frame", "ref_image", "ref_video", "ref_audio", "mask")
+# mask: white where an edit may change the first ref_image; source_video,
+# source_image: what an enhance flow upscales.
+ASSET_ROLES = ("first_frame", "last_frame", "ref_image", "ref_video", "ref_audio", "mask", "source_video", "source_image")
 ROLE_KIND = {"first_frame": "image", "last_frame": "image", "ref_image": "image", "ref_video": "video", "ref_audio": "audio",
-             "mask": "image"}
+             "mask": "image", "source_video": "video", "source_image": "image"}
+SOURCE_ROLES = ("source_video", "source_image")
 SPEEDS = ("quality", "fast")
 # aspect "follow": the output keeps image 1's shape (the parameter bar's
 # "follow image 1").
@@ -63,6 +65,9 @@ def check_route(flow, items):
     need = route.get("requiresAny") or []
     if need and not any(it["role"] in need for it in items):
         return {"code": "requires_any", "roles": need}
+    missing = [r for r in route.get("requiresAll") or [] if r not in counts]
+    if missing:
+        return {"code": "requires_all", "roles": missing}
     return None
 
 
@@ -208,6 +213,16 @@ def _in_unit(mp, inp):
     return mp
 
 
+def budget_share(mp, inp, by_role):
+    """The tier's megapixels for each of the input's budget.role assets,
+    cut to an equal share of budget.megapixels when they would exceed it."""
+    b = inp.get("budget")
+    n = len(by_role.get(b["role"]) or []) if b else 0
+    if not n or mp * n <= b["megapixels"]:
+        return mp
+    return math.floor(b["megapixels"] / n * 100) / 100
+
+
 def default_tier(inp, profile):
     """The tier of a resolution input's default, else the first."""
     mp = tiers(profile)
@@ -229,7 +244,143 @@ def flow_roles(flow, profile=None):
     return roles
 
 
-SIZE_ROLES = ("first_frame", "ref_image", "ref_video")
+SIZE_ROLES = ("first_frame", "ref_image", "ref_video", "source_video", "source_image")
+
+
+def has_role(flow, role):
+    return any(i.get("role") == role for i in flow.get("inputs", []))
+
+
+def _clamp(v, r):
+    v = float(v)
+    if r.get("min") is not None:
+        v = max(float(r["min"]), v)
+    if r.get("max") is not None:
+        v = min(float(r["max"]), v)
+    return v
+
+
+def _num(v):
+    return int(v) if float(v).is_integer() else v
+
+
+def job_scale(flow, params, profile=None):
+    """The upscale factor: params.scale within the scale input's range, else
+    its default; profile.fixedScale for a flow without a scale input."""
+    r = flow_roles(flow).get("scale")
+    if not r:
+        return float((profile or {}).get("fixedScale") or 0) or None
+    v = params.get("scale")
+    v = r.get("default") if v in (None, "") else v
+    try:
+        return _clamp(v, r) if v is not None else None
+    except (TypeError, ValueError):
+        raise JobError("bad_scale", "Bad upscale factor", scale=v)
+
+
+def segment_of(params):
+    """params.segment as (start, duration) seconds, None for the whole video."""
+    s = params.get("segment")
+    if not s:
+        return None
+    try:
+        start, dur = float(s.get("start") or 0), float(s.get("duration") or 0)
+    except (AttributeError, TypeError, ValueError):
+        raise JobError("bad_segment", "Bad preview range")
+    if start < 0 or dur <= 0:
+        raise JobError("bad_segment", "Bad preview range")
+    return start, dur
+
+
+def segment_items(items, params):
+    """A preview's source video counts as the seconds it runs on, so a
+    route's maxSeconds limits what is processed, not the upload."""
+    seg = segment_of(params)
+    if not seg:
+        return
+    for it in items:
+        if it["role"] == "source_video" and it.get("duration"):
+            if seg[0] >= it["duration"]:
+                raise JobError("bad_segment", "The preview starts after the end of the video")
+            it["duration"] = min(seg[1], it["duration"] - seg[0])
+
+
+def output_size(flow, items, params, profile=None):
+    """(width, height, scale) of the result for the source video or image, or None."""
+    src = next((it.get("asset") or it for it in items or () if it.get("role") in SOURCE_ROLES), None)
+    scale = job_scale(flow, params, profile) if src else None
+    if not src or not src.get("width") or not src.get("height") or not scale:
+        return None
+    return int(round(src["width"] * scale / 2)) * 2, int(round(src["height"] * scale / 2)) * 2, scale
+
+
+ASSUMED_FPS = 30
+
+
+def output_frames(items):
+    """(frames, fps) of the source video the job runs on (a preview counts
+    only its range, see segment_items), or None without a source video."""
+    it = next((it for it in items or () if it.get("role") == "source_video"), None)
+    if not it or not it.get("duration"):
+        return None
+    fps = (it.get("asset") or {}).get("fps") or ASSUMED_FPS
+    return int(math.ceil(float(it["duration"]) * fps)), fps
+
+
+def _per_variant(profile, key, variant):
+    lim = (profile or {}).get(key) or {}
+    return lim.get(variant) if variant in lim else lim.get("default")
+
+
+def check_output(profile, variant, size, items=None):
+    """Raise when the result is larger than profile.outputLimit allows for
+    this variant (megapixels; "default" for apps without variants), or when
+    megapixels × frames of the source video passes profile.outputPixelFrames."""
+    mp = _per_variant(profile, "outputLimit", variant)
+    if size and mp and size[0] * size[1] > mp * 1e6 + 1:
+        raise JobError("output_too_large", "The result would be larger than this model can make here",
+                       max=mp, width=size[0], height=size[1], variant=variant or "")
+    budget = _per_variant(profile, "outputPixelFrames", variant)
+    run = output_frames(items) if budget else None
+    if size and run and size[0] * size[1] / 1e6 * run[0] > budget:
+        max_frames = int(budget * 1e6 / (size[0] * size[1]))
+        raise JobError("output_too_long", "The video is too long to upscale to this size here",
+                       max_seconds=math.floor(max_frames / run[1] * 10) / 10, width=size[0], height=size[1],
+                       frames=run[0], variant=variant or "")
+
+
+SEGMENT_PAD = 0.5
+SEGMENT_MIN = 2.0
+
+
+def plan_segments(profile, variant, size, items, pad=SEGMENT_PAD):
+    """Segments a whole video over profile.outputPixelFrames runs as, or None
+    when it fits in one run. Each is {start, duration} for the workflow's own
+    slice plus {skip, keep} frames of its result that go into the joined
+    video; inner boundaries run pad seconds of context on both sides. Times
+    sit half a frame before a frame, so the slice's pts comparison picks it
+    whatever the float rounding."""
+    budget = _per_variant(profile, "outputPixelFrames", variant)
+    run = output_frames(items) if budget and size else None
+    if not run or size[0] * size[1] / 1e6 * run[0] <= budget:
+        return None
+    total, fps = run
+    most = int(budget * 1e6 / (size[0] * size[1]))
+    pad_f = int(round(pad * fps))
+    room = most - 2 * pad_f
+    if room < SEGMENT_MIN * fps:
+        raise JobError("output_too_long", "The video is too long to upscale to this size here",
+                       max_seconds=math.floor(most / fps * 10) / 10, width=size[0], height=size[1],
+                       frames=total, variant=variant or "")
+    n = int(math.ceil(total / room))
+    bounds = [int(round(i * total / n)) for i in range(n + 1)]
+    segs = []
+    for i in range(n):
+        a = max(0, bounds[i] - pad_f) if i else 0
+        b = min(total, bounds[i + 1] + pad_f) if i < n - 1 else total
+        segs.append({"start": round(max(0.0, (a - 0.5) / fps), 4), "duration": round((b - a) / fps, 4),
+                     "skip": bounds[i] - a, "keep": bounds[i + 1] - bounds[i]})
+    return segs
 
 
 def aspect_value(label):
@@ -303,7 +454,7 @@ def resolve_params(flow, params, items=(), profile=None):
     return resolve_roles(flow_roles(flow, profile), params, items, list(tiers(profile)))
 
 
-def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names=None, profile=None):
+def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names=None, profile=None, prefix="studio/"):
     """The prompt for one job.
 
     items: the job's assets in tray order, [{"id", "role", "kind",
@@ -333,6 +484,10 @@ def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names
         seed = random.randrange(MAX_SEED)
     seed = int(seed)
     used = {"seed": seed}
+    roles = flow_roles(flow, profile)
+    segment = segment_of(params) if has_role(flow, "segment_start") else None
+    if segment:
+        used["segment"] = {"start": segment[0], "duration": segment[1]}
 
     for inp in flow.get("inputs", []):
         role = inp.get("role")
@@ -353,6 +508,8 @@ def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names
                 raise JobError("missing_asset", "This mode needs a %s" % role.replace("_", " "), role=role)
         elif role == "prompt":
             value = render_prompt(params.get("prompt", ""), items, names or {}, profile.get("tokens"))
+            if not value.strip() and inp.get("optional") and inp.get("default"):
+                value = inp["default"]
             if not value.strip():
                 raise JobError("empty_prompt", "Write a prompt first")
             note = ref_note(items, profile, value)
@@ -372,7 +529,10 @@ def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names
         elif role == "resolution":
             if not params.get("resolution"):
                 continue
-            value = _in_unit(tiers(profile)[params["resolution"]], inp)
+            mp = budget_share(tiers(profile)[params["resolution"]], inp, by_role)
+            if mp != tiers(profile)[params["resolution"]]:
+                used["megapixelsEach"] = mp
+            value = _in_unit(mp, inp)
             used["resolution"] = params["resolution"]
         elif role == "seed":
             value = seed
@@ -382,10 +542,29 @@ def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names
                 continue
             value = int(s)
             used["steps"] = value
+        elif role == "scale":
+            value = job_scale(flow, params, profile)
+            if value is None:
+                continue
+            value = used["scale"] = _num(value)
+        elif role == "denoise":
+            v = params.get("denoise")
+            v = roles["denoise"].get("default") if v in (None, "") else v
+            if v is None:
+                continue
+            value = used["denoise"] = _num(_clamp(v, roles["denoise"]))
+        elif role == "segment_on":
+            value = bool(segment)
+        elif role in ("segment_start", "segment_length"):
+            if not segment:
+                continue
+            value = segment[0] if role == "segment_start" else segment[1]
         else:
             continue
         for node, field in targets:
             _set(g, node, field, value)
+    if "scale" not in used and any(has_role(flow, r) for r in SOURCE_ROLES) and profile.get("fixedScale"):
+        used["scale"] = _num(float(profile["fixedScale"]))
 
     for ag in flow.get("autogrow") or []:
         target = g.get(ag["node"])
@@ -417,8 +596,9 @@ def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names
         if first:
             # Nodes outside the autogrow that read a template node read the
             # first asset's copy (the edit's base image).
+            # The templates stay as they are for a later autogrow of the same role.
             for nid, node in g.items():
-                if nid in clones:
+                if nid in clones or nid in ag["template"]:
                     continue
                 for k, v in node.get("inputs", {}).items():
                     if _refs(v) and v[0] in first:
@@ -427,5 +607,5 @@ def assemble(flow, api, job_id, items, params, replace=None, file_of=None, names
     for nid in sinks:
         ins = g.get(nid, {}).get("inputs", {})
         if "filename_prefix" in ins:
-            ins["filename_prefix"] = "studio/%s" % job_id
+            ins["filename_prefix"] = prefix + job_id
     return _prune(g, sinks), used
