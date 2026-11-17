@@ -14,6 +14,18 @@ data:
     set -eu
 
     ENGINE=qwen
+    # An old sentinel can exist before llm-init's initContainer runs.
+    # Wait for this deployment's cleanup before reading any shared helpers or state.
+    _wc=0
+    while [ "$(cat /run/llm-init/run_state_generation 2>/dev/null || true)" != "${RUN_STATE_GENERATION:?}" ]; do
+        if [ "$_wc" -ge "${WRAPPER_COMMON_WAIT:-3600}" ]; then
+            printf '[wrapper] timed out waiting for runtime state cleanup\n' >&2
+            exit 1
+        fi
+        printf '[wrapper] waiting for runtime state cleanup (elapsed=%ss)\n' "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
     # Source the shared helpers llm-init publishes into RUN_DIR. That copy can
     # arrive late - the two containers are separate Deployments with no ordering
     # between them - so waiting here is the normal path.
