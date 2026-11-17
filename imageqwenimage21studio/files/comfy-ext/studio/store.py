@@ -9,7 +9,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS assets (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,            -- image | video | audio
-  source TEXT NOT NULL,          -- upload | output | frame | trim | mask | edit
+  source TEXT NOT NULL,          -- upload | output | frame | trim | mask | edit | example
   name TEXT NOT NULL,
   path TEXT NOT NULL,
   mime TEXT NOT NULL,
@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS assets (
   starred INTEGER NOT NULL DEFAULT 0,
   deleted INTEGER NOT NULL DEFAULT 0,
   created REAL NOT NULL,
-  md5 TEXT                       -- of the file as uploaded, before any conversion
+  md5 TEXT,                      -- of the file as uploaded, before any conversion
+  fps REAL,
+  owner TEXT NOT NULL DEFAULT '' -- the Olares user (X-Bfl-User)
 );
 CREATE INDEX IF NOT EXISTS assets_created ON assets(created);
 CREATE TABLE IF NOT EXISTS jobs (
@@ -39,10 +41,27 @@ CREATE TABLE IF NOT EXISTS jobs (
   parent_id TEXT, relation TEXT,
   starred INTEGER NOT NULL DEFAULT 0,
   deleted INTEGER NOT NULL DEFAULT 0,
-  created REAL NOT NULL, started REAL, finished REAL
+  created REAL NOT NULL, started REAL, finished REAL,
+  owner TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created);
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  dir TEXT NOT NULL,             -- the folder under each member's .users/<user>/
+  owner TEXT NOT NULL,
+  access TEXT NOT NULL DEFAULT 'invited',   -- invited | everyone
+  default_role TEXT NOT NULL DEFAULT 'editor',
+  archived INTEGER NOT NULL DEFAULT 0,
+  created REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id TEXT NOT NULL,
+  user TEXT NOT NULL,
+  role TEXT NOT NULL,            -- admin | editor | viewer
+  PRIMARY KEY (project_id, user)
+);
 """
 
 JSON_FIELDS = {"spec", "used", "error", "outputs"}
@@ -62,7 +81,8 @@ def _row(r):
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, owner=""):
+        """owner takes the rows written before there were owners."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
@@ -71,9 +91,21 @@ class Store:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.execute("PRAGMA busy_timeout=5000")
             self.db.executescript(SCHEMA)
-            if "md5" not in {r[1] for r in self.db.execute("PRAGMA table_info(assets)")}:
+            cols = {r[1] for r in self.db.execute("PRAGMA table_info(assets)")}
+            if "md5" not in cols:
                 self.db.execute("ALTER TABLE assets ADD COLUMN md5 TEXT")
+            if "fps" not in cols:
+                self.db.execute("ALTER TABLE assets ADD COLUMN fps REAL")
             self.db.execute("CREATE INDEX IF NOT EXISTS assets_md5 ON assets(md5)")
+            for table in ("assets", "jobs"):
+                if "owner" not in {r[1] for r in self.db.execute("PRAGMA table_info(%s)" % table)}:
+                    self.db.execute("ALTER TABLE %s ADD COLUMN owner TEXT NOT NULL DEFAULT ''" % table)
+                if owner:
+                    self.db.execute("UPDATE %s SET owner=? WHERE owner=''" % table, (owner,))
+                self.db.execute("CREATE INDEX IF NOT EXISTS %s_owner ON %s(owner, created)" % (table, table))
+                if "project" not in {r[1] for r in self.db.execute("PRAGMA table_info(%s)" % table)}:
+                    self.db.execute("ALTER TABLE %s ADD COLUMN project TEXT" % table)
+                self.db.execute("CREATE INDEX IF NOT EXISTS %s_project ON %s(project, created)" % (table, table))
 
     def _q(self, sql, args=()):
         with self.lock:
@@ -95,8 +127,24 @@ class Store:
         r = self._q("SELECT * FROM assets WHERE id=?", (aid,))
         return _row(r[0]) if r else None
 
-    def asset_by_md5(self, md5):
-        for r in self._q("SELECT * FROM assets WHERE md5=? AND deleted=0 ORDER BY created DESC", (md5,)):
+    @staticmethod
+    def _scope(sql, args, owner, project):
+        """project: that project's rows; else owner's own, outside projects."""
+        if project:
+            args.append(project)
+            return sql + " AND project=?"
+        if owner is not None:
+            args.append(owner)
+            return sql + " AND owner=? AND project IS NULL"
+        return sql
+
+    def asset_by_md5(self, md5, owner=None, project=None):
+        sql, args = "SELECT * FROM assets WHERE md5=? AND deleted=0", [md5]
+        sql = self._scope(sql, args, owner, project)
+        if project and owner is not None:
+            sql += " AND owner=?"
+            args.append(owner)
+        for r in self._q(sql + " ORDER BY created DESC", args):
             if os.path.exists(r["path"]):
                 return _row(r)
         return None
@@ -104,8 +152,9 @@ class Store:
     def assets_without_md5(self):
         return [_row(r) for r in self._q("SELECT id, path FROM assets WHERE md5 IS NULL AND deleted=0")]
 
-    def assets(self, kind=None, source=None, q=None, starred=None, before=None, limit=60):
+    def assets(self, kind=None, source=None, q=None, starred=None, before=None, limit=60, owner=None, project=None):
         sql, args = "SELECT * FROM assets WHERE deleted=0", []
+        sql = self._scope(sql, args, owner, project)
         if kind:
             sql += " AND kind=?"
             args.append(kind)
@@ -153,8 +202,9 @@ class Store:
         r = self._q("SELECT * FROM jobs WHERE id=?", (jid,))
         return _row(r[0]) if r else None
 
-    def jobs(self, before=None, starred=None, limit=30):
-        sql, args = "SELECT * FROM jobs WHERE deleted=0", []
+    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None):
+        sql, args = "SELECT * FROM jobs WHERE deleted=0 AND (relation IS NULL OR relation!='segment')", []
+        sql = self._scope(sql, args, owner, project)
         if starred:
             sql += " AND starred=1"
         if before:
@@ -163,6 +213,9 @@ class Store:
         sql += " ORDER BY created DESC LIMIT ?"
         args.append(int(limit))
         return [_row(r) for r in self._q(sql, args)]
+
+    def children(self, parent_id, relation):
+        return [_row(r) for r in self._q("SELECT * FROM jobs WHERE parent_id=? AND relation=? ORDER BY created", [parent_id, relation])]
 
     def jobs_by_status(self, statuses):
         return [_row(r) for r in self._q("SELECT * FROM jobs WHERE status IN (%s) ORDER BY created" % ",".join("?" * len(statuses)), list(statuses))]
@@ -175,3 +228,51 @@ class Store:
             self._x("UPDATE jobs SET %s WHERE id=?" % sets, [int(v) if isinstance(v, bool) else v for v in fields.values()] + [jid])
         return self.job(jid)
 
+
+    def projects_using(self, aid):
+        """Projects of the jobs that take this asset."""
+        like = "%%\"id\": \"%s\"%%" % aid
+        return {r[0] for r in self._q("SELECT DISTINCT project FROM jobs WHERE deleted=0 AND project IS NOT NULL AND spec LIKE ?", (like,))}
+
+    def project_active(self, pid):
+        return bool(self._q("SELECT 1 FROM jobs WHERE project=? AND status IN (%s) LIMIT 1" % ",".join("?" * len(ACTIVE)), (pid,) + ACTIVE))
+
+    def assets_of_project(self, pid):
+        return [_row(r) for r in self._q("SELECT * FROM assets WHERE project=?", (pid,))]
+
+    # projects
+
+    def add_project(self, p):
+        p = {"created": time.time(), "access": "invited", "default_role": "editor", "archived": 0, **p}
+        self._x("INSERT INTO projects (%s) VALUES (%s)" % (",".join(p), ",".join("?" * len(p))), list(p.values()))
+        return self.project(p["id"])
+
+    def project(self, pid):
+        r = self._q("SELECT * FROM projects WHERE id=?", (pid,)) if pid else None
+        if not r:
+            return None
+        d = _row(r[0])
+        d["archived"] = bool(d["archived"])
+        d["members"] = {m["user"]: m["role"] for m in self._q("SELECT user, role FROM project_members WHERE project_id=?", (pid,))}
+        return d
+
+    def projects(self):
+        return [self.project(r["id"]) for r in self._q("SELECT id FROM projects ORDER BY created")]
+
+    def project_by_name(self, name):
+        key = name.strip().casefold()
+        return next((p for p in self.projects() if p["name"].strip().casefold() == key), None)
+
+    def update_project(self, pid, **fields):
+        if fields:
+            sets = ",".join("%s=?" % k for k in fields)
+            self._x("UPDATE projects SET %s WHERE id=?" % sets, [int(v) if isinstance(v, bool) else v for v in fields.values()] + [pid])
+        return self.project(pid)
+
+    def set_member(self, pid, user, role):
+        if role:
+            self._x("INSERT INTO project_members (project_id, user, role) VALUES (?, ?, ?) "
+                    "ON CONFLICT(project_id, user) DO UPDATE SET role=excluded.role", (pid, user, role))
+        else:
+            self._x("DELETE FROM project_members WHERE project_id=? AND user=?", (pid, user))
+        return self.project(pid)
