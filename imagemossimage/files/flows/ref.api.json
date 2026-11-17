@@ -1,0 +1,219 @@
+{
+  "19": {
+    "inputs": {
+      "aspect_ratio": "1:1 (Square)",
+      "megapixels": 1,
+      "multiple": 16
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector"
+    }
+  },
+  "28": {
+    "inputs": {
+      "batch_size": 1,
+      "height": [
+        "19",
+        1
+      ],
+      "width": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "29": {
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "megapixels": 1,
+      "resolution_steps": 16,
+      "upscale_method": "lanczos"
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Image Scale To Total Pixels (reference)"
+    }
+  },
+  "30": {
+    "inputs": {
+      "unet_name": "moss_image_sft_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "31": {
+    "inputs": {
+      "lora_name": "moss_image_edit_lora_rank_64_bf16.safetensors",
+      "model": [
+        "30",
+        0
+      ],
+      "strength_model": 1
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "32": {
+    "inputs": {
+      "double_layers": "",
+      "end_percent": 1,
+      "model": [
+        "31",
+        0
+      ],
+      "single_layers": "22",
+      "start_percent": 0
+    },
+    "class_type": "SkipLayerGuidanceDiTSimple",
+    "_meta": {
+      "title": "SkipLayerGuidanceDiTSimple"
+    }
+  },
+  "33": {
+    "inputs": {
+      "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors",
+      "device": "default",
+      "type": "moss_image"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "34": {
+    "inputs": {
+      "vae_name": "flux2-vae_small.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "36": {
+    "inputs": {
+      "clip": [
+        "33",
+        0
+      ],
+      "edit_format": "Moss-Image-Edit",
+      "image_strength": 1,
+      "images.image_0": [
+        "29",
+        0
+      ],
+      "prompt": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact",
+      "vae": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "TextEncodeMOSSImageEdit",
+    "_meta": {
+      "title": "Text Encode MOSS-Image Edit (negative)"
+    }
+  },
+  "37": {
+    "inputs": {
+      "cfg": 4,
+      "denoise": 1,
+      "latent_image": [
+        "28",
+        0
+      ],
+      "model": [
+        "32",
+        0
+      ],
+      "negative": [
+        "36",
+        0
+      ],
+      "positive": [
+        "39",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "seed": 42,
+      "steps": 30
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "38": {
+    "inputs": {
+      "samples": [
+        "37",
+        0
+      ],
+      "vae": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "39": {
+    "inputs": {
+      "clip": [
+        "33",
+        0
+      ],
+      "edit_format": "Moss-Image-Edit",
+      "image_strength": 1,
+      "images.image_0": [
+        "29",
+        0
+      ],
+      "prompt": "",
+      "vae": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "TextEncodeMOSSImageEdit",
+    "_meta": {
+      "title": "Text Encode MOSS-Image Edit (positive)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": "two_women_berets_floral_jackets.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "imagemossimage/imagemossimage",
+      "images": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

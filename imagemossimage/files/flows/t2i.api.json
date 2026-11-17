@@ -1,0 +1,178 @@
+{
+  "18:1": {
+    "inputs": {
+      "unet_name": "moss_image_sft_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "18:15": {
+    "inputs": {
+      "double_layers": "",
+      "end_percent": 0.5,
+      "model": [
+        "18:1",
+        0
+      ],
+      "single_layers": "22",
+      "start_percent": 0
+    },
+    "class_type": "SkipLayerGuidanceDiTSimple",
+    "_meta": {
+      "title": "SkipLayerGuidanceDiTSimple"
+    }
+  },
+  "18:2": {
+    "inputs": {
+      "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors",
+      "device": "default",
+      "type": "moss_image"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "18:24": {
+    "inputs": {
+      "on_false": [
+        "18:1",
+        0
+      ],
+      "on_true": [
+        "18:15",
+        0
+      ],
+      "switch": false
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch"
+    }
+  },
+  "18:3": {
+    "inputs": {
+      "vae_name": "flux2-vae_small.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "18:4": {
+    "inputs": {
+      "clip": [
+        "18:2",
+        0
+      ],
+      "text": ""
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive Prompt"
+    }
+  },
+  "18:5": {
+    "inputs": {
+      "clip": [
+        "18:2",
+        0
+      ],
+      "text": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative Prompt (empty = reference default)"
+    }
+  },
+  "18:6": {
+    "inputs": {
+      "batch_size": 1,
+      "height": [
+        "19",
+        1
+      ],
+      "width": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "18:7": {
+    "inputs": {
+      "cfg": 2.5,
+      "denoise": 1,
+      "latent_image": [
+        "18:6",
+        0
+      ],
+      "model": [
+        "18:24",
+        0
+      ],
+      "negative": [
+        "18:5",
+        0
+      ],
+      "positive": [
+        "18:4",
+        0
+      ],
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "seed": 438829726369282,
+      "steps": 25
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "18:8": {
+    "inputs": {
+      "samples": [
+        "18:7",
+        0
+      ],
+      "vae": [
+        "18:3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "19": {
+    "inputs": {
+      "aspect_ratio": "1:1 (Square)",
+      "megapixels": 1,
+      "multiple": 16
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "imagemossimage/imagemossimage",
+      "images": [
+        "18:8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
