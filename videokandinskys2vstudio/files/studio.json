@@ -1,0 +1,141 @@
+{
+  "name": "videokandinskys2vstudio",
+  "title": "Kandinsky S2V",
+  "flows": [
+    {
+      "mode": "s2v",
+      "label": "Speech to video",
+      "output": "video",
+      "inputs": [
+        {
+          "id": "prompt",
+          "node": "8",
+          "field": "prompt",
+          "type": "textarea",
+          "label": "Prompt",
+          "default": "The video presents a stable medium close-up of a subject facing the camera directly. The subject exhibits natural, lifelike body dynamics: the head and shoulders move fluidly with the rhythm of speech. The lighting is even, maintaining a balanced natural exposure to clearly define facial features without washout. Throughout the sequence, the subject engages in continuous speech marked by precise, high-fidelity articulation. The lips move in a rhythmic, natural pattern: alternating between brief firm closures and relaxed openings. During these openings, the tips of the upper teeth are momentarily and realistically visible, exhibiting natural enamel texture. The upper lip lifts subtly over the teeth during enunciation, while the jaw performs minimal vertical oscillations synchronized with the speech cadence. Facial micro-expressions are active yet restrained; eyebrows rise and lower slightly with minute asymmetry. The eyes maintain a steady, engaged gaze forward, punctuated by smooth, deliberate blinks.",
+          "optional": true,
+          "role": "prompt"
+        },
+        {
+          "id": "image",
+          "node": "4",
+          "field": "image",
+          "type": "image",
+          "label": "Portrait",
+          "role": "ref_image"
+        },
+        {
+          "id": "audio",
+          "node": "5",
+          "field": "audio",
+          "type": "audio",
+          "label": "Speech",
+          "role": "ref_audio"
+        },
+        {
+          "id": "seed",
+          "node": "9",
+          "field": "seed",
+          "type": "seed",
+          "label": "Seed",
+          "default": 5,
+          "random": true,
+          "role": "seed"
+        }
+      ],
+      "route": {
+        "accepts": {
+          "ref_audio": {
+            "max": 1,
+            "maxSeconds": 120
+          },
+          "ref_image": {
+            "max": 1
+          }
+        },
+        "requiresAll": [
+          "ref_image",
+          "ref_audio"
+        ]
+      },
+      "api": "s2v.api.json",
+      "save": "s2v.json"
+    }
+  ],
+  "variants": [
+    {
+      "id": "lite",
+      "label": "Lite (5 GB model, faster)",
+      "default": true
+    },
+    {
+      "id": "pro",
+      "label": "Pro (43 GB model, more detail)",
+      "replace": {
+        "kandinsky_s2v_lite_distill.safetensors": "kandinsky_s2v_pro_distill.safetensors"
+      }
+    }
+  ],
+  "defaultVariant": "lite",
+  "meta": {
+    "description": "Kandinsky S2V turns a portrait and a speech recording into a talking video with synced lips, up to two minutes long",
+    "icon": "https://cdn.olares.com/images/2026/11/451ed0af9651fed1b9f49bf32f6aec32.png",
+    "provider": "Kandinsky",
+    "version": "0.1.0"
+  },
+  "profile": {
+    "tiers": null,
+    "stages": {
+      "encoding": [
+        "KandinskyS2VEncode"
+      ],
+      "sampling": [
+        "KandinskyS2VSampler"
+      ]
+    },
+    "prompts": {
+      "s2v": "# Kandinsky S2V prompt writer\n\nYou rewrite a user's idea into the prompt Kandinsky S2V expects. The model animates one portrait to match a speech recording: the face, lips, head and upper body move with the speech, and the camera and setting come from the portrait. The words spoken come from the audio, not from the prompt.\n\nWhen the portrait is attached, take the framing and light from it; otherwise keep them general. Write one paragraph in English, six to ten sentences, in this order:\n\n1. The framing and camera, taken from the portrait: for example `The video presents a stable medium close-up of a subject facing the camera directly.` Keep the camera static unless the user asks for slow, small motion.\n2. The body: how the head and shoulders move with the rhythm of speech, and any gesture the user asks for that the framing can show.\n3. The light, as it is in the portrait, kept even so the face stays clearly visible.\n4. The speech and the mouth: continuous, clear articulation; lips alternating between brief closures and relaxed openings; the jaw moving slightly in time with the speech.\n5. The face: restrained micro-expressions that fit the user's mood (calm, warm, serious, cheerful), eyebrows moving slightly, a steady gaze and natural blinks.\n\nRules:\n\n- Describe only what the portrait already shows; do not add people, change clothing, the setting or the style, or describe cuts or scene changes.\n- Keep the user's mood and any gesture they ask for. If they give no idea, write a neutral, natural talking delivery.\n- Do not quote what is said and do not describe music or sound effects.\n- Output the prompt only: no headings, notes, markdown or quotes."
+    },
+    "strings": {
+      "en": {
+        "job.err.oom": "Out of GPU memory. Try the Lite model or a shorter recording.",
+        "mode.s2v": "Speech to video",
+        "notify.done": "Video ready",
+        "param.aspectFromImage": "Follows the portrait",
+        "prompt.placeholder": "Optional: describe the framing, motion and expression. Left empty, the official prompt is used",
+        "tray.empty": "Add a portrait and a speech recording (up to 2 minutes)",
+        "variant.lite": "Lite · faster",
+        "variant.pro": "Pro · more detail"
+      },
+      "zh": {
+        "job.err.oom": "显存不足。可以改用 Lite 模型或缩短语音。",
+        "mode.s2v": "语音生成视频",
+        "notify.done": "视频生成好了",
+        "param.aspectFromImage": "跟随人像",
+        "prompt.placeholder": "可选：描述构图、动作和表情，留空则使用官方提示词",
+        "tray.empty": "添加一张人像和一段语音（最长 2 分钟）",
+        "variant.lite": "Lite · 更快",
+        "variant.pro": "Pro · 细节更好"
+      }
+    },
+    "examples": [
+      {
+        "id": "official",
+        "flow": "s2v",
+        "variant": "lite",
+        "assets": [
+          {
+            "role": "ref_image",
+            "file": "official-reference.jpg"
+          },
+          {
+            "role": "ref_audio",
+            "file": "official-speech.m4a"
+          }
+        ],
+        "result": "official-result.mp4"
+      }
+    ]
+  }
+}
