@@ -5,7 +5,7 @@
 {{- $enableDind := ne (index $env "ENABLE_DIND" | default "true") "false" }}
 {{- $serverPassword := index $env "OPENCODE_SERVER_PASSWORD" | default "" }}
 {{- $serverUsername := index $env "OPENCODE_SERVER_USERNAME" | default "opencode" }}
-{{- $image := "beclab/opencode:1.19.3.0" }}
+{{- $image := "beclab/opencode:1.19.6.1" }}
 
 ---
 apiVersion: apps/v1
@@ -389,7 +389,71 @@ spec:
       containers:
         - name: opencode
           image: "{{ $image }}"
-          command: ["sh", "-c", "exec /opt/olares-bake/lib/start-opencode.sh"]
+          command:
+            - "sh"
+            - "-c"
+            - |
+              # Without a limit OpenCode sends max_tokens 32000 to Router's
+              # default-chat, which Router rejects when its largest chat backend
+              # has a smaller output cap. Router answers /models only after the
+              # pod sidecars are up (init containers get 401), so the limit is
+              # read here, before OpenCode loads its config. A user-set limit is
+              # kept; the fallback is replaced once Router answers.
+              python3 - <<'PY' || true
+              import json
+              import time
+              import urllib.request
+              from pathlib import Path
+
+              path = Path("/home/opencode/.config/opencode/opencode.json")
+              FALLBACK_LIMIT = {"context": 32768, "output": 8192}
+
+              def router_limit(base):
+                  for attempt in range(3):
+                      try:
+                          with urllib.request.urlopen(base + "/models", timeout=10) as resp:
+                              data = json.load(resp).get("data") or []
+                          break
+                      except Exception as exc:
+                          error = exc
+                          time.sleep(5)
+                  else:
+                      print("router limit: model list unavailable (%s)" % error)
+                      return None
+                  context = output = 0
+                  for item in data:
+                      if not isinstance(item, dict) or item.get("mode") != "chat":
+                          continue
+                      if item.get("readiness") not in (None, "ready"):
+                          continue
+                      context = max(context, int(item.get("context_size") or 0))
+                      output = max(output, int(item.get("max_output_tokens") or 0))
+                  if context <= 0 or output <= 0:
+                      print("router limit: no chat model limits reported")
+                      return None
+                  return {"context": context, "output": min(output, context)}
+
+              try:
+                  cfg = json.loads(path.read_text(encoding="utf-8"))
+                  olares = cfg["provider"]["olares"]
+                  chat = olares["models"]["default-chat"]
+                  base = olares["options"]["baseURL"].rstrip("/")
+              except Exception:
+                  raise SystemExit(0)
+              if not isinstance(chat, dict) or not base.startswith("https://router."):
+                  raise SystemExit(0)
+              if "limit" in chat and chat["limit"] != FALLBACK_LIMIT:
+                  raise SystemExit(0)
+              limit = router_limit(base)
+              if limit is None:
+                  if "limit" in chat:
+                      raise SystemExit(0)
+                  limit = dict(FALLBACK_LIMIT)
+              chat["limit"] = limit
+              path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+              print("router limit: default-chat set to %s" % json.dumps(limit))
+              PY
+              exec /opt/olares-bake/lib/start-opencode.sh
           workingDir: /home/opencode/workspace
           securityContext:
             runAsUser: 1000
