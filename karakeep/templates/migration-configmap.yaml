@@ -22,7 +22,6 @@ data:
       if (result.error || result.status !== 0) {
         throw new Error(`${command} failed: ${result.error || result.stderr}`);
       }
-      return result.stdout;
     }
     function directory(p, mode = 0o700) {
       fs.mkdirSync(p, { recursive: true, mode });
@@ -96,7 +95,9 @@ data:
         if (fs.existsSync(archive) || fs.existsSync(staging) || fs.existsSync(original)) throw new Error('Unfinished previous backup; preserved for manual recovery');
         run('tar', ['-czf', archive, '-C', data, '.']);
         fs.chownSync(archive, 1000, 1000); fs.chmodSync(archive, 0o600);
-        if (!fs.statSync(archive).size || !run('tar', ['-tzf', archive]).length) throw new Error('Empty or unreadable backup');
+        if (!fs.statSync(archive).size) throw new Error('Empty backup');
+        // The listing can exceed Node's output buffer on large libraries.
+        run('tar', ['-tzf', archive], { stdio: ['ignore', 'ignore', 'pipe'] });
         directory(staging);
         // Extract as the final app user; never recursively chown existing data.
         run('tar', ['-xzf', archive, '-C', staging, '--no-same-owner', '--no-same-permissions', '--mode=u+rwX,go-rwx'], { uid: 1000, gid: 1000 });
