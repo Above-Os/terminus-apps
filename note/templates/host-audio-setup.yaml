@@ -193,7 +193,11 @@ spec:
 # a hook exiting 1 and one whose image could not be pulled). That uninstall
 # still ends clean, but without detach, so this namespace stays in the list
 # and the bridge stays. So everything here is bounded and the pod always
-# exits 0. It runs while the release's ConfigMap is still there.
+# exits 0. It runs while the release's ConfigMap is still there, but
+# app-service may run it a second time after helm has already deleted that
+# ConfigMap (olares 192.168.31.97, 2026-11-18): the volume is optional so the
+# pod still starts, and finding no script it exits 0 at once instead of
+# waiting out its deadline.
 # Only a release installed or upgraded with this hook runs it on uninstall.
 apiVersion: batch/v1
 kind: Job
@@ -227,7 +231,7 @@ spec:
           command:
             - sh
             - -c
-            - sh /setup/run-on-host.sh detach 120
+            - '[ -f /setup/run-on-host.sh ] || { echo "host audio: setup already removed, skipped"; exit 0; }; sh /setup/run-on-host.sh detach 120'
           volumeMounts:
             - name: host-audio-setup
               mountPath: /setup
@@ -238,6 +242,7 @@ spec:
         - name: host-audio-setup
           configMap:
             name: note-host-audio-setup
+            optional: true
         - name: host-proc
           hostPath:
             path: /proc
