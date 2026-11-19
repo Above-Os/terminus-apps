@@ -90,20 +90,20 @@ def aspect_route(aspect, items, defaults=None):
 
 
 def pick_flow(flows, items, mode="auto", speed=None, aspect=None):
-    """The flow for these assets: the asked mode, or the first that fits,
-    flows made for the asked speed first. Flows with a speed are only taken
-    for that speed; flows with a route.aspect only for that aspect_route."""
+    """Pick the requested mode's speed variant, the mode itself, or the first
+    compatible flow in auto mode, preferring the requested speed."""
     speed_of = lambda f: (f.get("route") or {}).get("speed") or ""
     fits = lambda f: not aspect or (f.get("route") or {}).get("aspect") in (None, "", aspect)
     order = [f for f in flows if speed and speed_of(f) == speed and fits(f)] + [f for f in flows if not speed_of(f) and fits(f)]
     if mode and mode != "auto":
-        for f in flows:
-            if f["mode"] == mode:
-                why = check_route(f, items)
-                if why:
-                    raise JobError("flow_rejects_assets", "This mode cannot take these assets", mode=mode, reason=why)
-                return f
-        raise JobError("unknown_mode", "Unknown mode", mode=mode)
+        variant = next((f for f in order if speed and speed_of(f) == speed and (f.get("route") or {}).get("of") == mode), None)
+        flow = variant or next((f for f in flows if f["mode"] == mode), None)
+        if not flow:
+            raise JobError("unknown_mode", "Unknown mode", mode=mode)
+        why = check_route(flow, items)
+        if why:
+            raise JobError("flow_rejects_assets", "This mode cannot take these assets", mode=flow["mode"], reason=why)
+        return flow
     reasons = {}
     for f in order:
         why = check_route(f, items)
