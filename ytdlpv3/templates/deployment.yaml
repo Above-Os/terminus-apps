@@ -5,7 +5,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: ytdlp
-    applications.app.bytetrade.io/author: bytetrade.io
 spec:
   replicas: {{ .Values.workloads.ytdlpv3.replicaCount }}
   strategy:
@@ -107,14 +106,12 @@ spec:
               cpu: "1"
               memory: 1Gi
       volumes:
-        # yt-dlp's private cookies/state. Final files are streamed to the
-        # system download-provider via DOWNLOAD_SERVER_URL, so /app/downloads
-        # is just a local spool. Both live under appCache (declared via
-        # permission.appCache: true).
+        # yt-dlp's private cookies and state.
         - name: config-dir
           hostPath:
             type: DirectoryOrCreate
             path: '{{ .Values.userspace.appCache }}'
+        # The system download server mounts this same directory for file handoff.
         - name: download-dir
           hostPath:
             type: DirectoryOrCreate
