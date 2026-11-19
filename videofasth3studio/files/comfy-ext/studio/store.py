@@ -71,6 +71,15 @@ JSON_FIELDS = {"spec", "used", "error", "outputs"}
 ACTIVE = ("queued", "running")
 RETRYABLE = ("failed", "cancelled", "interrupted")
 
+# An output can be moved independently of its job. Only images still in the
+# job's space count toward its favorites filter or its legacy favorite action.
+IMAGE_OUTPUTS = """
+json_each(jobs.outputs) AS output JOIN assets AS a ON a.id=output.value
+WHERE a.kind='image' AND a.source='output' AND a.deleted=0 AND a.job_id=jobs.id
+  AND a.owner=jobs.owner AND a.project IS jobs.project
+"""
+IMAGE_FAVORITES = f"EXISTS (SELECT 1 FROM {IMAGE_OUTPUTS} AND a.starred=1)"
+
 
 def _like(q):
     return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -80,6 +89,8 @@ def _row(r):
     if r is None:
         return None
     d = dict(r)
+    if "output_starred" in d:
+        d["starred"] = d.pop("output_starred")
     for k in JSON_FIELDS & d.keys():
         d[k] = json.loads(d[k]) if d[k] else None
     for k in ("starred", "deleted", "has_audio"):
@@ -89,12 +100,15 @@ def _row(r):
 
 
 class Store:
-    def __init__(self, path, owner=""):
+    def __init__(self, path, owner="", *, image_favorites=False):
         """owner takes the rows written before there were owners."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.Lock()
+        self.image_favorites = image_favorites
+        self._job_select = (f"SELECT jobs.*, {IMAGE_FAVORITES} AS output_starred FROM jobs"
+                            if image_favorites else "SELECT * FROM jobs")
         with self.lock:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -121,6 +135,17 @@ class Store:
             self.db.execute("UPDATE jobs SET prompt_id=id WHERE prompt_id=''")
             self.db.execute("UPDATE jobs SET queued_at=created WHERE queued_at IS NULL")
             self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_prompt_id ON jobs(prompt_id)")
+            if image_favorites:
+                # Consume the old job flags in the same transaction so an
+                # image unfavorited after migration stays that way on restart.
+                self.db.executescript(f"""
+                    BEGIN IMMEDIATE;
+                    UPDATE assets SET starred=1 WHERE starred=0 AND id IN (
+                        SELECT a.id FROM jobs, {IMAGE_OUTPUTS} AND jobs.starred=1
+                    );
+                    UPDATE jobs SET starred=0 WHERE starred=1;
+                    COMMIT;
+                """)
 
     def _q(self, sql, args=()):
         with self.lock:
@@ -218,7 +243,7 @@ class Store:
         return self.job(j["id"])
 
     def job(self, jid):
-        r = self._q("SELECT * FROM jobs WHERE id=?", (jid,))
+        r = self._q(self._job_select + " WHERE id=?", (jid,))
         return _row(r[0]) if r else None
 
     def job_by_prompt(self, prompt_id):
@@ -241,7 +266,7 @@ class Store:
         return self.job(jid) if changed else None
 
     def jobs(self, before=None, starred=None, limit=30, owner=None, project=None, after=None, q=None, ids=None):
-        sql, args = "SELECT * FROM jobs WHERE deleted=0 AND (relation IS NULL OR relation!='segment')", []
+        sql, args = self._job_select + " WHERE deleted=0 AND (relation IS NULL OR relation!='segment')", []
         sql = self._scope(sql, args, owner, project)
         if ids is not None:
             if not ids:
@@ -249,7 +274,7 @@ class Store:
             sql += " AND id IN (%s)" % ",".join("?" * len(ids))
             args.extend(ids)
         if starred:
-            sql += " AND starred=1"
+            sql += " AND status='done' AND output_starred=1" if self.image_favorites else " AND starred=1"
         if before:
             sql += " AND created<?"
             args.append(float(before))
@@ -276,6 +301,14 @@ class Store:
             sets = ",".join("%s=?" % k for k in fields)
             self._x("UPDATE jobs SET %s WHERE id=?" % sets, [int(v) if isinstance(v, bool) else v for v in fields.values()] + [jid])
         return self.job(jid)
+
+    def star_job_outputs(self, jid, starred):
+        """Support older image clients that favorite every output of a job."""
+        return [_row(r) for r in self._q(f"""
+            UPDATE assets SET starred=? WHERE starred<>? AND id IN (
+                SELECT a.id FROM jobs, {IMAGE_OUTPUTS} AND jobs.id=? AND jobs.deleted=0
+            ) RETURNING *
+        """, (starred, starred, jid))]
 
 
     def projects_using(self, aid):
