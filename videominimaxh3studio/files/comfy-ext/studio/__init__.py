@@ -175,7 +175,8 @@ class Studio:
         self.poster_dir = os.path.join(data, "studio", "posters")
         os.makedirs(self.poster_dir, exist_ok=True)
         os.makedirs(self.input_dir, exist_ok=True)
-        self.store = Store(os.path.join(data, "db", "studio.db"), self.admin)
+        self.store = Store(os.path.join(data, "db", "studio.db"), self.admin,
+                           image_favorites=self.kind == "image" and not self.profile.get("composer"))
         self.bus = Bus()
         self.events = asyncio.Queue()
         self.classes = {}
@@ -1203,7 +1204,7 @@ class Studio:
         if not job:
             return self.err(404, "not_found", "No such job")
         fields = {}
-        if "starred" in body:
+        if "starred" in body and not self.store.image_favorites:
             fields["starred"] = bool(body["starred"])
         if "project" in body and (body["project"] or None) != job.get("project"):
             if job["status"] in ACTIVE:
@@ -1219,6 +1220,10 @@ class Studio:
             fields["project"] = project["id"] if project else None
             self.bus.publish("job_deleted", {"id": jid}, gone)
         job = self.store.update_job(jid, **fields)
+        if "starred" in body and self.store.image_favorites:
+            for asset in self.store.star_job_outputs(jid, bool(body["starred"])):
+                self.publish_asset(asset)
+            job = self.store.job(jid)
         self.publish_job(job)
         return web.json_response(job)
 
@@ -1442,6 +1447,10 @@ class Studio:
             await self.run(self.move_asset, a, project)
         a = self.store.update_asset(aid, **fields)
         self.publish_asset(a)
+        if self.store.image_favorites and "starred" in fields and a["source"] == "output" and a["job_id"]:
+            job = self.store.job(a["job_id"])
+            if job and not job["deleted"] and self.aud(job) == self.aud(a):
+                self.publish_job(job)
         return web.json_response(a)
 
     async def h_asset_delete(self, request):
