@@ -20,13 +20,14 @@ import re
 import shutil
 import time
 import uuid
+from urllib.parse import quote
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
 from . import graph, llm, media, projects
 from .directory import RESYNC, Directory
 from .llm import Llm, LlmError
-from .store import ACTIVE, Store
+from .store import ACTIVE, RETRYABLE, Store
 
 log = logging.getLogger("comfyapp.studio")
 
@@ -38,6 +39,7 @@ DISK_LOW = 5 << 30
 MAX_COUNT = 4
 LLM_IMAGES = 6
 NAME_MAX = 80
+IMAGE_OUTPUT_NAME_MAX = 10
 # mask: a painted inpaint mask; edit: an image the front end prepared (the
 # expand canvas).
 UPLOAD_SOURCES = ("upload", "mask", "edit")
@@ -178,6 +180,7 @@ class Studio:
         self.events = asyncio.Queue()
         self.classes = {}
         self.cancelling = set()
+        self.posting = set()
         self.joining = set()
         self.spawning = set()
         self.tasks = set()
@@ -210,11 +213,14 @@ class Studio:
         out.update((v.get("replaceModes") or {}).get(mode) or {})
         return out
 
-    async def installed(self):
+    async def installed(self, *, wanted=None):
         """Variant ids whose models the console reports done, or None when
         it does not say (no groups, or unreachable)."""
-        if time.time() - self.installed_at < 3:
-            return self.installed_ids
+        cached = self.installed_ids
+        fresh = time.time() - self.installed_at < 3
+        # The picker can see a finished download before this cache expires.
+        if fresh and (not wanted or cached is None or wanted in cached):
+            return cached
         ids = None
         try:
             status, data = await self.call("GET", self.console + "/api/status")
@@ -223,6 +229,8 @@ class Studio:
                 ids = [g["id"] for g in groups if g.get("state") == "done"]
         except Exception as e:
             log.warning("studio: console status: %s", e)
+        if ids is None and fresh:
+            return cached
         self.installed_at, self.installed_ids = time.time(), ids
         return ids
 
@@ -235,7 +243,7 @@ class Studio:
         v = asked or self.preferred
         if v not in self.variants:
             raise graph.JobError("bad_variant", "Unknown precision", variant=v)
-        ok = await self.installed()
+        ok = await self.installed(wanted=asked)
         if ok is not None and v not in ok:
             if asked:
                 raise graph.JobError("variant_missing", "This precision is not downloaded", variant=v)
@@ -249,9 +257,15 @@ class Studio:
         except OSError:
             return None
 
+    def check_disk(self):
+        if (self.disk() or {}).get("low"):
+            raise graph.JobError("disk_low", "Less than 5 GB of disk left")
+
     def queue_snapshot(self):
         running, queued = self.queue.get_current_queue_volatile()
-        return {"running": [x[1] for x in running], "pending": [x[1] for x in sorted(queued, key=lambda x: x[0])]}
+        ids = self.store.ids_by_prompt([x[1] for x in (*running, *queued)])
+        return {"running": [ids.get(x[1], x[1]) for x in running],
+                "pending": [ids.get(x[1], x[1]) for x in sorted(queued, key=lambda x: x[0])]}
 
     @staticmethod
     def aud(item):
@@ -473,9 +487,12 @@ class Studio:
             poster = media.poster(path, info["kind"], os.path.join(self.user_dir(self.poster_dir, owner), aid + ".webp"), info["duration"])
         except Exception as e:
             log.warning("studio: poster for %s failed: %s", path, e)
+        name = clean_name(os.path.splitext(filename)[0], info["kind"])
+        if source == "output" and info["kind"] == "image":
+            name = name[:IMAGE_OUTPUT_NAME_MAX].rstrip()
         return {
             "id": aid, "kind": info["kind"], "source": source,
-            "name": clean_name(os.path.splitext(filename)[0], info["kind"]),
+            "name": name,
             "path": path, "mime": info["mime"], "bytes": os.path.getsize(path),
             "width": info["width"], "height": info["height"], "duration": info["duration"],
             "has_audio": info["has_audio"], "poster": poster, "job_id": job_id, "md5": md5, "owner": owner,
@@ -532,7 +549,6 @@ class Studio:
         params = dict(body.get("params") or {})
         params["prompt"] = body.get("prompt", "")
         count = max(1, min(MAX_COUNT, int(body.get("count") or 1)))
-        names = {it["id"]: it["asset"]["name"] for it in items}
         spec = {"prompt": body.get("prompt", ""), "mode": body.get("mode") or "auto",
                 "assets": [{"id": it["id"], "role": it["role"], **({"tag": it["tag"]} if it.get("tag") else {})} for it in items],
                 "params": body.get("params") or {}}
@@ -547,7 +563,7 @@ class Studio:
         graph.check_output(self.profile, variant, size, None if segs else items)
         before = await self.enhance_source(flow, items, params, owner, project)
         if segs:
-            job = await self.submit_segments(flow, items, params, variant, segs, spec, before, names,
+            job = await self.submit_segments(flow, items, params, variant, segs, spec, before,
                                              parent_id or body.get("parent_id"), relation or body.get("relation"), owner, project)
             self.queue_dirty = True
             return [job]
@@ -556,24 +572,42 @@ class Studio:
             if p.get("seed") not in (None, "") and count > 1:
                 p["seed"] = int(p["seed"]) + i
             jid = str(uuid.uuid4())
-            prompt, used = graph.assemble(flow, self.apis[flow["mode"]], jid, items, p, self.replace_of(variant, flow["mode"]),
-                                          file_of=lambda it: self.input_name(it["asset"]), names=names, profile=self.profile,
-                                          prefix="%s/" % os.path.relpath(self.space_path(owner, project, "outputs"), self.input_dir))
+            prompt, used = self.assemble(flow, jid, items, p, variant, owner, project)
             if before:
                 used["before"] = before
-            self.classes[jid] = {k: v.get("class_type", "") for k, v in prompt.items()}
             job = self.store.add_job({"id": jid, "mode": flow["mode"], "variant": variant, "spec": spec, "used": used,
                                       "status": "queued", "stage": "queued", "parent_id": parent_id or body.get("parent_id"),
                                       "relation": relation or body.get("relation"), "owner": owner,
                                       "project": project["id"] if project else None})
-            status, resp = await self.post("/prompt", {"prompt": prompt, "prompt_id": jid, "client_id": CLIENT_ID,
-                                                       "extra_data": {"studio_job": jid}})
-            if status != 200:
-                job = self.store.update_job(jid, status="failed", finished=time.time(), error=self.prompt_error(resp))
-            self.publish_job(job)
-            jobs.append(job)
-        self.queue_dirty = True
+            jobs.append(await self.enqueue(job, prompt))
         return jobs
+
+    def assemble(self, flow, jid, items, params, variant, owner, project):
+        """graph.assemble for one execution, writing into the owner's or project's outputs."""
+        return graph.assemble(flow, self.apis[flow["mode"]], jid, items, params, self.replace_of(variant, flow["mode"]),
+                              file_of=lambda it: self.input_name(it["asset"]),
+                              names={it["id"]: it["asset"]["name"] for it in items}, profile=self.profile,
+                              prefix="%s/" % os.path.relpath(self.space_path(owner, project, "outputs"), self.input_dir))
+
+    async def enqueue(self, job, prompt):
+        jid, pid = job["id"], job["prompt_id"]
+        self.classes[jid] = {k: v.get("class_type", "") for k, v in prompt.items()}
+        self.posting.add(pid)
+        try:
+            status, resp = await self.post("/prompt", {"prompt": prompt, "prompt_id": pid, "client_id": CLIENT_ID,
+                                                       "extra_data": {"studio_job": jid}})
+            if status != 200 and self.store.job(jid)["prompt_id"] == pid:
+                self.finish(jid, "failed", self.prompt_error(resp))
+        except (ClientError, OSError, asyncio.TimeoutError):
+            # A lost response does not mean the engine rejected the prompt.
+            # Let queue/history reconciliation settle it before another attempt.
+            log.warning("studio: submission response lost for %s", pid, exc_info=True)
+        finally:
+            self.posting.discard(pid)
+            self.queue_dirty = True
+        job = self.store.job(jid)
+        self.publish_job(job)
+        return job
 
     def segments_of(self, flow, items, params, variant, size):
         """graph.plan_segments for a whole video the flow can slice itself,
@@ -582,7 +616,7 @@ class Studio:
             return None
         return graph.plan_segments(self.profile, variant, size, items)
 
-    async def submit_segments(self, flow, items, params, variant, segs, spec, before, names, parent_id, relation, owner, project):
+    async def submit_segments(self, flow, items, params, variant, segs, spec, before, parent_id, relation, owner, project):
         """A parent job without a prompt and one hidden child per segment,
         all queued now so the models stay loaded between them."""
         pid = str(uuid.uuid4())
@@ -601,20 +635,18 @@ class Studio:
             for i in range(len(segs)):
                 if self.store.job(pid)["status"] not in ACTIVE:
                     break
-                await self.submit_segment(pid, i, flow, items, p, variant, spec, names, owner, project)
+                await self.submit_segment(pid, i, flow, items, p, variant, spec, owner, project)
         finally:
             self.spawning.discard(pid)
         return self.job_view(self.store.job(pid), publish=True)
 
-    async def submit_segment(self, pid, i, flow, items, params, variant, spec, names, owner, project):
+    async def submit_segment(self, pid, i, flow, items, params, variant, spec, owner, project):
         parent = self.store.job(pid)
         segs = parent["used"]["segments"]
         s = segs[i]
         cid = str(uuid.uuid4())
         p = dict(params, segment={"start": s["start"], "duration": s["duration"]})
-        prompt, used = graph.assemble(flow, self.apis[flow["mode"]], cid, items, p, self.replace_of(variant, flow["mode"]),
-                                      file_of=lambda it: self.input_name(it["asset"]), names=names, profile=self.profile,
-                                      prefix="%s/" % os.path.relpath(self.space_path(owner, project, "outputs"), self.input_dir))
+        prompt, used = self.assemble(flow, cid, items, p, variant, owner, project)
         self.classes[cid] = {k: v.get("class_type", "") for k, v in prompt.items()}
         self.store.add_job({"id": cid, "mode": flow["mode"], "variant": variant, "spec": spec, "used": used,
                             "status": "queued", "stage": "queued", "parent_id": pid, "relation": "segment", "owner": owner,
@@ -753,10 +785,10 @@ class Studio:
                 log.exception("studio: handling %s", event)
 
     async def handle(self, event, data):
-        jid = data["prompt_id"]
-        job = self.store.job(jid)
+        job = self.store.job_by_prompt(data["prompt_id"])
         if not job or job["status"] not in ACTIVE:
             return
+        jid = job["id"]
         now = time.time()
         if job["stage"] == "cancelling" and event in ("executing", "progress"):
             return
@@ -777,8 +809,10 @@ class Studio:
             cls = self.classes.get(jid, {}).get(data.get("node"), "")
             if cls in self.samplers or job["stage"] == "sampling":
                 self.store.update_job(jid, stage="sampling", step=data.get("value"), steps=data.get("max"))
-                self.bus.publish("progress", {"id": job["parent_id"] if job.get("relation") == "segment" else jid, "stage": "sampling",
-                                              "step": data.get("value"), "steps": data.get("max")}, self.aud(job))
+                target = self.store.job(job["parent_id"]) if job.get("relation") == "segment" else job
+                if target:
+                    self.bus.publish("progress", {"id": target["id"], "attempt": target["attempt"], "stage": "sampling",
+                                                  "step": data.get("value"), "steps": data.get("max")}, self.aud(target))
         elif event == "executed":
             await self.add_outputs(job, data.get("output") or {})
         elif event == "execution_success":
@@ -843,6 +877,8 @@ class Studio:
             except Exception as e:
                 log.warning("studio: output %s: %s", path, e)
                 continue
+            if self.store.job(job["id"])["prompt_id"] != job["prompt_id"]:
+                return
             asset = self.store.add_asset(a)
             self.publish_asset(asset)
             outs.append(asset["id"])
@@ -877,11 +913,14 @@ class Studio:
                 else:
                     await self.advance(jid)
                 continue
-            if jid in live:
+            pid = job["prompt_id"]
+            if jid in live or pid in self.posting:
                 continue
-            hist = self.queue.get_history(prompt_id=jid).get(jid)
+            hist = self.queue.get_history(prompt_id=pid).get(pid)
             if hist:
                 await self.add_outputs(job, {k: v for o in (hist.get("outputs") or {}).values() for k, v in o.items()})
+                if self.store.job(jid)["prompt_id"] != pid:
+                    continue
                 st = (hist.get("status") or {}).get("status_str")
                 if st == "success":
                     self.finish(jid, "done")
@@ -893,7 +932,7 @@ class Studio:
                     else:
                         self.finish(jid, "cancelled" if jid in self.cancelling else "interrupted",
                                     None if jid in self.cancelling else {"code": "interrupted", "message": "Interrupted"})
-            elif time.time() - job["created"] > 15:
+            elif time.time() - job["queued_at"] > 15:
                 self.finish(jid, "interrupted", {"code": "lost", "message": "ComfyUI restarted before the job finished"})
 
     async def reconcile_loop(self):
@@ -1101,7 +1140,8 @@ class Studio:
         pid = q.get("project") or None
         if pid and not projects.role(self.store.project(pid), user, admin):
             return self.err(404, "no_project", "No such project")
-        jobs = self.store.jobs(q.get("before"), q.get("starred") == "1", min(100, int(q.get("limit", 30))), owner=user, project=pid)
+        jobs = self.store.jobs(q.get("before"), q.get("starred") == "1", min(100, int(q.get("limit", 30))), owner=user, project=pid,
+                               after=q.get("after"), q=q.get("q"))
         ids = {a["id"] for j in jobs for a in j["spec"].get("assets", [])} | {o for j in jobs for o in j["outputs"] or []}
         assets = {}
         for aid in ids:
@@ -1121,8 +1161,7 @@ class Studio:
     async def h_submit(self, request):
         body = await self.body(request)
         try:
-            if (self.disk() or {}).get("low"):
-                raise graph.JobError("disk_low", "Less than 5 GB of disk left")
+            self.check_disk()
             user, admin = self.viewer(request)
             project, denied = self.writable(body.get("project"), user, admin)
             if denied:
@@ -1221,57 +1260,73 @@ class Studio:
         snap = self.queue_snapshot()
         if jid in snap["running"]:
             self.publish_job(self.store.update_job(jid, stage="cancelling"))
-        await self.post("/api/jobs/%s/cancel" % jid, {})
-        if jid not in snap["running"]:
+        await self.post("/api/jobs/%s/cancel" % job["prompt_id"], {})
+        if jid not in snap["running"] and self.store.job(jid)["prompt_id"] == job["prompt_id"]:
             self.finish(jid, "cancelled")
 
     async def h_retry(self, request):
-        job = self.job_for(request, request.match_info["id"])
+        job = self.job_for(request, request.match_info["id"], edit=True)
         if not job:
             return self.err(404, "not_found", "No such job")
+        body = await self.body(request)
+        attempt = body.get("attempt")
+        if type(attempt) is not int or attempt < 1:
+            return self.err(400, "bad_attempt", "Invalid retry attempt")
+        if attempt != job["attempt"] or job["status"] not in RETRYABLE:
+            return web.json_response({"jobs": [self.job_view(job)]})
         user, admin = self.viewer(request)
-        if job["status"] not in ACTIVE and self.resumable(job):
+        if (job.get("used") or {}).get("segments"):
             try:
                 return web.json_response({"jobs": [await self.resume_segments(job, user, admin)]})
             except graph.JobError as e:
                 return web.json_response({"error": e.as_dict()}, status=400)
-        spec = dict(job["spec"])
-        spec["mode"] = job["mode"]
-        params = dict(spec.get("params") or {})
-        if not params.get("seedLocked"):
-            params.pop("seed", None)
-        spec["params"] = params
+        spec = dict(job["spec"], mode=job["mode"])
+        params = dict(spec.get("params") or {}, variant=job["variant"])
+        old_used = job.get("used") or {}
+        if old_used.get("seed") is not None:
+            params["seed"] = old_used["seed"]
         try:
-            jobs = await self.submit(spec, parent_id=job["id"], relation="retry", owner=user, admin=admin,
-                                     project=self.derived_project(job, user, admin))
+            self.check_disk()
+            variant = await self.job_variant(params)
+            job = self.job_for(request, request.match_info["id"], edit=True)
+            if not job:
+                return self.err(404, "not_found", "No such job")
+            if attempt != job["attempt"] or job["status"] not in RETRYABLE:
+                return web.json_response({"jobs": [job]})
+            flow, items = self.plan(spec, job["owner"], admin)
+            graph.check_output(self.profile, variant, graph.output_size(flow, items, params, self.profile), items)
+            pid = str(uuid.uuid4())
+            prompt, used = self.assemble(flow, pid, items, dict(params, prompt=spec.get("prompt", "")), variant, job["owner"], self.project_of(job))
+            if old_used.get("before"):
+                used["before"] = old_used["before"]
         except graph.JobError as e:
             return web.json_response({"error": e.as_dict()}, status=400)
-        return web.json_response({"jobs": jobs})
+        retried = self.store.retry_job(job["id"], attempt, pid, used)
+        if not retried:
+            return web.json_response({"jobs": [self.store.job(job["id"])]})
+        self.cancelling.discard(job["id"])
+        return web.json_response({"jobs": [await self.enqueue(retried, prompt)]})
 
     def done_segment(self, s):
         c = self.store.job(s["job"]) if s.get("job") else None
         return bool(c and c["status"] == "done" and any(os.path.exists(f) for f in (c.get("used") or {}).get("files") or []))
-
-    def resumable(self, job):
-        """A segmented job with some segments' results still on disk."""
-        segs = (job.get("used") or {}).get("segments")
-        return bool(segs) and any(self.done_segment(s) for s in segs)
 
     async def resume_segments(self, job, user, admin):
         """Runs again only the segments that have no result, same seed."""
         pid = job["id"]
         flow, items = self.plan(dict(job["spec"], mode=job["mode"]), job.get("owner", ""), admin)
         params = dict(job["spec"].get("params") or {}, prompt=job["spec"].get("prompt", ""), seed=job["used"]["seed"])
-        names = {it["id"]: it["asset"]["name"] for it in items}
         project = self.store.project(job["project"]) if job.get("project") else None
-        self.store.update_job(pid, status="running", stage="queued", error=None, finished=None)
+        if not self.store.retry_job(pid, job["attempt"], str(uuid.uuid4()), job["used"]):
+            return self.job_view(self.store.job(pid))
+        self.store.update_job(pid, status="running", started=time.time())
         self.spawning.add(pid)
         try:
             for i, s in enumerate(job["used"]["segments"]):
                 if self.store.job(pid)["status"] not in ACTIVE:
                     break
                 if not self.done_segment(s):
-                    await self.submit_segment(pid, i, flow, items, params, job["variant"], job["spec"], names, job.get("owner", ""), project)
+                    await self.submit_segment(pid, i, flow, items, params, job["variant"], job["spec"], job.get("owner", ""), project)
         finally:
             self.spawning.discard(pid)
         self.queue_dirty = True
@@ -1349,9 +1404,15 @@ class Studio:
         pid = q.get("project") or None
         if pid and not projects.role(self.store.project(pid), user, admin):
             return self.err(404, "no_project", "No such project")
-        return web.json_response({"assets": self.store.assets(q.get("kind"), q.get("source"), q.get("q"), q.get("starred") == "1",
-                                                              q.get("before"), min(200, int(q.get("limit", 60))),
-                                                              owner=user, project=pid)})
+        assets = self.store.assets(q.get("kind"), q.get("source"), q.get("q"), q.get("starred") == "1",
+                                   q.get("before"), min(200, int(q.get("limit", 60))),
+                                   owner=user, project=pid, after=q.get("after"))
+        result = {"assets": assets}
+        if q.get("with_jobs") == "1":
+            ids = {a["job_id"] for a in assets if a["job_id"]}
+            jobs = self.store.jobs(owner=user, project=pid, limit=len(ids), ids=ids)
+            result["jobs"] = {j["id"]: self.job_view(j) for j in jobs}
+        return web.json_response(result)
 
     async def h_asset_by_md5(self, request):
         md5 = request.match_info["md5"].lower()
@@ -1449,10 +1510,17 @@ class Studio:
             return self.err(404, "not_found", "No such file")
         ext = os.path.splitext(a["path"])[1]
         disp = "attachment" if request.query.get("download") else "inline"
-        fname = re.sub(r"[^\w.\- ]+", "_", a["name"]) + ext
+        fname = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", a["name"]).strip()
+        if not fname.lower().endswith(ext.lower()):
+            fname += ext
+        fallback = re.sub(r"%|[^\x20-\x7e]+", "_", fname)
+        disposition = '%s; filename="%s"' % (disp, fallback)
+        if fname != fallback:
+            disposition += "; filename*=UTF-8''" + quote(fname)
         return web.FileResponse(a["path"], headers={
-            "Content-Type": a["mime"], "Content-Disposition": "%s; filename=\"%s\"" % (disp, fname),
-            "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
+            "Content-Type": a["mime"], "Content-Disposition": disposition,
+            "Cache-Control": "private, no-store" if disp == "attachment" else "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; sandbox",
         })
 
