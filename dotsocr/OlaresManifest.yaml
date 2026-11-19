@@ -7,7 +7,7 @@ metadata:
   description: "Multilingual document text recognition with layout understanding"
   appid: dotsocr
   title: dots.ocr
-  version: '1.0.47'
+  version: '1.0.48'
   categories:
     - AI
     - models
@@ -46,13 +46,13 @@ workloadReplicas:
   ocradapter: 1
 spec:
   upgradeDescription: |
-    v1.0.46: Store runtime state in Common for cross-node operation. Prefer existing Common configuration; otherwise migrate local legacy Cache or initialize in Common. Retry shared helper reads during engine startup.
+    v1.0.48: Add Intel discrete GPU support with the SYCL llama.cpp engine and the same OCR API and model as the NVIDIA package.
   onlyAdmin: true
   versionName: 'ggml-org/dots.ocr-GGUF:Q8_0'
   fullDescription: |
     dots.ocr extracts text from document images and PDF pages while interpreting page layout and reading order. Its multilingual model recognizes text, tables, and formulas to help turn document pages into reusable content.
 
-    This app provides the Q8 version of dots.ocr to compatible Olares applications. It requires a supported NVIDIA GPU. Complex layouts, tables, and formulas may need manual review.
+    This app provides the Q8 version of dots.ocr to compatible Olares applications. It supports NVIDIA GPUs and Intel discrete GPUs. Complex layouts, tables, and formulas may need manual review.
   developer: dots studio
   website: https://studio.dots.ai/
   sourceCode: https://github.com/studio-dots-ai/dots.ocr
@@ -87,6 +87,15 @@ spec:
       limitedMemory: "16Gi"
       requiredDisk: "5Gi"
       limitedDisk: "50Gi"
+    - mode: intel-gpu
+      requiredCpu: "2"
+      limitedCpu: "6"
+      requiredMemory: "8Gi"
+      limitedMemory: "16Gi"
+      requiredDisk: "5Gi"
+      limitedDisk: "50Gi"
+      requiredGPUMemory: "7Gi"
+      limitedGPUMemory: "7Gi"
 
   supportArch:
     - amd64
@@ -151,7 +160,7 @@ envs:
     editable: true
     applyOnChange: true
     default: "7Gi"
-    description: "Per-instance GPU memory (nvidia.com/gpumem). The 7Gi default includes headroom above the measured real-document workload peak."
+    description: "Per-instance GPU memory: NVIDIA uses nvidia.com/gpumem; Intel discrete GPUs use gpu-memory pod annotations. The 7Gi default includes headroom above the measured real-document workload peak."
   - envName: LLAMACPP_CPU_REQUEST
     required: false
     type: string

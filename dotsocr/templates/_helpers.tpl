@@ -16,7 +16,27 @@
 
 {{- define "dotsocr.llmInitTag" -}}v1.7.21{{- end -}}
 {{- define "dotsocr.ocrAdapterImage" -}}docker.io/beclab/ocr-adapter@sha256:552d75de0fc4ae27382cc93e41f568be2340a8a2d2490dbc20b2b6860a40a81a{{- end -}}
-{{- define "dotsocr.llamacppImage" -}}docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143{{- end -}}
+{{- /* Olares accelerator mode selected at install time. */ -}}
+{{- define "dotsocr.gpuType" -}}
+{{- $gpuObj := .Values.GPU | default dict -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- $gpuType = $gpuObj.Type | default "nvidia" -}}
+{{- end -}}
+{{- $gpuType -}}
+{{- end -}}
+{{- /* Select CUDA for NVIDIA/GB10 and SYCL for Intel dGPU. */ -}}
+{{- define "dotsocr.llamacppImage" -}}
+{{- $gpuType := include "dotsocr.gpuType" . -}}
+{{- $images := .Values.engine.images | default dict -}}
+{{- if eq $gpuType "intel-gpu" -}}
+{{- $images.intelGpu | default "docker.io/beclab/ggml-org-llama.cpp:server-intel-b10752" -}}
+{{- else if eq $gpuType "nvidia-gb10" -}}
+{{- $images.nvidiaGb10 | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143" -}}
+{{- else -}}
+{{- $images.nvidia | default "docker.io/beclab/ggml-org-llama.cpp:server-cuda12-b10143" -}}
+{{- end -}}
+{{- end -}}
 
 {{- /* Q8-only pair: comma dual-source, each one --include (single-file hf path).
        Avoids one hf:// with two --include, which can leave snapshot without main GGUF. */ -}}
