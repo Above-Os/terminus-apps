@@ -63,6 +63,30 @@ spec:
         terminationMessagePolicy: File
         securityContext:
           runAsUser: 0
+      - name: affine-migration
+        image: "beclab/toeverything-affine:0.27.4"
+        imagePullPolicy: IfNotPresent
+        command: ["node", "./scripts/self-host-predeploy.js"]
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-secrets
+              key: DATABASE_URL
+        - name: REDIS_SERVER_HOST
+          value: "redis-svc"
+        - name: AFFINE_INDEXER_ENABLED
+          value: "false"
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - mountPath: /root/.affine/config
+          name: config
       containers:
       - env:
         - name: PGID

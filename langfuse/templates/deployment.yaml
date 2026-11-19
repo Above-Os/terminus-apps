@@ -197,42 +197,6 @@ spec:
       port: 9003
       targetPort: 9003
 
-# Create bucket `langfuse` once MinIO is up.
-# Skip when replicaCount is 0 (app stop): a new Job named with
-# Release.Revision would loop forever waiting for scaled-down MinIO.
-{{- if gt (int .Values.workloads.minio.replicaCount) 0 }}
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: minio-make-bucket-{{ .Release.Revision }}
-  namespace: {{ .Release.Namespace }}
-spec:
-  ttlSecondsAfterFinished: 100
-  template:
-    metadata:
-      labels:
-        job: minio-make-bucket
-        gateway.olares.io/shared-caller-outbound: "false"
-      annotations:
-        linkerd.io/inject: disabled
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: mc
-          image: "docker.io/beclab/minio-mc:RELEASE.2025-07-16T15-35-03Z"
-          env:
-            - name: MINIO_ROOT_USER
-              valueFrom: { secretKeyRef: { name: langfuse-secrets, key: MINIO_ROOT_USER } }
-            - name: MINIO_ROOT_PASSWORD
-              valueFrom: { secretKeyRef: { name: langfuse-secrets, key: MINIO_ROOT_PASSWORD } }
-          command:
-            - /bin/sh
-            - -c
-            - >-
-              until (mc alias set local http://minio:9002 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mb -p local/langfuse); do echo waiting for minio; sleep 2; done; echo done;
-{{- end }}
-
 # ==========================
 # Langfuse Web (UI & API)
 # ==========================
@@ -263,6 +227,29 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
+        # The worker already waits for the web service, so initialize the
+        # bucket here before either component starts using it.
+        - name: ensure-minio-bucket
+          image: "docker.io/beclab/minio-mc:RELEASE.2025-07-16T15-35-03Z"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: { secretKeyRef: { name: langfuse-secrets, key: MINIO_ROOT_USER } }
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: langfuse-secrets, key: MINIO_ROOT_PASSWORD } }
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until mc alias set local http://minio:9002 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+                    mc mb -p local/langfuse; do
+                echo "Waiting for MinIO"
+                sleep 2
+              done
+              echo "Langfuse bucket is ready"
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
       containers:
         - name: web
           image: "langfuse/langfuse:4.30.0"

@@ -1,4 +1,50 @@
-# Configuration migration in Chart 1.0.24
+# Upgrade to Chart 1.0.26
+
+If `/app/server/.env` already points to the non-empty `/app/server/storage/.env`, upgrade normally. The application verifies a local database and storage backup before migrations.
+
+For a legacy installation storing configuration only inside its container, perform the following export **before** starting the upgrade or stopping the old instance. Run the command in a terminal for the running `anythingllm` container, as its application user. Keep the terminal open until the export reports success. It preserves the original bytes and links the active environment file to persistent storage so subsequent settings saves survive the upgrade. Keep the backup with the corresponding database.
+
+```sh
+node - <<'JS'
+const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const source='/app/server/.env',destination='/app/server/storage/.env';
+if(!fs.existsSync(source)||!fs.statSync(source).isFile())throw new Error('Legacy configuration is missing; refusing upgrade');
+const bytes=fs.readFileSync(source);
+if(bytes.length===0)throw new Error('Legacy configuration is empty; refusing upgrade');
+const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+const directory='/app/server/storage/.olares-upgrade/config-migration';
+fs.mkdirSync(directory,{recursive:true,mode:0o700});
+const digest=hash(bytes),archive=path.join(directory,digest+'.env');
+if(!fs.existsSync(archive))fs.writeFileSync(archive,bytes,{flag:'wx',mode:0o600});
+if(hash(fs.readFileSync(archive))!==digest)throw new Error('Configuration backup verification failed');
+if(fs.realpathSync(source)!==destination){
+  if(fs.existsSync(destination)){
+    const previous=fs.readFileSync(destination),prior=path.join(directory,hash(previous)+'.env');
+    if(!fs.existsSync(prior))fs.writeFileSync(prior,previous,{flag:'wx',mode:0o600});
+    if(hash(fs.readFileSync(prior))!==hash(previous))throw new Error('Previous persistent configuration backup verification failed');
+  }
+  const pending=destination+'.migration-pending';
+  const fd=fs.openSync(pending,'w',0o600);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+  if(hash(fs.readFileSync(pending))!==digest)throw new Error('Exported configuration differs');
+  fs.renameSync(pending,destination);
+  // Keep subsequent settings saves persistent during the handover.
+  const link=source+'.migration-link';
+  try{fs.unlinkSync(link);}catch(e){if(e.code!=='ENOENT')throw e;}
+  fs.symlinkSync(destination,link);fs.renameSync(link,source);
+}
+fs.chmodSync(destination,0o600);
+if(hash(fs.readFileSync(source))!==hash(fs.readFileSync(destination)))throw new Error('Persistent configuration verification failed');
+fs.writeFileSync(path.join(directory,'verified.json'),JSON.stringify({sha256:digest,bytes:bytes.length}),{mode:0o600});
+console.log('Legacy configuration exported and verified; values were not logged.');
+JS
+```
+
+If the old container is already gone, recover the original configuration from a backup. When the database exists without a non-empty persistent configuration, startup halts before database migration. The Chart does not create a replacement in this case.
+
+## Historical notes for Chart 1.0.24
+
+The automated hook described below was removed in 1.0.26 because injected network sidecars prevented the hook Job from finishing. The previous migration test records are kept for reference.
+
 
 Chart 1.0.23 required a manual export of `/app/server/.env` before upgrading a legacy installation. Legacy Charts kept that file in the container layer. Without the export, replacing the old Pod made the original provider settings unavailable and the new initialization correctly refused to migrate the existing database. Release notes alone did not make the upgrade automatic.
 

@@ -9,6 +9,23 @@
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $hfToken := $oe.HF_TOKEN | default "" -}}
 {{- $runStateHostPath := printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name -}}
+{{- if .Release.IsUpgrade -}}
+  {{- with lookup "apps/v1" "Deployment" .Release.Namespace .Release.Name -}}
+    {{- $persistentHistory := false -}}
+    {{- range .spec.template.spec.containers -}}
+      {{- if eq .name "whisperservice" -}}
+        {{- range .env -}}
+          {{- if and (eq .name "DB_URL") (eq (.value | default "") "sqlite:////state/records.db") -}}
+            {{- $persistentHistory = true -}}
+          {{- end -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if not $persistentHistory -}}
+      {{- fail "WhisperService task history is not configured for persistent storage. Before upgrading, migrate through chart 1.1.26 and verify task history there." -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
