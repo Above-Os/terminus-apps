@@ -5,18 +5,17 @@ metadata:
   name: note
   appid: note
   title: Note
-  description: Local meeting transcripts with speaker identities, glossary and AI minutes
+  description: Local meeting transcripts with speaker identities, glossary and AI minutes, with its own accounts
   icon: https://app.cdn.olares.com/appstore/note/icon.png
-  version: 0.6.16
+  version: 0.6.17
   categories:
   - workspace  
 
 spec:
-  onlyAdmin: true
-  versionName: "0.6.16"
+  versionName: "0.6.17"
   runAsUser: true
   upgradeDescription: |
-    - Note 0.6.16: Speaker recognition is more accurate across different recording conditions, and Note now asks before adding a voice that doesn't sound like the selected person to their voiceprint. On phones, meeting tabs fit on one row with the rest under More, and fullscreen playback is more reliable.
+    - Note 0.6.17: Security improvement: other people on this Olares can no longer find out whether a recording exists by trying to end it. Note now keeps its own accounts: the first visit creates the owner, who then adds admins and members.
   fullDescription: |
     Note turns recordings into local, verifiable transcripts: who spoke, when each word was said, and which source passage supports an action item. Personal and project glossaries keep important names consistent.
 
@@ -28,10 +27,11 @@ spec:
     - Transcribe speech with word-level timings so text and audio stay in sync.
     - Track structured action items with owners, due dates, status, and sources.
     - Optionally generate versioned summaries, translations, and subtitles.
-    - Import a file from Files or upload it in the browser.
+    - Upload a file in the browser.
+    - Keep Note's own accounts: the owner adds admins and members, each with their own password and optional two-factor sign-in.
     - Create personal API keys for restricted external audio uploads and progress checks.
 
-    This app uses Router and the model applications installed on this Olares. Router must be running, with local speech recognition, diarization, speaker embedding, and forced alignment models available for a complete transcript. Chat and translation models are optional. One install serves everyone on this Olares.
+    This app uses Router and the model applications installed on this Olares. Router must be running, with local speech recognition, diarization, speaker embedding, and forced alignment models available for a complete transcript. Chat and translation models are optional. Each Olares user installs their own copy, and people without an Olares account can use it with an account from its owner. Importing from Files and the in-cluster agent API are not available.
   developer: Olares
   submitter: Olares
   locale:
@@ -53,15 +53,15 @@ spec:
     - arm64
 permission:
   appData: true
-  userData:
-    - Home
 entrances:
   - name: note
     host: note-svc
     port: 8080
     title: Note
     icon: https://app.cdn.olares.com/appstore/note/icon.png
-    authLevel: private
+    # Note's own sign-in guards it; an Olares login in front would ask
+    # people without an Olares account for one.
+    authLevel: public
     openMethod: window
   - name: note-api
     host: note-svc
@@ -70,16 +70,7 @@ entrances:
     icon: https://app.cdn.olares.com/appstore/note/icon.png
     authLevel: public
     invisible: true
-sharedEntrances:
-  - name: noteagents
-    host: sharedentrances-note
-    port: 0
-    title: Note Agent API
-    icon: https://app.cdn.olares.com/appstore/note/icon.png
-    invisible: true
-    authLevel: internal
 options:
-  shared: true
   # The entrance proxy cuts every request at 15s by default, which would kill
   # both the progress event stream and any upload larger than a short clip.
   apiTimeout: 0
