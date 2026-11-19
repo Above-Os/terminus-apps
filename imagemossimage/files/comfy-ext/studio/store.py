@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS assets (
 );
 CREATE INDEX IF NOT EXISTS assets_created ON assets(created);
 CREATE TABLE IF NOT EXISTS jobs (
-  id TEXT PRIMARY KEY,           -- also the ComfyUI prompt_id
+  id TEXT PRIMARY KEY,           -- stable across retries
+  prompt_id TEXT NOT NULL DEFAULT '',
+  attempt INTEGER NOT NULL DEFAULT 1,
+  queued_at REAL,
   mode TEXT NOT NULL,
   variant TEXT NOT NULL,
   spec TEXT NOT NULL,            -- {prompt, mode, assets: [{id, role}], params, batch?, action?}
@@ -66,6 +69,11 @@ CREATE TABLE IF NOT EXISTS project_members (
 
 JSON_FIELDS = {"spec", "used", "error", "outputs"}
 ACTIVE = ("queued", "running")
+RETRYABLE = ("failed", "cancelled", "interrupted")
+
+
+def _like(q):
+    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def _row(r):
@@ -106,6 +114,13 @@ class Store:
                 if "project" not in {r[1] for r in self.db.execute("PRAGMA table_info(%s)" % table)}:
                     self.db.execute("ALTER TABLE %s ADD COLUMN project TEXT" % table)
                 self.db.execute("CREATE INDEX IF NOT EXISTS %s_project ON %s(project, created)" % (table, table))
+            cols = {r[1] for r in self.db.execute("PRAGMA table_info(jobs)")}
+            for name, typ in (("prompt_id", "TEXT NOT NULL DEFAULT ''"), ("attempt", "INTEGER NOT NULL DEFAULT 1"), ("queued_at", "REAL")):
+                if name not in cols:
+                    self.db.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (name, typ))
+            self.db.execute("UPDATE jobs SET prompt_id=id WHERE prompt_id=''")
+            self.db.execute("UPDATE jobs SET queued_at=created WHERE queued_at IS NULL")
+            self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_prompt_id ON jobs(prompt_id)")
 
     def _q(self, sql, args=()):
         with self.lock:
@@ -113,7 +128,7 @@ class Store:
 
     def _x(self, sql, args=()):
         with self.lock:
-            self.db.execute(sql, args)
+            return self.db.execute(sql, args).rowcount
 
     # assets
 
@@ -152,7 +167,7 @@ class Store:
     def assets_without_md5(self):
         return [_row(r) for r in self._q("SELECT id, path FROM assets WHERE md5 IS NULL AND deleted=0")]
 
-    def assets(self, kind=None, source=None, q=None, starred=None, before=None, limit=60, owner=None, project=None):
+    def assets(self, kind=None, source=None, q=None, starred=None, before=None, limit=60, owner=None, project=None, after=None):
         sql, args = "SELECT * FROM assets WHERE deleted=0", []
         sql = self._scope(sql, args, owner, project)
         if kind:
@@ -165,12 +180,15 @@ class Store:
             sql += " AND source<>'mask'"
         if q:
             sql += " AND name LIKE ? ESCAPE '\\'"
-            args.append("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            args.append(_like(q))
         if starred:
             sql += " AND starred=1"
         if before:
             sql += " AND created<?"
             args.append(float(before))
+        if after:
+            sql += " AND created>=?"
+            args.append(float(after))
         sql += " ORDER BY created DESC LIMIT ?"
         args.append(int(limit))
         return [_row(r) for r in self._q(sql, args)]
@@ -192,6 +210,7 @@ class Store:
 
     def add_job(self, j):
         j = {"created": time.time(), **j}
+        j = {"prompt_id": j["id"], "queued_at": j["created"], **j}
         for k in JSON_FIELDS & j.keys():
             j[k] = json.dumps(j[k])
         cols = ",".join(j)
@@ -202,14 +221,44 @@ class Store:
         r = self._q("SELECT * FROM jobs WHERE id=?", (jid,))
         return _row(r[0]) if r else None
 
-    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None):
+    def job_by_prompt(self, prompt_id):
+        r = self._q("SELECT * FROM jobs WHERE prompt_id=?", (prompt_id,))
+        return _row(r[0]) if r else None
+
+    def ids_by_prompt(self, prompt_ids):
+        """{prompt_id: job id} for the prompts that belong to a job."""
+        if not prompt_ids:
+            return {}
+        return dict(self._q("SELECT prompt_id, id FROM jobs WHERE prompt_id IN (%s)" % ",".join("?" * len(prompt_ids)), list(prompt_ids)))
+
+    def retry_job(self, jid, attempt, prompt_id, used):
+        """Atomically claim one execution, keeping the original job and batch."""
+        changed = self._x(
+            "UPDATE jobs SET prompt_id=?, attempt=attempt+1, queued_at=?, used=?, "
+            "status='queued', stage='queued', step=NULL, steps=NULL, started=NULL, finished=NULL, error=NULL, outputs='[]' "
+            "WHERE id=? AND attempt=? AND deleted=0 AND status IN (%s)" % ",".join("?" * len(RETRYABLE)),
+            (prompt_id, time.time(), json.dumps(used), jid, attempt, *RETRYABLE))
+        return self.job(jid) if changed else None
+
+    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None, after=None, q=None, ids=None):
         sql, args = "SELECT * FROM jobs WHERE deleted=0 AND (relation IS NULL OR relation!='segment')", []
         sql = self._scope(sql, args, owner, project)
+        if ids is not None:
+            if not ids:
+                return []
+            sql += " AND id IN (%s)" % ",".join("?" * len(ids))
+            args.extend(ids)
         if starred:
             sql += " AND starred=1"
         if before:
             sql += " AND created<?"
             args.append(float(before))
+        if after:
+            sql += " AND created>=?"
+            args.append(float(after))
+        if q:
+            sql += " AND json_extract(spec, '$.prompt') LIKE ? ESCAPE '\\'"
+            args.append(_like(q))
         sql += " ORDER BY created DESC LIMIT ?"
         args.append(int(limit))
         return [_row(r) for r in self._q(sql, args)]
