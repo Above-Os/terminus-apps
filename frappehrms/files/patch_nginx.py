@@ -18,15 +18,26 @@ location = / { return 302 /login; }
 location = /login { default_type text/html; charset utf-8; try_files /frontend/public/login =404; }
 """
 
+# Desk embeds its boot data in HTML. Use the same case-insensitive media type
+# without triggering the Olares HTML decoration filter's full-response buffer.
+DESK_CONTENT_TYPE = """
+map "$uri|$upstream_http_content_type" $frappe_content_type {
+ default $upstream_http_content_type;
+ "~^/app(?:/[^|]*)?[|]text/html(.*)$" "text/HTML$1";
+}
+"""
+
 WEB = """location @webserver {
+ include /etc/nginx/snippets/security_headers.conf;
  proxy_hide_header Content-Type;
- add_header Content-Type "application/xhtml+xml; charset=utf-8" always;
- proxy_hide_header Link;"""
+ add_header Content-Type $frappe_content_type always;"""
 
 conf_dir = Path("/etc/nginx/conf.d")
 patched = False
 for path in conf_dir.glob("*.conf"):
     text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    if "location @webserver {" not in text:
+        continue
     text = text.replace("gzip on;", "gzip off;")
     if "location /api/" not in text:
         if "location /assets {" not in text:
@@ -36,16 +47,12 @@ for path in conf_dir.glob("*.conf"):
         if "location / {" not in text:
             raise SystemExit(f"cannot insert /login into {path}")
         text = text.replace("location / {", LOGIN + "\nlocation / {", 1)
-    if "application/xhtml+xml" not in text:
-        if "location @webserver {" not in text:
-            raise SystemExit(f"cannot patch @webserver in {path}")
-        text = text.replace("location @webserver {", WEB, 1)
+    if "add_header Content-Type $frappe_content_type always;" not in text:
+        text = DESK_CONTENT_TYPE + text.replace("location @webserver {", WEB, 1)
     path.write_text(text, encoding="utf-8")
     patched = True
     print(f"patched {path.name}")
 
 if not patched:
-    raise SystemExit("no nginx conf files found")
-if not any("application/xhtml+xml" in p.read_text(encoding="utf-8") for p in conf_dir.glob("*.conf")):
-    raise SystemExit("xhtml content-type rewrite missing after patch")
+    raise SystemExit("no Frappe webserver config found")
 print("patched nginx conf")
