@@ -73,8 +73,6 @@ spec:
               containerPort: 8080
             - name: external
               containerPort: 8081
-            - name: agents
-              containerPort: 8082
           {{- if .Values.capture.usb.enabled }}
           # The device cgroup only lets a privileged container open the
           # host's sound devices; the group above is what the file modes ask.
@@ -84,6 +82,10 @@ spec:
           env:
             - name: NOTE_PORT
               value: "8080"
+            # Note's own accounts, activated on first open, behind a public
+            # entrance.
+            - name: NOTE_AUTH_MODE
+              value: "local"
             {{- if or .Values.capture.usb.enabled .Values.capture.bluetooth.enabled }}
             - name: NOTE_CAPTURE_ENABLED
               value: "true"
@@ -123,17 +125,14 @@ spec:
             {{- end }}
             - name: NOTE_EXTERNAL_PORT
               value: "8081"
-            # Read-only REST and MCP for apps in the cluster, behind the
-            # internal shared entrance (sharedentrances-note below).
-            - name: NOTE_AGENT_PORT
-              value: "8082"
             # Where an API key's integrations reach that port: the note-api
             # entrance's own label (app id and entrance index, as app-service
-            # names it), under the caller's zone as for Files below. The page
-            # cannot tell it reliably from the host it is served on.
+            # names it), under the installing user's zone, as a local account
+            # has none of its own. The page cannot tell it reliably from the
+            # host it is served on.
             {{- with index (.Values.domain | default dict) "note-api" }}
             - name: NOTE_EXTERNAL_ORIGIN
-              value: {{ printf "https://%s.{user}.%s" (. | splitList "." | first) ($.Values.user.zone | splitList "." | rest | join ".") | quote }}
+              value: {{ printf "https://%s.%s" (. | splitList "." | first) $.Values.user.zone | quote }}
             {{- end }}
             - name: NOTE_DATA_DIR
               value: /data
@@ -147,13 +146,7 @@ spec:
             - name: LLM_GATEWAY_URL
               value: "http://3a77b15d.shared.olares.com/v1"
             - name: OLARES_APP_ID
-              value: "note"
-            # A shared reinstall can preserve recordings while recreating the
-            # middleware database. Give orphan recovery a deterministic owner
-            # instead of leaving those recordings invisible when several users
-            # already exist in the Olares directory.
-            - name: NOTE_OWNER
-              value: {{ .Values.bfl.username | quote }}
+              value: {{ .Values.appId | quote }}
             - name: NOTE_CATALOG_EVENTS_NATS_URL
               value: {{ printf "nats://nats.user-system-%s:4222" .Values.bfl.username | quote }}
             - name: NOTE_CATALOG_EVENTS_NATS_USER
@@ -165,35 +158,6 @@ spec:
                   key: password
             - name: NOTE_CATALOG_EVENTS_SUBJECT
               value: "router.catalog"
-            - name: NOTE_LLDAP_READONLY_URL
-              value: "http://lldap-provider-svc.os-framework:28080"
-            - name: NOTE_LLDAP_TOKEN_FILE
-              value: "/var/run/secrets/kubernetes.io/serviceaccount/token"
-            - name: NOTE_LLDAP_NATS_URL
-              value: "nats://nats.os-platform:4222"
-            - name: NOTE_LLDAP_NATS_USER
-              value: {{ printf "%s-note-users" .Release.Namespace | quote }}
-            - name: NOTE_LLDAP_NATS_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: note-nats
-                  key: password
-            - name: NOTE_LLDAP_RESYNC_INTERVAL
-              value: "5m"
-            # Browser uploads land on this pod's volume. Files is still used
-            # to browse and import from the caller's Home, and for HLS.
-            # {user} is replaced from the authenticated caller so each user
-            # reaches their own Files entrance. The domain is the platform's,
-            # taken from the installing admin's zone: a caller on the LAN name
-            # arrives from <entrance>.<user>.olares.local, which resolves on
-            # their side of the network and nowhere in this cluster.
-            - name: NOTE_FILES_BASE_URL
-              value: {{ printf "https://files.{user}.%s" (.Values.user.zone | splitList "." | rest | join ".") | quote }}
-            # The directory app-data appears under in the user's Drive: the
-            # last element of the path app-service mounts, which is the name
-            # this app was installed under.
-            - name: NOTE_FILES_DRIVE_APP
-              value: {{ base .Values.userspace.appData | quote }}
             - name: NOTE_CPU_WORKERS
               value: {{ .Values.workers.cpu | quote }}
             - name: NOTE_GPU_WORKERS
@@ -397,25 +361,4 @@ spec:
     - name: external
       port: 8081
       targetPort: 8081
-      protocol: TCP
----
-# The internal shared entrance: apps in the cluster reach the agent API at
-# http://7cb19ff3.shared.olares.com (md5(md5("note")[:8] + "shared")[:8])
-# through the app gateway, which verifies the caller's JWT and stamps
-# X-Caller-User and X-Caller-Appid, as they reach Router. Only the agent
-# listener is behind it.
-apiVersion: v1
-kind: Service
-metadata:
-  name: sharedentrances-note
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app: note
-spec:
-  selector:
-    app: note
-  ports:
-    - name: agents
-      port: 80
-      targetPort: 8082
       protocol: TCP
