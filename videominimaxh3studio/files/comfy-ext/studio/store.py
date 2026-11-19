@@ -240,9 +240,14 @@ class Store:
             (prompt_id, time.time(), json.dumps(used), jid, attempt, *RETRYABLE))
         return self.job(jid) if changed else None
 
-    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None, after=None, q=None):
+    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None, after=None, q=None, ids=None):
         sql, args = "SELECT * FROM jobs WHERE deleted=0 AND (relation IS NULL OR relation!='segment')", []
         sql = self._scope(sql, args, owner, project)
+        if ids is not None:
+            if not ids:
+                return []
+            sql += " AND id IN (%s)" % ",".join("?" * len(ids))
+            args.extend(ids)
         if starred:
             sql += " AND starred=1"
         if before:
