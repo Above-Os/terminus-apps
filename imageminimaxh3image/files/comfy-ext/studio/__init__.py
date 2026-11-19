@@ -1006,7 +1006,7 @@ class Studio:
             "kind": self.kind, "composer": self.profile.get("composer") or "", "actions": self.profile.get("actions") or [],
             "variant": self.preferred, "variants": [{"id": v["id"], "label": v["label"]} for v in self.variants.values()] or None,
             "flows": flows, "tiers": list(graph.tiers(self.profile)), "uploadLimit": UPLOAD_LIMIT, "maxCount": MAX_COUNT,
-            "profile": {k: self.profile.get(k) for k in ("strings", "promptTemplate", "aspectDefault", "fixedScale", "outputLimit", "outputPixelFrames")
+            "profile": {k: self.profile.get(k) for k in ("strings", "promptTemplate", "aspectDefault", "videoWorkspace", "fixedScale", "outputLimit", "outputPixelFrames")
                         if self.profile.get(k)},
             "refTags": [t["id"] for t in self.profile.get("refTags") or []],
             "examples": [self.example_info(x) for x in self.examples.values()],
