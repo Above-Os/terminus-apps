@@ -20,6 +20,7 @@ import re
 import shutil
 import time
 import uuid
+from urllib.parse import quote
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
@@ -38,6 +39,7 @@ DISK_LOW = 5 << 30
 MAX_COUNT = 4
 LLM_IMAGES = 6
 NAME_MAX = 80
+IMAGE_OUTPUT_NAME_MAX = 10
 # mask: a painted inpaint mask; edit: an image the front end prepared (the
 # expand canvas).
 UPLOAD_SOURCES = ("upload", "mask", "edit")
@@ -211,11 +213,14 @@ class Studio:
         out.update((v.get("replaceModes") or {}).get(mode) or {})
         return out
 
-    async def installed(self):
+    async def installed(self, *, wanted=None):
         """Variant ids whose models the console reports done, or None when
         it does not say (no groups, or unreachable)."""
-        if time.time() - self.installed_at < 3:
-            return self.installed_ids
+        cached = self.installed_ids
+        fresh = time.time() - self.installed_at < 3
+        # The picker can see a finished download before this cache expires.
+        if fresh and (not wanted or cached is None or wanted in cached):
+            return cached
         ids = None
         try:
             status, data = await self.call("GET", self.console + "/api/status")
@@ -224,6 +229,8 @@ class Studio:
                 ids = [g["id"] for g in groups if g.get("state") == "done"]
         except Exception as e:
             log.warning("studio: console status: %s", e)
+        if ids is None and fresh:
+            return cached
         self.installed_at, self.installed_ids = time.time(), ids
         return ids
 
@@ -236,7 +243,7 @@ class Studio:
         v = asked or self.preferred
         if v not in self.variants:
             raise graph.JobError("bad_variant", "Unknown precision", variant=v)
-        ok = await self.installed()
+        ok = await self.installed(wanted=asked)
         if ok is not None and v not in ok:
             if asked:
                 raise graph.JobError("variant_missing", "This precision is not downloaded", variant=v)
@@ -480,9 +487,12 @@ class Studio:
             poster = media.poster(path, info["kind"], os.path.join(self.user_dir(self.poster_dir, owner), aid + ".webp"), info["duration"])
         except Exception as e:
             log.warning("studio: poster for %s failed: %s", path, e)
+        name = clean_name(os.path.splitext(filename)[0], info["kind"])
+        if source == "output" and info["kind"] == "image":
+            name = name[:IMAGE_OUTPUT_NAME_MAX].rstrip()
         return {
             "id": aid, "kind": info["kind"], "source": source,
-            "name": clean_name(os.path.splitext(filename)[0], info["kind"]),
+            "name": name,
             "path": path, "mime": info["mime"], "bytes": os.path.getsize(path),
             "width": info["width"], "height": info["height"], "duration": info["duration"],
             "has_audio": info["has_audio"], "poster": poster, "job_id": job_id, "md5": md5, "owner": owner,
@@ -996,7 +1006,7 @@ class Studio:
             "kind": self.kind, "composer": self.profile.get("composer") or "", "actions": self.profile.get("actions") or [],
             "variant": self.preferred, "variants": [{"id": v["id"], "label": v["label"]} for v in self.variants.values()] or None,
             "flows": flows, "tiers": list(graph.tiers(self.profile)), "uploadLimit": UPLOAD_LIMIT, "maxCount": MAX_COUNT,
-            "profile": {k: self.profile.get(k) for k in ("strings", "promptTemplate", "aspectDefault", "fixedScale", "outputLimit", "outputPixelFrames")
+            "profile": {k: self.profile.get(k) for k in ("strings", "promptTemplate", "aspectDefault", "videoWorkspace", "fixedScale", "outputLimit", "outputPixelFrames")
                         if self.profile.get(k)},
             "refTags": [t["id"] for t in self.profile.get("refTags") or []],
             "examples": [self.example_info(x) for x in self.examples.values()],
@@ -1394,9 +1404,15 @@ class Studio:
         pid = q.get("project") or None
         if pid and not projects.role(self.store.project(pid), user, admin):
             return self.err(404, "no_project", "No such project")
-        return web.json_response({"assets": self.store.assets(q.get("kind"), q.get("source"), q.get("q"), q.get("starred") == "1",
-                                                              q.get("before"), min(200, int(q.get("limit", 60))),
-                                                              owner=user, project=pid, after=q.get("after"))})
+        assets = self.store.assets(q.get("kind"), q.get("source"), q.get("q"), q.get("starred") == "1",
+                                   q.get("before"), min(200, int(q.get("limit", 60))),
+                                   owner=user, project=pid, after=q.get("after"))
+        result = {"assets": assets}
+        if q.get("with_jobs") == "1":
+            ids = {a["job_id"] for a in assets if a["job_id"]}
+            jobs = self.store.jobs(owner=user, project=pid, limit=len(ids), ids=ids)
+            result["jobs"] = {j["id"]: self.job_view(j) for j in jobs}
+        return web.json_response(result)
 
     async def h_asset_by_md5(self, request):
         md5 = request.match_info["md5"].lower()
@@ -1494,10 +1510,17 @@ class Studio:
             return self.err(404, "not_found", "No such file")
         ext = os.path.splitext(a["path"])[1]
         disp = "attachment" if request.query.get("download") else "inline"
-        fname = re.sub(r"[^\w.\- ]+", "_", a["name"]) + ext
+        fname = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", a["name"]).strip()
+        if not fname.lower().endswith(ext.lower()):
+            fname += ext
+        fallback = re.sub(r"%|[^\x20-\x7e]+", "_", fname)
+        disposition = '%s; filename="%s"' % (disp, fallback)
+        if fname != fallback:
+            disposition += "; filename*=UTF-8''" + quote(fname)
         return web.FileResponse(a["path"], headers={
-            "Content-Type": a["mime"], "Content-Disposition": "%s; filename=\"%s\"" % (disp, fname),
-            "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
+            "Content-Type": a["mime"], "Content-Disposition": disposition,
+            "Cache-Control": "private, no-store" if disp == "attachment" else "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; sandbox",
         })
 
