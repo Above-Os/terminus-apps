@@ -208,6 +208,17 @@ data:
         exit 127
     fi
 
+    # FreeToken enables PyTorch expandable_segments at runtime unless an
+    # allocator config is set. Those segments come from cuMemCreate, which
+    # HAMi time slicing (GPU mode 2) cannot evict, so another app bound to the
+    # same GPU would run out of device memory on its turn. Any non-empty value
+    # suppresses that default; it must not mention expandable_segments, which
+    # newer HAMi-core strips from the environment before the process starts.
+    if [ "${CUDA_DEVICE_GPU_MODE_0:-}" = "2" ] && [ -z "${PYTORCH_CUDA_ALLOC_CONF:-}${PYTORCH_ALLOC_CONF:-}" ]; then
+        export PYTORCH_CUDA_ALLOC_CONF="pinned_use_cuda_host_register:False"
+        log "time slice GPU: keeping expandable_segments off so GPU memory stays evictable"
+    fi
+
     run_freetoken() {
         # Preserve container CMD extras before ENGINE_ARGS word-splitting.
         extra_argv="$*"
