@@ -192,7 +192,7 @@ spec:
               memory: 6Gi
 
         - name: vectorcrawl
-          image: "beclab/vectorcrawl:v1.0.23"
+          image: "beclab/vectorcrawl:v1.0.24"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -200,6 +200,8 @@ spec:
           env:
             - name: LISTEN_ADDR
               value: 0.0.0.0:8080
+            - name: SHARED_API_ALLOW_NO_AUTH
+              value: "true"
             - name: K8S_NAMESPACE
               value: wisev3-shared
             - name: REDIS_PASSWORD
@@ -351,6 +353,24 @@ spec:
       protocol: TCP
       port: 3100
       targetPort: 3100
+
+---
+# VectorCrawl shared REST + MCP: /v1/*, /v2/*, /adapters/* 
+# A ClusterIP Service forwards all paths; MCP needs no separate entrance.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sharedentrances-vectorcrawl
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: knowledge
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8080
 
 ---
 # v3 sharedentrance: cluster-internal canonical hop other v3 apps SHOULD
