@@ -65,9 +65,15 @@ spec:
           command: ["sh", "-ec"]
           args:
             - |
-              # The upstream daemon runs as UID 1001. Preserve existing plugin
-              # files and align the storage root for fresh deployments.
               chown 1001:1001 /app/storage
+              # The older daemon created these directories and their contents as root.
+              # Migrate its files without following symlinks or changing permission bits.
+              for directory in assets cwd plugin plugin_packages; do
+                path="/app/storage/${directory}"
+                if [ -L "$path" ] || [ ! -d "$path" ]; then continue; fi
+                find "$path" -xdev \( -type d -o -type f \) -user 0 \
+                  -exec chown -h 1001:1001 {} +
+              done
           securityContext:
             runAsUser: 0
           volumeMounts:
