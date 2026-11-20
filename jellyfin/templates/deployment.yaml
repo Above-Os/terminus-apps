@@ -104,17 +104,6 @@ data:
 {{- $isIntelMode := eq $gpuType "intel" }}
 {{- $isAmdMode := eq $gpuType "amd" }}
 {{- $isIgpuMode := or $isIntelMode $isAmdMode }}
-{{- $supportsGpuInject := false }}
-{{- if .Values.sysVersion }}
-{{- $supportsGpuInject = semverCompare ">=1.12.7-0" (toString .Values.sysVersion) }}
-{{- end }}
-{{- $envHwAccel := eq (toString (.Values.olaresEnv.ENABLE_HW_ACCEL | default "false")) "true" }}
-{{- $useNewAccel := and $supportsGpuInject $isIgpuMode }}
-{{- $useLegacyAccel := or (and (not $supportsGpuInject) $envHwAccel) (and (not $supportsGpuInject) $isIgpuMode) }}
-{{- $hwAccel := or $useNewAccel $useLegacyAccel }}
-{{- $needGpuInject := $useNewAccel }}
-{{- $needPrivileged := $useLegacyAccel }}
-{{- $needDriHostPath := $useLegacyAccel }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -122,7 +111,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: jellyfin
-  {{- if $needGpuInject }}
+  {{- if $isIgpuMode }}
   annotations:
     applications.app.bytetrade.io/gpu-inject: "true"
   {{- end }}
@@ -142,15 +131,10 @@ spec:
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
-        {{- if $hwAccel }}
+        {{- if $isIgpuMode }}
         supplementalGroups:
-          {{- if $useNewAccel }}
           - 44
           - 994
-          {{- else }}
-          - {{ .Values.olaresEnv.VIDEO_GID | default "44" | int }}
-          - {{ .Values.olaresEnv.RENDER_GID | default "994" | int }}
-          {{- end }}
         {{- end }}
       affinity:
         nodeAffinity:
@@ -167,12 +151,6 @@ spec:
           hostPath:
             type: Directory
             path: {{ .Values.userspace.userData }}
-        {{- if $needDriHostPath }}
-        - name: dri
-          hostPath:
-            path: /dev/dri
-            type: Directory
-        {{- end }}
         - hostPath:
             path: '{{ .Values.userspace.appData }}/config'
             type: DirectoryOrCreate
@@ -228,14 +206,11 @@ spec:
 
       containers:
         - name: jellyfin
-          image: "docker.io/beclab/jellyfin-jellyfin:12.1"
+          image: "docker.io/jellyfin/jellyfin:12.4"
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
-            {{- if $needPrivileged }}
-            privileged: true
-            {{- end }}
           resources:
             requests:
               cpu: 100m
@@ -258,10 +233,6 @@ spec:
             mountPath: /olares/userdata/external
           - name: external
             mountPath: /external
-          {{- if $needDriHostPath }}
-          - name: dri
-            mountPath: /dev/dri
-          {{- end }}
           env:
           - name: PGID
             value: "1000"
@@ -271,7 +242,7 @@ spec:
             value: "002"
           - name: TZ
             value: Etc/UTC
-          {{- if $hwAccel }}
+          {{- if $isIgpuMode }}
           # The upstream image ships NVIDIA_VISIBLE_DEVICES=all for NVENC. On a
           # hybrid host that makes the NVIDIA runtime hook add its own render
           # node beside the bound iGPU, and oneVPL fails deriving QSV from it.

@@ -10,7 +10,7 @@ metadata:
   description: The Free Software Media System
   icon: https://app.cdn.olares.com/appstore/jellyfin/icon.png
   appid: jellyfin
-  version: '1.0.36'
+  version: '1.0.37'
   title: Jellyfin
   categories:
   - Fun
@@ -27,7 +27,7 @@ permission:
   userData:
   - Home
 spec:
-  versionName: '12.1'
+  versionName: '12.4'
   featuredImage: https://app.cdn.olares.com/appstore/jellyfin/promote_image_1v2.webp
   promoteImage:
   - https://app.cdn.olares.com/appstore/jellyfin/promote_image_1v2.webp
@@ -62,14 +62,14 @@ spec:
     The project relies entirely on contributions from volunteers. Want to help out? There's lots of ways to do so, and you don't even have to code!
 
   upgradeDescription: |
-    This release supports choosing an **accelerator mode** at install time (**cpu**, **intel**, or **amd**). If you need hardware transcoding and your current install does not use the right mode, **uninstall and reinstall** Jellyfin. When uninstalling, **do not** enable delete application data — your libraries, settings, and configuration will remain for the new install.
-    On Olares **12.6**, install **cpu** and enable **ENABLE_HW_ACCEL** for integrated-GPU transcoding. On Olares **12.7+**, choose **intel** or **amd** at install for gpu-inject hardware transcoding.
+    This release requires Olares 1.12.7 or later. If you used CPU mode with ENABLE_HW_ACCEL on Olares 1.12.6, upgrading keeps the app in CPU mode. Hardware transcoding via that setting is no longer available.
+    To restore hardware transcoding, upgrade Olares first, then uninstall Jellyfin with application data retained and reinstall in Intel or AMD mode for your GPU. This retains your libraries and settings. Instances already installed in Intel or AMD mode can upgrade normally.
 
     On a host with both an integrated GPU and a discrete NVIDIA card, hardware transcoding now keeps only the bound integrated render node visible, so QSV no longer fails initializing against the NVIDIA device.
 
-    **Jellyfin 12.1** is a maintenance release with performance refinements and bug fixes: improved nested-folder handling and media entry resolution, library monitoring and subtitle processing updates, database optimizations, Quick Connect user selection in the web UI, Jellyfin SDK 1.0.0, and Safari indicator color fixes. Upgrades migrate legacy root-owned config to the application user and normalize empty encoder presets to **auto**. Back up configuration and data before upgrading.
+    Jellyfin 12.4 includes maintenance fixes and an updated .NET runtime. Back up Jellyfin data and configuration before upgrading. When upgrading from 10.11.x, check for usernames that differ only by case and run a full media library scan after upgrading.
 
-    View full release note at https://github.com/jellyfin/jellyfin/releases/tag/v12.1
+    [Jellyfin 12.4 release notes](https://github.com/jellyfin/jellyfin/releases/tag/v12.4)
 
   developer: Jellyfin
   website: https://jellyfin.org/
@@ -128,33 +128,7 @@ options:
   dependencies:
   - name: olares
     type: system
-    version: '>=1.12.6-0'
-envs:
-  - envName: ENABLE_HW_ACCEL
-    type: bool
-    default: 'false'
-    required: false
-    editable: true
-    applyOnChange: true
-    description: |
-      **Olares 12.6 only.** Enable Intel/AMD iGPU hw transcoding on **cpu** install: mounts /dev/dri, supplementalGroups, privileged. On Olares **12.7+**, install with **intel** or **amd** accelerator instead — this env is ignored when gpu-inject is active.
-      Host must expose /dev/dri. Set VIDEO_GID and RENDER_GID from the host if not on Olares One.
-  - envName: VIDEO_GID
-    type: int
-    default: '44'
-    required: false
-    editable: true
-    applyOnChange: true
-    description: |
-      **Olares 12.6 legacy path only** (when ENABLE_HW_ACCEL=true). GID of the host "video" group for /dev/dri/card*. Run `getent group video` on the host.
-  - envName: RENDER_GID
-    type: int
-    default: '994'
-    required: false
-    editable: true
-    applyOnChange: true
-    description: |
-      **Olares 12.6 legacy path only** (when ENABLE_HW_ACCEL=true). GID of the host "render" group for /dev/dri/renderD*. Run `getent group render` on the host.
+    version: '>=1.12.7-0'
 entrances:
 - name: jellyfin-svc
   port: 8096
