@@ -60,6 +60,19 @@ spec:
               readOnly: true
             - name: plugin-daemon-claim0
               mountPath: /new-data
+        - name: prepare-plugin-storage
+          image: "docker.io/beclab/busybox:1.37"
+          command: ["sh", "-ec"]
+          args:
+            - |
+              # The upstream daemon runs as UID 1001. Preserve existing plugin
+              # files and align the storage root for fresh deployments.
+              chown 1001:1001 /app/storage
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: plugin-daemon-claim0
+              mountPath: /app/storage
       containers:
         - name: plugin-daemon
           envFrom:
@@ -101,7 +114,7 @@ spec:
               value: "http://ssrfproxy:3128"
             - name: HTTPS_PROXY
               value: "http://ssrfproxy:3128"
-          image: "docker.io/beclab/langgenius-dify-plugin-daemon:0.5.3-local"
+          image: "docker.io/langgenius/dify-plugin-daemon:0.6.15-local"
           ports:
             - containerPort: 5002
               protocol: TCP
