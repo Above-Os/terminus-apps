@@ -21,18 +21,52 @@ data:
         shutil.copy2(config, backup / 'config.yaml')
         (backup / 'config.yaml').chmod(0o600)
 
-    plugin = home / 'plugins/advanced-delegation'
-    disabled = (raw.get('plugins') or {}).get('disabled') or []
-    if not plugin.exists() and 'advanced-delegation' not in disabled:
-        # Install an immutable official revision. Preserve existing installations and opt-outs.
-        subprocess.run([
-            '/opt/hermes/bin/hermes', 'plugins', 'install',
-            'NousResearch/hermes-official-plugins#advanced-delegation',
-            '--ref', 'e404b6816b20237a82f6fbe2749b5a576cf75dba',
-            '--enable', '--yes-deps',
-        ], check=True, timeout=360)
-        # The official installer writes plugin state. Reload it before saving Webapp defaults.
-        raw = require_readable_config_before_write(config)
+    managed_plugins = [
+        ('advanced-delegation', 'NousResearch/hermes-official-plugins#advanced-delegation',
+         'e404b6816b20237a82f6fbe2749b5a576cf75dba'),
+    ]
+
+    def seed_optional_plugins():
+        profile = '<unresolved>'
+        stage = 'resolve active profile'
+        try:
+            from hermes_cli.profiles import get_active_profile, resolve_profile_env
+            profile = get_active_profile()
+            plugin_home = Path(resolve_profile_env(profile))
+            stage = 'read plugin settings'
+            settings = raw if plugin_home == home else require_readable_config_before_write(plugin_home / 'config.yaml')
+            disabled = settings.get('plugins', {}).get('disabled', [])
+            if not isinstance(disabled, list):
+                raise ValueError('plugins.disabled must be a list')
+        except (Exception, SystemExit) as exc:
+            print(f'[init-webapp] Skipping optional plugins: profile={profile}, step={stage}, '
+                  f'{type(exc).__name__}: {exc}', flush=True)
+            return
+
+        for name, source, revision in managed_plugins:
+            if name in disabled:
+                continue
+            stage = 'check existing installation'
+            try:
+                # lstat preserves symlinks and distinguishes absence from access errors.
+                try:
+                    (plugin_home / 'plugins' / name).lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    continue
+                stage = 'install plugin'
+                subprocess.run([
+                    '/opt/hermes/bin/hermes', '--profile', profile, 'plugins', 'install',
+                    source, '--ref', revision, '--enable', '--yes-deps',
+                ], check=True, timeout=360)
+            except Exception as exc:
+                print(f'[init-webapp] Skipping optional plugin {name}: profile={profile}, '
+                      f'step={stage}, {type(exc).__name__}: {exc}', flush=True)
+
+    seed_optional_plugins()
+    # Installers can change plugin settings even when a later enable step fails.
+    raw = require_readable_config_before_write(config)
 
     webapp = raw.setdefault('webapp', {})
     webapp.setdefault('enabled', True)
