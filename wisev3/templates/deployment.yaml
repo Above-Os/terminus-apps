@@ -394,33 +394,7 @@ spec:
       port: 80
       targetPort: 3010
 
-{{- /*
-  Wise frontend — merged in from the former standalone `wisev3` app.
 
-  This app is now a single shared app (options.shared + spec.onlyAdmin): the
-  Olares Admin installs it once, the knowledge backend (above) and this Wise
-  frontend both run once in `{{ .Release.Namespace }}`, and the platform
-  registers the `wiseclient` entrance for every user (pointing at the same
-  shared frontend).
-
-  Files / download access: the frontend proxies its files (/api, /upload,
-  /videos) and download (/api/download|user|system|url) requests to the in-Pod
-  `provider-inject` openresty sidecar (see wise-nginx-configmap.yaml), which
-  forwards to the os-framework system providers:
-      files    -> files-provider-svc.os-framework:28080    (backend:files-provider)
-      download -> download-provider-svc.os-framework:28080  (backend:download-provider)
-  Per-user identity: this is a shared app, so presenting the app's own
-  `wise-provider` SA would collapse every caller to the install owner (Admin).
-  Instead the sidecar MINTS a per-user `user-backend` token from the
-  gateway-stamped X-Bfl-User and presents that, so the provider-proxy resolves
-  the real end user. wise-provider only needs `create serviceaccounts/token`;
-  the minted token's authorization comes from the per-user bindings in
-  system-server permission.yaml. SA and roles live in rbac.yaml.
-
-  Backend connectivity: the Wise frontend image (TermiPass
-  docker/wise/wise.conf) hardcodes the knowledge upstream FQDN; that wiring
-  is intentionally left as-is for now.
-*/ -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
