@@ -1,4 +1,5 @@
-{{- /* Speaker-attributed ASR engine (audio-diarasr): NVIDIA amd64 only, capabilities stt and diar from one generation. */ -}}
+{{- /* Speaker-attributed ASR engine, capabilities stt and diar from one generation. amd64 only:
+       NVIDIA runs audio-diarasr (CUDA), Intel Arc runs audio-diarasr-xpu (PyTorch XPU). */ -}}
 {{- $oe := .Values.olaresEnv | default dict -}}
 {{- $modelName := $oe.MODEL_NAME | default "" -}}
 {{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
@@ -17,7 +18,13 @@
 {{- $memLimit := trim ($oe.MEMORY_LIMIT | default "32Gi") -}}
 {{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "12Gi") -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" $gpuRaw -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-diarasr:v1.1.42" -}}
+{{- $gpuType := .Values.gpu | default "" -}}
+{{- if not $gpuType -}}
+{{- if .Values.GPU -}}{{- $gpuType = .Values.GPU.Type | default "nvidia" -}}{{- else -}}{{- $gpuType = "nvidia" -}}{{- end -}}
+{{- end -}}
+{{- $isIntel := eq $gpuType "intel-gpu" -}}
+{{- /* ENGINE_IMAGE has no manifest default: filling one would pin both modes to the same image. */ -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-diarasr-xpu:v1.1.43" "docker.io/beclab/audio-diarasr:v1.1.42" $isIntel) -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "--max-new-tokens 65536") -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
@@ -66,6 +73,20 @@ spec:
           configMap:
             name: audio-wrappers
             defaultMode: 0555
+{{- if $isIntel }}
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: drm
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+{{- end }}
       containers:
         - name: {{ $cname }}
           image: "{{ $engineImage }}"
@@ -89,7 +110,7 @@ spec:
             - name: WRAPPER_COMMON
               value: /run/llm-init/wrappers/common.sh
             - name: OLARES_GPU_MODE
-              value: nvidia
+              value: "{{ $gpuType }}"
             - name: ENGINE_MAX_CONCURRENCY
               value: "1"
 {{- if $engineArgs }}
@@ -135,15 +156,27 @@ spec:
             - name: wrappers
               mountPath: /wrappers
               readOnly: true
+{{- if $isIntel }}
+            - name: dri
+              mountPath: /dev/dri
+            - name: drm
+              mountPath: /sys/class/drm
+            - name: dshm
+              mountPath: /dev/shm
+{{- end }}
           resources:
             requests:
               cpu: "{{ $cpuRequest }}"
               memory: "{{ $memRequest }}"
+{{- if not $isIntel }}
               nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
             limits:
               cpu: "{{ $cpuLimit }}"
               memory: "{{ $memLimit }}"
+{{- if not $isIntel }}
               nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
