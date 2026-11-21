@@ -1,0 +1,162 @@
+{{- /* Speaker-attributed ASR engine (audio-diarasr): NVIDIA amd64 only, capabilities stt and diar from one generation. */ -}}
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $supportsKeys := list -}}
+{{- range $tok := splitList "," ($oe.MODEL_SUPPORTS | default "stt,diar") -}}
+{{- $tok = trim $tok -}}
+{{- if $tok -}}
+{{- $supportsKeys = append $supportsKeys (ternary $tok (printf "supports_%s" $tok) (hasPrefix "supports_" $tok)) -}}
+{{- end -}}
+{{- end -}}
+{{- $supportsRaw := join "," $supportsKeys -}}
+{{- $enginePort := int ($oe.ENGINE_PORT | default "8000") -}}
+{{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
+{{- $memRequest := trim ($oe.MEMORY_REQUEST | default "4Gi") -}}
+{{- $cpuLimit := trim ($oe.CPU_LIMIT | default "6") -}}
+{{- $memLimit := trim ($oe.MEMORY_LIMIT | default "32Gi") -}}
+{{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "12Gi") -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" $gpuRaw -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-diarasr:v1.1.42" -}}
+{{- $engineArgs := trim ($oe.ENGINE_ARGS | default "--max-new-tokens 65536") -}}
+{{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
+{{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}
+{{- $hfEndpoint := $oe.HF_ENDPOINT | default "" -}}
+{{- $hfToken := $oe.HF_TOKEN | default "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels:
+    io.kompose.service: audio-engine
+  annotations:
+    audio.bytetrade.io/model: "{{ $modelName }}"
+    audio.bytetrade.io/supports: "{{ $supportsRaw }}"
+    applications.app.bytetrade.io/gpu-inject: "{{ $cname }}"
+spec:
+  replicas: {{ .Values.workloads.audiomossdiarizev3.replicaCount }}
+  selector:
+    matchLabels:
+      io.kompose.service: audio-engine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        io.kompose.network/chrome-default: "true"
+        io.kompose.service: audio-engine
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: "{{ .Values.userspace.appCommon }}/huggingface"
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: "{{ .Values.userspace.appData }}/data"
+            type: DirectoryOrCreate
+        - name: run-state
+          hostPath:
+            path: "{{ printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}"
+            type: DirectoryOrCreate
+        - name: wrappers
+          configMap:
+            name: audio-wrappers
+            defaultMode: 0555
+      containers:
+        - name: {{ $cname }}
+          image: "{{ $engineImage }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/engine.sh"]
+          env:
+            - name: RUN_STATE_GENERATION
+              value: {{ include "audio.runStateGeneration" . | quote }}
+            - name: ENGINE_KIND
+              value: audio
+            - name: MODEL_NAME
+              value: "{{ $modelName }}"
+            - name: MODEL_SOURCE
+              value: "{{ $modelSource }}"
+            - name: MODEL_SUPPORTS
+              value: "{{ $supportsRaw }}"
+            - name: ENGINE_PORT
+              value: "{{ $enginePort }}"
+            - name: LOG_LEVEL
+              value: "{{ $oe.LOG_LEVEL | default "info" }}"
+            - name: WRAPPER_COMMON
+              value: /run/llm-init/wrappers/common.sh
+            - name: OLARES_GPU_MODE
+              value: nvidia
+            - name: ENGINE_MAX_CONCURRENCY
+              value: "1"
+{{- if $engineArgs }}
+            - name: ENGINE_ARGS
+              value: "{{ $engineArgs }}"
+{{- end }}
+            - name: REQUIRED_GPU_MEMORY
+              value: "{{ $gpuRaw }}"
+            - name: HF_HOME
+              value: /cache/hf
+            - name: HF_HUB_CACHE
+              value: /cache/hf/hub
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /cache/hf/hub
+{{- if $hfEndpoint }}
+            - name: HF_ENDPOINT
+              value: "{{ $hfEndpoint }}"
+{{- end }}
+{{- if $hfToken }}
+            - name: HF_TOKEN
+              value: "{{ $hfToken }}"
+{{- end }}
+            - name: TZ
+              value: Etc/UTC
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: GPU_CORE_UTILIZATION_POLICY
+              value: "{{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" }}"
+          ports:
+            - name: http
+              containerPort: {{ $enginePort }}
+          # No readinessProbe: Ready at start so the app runs while the model downloads; llm-init gates /v1/*.
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /cache/hf/hub
+            - name: data
+              mountPath: /tmp
+            - name: run-state
+              mountPath: /run/llm-init
+              readOnly: true
+            - name: wrappers
+              mountPath: /wrappers
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ $cpuRequest }}"
+              memory: "{{ $memRequest }}"
+              nvidia.com/gpumem: {{ $gpuMiB }}
+            limits:
+              cpu: "{{ $cpuLimit }}"
+              memory: "{{ $memLimit }}"
+              nvidia.com/gpumem: {{ $gpuMiB }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+spec:
+  selector:
+    io.kompose.service: audio-engine
+  ports:
+    - name: http
+      port: {{ $enginePort }}
+      targetPort: {{ $enginePort }}
+  type: ClusterIP
