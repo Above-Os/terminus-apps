@@ -3,18 +3,19 @@ metadata:
   description: Une plateforme open source pour une collaboration sécurisée tout au long du cycle de vie du développement logiciel
 spec:
   upgradeDescription: |
-    Mettre à niveau Mattermost de 9.9.1 vers la Team Edition officielle 11.8.2.
+    Mettre à niveau Mattermost Team Edition de 11.8.2 vers 11.11.1.
 
     **Application**
-    - Passer à `mattermost/mattermost-team-edition:11.8.2`
-    - Configurer PostgreSQL et l'URL du site via les variables d'environnement `MM_*`
-    - Augmenter la limite mémoire à 4 GiB (Mattermost 11 nécessite PostgreSQL 14+)
+    - Image officielle `mattermost/mattermost-team-edition:11.11.1` (linux/amd64)
+    - Le démarrage applique les migrations de base de données de v11.9 à v11.11, y compris l'enum de type de canal et les index recap de v11.11. L'amont n'attend pas d'interruption de la base.
+    - PostgreSQL 14+ est inchangé. Ce chart utilise l'image Team Edition standard, pas le build FIPS.
+    - Depuis v11.9, les listes d'URI de redirection OAuth Dynamic Client Registration sont comparées par composant d'URL. Un motif qui doit correspondre à une query string nécessite une entrée `?**` séparée. Ce chart ne configure pas DCR.
 
-    **Correctifs du Chart**
-    - Exécuter en tant qu'uid 1000 ; le conteneur d'init corrige les permissions du volume
-    - Désactiver la journalisation fichier ; monter le répertoire des plugins serveur pour corriger les erreurs de permissions
+    **Chart**
+    - L'image du Deployment est fixée afin qu'une mise à niveau remplace 11.8.2 lorsque les values enregistrées omettent `image` ou conservent l'ancien tag.
 
-    Notes de version : https://github.com/mattermost/mattermost/releases/tag/v11.8.2
+    Notes de version : https://github.com/mattermost/mattermost/releases/tag/v11.11.1
+    Notes de mise à niveau : https://docs.mattermost.com/administration-guide/upgrade/important-upgrade-notes
   fullDescription: |
     Mattermost est une plateforme open source pour une collaboration sécurisée tout au long du cycle de vie du développement logiciel. Elle vous offre une collaboration d'entreprise sécurisée avec un contrôle total sur vos données.
 
