@@ -3,11 +3,11 @@ olaresManifest.type: app
 apiVersion: 'v3'
 metadata:
   name: audiomossdiarizev3
-  icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+  icon: https://cdn.olares.com/images/2026/11/bb13486a3d77a90b644538da11d5b473.png
   description: A speech recognition model that transcribes whole meetings and labels each speaker
   appid: audiomossdiarizev3
   title: MOSS-Transcribe-Diarize
-  version: '1.0.0'
+  version: '1.0.1'
   categories:
     - AI
     - models
@@ -23,14 +23,14 @@ sharedEntrances:
     title: MOSS-Transcribe-Diarize API
     invisible: true
     authLevel: internal
-    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    icon: https://cdn.olares.com/images/2026/11/bb13486a3d77a90b644538da11d5b473.png
 # Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
 entrances:
   - name: audiomossdiarizev3
     port: 8090
     host: download-svc
     title: MOSS-Transcribe-Diarize
-    icon: https://app.cdn.olares.com/appstore/default/defaulticon.webp
+    icon: https://cdn.olares.com/images/2026/11/bb13486a3d77a90b644538da11d5b473.png
     openMethod: window
     authLevel: internal
 workloadReplicas:
@@ -38,6 +38,7 @@ workloadReplicas:
   llminit: 1
 spec:
   upgradeDescription: |
+    v1.0.1: Run on Intel Arc GPUs; new icon.
     v1.0.0: First release.
   onlyAdmin: true
   versionName: 'OpenMOSS-Team/MOSS-Transcribe-Diarize'
@@ -49,7 +50,7 @@ spec:
     - Hear a complete recording at once rather than in separate pieces.
     - Serve both speech-to-text and speaker diarization to compatible Olares applications from the same pass.
 
-    A compatible NVIDIA GPU with at least `12Gi` of GPU memory is required.
+    Requires a compatible NVIDIA GPU with at least `12Gi` of GPU memory, or an Intel Arc discrete GPU. Intel integrated graphics are not supported.
 
   developer: OpenMOSS
   website: https://github.com/OpenMOSS
@@ -66,6 +67,16 @@ spec:
   accelerator:
     # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim).
     - mode: nvidia
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 200Gi
+      limitedMemory: "36Gi"
+      requiredMemory: "4352Mi"
+      requiredGPUMemory: "12Gi"
+      limitedGPUMemory: "12Gi"
+    # Intel Arc only (no iGPU mode): same envelope as nvidia. The GPU-memory field is for the installer; the pod only bind-mounts /dev/dri.
+    - mode: intel-gpu
       limitedCpu: "7"
       requiredCpu: "700m"
       requiredDisk: 50Mi
@@ -176,8 +187,10 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    default: "docker.io/beclab/audio-diarasr:v1.1.42"
-    description: "Engine image."
+    # No default: nvidia → audio-diarasr:v1.1.42; intel-gpu → audio-diarasr-xpu:v1.1.43.
+    description: "Engine image override. Left empty, nvidia uses
+      docker.io/beclab/audio-diarasr:v1.1.42 and intel-gpu uses
+      docker.io/beclab/audio-diarasr-xpu:v1.1.43. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
