@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: markitdown
+  namespace: '{{ .Release.Namespace }}'
+spec:
+  replicas: {{ .Values.workloads.markitdown.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: markitdown
+  template:
+    metadata:
+      labels:
+        app: markitdown
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+        - name: init-permissions
+          image: beclab/aboveos-busybox:1.37.0
+          command: [sh, -ec, 'chown 1000:1000 /workdir']
+          securityContext:
+            runAsUser: 0
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          volumeMounts:
+            - name: documents
+              mountPath: /workdir
+      containers:
+        - name: markitdown
+          image: harveyff/markitdown-mcp:0.1.9-olares.6
+          imagePullPolicy: IfNotPresent
+          env:
+            # Per-user Router entrance: Olares mesh authenticates this app.
+            - name: ROUTER_BASE_URL
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+            - name: ROUTER_OCR_MODEL
+              value: default-ocr
+            - name: OCR_TIMEOUT_SECONDS
+              value: '180'
+          ports:
+            - name: mcp
+              containerPort: 3001
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: '2', memory: 2Gi}
+          readinessProbe:
+            tcpSocket: {port: mcp}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          startupProbe:
+            tcpSocket: {port: mcp}
+            failureThreshold: 30
+            periodSeconds: 5
+          volumeMounts:
+            - name: documents
+              mountPath: /workdir
+              readOnly: true
+      volumes:
+        - name: documents
+          hostPath:
+            path: '{{ .Values.userspace.userData }}/Documents/MarkItDown'
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: markitdown
+  namespace: '{{ .Release.Namespace }}'
+spec:
+  selector:
+    app: markitdown
+  ports:
+    - name: mcp
+      port: 3001
+      targetPort: mcp
