@@ -79,6 +79,20 @@ spec:
           volumeMounts:
             - name: plugin-daemon-claim0
               mountPath: /app/storage
+        - name: wait-for-redis
+          image: "docker.io/beclab/redis:7.0.4"
+          command: ["sh", "-ec"]
+          args:
+            - |
+              until [ "$(timeout 3 redis-cli -h redis ping 2>/dev/null)" = PONG ]; do
+                sleep 2
+              done
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: dify-api-secrets
+                  key: REDIS_PASSWORD
       containers:
         - name: plugin-daemon
           envFrom:
