@@ -16,7 +16,9 @@
 {{- $cpuRequest := trim ($oe.CPU_REQUEST | default "500m") -}}
 {{- $memRequest := trim ($oe.MEMORY_REQUEST | default "5Gi") -}}
 {{- $cpuLimit := trim ($oe.CPU_LIMIT | default "6") -}}
-{{- $memLimit := trim ($oe.MEMORY_LIMIT | default "12Gi") -}}
+{{- /* Under HAMi time slicing the driver can move the whole GPU quota into host memory charged
+       to this container, so the limit has to cover the quota plus the ~6Gi the processes use. */ -}}
+{{- $memLimit := trim ($oe.MEMORY_LIMIT | default "24Gi") -}}
 {{- $gpuRaw := trim ($oe.REQUIRED_GPU_MEMORY | default "16Gi") -}}
 {{- $gpuMiB := include "llmbase.gpuMiB" $gpuRaw -}}
 {{- $gpuType := .Values.gpu | default "" -}}
@@ -25,7 +27,7 @@
 {{- end -}}
 {{- $isIntel := eq $gpuType "intel-gpu" -}}
 {{- /* ENGINE_IMAGE has no manifest default: filling one would pin both modes to the same image. */ -}}
-{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-diarasr-sgl-xpu:v1.1.44" "docker.io/beclab/audio-diarasr-sgl:v1.1.45" $isIntel) -}}
+{{- $engineImage := $oe.ENGINE_IMAGE | default (ternary "docker.io/beclab/audio-diarasr-sgl-xpu:v1.1.44" "docker.io/beclab/audio-diarasr-sgl:v1.1.47" $isIntel) -}}
 {{- $engineArgs := trim ($oe.ENGINE_ARGS | default "--max-audio-seconds 1800") -}}
 {{- $modelSan := regexReplaceAll "[^a-z0-9]+" (lower $modelName) "-" | trimAll "-" -}}
 {{- $cname := printf "audio-%s" $modelSan | trunc 63 | trimSuffix "-" -}}

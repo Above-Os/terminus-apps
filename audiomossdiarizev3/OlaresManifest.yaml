@@ -7,7 +7,7 @@ metadata:
   description: A speech recognition model that transcribes whole meetings and labels each speaker
   appid: audiomossdiarizev3
   title: MOSS-Transcribe-Diarize
-  version: '1.0.3'
+  version: '1.0.4'
   categories:
     - AI
     - models
@@ -38,6 +38,7 @@ workloadReplicas:
   llminit: 1
 spec:
   upgradeDescription: |
+    v1.0.4: Fix transcription hanging after the engine ran out of memory on a GPU shared with other apps; the engine now restarts on its own.
     v1.0.3: Fix the engine restarting over and over on NVIDIA GPUs shared by time slicing.
     v1.0.2: Run on SGLang-Omni, about 7x faster on NVIDIA with DFlash2 speculative decoding and about 4x faster on Intel Arc. Recordings up to 30 minutes; NVIDIA now needs 16Gi of GPU memory.
     v1.0.1: Run on Intel Arc GPUs; new icon.
@@ -73,7 +74,7 @@ spec:
       requiredCpu: "700m"
       requiredDisk: 50Mi
       limitedDisk: 200Gi
-      limitedMemory: "16Gi"
+      limitedMemory: "28Gi"
       requiredMemory: "5376Mi"
       requiredGPUMemory: "16Gi"
       limitedGPUMemory: "16Gi"
@@ -83,7 +84,7 @@ spec:
       requiredCpu: "700m"
       requiredDisk: 50Mi
       limitedDisk: 200Gi
-      limitedMemory: "16Gi"
+      limitedMemory: "28Gi"
       requiredMemory: "5376Mi"
       requiredGPUMemory: "16Gi"
       limitedGPUMemory: "16Gi"
@@ -169,7 +170,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "12Gi"
+    default: "24Gi"
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -190,9 +191,9 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    # No default: nvidia → audio-diarasr-sgl:v1.1.45; intel-gpu → audio-diarasr-sgl-xpu:v1.1.44.
+    # No default: nvidia → audio-diarasr-sgl:v1.1.47; intel-gpu → audio-diarasr-sgl-xpu:v1.1.44.
     description: "Engine image override. Left empty, nvidia uses
-      docker.io/beclab/audio-diarasr-sgl:v1.1.45 and intel-gpu uses
+      docker.io/beclab/audio-diarasr-sgl:v1.1.47 and intel-gpu uses
       docker.io/beclab/audio-diarasr-sgl-xpu:v1.1.44. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
