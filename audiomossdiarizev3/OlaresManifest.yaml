@@ -7,7 +7,7 @@ metadata:
   description: A speech recognition model that transcribes whole meetings and labels each speaker
   appid: audiomossdiarizev3
   title: MOSS-Transcribe-Diarize
-  version: '1.0.1'
+  version: '1.0.2'
   categories:
     - AI
     - models
@@ -38,6 +38,7 @@ workloadReplicas:
   llminit: 1
 spec:
   upgradeDescription: |
+    v1.0.2: Run on SGLang-Omni, about 7x faster on NVIDIA with DFlash2 speculative decoding and about 4x faster on Intel Arc. Recordings up to 30 minutes; NVIDIA now needs 16Gi of GPU memory.
     v1.0.1: Run on Intel Arc GPUs; new icon.
     v1.0.0: First release.
   onlyAdmin: true
@@ -50,7 +51,7 @@ spec:
     - Hear a complete recording at once rather than in separate pieces.
     - Serve both speech-to-text and speaker diarization to compatible Olares applications from the same pass.
 
-    Requires a compatible NVIDIA GPU with at least `12Gi` of GPU memory, or an Intel Arc discrete GPU. Intel integrated graphics are not supported.
+    Requires a compatible NVIDIA GPU with at least `16Gi` of GPU memory, or an Intel Arc discrete GPU. Intel integrated graphics are not supported.
 
   developer: OpenMOSS
   website: https://github.com/OpenMOSS
@@ -71,20 +72,20 @@ spec:
       requiredCpu: "700m"
       requiredDisk: 50Mi
       limitedDisk: 200Gi
-      limitedMemory: "36Gi"
-      requiredMemory: "4352Mi"
-      requiredGPUMemory: "12Gi"
-      limitedGPUMemory: "12Gi"
+      limitedMemory: "16Gi"
+      requiredMemory: "5376Mi"
+      requiredGPUMemory: "16Gi"
+      limitedGPUMemory: "16Gi"
     # Intel Arc only (no iGPU mode): same envelope as nvidia. The GPU-memory field is for the installer; the pod only bind-mounts /dev/dri.
     - mode: intel-gpu
       limitedCpu: "7"
       requiredCpu: "700m"
       requiredDisk: 50Mi
       limitedDisk: 200Gi
-      limitedMemory: "36Gi"
-      requiredMemory: "4352Mi"
-      requiredGPUMemory: "12Gi"
-      limitedGPUMemory: "12Gi"
+      limitedMemory: "16Gi"
+      requiredMemory: "5376Mi"
+      requiredGPUMemory: "16Gi"
+      limitedGPUMemory: "16Gi"
 
   supportArch:
     - amd64
@@ -107,8 +108,9 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "hf://OpenMOSS-Team/MOSS-Transcribe-Diarize"
-    description: "HuggingFace source llm-init downloads into the shared cache."
+    default: "hf://OpenMOSS-Team/MOSS-Transcribe-Diarize,hf://wilsonzheng0327/MOSS-Transcribe-Diarize-dflash2 --revision 201410d4b9c89e86d97af160658766206959ad40"
+    description: "HuggingFace sources llm-init downloads into the shared cache: the model, then the
+      DFlash2 draft NVIDIA uses for speculative decoding (Intel Arc ignores it)."
     regex: "^hf://"
   - envName: MODEL_NAME
     required: true
@@ -141,7 +143,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "12Gi"
+    default: "16Gi"
     description: "GPU memory required for this model."
   - envName: CPU_REQUEST
     required: true
@@ -154,7 +156,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "4Gi"
+    default: "5Gi"
   - envName: CPU_LIMIT
     required: true
     type: string
@@ -166,7 +168,7 @@ envs:
     type: string
     editable: false
     applyOnChange: false
-    default: "32Gi"
+    default: "12Gi"
   - envName: LOG_LEVEL
     required: false
     type: string
@@ -187,19 +189,19 @@ envs:
     type: string
     editable: true
     applyOnChange: true
-    # No default: nvidia → audio-diarasr:v1.1.42; intel-gpu → audio-diarasr-xpu:v1.1.43.
+    # No default: nvidia → audio-diarasr-sgl:v1.1.44; intel-gpu → audio-diarasr-sgl-xpu:v1.1.44.
     description: "Engine image override. Left empty, nvidia uses
-      docker.io/beclab/audio-diarasr:v1.1.42 and intel-gpu uses
-      docker.io/beclab/audio-diarasr-xpu:v1.1.43. Filling this REPLACES that choice for every mode."
+      docker.io/beclab/audio-diarasr-sgl:v1.1.44 and intel-gpu uses
+      docker.io/beclab/audio-diarasr-sgl-xpu:v1.1.44. Filling this REPLACES that choice for every mode."
   - envName: ENGINE_ARGS
     required: false
     type: string
     editable: true
     applyOnChange: true
-    default: "--max-new-tokens 65536"
-    description: "Engine flags. 65536 new tokens per recording (--max-new-tokens) covers a
-      busy meeting of an hour and a half; the engine's own 32768 truncates sessions of 45
-      minutes and more. Weights load in bfloat16 unless --dtype says otherwise."
+    default: "--max-audio-seconds 1800"
+    description: "Engine flags. --max-audio-seconds sizes the KV cache for the longest recording
+      the engine accepts; longer uploads are refused, and a larger value needs more GPU memory
+      than the 16Gi above. Flags the wrapper does not know go to sgl-omni serve."
   - envName: HF_ENDPOINT
     required: false
     applyOnChange: true
