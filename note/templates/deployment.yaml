@@ -27,14 +27,6 @@ spec:
         app: note
       annotations:
         config.linkerd.io/skip-outbound-ports: "5432,4222"
-        {{- if .Values.capture.bluetooth.enabled }}
-        # Pairing calls BlueZ over the host's system bus, which the runtime's
-        # default AppArmor profile forbids a container (hzydemo01: DENIED
-        # dbus_method_call). Unconfined lifts that one confinement; the
-        # container stays unprivileged. The annotation, not the securityContext
-        # field, so it holds on clusters older than Kubernetes 1.30.
-        container.apparmor.security.beta.kubernetes.io/note: unconfined
-        {{- end }}
     spec:
       securityContext:
         runAsUser: 1000
@@ -97,12 +89,6 @@ spec:
             {{- if .Values.capture.bluetooth.enabled }}
             - name: NOTE_CAPTURE_PULSE_SERVER
               value: unix:/run/host-pulse/native
-            - name: NOTE_CAPTURE_SYSTEM_BUS
-              value: unix:path=/run/host-dbus/system_bus_socket
-            # Pairing goes to the host's Bluetooth helper while its socket is
-            # there; the system bus above is for a host an older Note set up.
-            - name: NOTE_CAPTURE_BT_HELPER
-              value: /run/host-bt/helper.sock
             {{- end }}
             {{- if .Values.devTools.perf.enabled }}
             # Development performance records: on only in a preview
@@ -221,14 +207,6 @@ spec:
             - name: pulse-relay
               mountPath: /run/host-pulse
               readOnly: true
-            - name: host-dbus
-              mountPath: /run/host-dbus
-              # Connecting to the bus's socket needs no write to the mount.
-              readOnly: true
-            - name: host-bt
-              mountPath: /run/host-bt
-              # Connecting needs no write to the mount either.
-              readOnly: true
             {{- end }}
         {{- if .Values.capture.bluetooth.enabled }}
         # Carries Note's pulse connections to the host's sound server. Note
@@ -309,14 +287,14 @@ spec:
         # Where the relay listens and Note connects.
         - name: pulse-relay
           emptyDir: {}
-        # The host's audio setup links /run/olares-audio/pulse to the pulse
-        # directory of whichever user runs the sound server, so one package
-        # fits every box; the relay reads the link and connects under
-        # /run/user. Without the link it takes the one pulse socket under
-        # /run/user. The directories, not the socket: the server recreates the
-        # socket when the user's session restarts, and a mounted file would go
-        # stale. OrCreate, so a box not set up yet still starts Note; it just
-        # lists no Bluetooth devices until it is.
+        # A host can link /run/olares-audio/pulse to the pulse directory of
+        # whichever user runs the sound server, so one package fits every box;
+        # the relay reads the link and connects under /run/user. Without the
+        # link it takes the one pulse socket under /run/user. The directories,
+        # not the socket: the server recreates the socket when the user's
+        # session restarts, and a mounted file would go stale. OrCreate, so a
+        # box without a sound server still starts Note; it just lists no
+        # Bluetooth devices.
         - name: host-olares-audio
           hostPath:
             path: /run/olares-audio
@@ -324,22 +302,6 @@ spec:
         - name: host-run-user
           hostPath:
             path: /run/user
-            type: DirectoryOrCreate
-        # The system bus, for pairing headsets through the host's BlueZ from
-        # the record dialog. The directory, for the same reason as above.
-        # OrCreate as well, now that Bluetooth is on by default: a host with no
-        # system bus still starts Note, which then finds no adapter.
-        - name: host-dbus
-          hostPath:
-            path: /run/dbus
-            type: DirectoryOrCreate
-        # The host's Bluetooth helper (olares-note-bt.socket, installed by the
-        # host audio job). The directory, as above: systemd makes the socket
-        # again when the unit restarts. OrCreate, so Note starts before the
-        # job has run; it asks again at each call.
-        - name: host-bt
-          hostPath:
-            path: /run/olares-audio/bt
             type: DirectoryOrCreate
         {{- end }}
 ---
