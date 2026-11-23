@@ -38,7 +38,7 @@ data:
     }
 
     async function missing(db, ids) {
-      return db`SELECT a.id, (a.type = 'VIDEO' AND NOT EXISTS (
+      return db`SELECT a.id, ((a.type = 'VIDEO' OR lower(a."originalFileName") LIKE '%.gif') AND NOT EXISTS (
           SELECT 1 FROM asset_video v WHERE v."assetId" = a.id)) AS "needsVideoMetadata"
         FROM asset a WHERE a.id IN ${db(ids)}
         AND a."deletedAt" IS NULL AND a.type IN ('IMAGE','VIDEO')
@@ -72,7 +72,7 @@ data:
         const deferred = missingRows.filter(row => row.needsVideoMetadata);
         if (deferred.length) {
           state.unresolved += deferred.length;
-          console.warn('Refresh video metadata before regenerating thumbnails:', deferred.map(row => row.id).join(','));
+          console.warn('Refresh video or GIF metadata before regenerating thumbnails:', deferred.map(row => row.id).join(','));
         }
         const candidates = missingRows.filter(row => !row.needsVideoMetadata);
         for (let i = 0; i < candidates.length; i += batchSize) {
