@@ -231,34 +231,54 @@ status:
   loadBalancer: {}
 
 ---
-apiVersion: batch/v1
-kind: CronJob
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: fireflyiii-cron
   namespace: {{ .Release.Namespace }}
   labels:
     app: fireflyiii-cron
 spec:
-  schedule: "0 3 * * *"
-  jobTemplate:
+  replicas: {{ .Values.workloads.fireflyiiicron.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: fireflyiii-cron
+  template:
+    metadata:
+      labels:
+        app: fireflyiii-cron
     spec:
-      template:
-        metadata:
-          labels:
-            app: fireflyiii-cron
-        spec:
-          containers:
-            - name: cron
-              image: alpine
-              command: [
-                "sh",
-                "-c",
-                "wget -qO- http://fireflyiii:8080/api/v1/cron/$STATIC_CRON_TOKEN"
-              ]
-              env:
-                - name: STATIC_CRON_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: fireflyiii-secrets
-                      key: STATIC_CRON_TOKEN
-          restartPolicy: OnFailure
+      containers:
+        - name: cron
+          image: alpine
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - sh
+            - -ec
+            - |
+              case "$TZ" in
+                UTC) ;;
+                *) [ -f "/usr/share/zoneinfo/$TZ" ] || apk add --no-cache tzdata
+                   test -f "/usr/share/zoneinfo/$TZ" ;;
+              esac
+              mkdir -p /tmp/firefly-crontabs
+              cat > /tmp/firefly-crontabs/root <<'CRONTAB'
+              0 3 * * * wget -qO /dev/null "http://fireflyiii:{{ .Values.port | default 3000 }}/api/v1/cron/$STATIC_CRON_TOKEN" || echo "Firefly III cron request failed" >&2
+              CRONTAB
+              exec crond -f -L /dev/stderr -c /tmp/firefly-crontabs
+          env:
+            - name: TZ
+              value: {{ (default dict .Values.olaresEnv).APP_TIMEZONE | default "UTC" | quote }}
+            - name: STATIC_CRON_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fireflyiii-secrets
+                  key: STATIC_CRON_TOKEN
