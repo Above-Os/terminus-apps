@@ -1023,18 +1023,47 @@ class Studio:
         if not text:
             return self.err(400, "bad_request", "A prompt is required")
         mode, task, flow = b.get("mode") or "", b.get("task") or "generate", b.get("flow") or ""
-        system = llm.system_prompt(mode, self.kind, self.profile.get("promptTemplate"), task, flow, self.profile.get("prompts"),
-                                   text)
+        template, prompts = self.profile.get("promptTemplate"), self.profile.get("prompts")
+        if mode not in llm.modes(self.kind, template, prompts):
+            return self.err(400, "bad_mode", "Unknown rewrite mode")
+        model_info = self.llm.info()
+        attach = mode != "translate_en" and (not model_info or model_info["vision"])
+        assets, images = await self.rewrite_assets(b.get("assets") or [], attach, *self.viewer(request))
+        system = llm.system_prompt(mode, self.kind, template, task, flow, prompts, text, has_image=bool(images))
         if not system:
             return self.err(400, "bad_mode", "Unknown rewrite mode")
-        assets, images = await self.rewrite_assets(b.get("assets") or [], mode != "translate_en", *self.viewer(request))
-        user = llm.job_text(text, self.kind, flow, b.get("duration"), b.get("aspect") or "", task, assets,
-                            mode != "translate_en" and mode.endswith("_en"))
+        image_edit = self.kind == "image" and task == "edit" and mode != "translate_en"
+        fallback_system = None
+        if image_edit and images:
+            fallback_system = llm.system_prompt(mode, self.kind, template, task, flow, prompts, text, has_image=False)
+        if (self.kind == "video" and mode == "translate_en") or (image_edit and not images):
+            user = text
+        else:
+            user = llm.job_text(text, self.kind, flow, b.get("duration"), b.get("aspect") or "", task, assets, mode=mode)
         t0 = time.time()
         try:
-            fields = llm.sampling(mode, self.kind, task, self.llm.model, self.llm.effort, self.llm.info())
+            sampling_task = "generate" if image_edit and not images else task
+            fields = llm.sampling(mode, self.kind, sampling_task, self.llm.model, self.llm.effort, model_info)
             labels = {a["label"]: a["token"] for a in assets if a.get("label")}
-            out = await self.llm.rewrite(text, system, user, images, fields, labels=labels)
+            out = await self.llm.rewrite(text, system, user, images, fields, labels=labels, kind=self.kind,
+                                         fallback_system=fallback_system)
+            if self.kind == "image" and llm.image_template_echo(text, out):
+                log.info("studio: rewrite %s/%s echoed the image template", mode, task)
+                return web.json_response({"prompt": text})
+            if llm.rewrite_language_mismatch(self.kind, mode, text, out):
+                correction = llm.language_correction_prompt(self.kind, mode, text)
+                if correction:
+                    correction_fields = llm.sampling("translate_en", self.kind, task, self.llm.model, info=self.llm.info())
+                    try:
+                        out = await self.llm.rewrite(out, correction, fields=correction_fields, timeout=45, kind=self.kind)
+                    except LlmError as e:
+                        log.info("studio: rewrite language correction failed: %s", e.code)
+                if llm.rewrite_language_mismatch(self.kind, mode, text, out):
+                    raise LlmError("language_changed", "The AI output language did not match the selected mode", 422)
+            if self.kind == "image" and (llm.image_template_echo(text, out) or
+                                         not llm.keeps_image_subject(text, out, mode, task)):
+                log.info("studio: rewrite %s/%s did not preserve the image prompt", mode, task)
+                out = text
         except LlmError as e:
             log.info("studio: rewrite %s/%s failed after %.1fs: %s", mode, flow or task, time.time() - t0, e.code)
             return self.err(e.status, e.code, e.message)
