@@ -234,7 +234,7 @@ status:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fireflyiii-cron
+  name: fireflyiiicron
   namespace: {{ .Release.Namespace }}
   labels:
     app: fireflyiii-cron
@@ -252,7 +252,7 @@ spec:
     spec:
       containers:
         - name: cron
-          image: alpine
+          image: docker.io/library/nginx:1.30.8-alpine3.24
           resources:
             requests:
               cpu: 5m
@@ -265,13 +265,25 @@ spec:
             - -ec
             - |
               case "$TZ" in
-                UTC) ;;
-                *) [ -f "/usr/share/zoneinfo/$TZ" ] || apk add --no-cache tzdata
-                   test -f "/usr/share/zoneinfo/$TZ" ;;
+                ""|/*|*..*) TZ=UTC ;;
               esac
+              if [ ! -f "/usr/share/zoneinfo/$TZ" ]; then
+                echo "Unknown scheduler time zone; using UTC" >&2
+                TZ=UTC
+              fi
+              export TZ
               mkdir -p /tmp/firefly-crontabs
+              cat > /tmp/firefly-cron-request <<'REQUEST'
+              status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 120 \
+                "http://fireflyiii:{{ .Values.port | default 3000 }}/api/v1/cron/$STATIC_CRON_TOKEN")
+              result=$?
+              case "$result:$status" in
+                0:2??) exit 0 ;;
+                *) echo "Firefly III cron request failed (curl=$result, HTTP=$status)" >&2; exit 1 ;;
+              esac
+              REQUEST
               cat > /tmp/firefly-crontabs/root <<'CRONTAB'
-              0 3 * * * wget -qO /dev/null "http://fireflyiii:{{ .Values.port | default 3000 }}/api/v1/cron/$STATIC_CRON_TOKEN" || echo "Firefly III cron request failed" >&2
+              0 3 * * * sh /tmp/firefly-cron-request
               CRONTAB
               exec crond -f -L /dev/stderr -c /tmp/firefly-crontabs
           env:
