@@ -148,6 +148,9 @@ class Studio:
         self.variants = {v["id"]: v for v in self.cfg.get("variants") or []}
         self.preferred = os.environ.get("STUDIO_VARIANT") or self.cfg.get("defaultVariant") or ""
         self.device = os.environ.get("STUDIO_DEVICE") or ""
+        # Matches comfy-ext/ts_idle.py: the models are unloaded whenever the queue goes idle.
+        self.unloads_idle = (os.environ.get("CUDA_DEVICE_GPU_MODE_0") == "2"
+                             and os.environ.get("FLOWSTUDIO_TS_IDLE", "1") != "0")
         self.console = (os.environ.get("STUDIO_CONSOLE") or "http://127.0.0.1:8090").rstrip("/")
         self.admin = os.environ.get("STUDIO_ADMIN") or ""
         self.directory = Directory()
@@ -442,8 +445,10 @@ class Studio:
                 shutil.copyfile(p, dst)
         return name
 
-    def estimate(self, flow, items, params, variant):
-        """Seconds from the app hooks when they cover this device, else None."""
+    def estimate(self, flow, items, params, variant, count=1):
+        """Seconds for count such jobs queued together, from the app hooks when
+        they cover this device, else None. hooks.load is added once: the
+        models stay loaded between the jobs and are unloaded after them."""
         if not self.hooks or not hasattr(self.hooks, "estimate"):
             return None
         devices = getattr(self.hooks, "DEVICES", None)
@@ -454,10 +459,15 @@ class Studio:
             s = self.hooks.estimate(flow["mode"], variant, p.get("resolution") or "",
                                     float(p.get("duration") or 5), p.get("aspect") or "",
                                     items, p.get("prompt") or "")
+            if s is None:
+                return None
+            load = 0
+            if getattr(self, "unloads_idle", False) and hasattr(self.hooks, "load"):
+                load = self.hooks.load(flow["mode"], variant) or 0
         except Exception:
             log.exception("studio: app_hooks.estimate failed")
             return None
-        return round(float(s)) if s is not None else None
+        return round(float(load) + float(s) * count)
 
     # asset registration
 
@@ -1218,12 +1228,13 @@ class Studio:
         est = self.estimate(flow, items, params, variant)
         resolved, sources = graph.resolve_params(flow, params, items, self.profile)
         count = max(1, min(MAX_COUNT, int(body.get("count") or 1)))
+        total = self.estimate(flow, items, params, variant, count) if est is not None else None
         warnings = []
         disk = self.disk()
         if disk and disk["low"]:
             warnings.append({"code": "disk_low"})
         return web.json_response({"ok": True, "mode": flow["mode"], "label": flow.get("label"), "variant": variant, "estimate": est,
-                                  "total": est * count if est is not None else None, "warnings": warnings, "disk": disk, "output": output,
+                                  "total": total, "warnings": warnings, "disk": disk, "output": output,
                                   "params": {**{k: resolved[k] for k in ("aspect", "duration", "resolution") if k in resolved}, "sources": sources}})
 
     async def h_job_patch(self, request):
