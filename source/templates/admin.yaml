@@ -20,12 +20,17 @@ spec:
       serviceAccountName: default
       containers:
         - name: admin
-          image: aboveos/appstore-adminv2:v2.1.19
+          image: aboveos/appstore-adminv2:v2.1.21
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
                 name: appstore-adminv2-config
           env:
+            - name: ADMINV2_PROXY_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: ADMINV2_PROXY_AUTH_SECRET
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -52,9 +57,14 @@ spec:
               cpu: "1"
               memory: 1Gi
         - name: admin-frontend
-          image: aboveos/appstore-adminv2-frontend:v2.1.19
+          image: aboveos/appstore-adminv2-frontend:v2.1.21
           imagePullPolicy: IfNotPresent
           env:
+            - name: ADMINV2_PROXY_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}-secrets"
+                  key: ADMINV2_PROXY_AUTH_SECRET
             - name: ADMINV2_API_UPSTREAM
               value: http://127.0.0.1:4003
           ports:
