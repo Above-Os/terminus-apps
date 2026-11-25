@@ -22,79 +22,53 @@ spec:
         io.kompose.service: isaaclab
         bytetrade.io/terminal: isaaclab
     spec:
-      shareProcessNamespace: true
-      containers:
-        - name: preload-cover
+      initContainers:
+        - name: prepare-runtime
           image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1-uv1
-          command: [ "/bin/bash" ]
+          command: ["/bin/bash", "-ec"]
           args:
-            - "-c"
             - |
-              echo "preload-cover started" >&2
-              needle="isaaclab-""hold"
-              covered=""
-              while true; do
-                target=""
-                for p in /proc/[0-9]*; do
-                  cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)
-                  case "$cmd" in
-                    *"$needle"*) target=${p#/proc/}; break ;;
-                  esac
-                done
-                if [ -z "$target" ]; then
-                  sleep 0.5
-                  continue
-                fi
-                src=$(nsenter -t "$target" -m -- findmnt -n -o SOURCE /etc/ld.so.preload 2>/dev/null || true)
-                case "$src" in
-                  *null*)
-                    if [ "$covered" != "$target" ]; then
-                      echo "already covered pid=$target src=$src" >&2
-                      covered=$target
-                    fi
-                    sleep 2
-                    continue
-                    ;;
-                esac
-                uid=$(awk '/^Uid:/ {print $2}' /proc/"$target"/status)
-                gid=$(awk '/^Gid:/ {print $2}' /proc/"$target"/status)
-                echo "covering pid=$target uid=$uid src=${src}" >&2
-                nsenter -t "$target" -m -- chown "$uid:$gid" /root /workspace/isaaclab /workspace/isaaclab/isaaclab.sh /isaac-sim/runheadless.sh || echo "chown failed pid=$target" >&2
-                nsenter -t "$target" -m -- chmod 755 /root || true
-                nsenter -t "$target" -m -- bash -c 'src=/isaac-sim/kit/python/lib/python3.12/site-packages/isaacteleop/cloudxr/native; for bin in /isaac-sim/extscache/omni.kit.livestream.webrtc-*/bin; do ln -sfn "$src/libNvStreamBase.so" "$bin/libNvStreamBase.so" && ln -sfn "$src/libcudart.so.12" "$bin/libcudart.so.12" || exit 1; done' || echo "webrtc link failed pid=$target" >&2
-                if nsenter -t "$target" -m -- mount --bind /dev/null /etc/ld.so.preload; then
-                  echo "mount ok pid=$target" >&2
-                  covered=$target
-                  nsenter -t "$target" -m -- chown -R "$uid:$gid" /isaac-sim/kit/cache /root/.cache /root/.nv /root/.nvidia-omniverse /root/.local /root/Documents || echo "cache chown failed pid=$target" >&2
-                else
-                  echo "mount failed pid=$target" >&2
-                fi
-                sleep 1
-              done
+              id -u > /prepared/uid
+              id -g > /prepared/gid
+              mkdir -p /prepared/webrtc /prepared/home/{.cache/{ov,pip,nvidia/GLCache},.nv/ComputeCache,.nvidia-omniverse/logs,.local/share/ov/data,Documents}
+              cp /isaac-sim/runheadless.sh /prepared/runheadless.sh
+              chmod u+wx /prepared/runheadless.sh
+              src=/isaac-sim/kit/python/lib/python3.12/site-packages/isaacteleop/cloudxr/native
+              bin=/isaac-sim/extscache/omni.kit.livestream.webrtc-10.7.0+110.1.2.lx64.r.cp312/bin
+              cp -R "$bin/." /prepared/webrtc/
+              # The CUDA runtime bundled with torch also exports symbols absent
+              # from CloudXR's older copy; both run in the same Kit process.
+              cuda=/isaac-sim/kit/python/lib/python3.12/site-packages/nvidia/cuda_runtime/lib/libcudart.so.12
+              test -r "$src/libNvStreamBase.so" && test -r "$cuda"
+              ln -sfn "$src/libNvStreamBase.so" /prepared/webrtc/libNvStreamBase.so
+              ln -sfn "$cuda" /prepared/webrtc/libcudart.so.12
+          volumeMounts:
+            - {name: runtime-files, mountPath: /prepared}
+        - name: prepare-cache
+          image: beclab/aboveos-busybox:1.37.0
           securityContext:
             runAsUser: 0
-            privileged: true
-          resources:
-            limits:
-              cpu: 200m
-              memory: 128Mi
-            requests:
-              cpu: 10m
-              memory: 32Mi
+            allowPrivilegeEscalation: false
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              uid=$(cat /prepared/uid)
+              gid=$(cat /prepared/gid)
+              for dir in kit-cache ov-cache pip-cache glcache computecache logs data documents; do
+                mkdir -p "/cache/$dir"
+                chown "$uid:$gid" "/cache/$dir"
+              done
+          volumeMounts:
+            - {name: runtime-files, mountPath: /prepared, readOnly: true}
+            - {name: isaaclab-data, mountPath: /cache}
+      containers:
         - name: isaaclab
           image: docker.io/beclab/nvidia-isaac-lab:3.0.0-rc1-uv1
           command: [ "/bin/bash" ]
           args:
             - "-c"
             - |
-              : isaaclab-hold
-              while true; do
-                src=$(findmnt -n -o SOURCE /etc/ld.so.preload 2>/dev/null || true)
-                case "$src" in
-                  *null*) break ;;
-                esac
-                sleep 0.5
-              done
+              set -e
               insert_hub_cleanup() {
                 file="$1"
                 needle="$2"
@@ -238,6 +212,12 @@ spec:
             - containerPort: 47998
               protocol: UDP
           volumeMounts:
+            - {name: runtime-files, subPath: home, mountPath: /root}
+            - {name: runtime-files, subPath: runheadless.sh, mountPath: /isaac-sim/runheadless.sh}
+            - name: runtime-files
+              subPath: webrtc
+              mountPath: /isaac-sim/extscache/omni.kit.livestream.webrtc-10.7.0+110.1.2.lx64.r.cp312/bin
+              readOnly: true
             - mountPath: /isaac-sim/kit/cache
               name: isaaclab-data
               subPath: kit-cache
@@ -264,6 +244,8 @@ spec:
               subPath: documents
       restartPolicy: Always
       volumes:
+        - name: runtime-files
+          emptyDir: {}
         - name: isaaclab-data
           hostPath:
             type: DirectoryOrCreate
