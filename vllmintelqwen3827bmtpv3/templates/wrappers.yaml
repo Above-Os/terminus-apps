@@ -94,6 +94,17 @@ data:
         case "${ENGINE_ARGS:-}" in
             ENGINE_ARGS=*) ENGINE_ARGS=${ENGINE_ARGS#ENGINE_ARGS=} ;;
         esac
+        # B70 pilot: use an explicit 7 GiB KV cache when no size was supplied.
+        # This also applies when llm-init restores the previous default arguments.
+        local explicit_cache=false arg
+        for arg in ${ENGINE_ARGS:-} "$@"; do
+            case "$arg" in
+                --kv-cache-memory-bytes|--kv-cache-memory-bytes=*) explicit_cache=true ;;
+            esac
+        done
+        if [[ "$explicit_cache" == false ]]; then
+            set -- "$@" --kv-cache-memory-bytes 7516192768
+        fi
         log "starting vLLM with model=$MODEL_NAME args=${ENGINE_ARGS:-<empty>}"
         # shellcheck disable=SC2086  # intentional word-splitting of ENGINE_ARGS
         exec vllm serve \
