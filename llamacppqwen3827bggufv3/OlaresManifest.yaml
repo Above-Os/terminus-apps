@@ -7,7 +7,7 @@ metadata:
   description: "Qwen3.8-27B (GGUF UD-Q4_K_XL) served with llama.cpp. llm-init and the inference engine share runtime state through Common and can run on different nodes."
   appid: llamacppqwen3827bggufv3
   title: Qwen3.8-27B (llama.cpp)
-  version: '1.0.23'
+  version: '1.0.24'
   categories:
     - AI
     - models
@@ -38,6 +38,10 @@ spec:
   onlyAdmin: true
   versionName: 'unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL'
   upgradeDescription: |
+    **1.0.24**
+
+    - Updated llm-init to v1.7.27-hf-progress.1. The model card lists `none`, `low`, `medium`, `xhigh` as reasoning effort options, with `xhigh` as the default.
+
     v1.0.23: Store runtime state in Common for cross-node operation. Prefer existing Common configuration; otherwise migrate local legacy Cache or initialize in Common. Retry shared helper reads during engine startup.
 
     v1.0.22: Model Console (llm-init) updated to v1.7.26.
@@ -210,16 +214,12 @@ envs:
     - title: None
       value: none
     description:  "The model capabilities. Pick what your model supports, if no extra capabilities, pick None."
-  # Not editable: which levels exist is a fact of this model and this chat
-  # template, not a preference. The template raises on anything outside
-  # low / medium / xhigh, so an extra level would turn into a failed
-  # request for whichever client read the levels off the model card.
   - envName: MODEL_REASONING_EFFORT
     required: false
     type: string
     editable: false
     applyOnChange: false
-    default: "low,medium,xhigh"
+    default: "none,low,medium,xhigh"
     description:  "The reasoning_effort levels this model accepts, published on the model card so clients can read them instead of guessing."
   # The level llama.cpp's template already uses when a request carries no
   # reasoning_effort. It is published, never injected: nothing in the chain
