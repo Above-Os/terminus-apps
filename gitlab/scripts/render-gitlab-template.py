@@ -4,7 +4,7 @@ import re
 import sys
 
 CLUSTER_ROLE_START = "# Source: gitlab/charts/nginx-ingress/templates/clusterrole.yaml\n"
-CTRL_ROLE_START = "# Source: gitlab/charts/nginx-ingress/templates/controller-role.yaml\n"
+CLUSTER_BINDING_START = "# Source: gitlab/charts/nginx-ingress/templates/clusterrolebinding.yaml\n"
 
 def strip_horizontal_pod_autoscalers(text: str) -> str:
     """Drop HorizontalPodAutoscaler documents (Helm chart default; legacy v16 had none)."""
@@ -291,13 +291,12 @@ def main() -> None:
     with open(path_in, encoding="utf-8") as f:
         text = f.read()
 
-    if CLUSTER_ROLE_START not in text or CTRL_ROLE_START not in text:
-        print("ERROR: expected nginx ClusterRole/controller-role markers missing", file=sys.stderr)
-        sys.exit(1)
-
-    pre, rest = text.split(CLUSTER_ROLE_START, 1)
-    _, post_ctrl = rest.split(CTRL_ROLE_START, 1)
-    text = pre + ROLE_CLUSTER_REPLACEMENT + CTRL_ROLE_START + post_ctrl
+    # Replace only the two ingress objects. Helm sorts the Runner Role between them and the controller Role.
+    for marker, replacement in ((CLUSTER_ROLE_START, ROLE_CLUSTER_REPLACEMENT), (CLUSTER_BINDING_START, "")):
+        pattern = r"(?m)^" + re.escape(marker) + r"[\s\S]*?^---\n"
+        text, count = re.subn(pattern, lambda _: replacement, text)
+        if count != 1:
+            sys.exit(f"Expected exactly one ingress RBAC document: {marker.strip()}")
 
     # Namespace and in-cluster DNS
     text = re.sub(r"(?m)^(\s*)namespace: gitlab$", r"\1namespace: {{ .Release.Namespace }}", text)
