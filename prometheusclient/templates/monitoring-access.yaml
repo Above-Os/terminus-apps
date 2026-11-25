@@ -1,0 +1,45 @@
+{{- /* system-server checks the entrance identity and includes the query string in the authorized path. */ -}}
+{{- $ui := list "/" "/graph" "/query" "/alerts" "/targets" "/rules" "/service-discovery" "/service-discovery/" "/status" "/config" "/flags" "/tsdb-status" "/agent" "/favicon.ico" "/manifest.json" "/version" "/classic/graph" -}}
+{{- $read := list "/api/v1/query" "/api/v1/query_range" "/api/v1/query_exemplars" "/api/v1/format_query" "/api/v1/series" "/api/v1/labels" -}}
+{{- $info := list "/api/v1/targets" "/api/v1/targets/metadata" "/api/v1/metadata" "/api/v1/rules" "/api/v1/alerts" "/api/v1/alertmanagers" "/api/v1/status/buildinfo" "/api/v1/status/runtimeinfo" "/api/v1/status/flags" "/api/v1/status/config" "/api/v1/status/tsdb" "/api/v1/status/walreplay" "/-/healthy" "/-/ready" "/metrics" "/federate" -}}
+{{- range $index := list 0 1 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $.Values.bfl.username }}:prometheus-k8s-{{ $index }}
+  annotations:
+    provider-registry-ref: {{ $.Values.bfl.username }}/4ae9f19e{{ $index }}
+    provider-service-ref: http://prometheus-k8s.kubesphere-monitoring-system:9090
+rules:
+  - verbs: ["get", "head"]
+    nonResourceURLs:
+      {{- range $path := concat $ui $info }}
+      - {{ $path | quote }}
+      - {{ printf "%s?*" $path | quote }}
+      {{- end }}
+      - "/static/*"
+      - "/assets/*"
+      - "/consoles/*"
+  - verbs: ["get", "head", "post"]
+    nonResourceURLs:
+      {{- range $path := $read }}
+      - {{ $path | quote }}
+      - {{ printf "%s?*" $path | quote }}
+      {{- end }}
+  - verbs: ["get", "head"]
+    nonResourceURLs:
+      - "/api/v1/label/*"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $.Values.bfl.username }}:prometheus-k8s-{{ $index }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $.Values.bfl.username }}:prometheus-k8s-{{ $index }}
+subjects:
+  - kind: User
+    name: {{ $.Values.bfl.username | quote }}
+{{- end }}
