@@ -1,3 +1,4 @@
+{{- $usbEnabled := eq (lower (toString (dig "ENABLE_USB_ACCELERATOR" .Values.usb.enabled (.Values.olaresEnv | default dict)))) "true" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -98,13 +99,13 @@ spec:
               name: frigate-cache
             - mountPath: /dev/shm
               name: shm
-            {{- if .Values.usb.enabled }}
+            {{- if $usbEnabled }}
             - mountPath: /dev/bus/usb
               name: usb-devices
             {{- end }}
           securityContext:
             privileged: {{ .Values.securityContext.privileged | default false }}
-            {{- if .Values.usb.enabled }}
+            {{- if $usbEnabled }}
             capabilities:
               add:
                 - SYS_RAWIO
@@ -130,7 +131,7 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.shmSize | default "2Gi" }}
-        {{- if .Values.usb.enabled }}
+        {{- if $usbEnabled }}
         - name: usb-devices
           hostPath:
             path: /dev/bus/usb
