@@ -12,7 +12,7 @@ metadata:
   title: Palworld
   description: Palworld dedicated server.
   icon: https://cdn.olares.com/images/2026/08/77e9ce1497f6244892da4437be85eac3.png
-  version: 0.1.15
+  version: 0.1.16
   categories:
   - Fun
   - homelab
@@ -28,11 +28,12 @@ entrances:
   openMethod: window
 
 ports:
-- name: palworld
+- name: game-udp
   host: palworld
   port: 8211
   protocol: udp
-  exposePort: 8211
+  exposePort: 48211
+  addToTailscaleAcl: true
 
 overlayGateway:
   enable: true
@@ -42,15 +43,6 @@ overlayGateway:
     workload: palworld
     description: "Join with the Palworld client (UDP 8211)"
     protocol: udp
-
-tailscale:
-  acls:
-  - proto: udp
-    dst:
-    - "*:8211"
-  - proto: udp
-    dst:
-    - "*:27015"
 
 permission:
   appData: true
@@ -96,10 +88,10 @@ spec:
 
     On the same LAN, open Settings → Network → Overlay gateway, turn on the gateway and enable Overlay for this app, then join using the LAN IP and port shown there (UDP 8211).
 
-    To join over VPN when players are not on the same network, use `<olares-id>.olares.com:8211` (for example olarestest001.olares.com:8211). Turn off Overlay for this app first — Overlay and VPN cannot be used together on Palworld. Community listing is off.
+    To join over VPN when players are not on the same network, use `<olares-id>.olares.com:48211` (for example olarestest001.olares.com:48211). Turn off Overlay for this app first — Overlay and VPN cannot be used together on Palworld. Community listing is off.
 
   upgradeDescription: |
-    Pin the game server pod to control-plane (master) via nodeAffinity for overlay gateway LAN access.
+    VPN UDP: 8211 → 48211. Overlay UDP: 8211.
 
 options:
   apiTimeout: 0

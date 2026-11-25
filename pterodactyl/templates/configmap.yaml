@@ -36,6 +36,12 @@ data:
       proxy_temp_path /tmp/proxy;
       uwsgi_temp_path /tmp/uwsgi;
       scgi_temp_path /tmp/scgi;
+      {{- if ne (toString .Values.olaresEnv.ENABLE_WINGS) "true" }}
+      server {
+        listen 8081;
+        return 503 "Local Wings is disabled.";
+      }
+      {{- end }}
       server {
         listen 8080;
         server_name _;
@@ -135,9 +141,13 @@ data:
         $node = $app->make(Pterodactyl\Services\Nodes\NodeCreationService::class)->handle([
             'name'=>'Olares Local Wings','location_id'=>$location->id,'fqdn'=>getenv('WINGS_DOMAIN'),
             'scheme'=>'https','behind_proxy'=>true,'memory'=>4096,'memory_overallocate'=>0,
-            'disk'=>10240,'disk_overallocate'=>0,'daemonListen'=>443,'daemonSFTP'=>42022,
+            'disk'=>10240,'disk_overallocate'=>0,'daemonListen'=>443,'daemonSFTP'=>48022,
             'daemonBase'=>'/wings/volumes','public'=>false,'upload_size'=>100,
         ]);
+    }
+    if ((int)$node->daemonSFTP === 42022 && $node->fqdn === getenv('WINGS_DOMAIN')) {
+        $node->daemonSFTP = 48022;
+        $node->saveOrFail();
     }
     $config=$node->getConfiguration();
     // Keep existing node settings, including user customization and Wings-expanded defaults.

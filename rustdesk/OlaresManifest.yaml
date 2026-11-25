@@ -7,7 +7,7 @@ metadata:
   title: RustDesk Server
   description: Self-hosted ID and relay services for RustDesk remote desktop connections
   icon: https://cdn.olares.com/images/2026/10/4f9153e49aa8750df57399f8db773703.png
-  version: 0.0.17
+  version: 0.0.18
   categories:
   - homelab
 entrances:
@@ -19,6 +19,8 @@ entrances:
   authLevel: private
   openMethod: window
 spec:
+  upgradeDescription: |
+    VPN NAT: 31115 → 48115. ID (TCP/UDP): 31116 → 48116. Relay: 31117 → 48117.
   versionName: 1.1.16
   developer: RustDesk
   submitter: Olares
@@ -76,19 +78,22 @@ options:
 workloadReplicas:
   rustdesk: 1
 ports:
-- name: nat-test
+- name: nat
   host: rustdesk-id
   port: 21115
-  exposePort: 31115
+  exposePort: 48115
+  addToTailscaleAcl: true
   protocol: tcp
-- name: id-tcp
+- name: rendezvous
   host: rustdesk-id
   port: 21116
-  exposePort: 31116
-- name: relay-tcp
+  exposePort: 48116
+  addToTailscaleAcl: true
+- name: relay
   host: rustdesk-id
   port: 21117
-  exposePort: 31117
+  exposePort: 48117
+  addToTailscaleAcl: true
   protocol: tcp
 envs:
 - envName: SERVER_HOST
@@ -122,13 +127,3 @@ overlayGateway:
     port: 21117
     protocol: tcp
     description: RustDesk relay server
-tailscale:
-  acls:
-  - proto: tcp
-    dst:
-    - '*:31115'
-    - '*:31116'
-    - '*:31117'
-  - proto: udp
-    dst:
-    - '*:31116'
