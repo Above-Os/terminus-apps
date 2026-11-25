@@ -10,6 +10,24 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: mastodon
 data:
+  bootstrap.rb: |
+    require "pg"
+
+    # Serialize concurrent web starts. Keep the completion record in the same
+    # database as the migrated data so restoring an empty database reruns setup.
+    PG.connect(host: ENV.fetch("DB_HOST"), port: ENV.fetch("DB_PORT"),
+               dbname: ENV.fetch("DB_NAME"), user: ENV.fetch("DB_USER"),
+               password: ENV.fetch("DB_PASS")) do |db|
+      db.exec("SELECT pg_advisory_lock(hashtext('olares.mastodon.bootstrap'))")
+      db.exec("CREATE TABLE IF NOT EXISTS olares_bootstrap_runs (release_key text PRIMARY KEY)")
+      key = [ARGV.fetch(0)]
+      next if db.exec_params("SELECT 1 FROM olares_bootstrap_runs WHERE release_key = $1", key).ntuples > 0
+
+      abort "Mastodon bootstrap failed" unless system("/bin/bash", "/scripts/migrate-and-create-admin.sh")
+      abort "Migrations pending" unless system("bundle", "exec", "rails", "db:abort_if_pending_migrations")
+      db.exec_params("INSERT INTO olares_bootstrap_runs VALUES ($1)", key)
+    end
+
   # All these operations require access to PostgreSQL (including Elasticsearch migration) and Redis. In order to avoid
   # potential race conditions we include them in the same script.
   migrate-and-create-admin.sh: |-
@@ -21,7 +39,7 @@ data:
     set -o pipefail
 
     # Enable verbose output
-    set -x
+    set +x
     
     # Global error handling
     trap 'echo "ERROR: Script failed at line $LINENO. Command: $BASH_COMMAND"' ERR
@@ -225,7 +243,6 @@ data:
     echo "AUTO_CREATE_ADMIN=${auto_create_admin}"
     echo "MASTODON_ADMIN_USERNAME=${MASTODON_ADMIN_USERNAME:-not set}"
     echo "MASTODON_ADMIN_EMAIL=${MASTODON_ADMIN_EMAIL:-not set}"
-    echo "MASTODON_ADMIN_PASSWORD=${MASTODON_ADMIN_PASSWORD:+[SET]}${MASTODON_ADMIN_PASSWORD:-[NOT SET]}"
     echo ""
     
     if [ "$auto_create_admin" = "true" ]; then
@@ -1123,241 +1140,6 @@ data:
     echo ""
     echo "=========================================="
     echo "=== Initialization Completed ==="
-    echo "=========================================="
-    echo "Timestamp: $(date)"
-    echo "=========================================="
-  precompile-assets.sh: |-
-    #!/bin/bash
-
-    set -o errexit
-    set -o nounset
-    set -o pipefail
-
-    # Enable verbose output
-    set -x
-
-    echo "=========================================="
-    echo "=== Starting Mastodon assets precompilation ==="
-    echo "=========================================="
-    echo "Timestamp: $(date)"
-    echo "Working directory: $(pwd)"
-    cd /app/www
-    echo "Changed to: $(pwd)"
-    echo ""
-    
-    # Ensure public directory exists and has correct permissions (set at the beginning)
-    echo "=== Setting up public directory permissions (initial) ==="
-    echo "Timestamp: $(date)"
-    if [ ! -d "/app/www/public" ]; then
-      echo "Creating /app/www/public directory..."
-      mkdir -p /app/www/public
-    fi
-    if [ ! -d "/app/www/public/assets" ]; then
-      echo "Creating /app/www/public/assets directory..."
-      mkdir -p /app/www/public/assets
-    fi
-    echo "Setting permissions on /app/www/public..."
-    # Only use chmod, don't use chown (may not have permission)
-    find /app/www/public -type d -exec chmod 777 {} \; 2>/dev/null || true
-    find /app/www/public -type f -exec chmod 644 {} \; 2>/dev/null || true
-    chmod 777 /app/www/public/assets 2>/dev/null || true
-    echo "Current permissions:"
-    ls -la /app/www/public/ | head -5
-    echo ""
-    
-    # Ensure public directory exists and has correct permissions
-    echo "=== Setting up public directory permissions ==="
-    echo "Timestamp: $(date)"
-    if [ ! -d "/app/www/public" ]; then
-      echo "Creating /app/www/public directory..."
-      mkdir -p /app/www/public
-    fi
-    echo "Setting permissions on /app/www/public..."
-    # Only use chmod, don't use chown (may not have permission)
-    find /app/www/public -type d -exec chmod 777 {} \; 2>/dev/null || true
-    find /app/www/public -type f -exec chmod 644 {} \; 2>/dev/null || true
-    chmod 777 /app/www/public/assets 2>/dev/null || true
-    
-    # Ensure assets subdirectory exists
-    if [ ! -d "/app/www/public/assets" ]; then
-      echo "Creating /app/www/public/assets directory..."
-      mkdir -p /app/www/public/assets
-      chmod 777 /app/www/public/assets
-    fi
-    
-    echo "Current permissions:"
-    ls -la /app/www/public/ | head -10
-    echo ""
-
-    # Wait for Redis connection (use TCP port check, as redis gem may not be installed)
-    echo "Waiting for Redis connection..."
-    redis_host="${REDIS_HOST:-${MASTODON_REDIS_HOST:-mastodon-redis-master}}"
-    redis_port="${REDIS_PORT:-${MASTODON_REDIS_PORT_NUMBER:-6379}}"
-    echo "Connecting to Redis at ${redis_host}:${redis_port}"
-    # Use TCP port check (doesn't depend on redis gem)
-    max_attempts=30
-    attempt=0
-    while [ $attempt -lt $max_attempts ]; do
-      # Use nc (netcat) or timeout to check TCP connection
-      if command -v nc >/dev/null 2>&1; then
-        if nc -z -w 2 "${redis_host}" "${redis_port}" 2>/dev/null; then
-          echo "Redis port is open"
-          break
-        fi
-      elif command -v timeout >/dev/null 2>&1 && command -v bash >/dev/null 2>&1; then
-        # Use bash TCP connection check
-        if timeout 2 bash -c "echo > /dev/tcp/${redis_host}/${redis_port}" 2>/dev/null; then
-          echo "Redis port is open"
-          break
-        fi
-      else
-        # If none available, try using curl to check (though Redis is not HTTP, at least can detect port)
-        if curl -sf --connect-timeout 2 "${redis_host}:${redis_port}" >/dev/null 2>&1; then
-          echo "Redis port is open"
-          break
-        fi
-      fi
-      attempt=$((attempt + 1))
-      if [ $attempt -eq $max_attempts ]; then
-        echo "WARNING: Could not connect to Redis after ${max_attempts} attempts"
-        echo "Continuing anyway - Redis connection will be checked during asset precompilation"
-        break
-      fi
-      echo "Redis is unavailable - sleeping (attempt ${attempt}/${max_attempts})"
-      sleep 2
-    done
-    echo "Proceeding with asset precompilation (Redis will be checked by Rails)"
-
-    # Wait for S3/MinIO connection (only if S3 is enabled)
-    if [ "${S3_ENABLED:-false}" = "true" ]; then
-      s3_host="${MASTODON_S3_HOSTNAME:-${S3_HOSTNAME}}"
-      s3_port="${MASTODON_S3_PORT_NUMBER:-${S3_PORT_NUMBER:-9000}}"
-      echo "Waiting for S3/MinIO connection at ${s3_host}:${s3_port}..."
-      until curl -sf "http://${s3_host}:${s3_port}/minio/health/live" > /dev/null 2>&1 || curl -sf "http://${s3_host}:${s3_port}" > /dev/null 2>&1; do
-        echo "S3/MinIO is unavailable - sleeping"
-        sleep 2
-      done
-      echo "S3/MinIO connection established"
-    else
-      echo "S3 is disabled, using local storage"
-      echo "Ensuring local storage directories exist..."
-      mkdir -p /app/www/public/system
-      chmod -R 777 /app/www/public/system 2>/dev/null || true
-    fi
-
-    # Set Yarn temporary directory to mounted tmp directory (has write permission)
-    # Note: Newer versions of Yarn don't support YARN_TMPDIR, only use TMPDIR
-    export YARN_CACHE_FOLDER=/app/www/tmp/.yarn-cache
-    export TMPDIR=/app/www/tmp
-    mkdir -p "${YARN_CACHE_FOLDER}" "${TMPDIR}"
-    chmod -R 777 "${YARN_CACHE_FOLDER}" "${TMPDIR}" 2>/dev/null || true
-    
-    # First disable Vite (before any operations)
-    echo "Disabling Vite build system..."
-    # Disable all Vite config files
-    if [ -f "vite.config.mts" ]; then
-      mv vite.config.mts vite.config.mts.disabled 2>/dev/null || true
-      echo "Disabled vite.config.mts"
-    fi
-    if [ -f "vite.config.ts" ]; then
-      mv vite.config.ts vite.config.ts.disabled 2>/dev/null || true
-      echo "Disabled vite.config.ts"
-    fi
-    if [ -f "vite.config.js" ]; then
-      mv vite.config.js vite.config.js.disabled 2>/dev/null || true
-      echo "Disabled vite.config.js"
-    fi
-    # Disable Vite Ruby initializer file
-    if [ -f "config/initializers/vite_ruby.rb" ]; then
-      mv config/initializers/vite_ruby.rb config/initializers/vite_ruby.rb.disabled 2>/dev/null || true
-      echo "Disabled vite_ruby.rb initializer"
-    fi
-    # Set environment variables to disable Vite
-    export VITE_SKIP=true
-    export VITE_RUBY_HOST=localhost
-    export VITE_RUBY_PORT=3000
-    export DISABLE_VITE=true
-    
-    # Attempt to install Node.js dependencies (if package.json exists)
-    # But will not use Vite
-    if [ -f "package.json" ] && command -v yarn >/dev/null 2>&1; then
-      echo "Installing Node.js dependencies (Vite will not be used)..."
-      # Use newer Yarn parameters (--immutable instead of --frozen-lockfile)
-      # Set Yarn config instead of using command line parameters
-      yarn config set cacheFolder "${YARN_CACHE_FOLDER}" 2>/dev/null || true
-      yarn install --immutable 2>&1 || echo "Yarn install had warnings, continuing..."
-      # If vite binary exists, disable it
-      if [ -f "node_modules/.bin/vite" ]; then
-        mv node_modules/.bin/vite node_modules/.bin/vite.disabled 2>/dev/null || true
-        echo "Disabled vite binary"
-      fi
-    else
-      echo "Skipping Node.js dependencies (yarn not available or no package.json)"
-    fi
-    
-    # Ensure public directory has correct permissions
-    echo ""
-    echo "=== Setting up public directory permissions ==="
-    echo "Timestamp: $(date)"
-    if [ ! -d "/app/www/public" ]; then
-      echo "Creating /app/www/public directory..."
-      mkdir -p /app/www/public
-    fi
-    if [ ! -d "/app/www/public/assets" ]; then
-      echo "Creating /app/www/public/assets directory..."
-      mkdir -p /app/www/public/assets
-    fi
-    echo "Setting permissions on /app/www/public..."
-    # Only use chmod, don't use chown (may not have permission)
-    find /app/www/public -type d -exec chmod 777 {} \; 2>/dev/null || true
-    find /app/www/public -type f -exec chmod 644 {} \; 2>/dev/null || true
-    chmod 777 /app/www/public/assets 2>/dev/null || true
-    echo "Current permissions:"
-    ls -la /app/www/public/ | head -5
-    echo ""
-    
-    # Use Sprockets to precompile assets (don't use Vite)
-    echo "=== Precompiling assets ==="
-    echo "Timestamp: $(date)"
-    echo "Precompiling assets with Sprockets only..."
-    
-    # Ensure permissions are correct again (only use chmod)
-    find /app/www/public -type d -exec chmod 777 {} \; 2>/dev/null || true
-    find /app/www/public -type f -exec chmod 644 {} \; 2>/dev/null || true
-    chmod 777 /app/www/public/assets 2>/dev/null || true
-    # Remove old manifest file if it exists (if there are permission issues)
-    rm -f /app/www/public/assets/.manifest.json /app/www/public/assets/.sprockets-manifest-*.json 2>/dev/null || true
-    
-    VITE_SKIP=true VITE_RUBY_HOST=localhost VITE_RUBY_PORT=3000 DISABLE_VITE=true bundle exec rails assets:precompile RAILS_ENV=production
-    precompile_exit_code=$?
-    
-    if [ $precompile_exit_code -eq 0 ]; then
-      echo "✓ Assets precompilation completed successfully"
-      echo ""
-      echo "Verifying compiled assets..."
-      if [ -f "/app/www/public/assets/.manifest.json" ]; then
-        echo "✓ Manifest file created successfully"
-        ls -lh /app/www/public/assets/.manifest.json
-      else
-        echo "⚠ Warning: Manifest file not found, but compilation may have succeeded"
-      fi
-      echo ""
-      echo "Asset files created:"
-      ls -lh /app/www/public/assets/ | head -10
-    else
-      echo "✗ Assets precompilation failed with exit code: $precompile_exit_code"
-      echo ""
-      echo "Checking public directory permissions..."
-      ls -la /app/www/public/
-      echo ""
-      echo "Checking assets directory..."
-      ls -la /app/www/public/assets/ 2>/dev/null || echo "Assets directory does not exist"
-      exit $precompile_exit_code
-    fi
-    
-    echo ""
-    echo "=========================================="
-    echo "=== Assets Precompilation Completed ==="
     echo "=========================================="
     echo "Timestamp: $(date)"
     echo "=========================================="

@@ -80,89 +80,14 @@ spec:
               cpu: 1500m
               memory: 2Gi
           securityContext:
-            allowPrivilegeEscalation: true
+            allowPrivilegeEscalation: false
             privileged: false
             readOnlyRootFilesystem: false
             seLinuxOptions: {}
             seccompProfile:
               type: RuntimeDefault
-          # LinuxServer.io image requires direct startup command to run streaming service
-          # Mastodon streaming uses Puma to start streaming API, listening on port 8080
-          # Note: If config file already specifies port, don't repeat it in command line
-          command:
-            - /bin/bash
-            - -ec
-            - |
-              cd /app/www
-              # Completely disable Rails Host Authorization (streaming is internal service, no host verification needed)
-              # Do not clear RAILS_HOST here: an empty host makes force_ssl Location headers like https:/path
-              # Method 2: Create initializer file to disable Host Authorization
-              mkdir -p config/initializers
-              cat > config/initializers/disable_host_authorization.rb << 'EOF'
-              # Disable Host Authorization middleware
-              Rails.application.config.hosts.clear if Rails.application.config.respond_to?(:hosts)
-              Rails.application.config.hosts = nil if Rails.application.config.respond_to?(:hosts=)
-              
-              # Rails 8.0+ disable Host Authorization
-              if Rails.application.config.respond_to?(:action_dispatch)
-                Rails.application.config.action_dispatch.hosts_authorization = { exclude: ->(request) { true } }
-              end
-              
-              # If above methods don't work, directly remove middleware
-              Rails.application.config.middleware.delete(ActionDispatch::HostAuthorization) rescue nil
-              EOF
-              # Fix Content Security Policy configuration to handle nil values
-              # Ensure domain environment variables have default values
-              if [ -z "$WEB_DOMAIN" ] || [ "$WEB_DOMAIN" = "" ]; then
-                export WEB_DOMAIN="localhost"
-              fi
-              if [ -z "$LOCAL_DOMAIN" ] || [ "$LOCAL_DOMAIN" = "" ]; then
-                export LOCAL_DOMAIN="$WEB_DOMAIN"
-              fi
-              # Fix or disable Content Security Policy initializer
-              if [ -f config/initializers/content_security_policy.rb ]; then
-                # Backup original file
-                cp config/initializers/content_security_policy.rb config/initializers/content_security_policy.rb.bak 2>/dev/null || true
-                # Create a fixed version that handles nil values
-                cat > config/initializers/content_security_policy.rb << 'EOFCSP'
-              # Fixed Content Security Policy configuration
-              # Ensure domain values are not nil before configuring CSP
-              web_domain = ENV['WEB_DOMAIN'].presence || 'localhost'
-              local_domain = ENV['LOCAL_DOMAIN'].presence || web_domain
-              
-              Rails.application.config.content_security_policy do |policy|
-                policy.default_src :self, :https
-                policy.font_src    :self, :https, :data
-                policy.img_src     :self, :https, :data, :blob
-                policy.style_src   :self, :https, :unsafe_inline
-                policy.script_src  :self, :https, :unsafe_inline, :unsafe_eval
-                policy.connect_src :self, :https, "wss://#{local_domain}", "ws://#{local_domain}"
-                policy.media_src   :self, :https, :data, :blob
-                policy.frame_src   :self, :https
-                policy.worker_src  :self, :blob
-                policy.manifest_src :self
-              end
-              
-              Rails.application.config.content_security_policy_report_only = false
-              EOFCSP
-              fi
-              # Check if config file exists and if port is already specified
-              if [ -f config/puma-streaming.rb ]; then
-                # Use streaming-specific config file, don't repeat port specification
-                bundle exec puma -C config/puma-streaming.rb -e production
-              elif [ -f config/puma.rb ]; then
-                # Check if config file already specifies port binding
-                if grep -q "bind.*8080\|port.*8080" config/puma.rb 2>/dev/null; then
-                  # Config file already specifies port, use directly
-                  bundle exec puma -C config/puma.rb -e production
-                else
-                  # Config file doesn't specify port, use environment variable PORT
-                  PORT=8080 bundle exec puma -C config/puma.rb -e production
-                fi
-              else
-                # No config file, use environment variable PORT to specify port
-                PORT=8080 bundle exec puma -e production
-              fi
+          workingDir: /app/www
+          command: ["node", "streaming/index.js"]
           env:
             - name: PUID
               value: "0"

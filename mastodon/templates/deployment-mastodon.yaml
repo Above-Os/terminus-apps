@@ -123,6 +123,65 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: IfNotPresent
+        - name: migrate-and-create-admin
+          image: "docker.io/linuxserver/mastodon:4.7.1"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -ec
+          args:
+            - cd /app/www && exec bundle exec ruby /scripts/bootstrap.rb {{ printf "%s/%s/%v" .Release.Name .Chart.Version .Release.Revision | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+            seLinuxOptions: {}
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: PUID
+              value: "0"
+            - name: PGID
+              value: "0"
+            - name: MASTODON_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: MASTODON_DATABASE_PASSWORD
+            - name: MASTODON_ELASTICSEARCH_HOST
+              value: "mastodon-elasticsearch"
+            - name: MASTODON_ELASTICSEARCH_PORT_NUMBER
+              value: "9200"
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-default
+                  key: DB_PASS
+            # The rake db:migrate job requires access to Redis
+            - name: MASTODON_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-redis
+                  key: "redis-password"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mastodon-redis
+                  key: "redis-password"
+          envFrom:
+            - configMapRef:
+                name: mastodon-default
+            - secretRef:
+                name: mastodon-default
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          resources:
+            limits: {}
+            requests: {}
       containers:
         - name: mastodon
           image: "docker.io/linuxserver/mastodon:4.7.1"
@@ -135,7 +194,7 @@ spec:
               cpu: "3"
               memory: 4Gi
           securityContext:
-            allowPrivilegeEscalation: true
+            allowPrivilegeEscalation: false
             privileged: false
             readOnlyRootFilesystem: false
             seLinuxOptions: {}
@@ -336,6 +395,10 @@ spec:
       volumes:
           - name: empty-dir
             emptyDir: {}
+          - name: scripts
+            configMap:
+              name: mastodon-init-scripts
+              defaultMode: 0755
           - name: initializers
             configMap:
               name: mastodon-initializers
