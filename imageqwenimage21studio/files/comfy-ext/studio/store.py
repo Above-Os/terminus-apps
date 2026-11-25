@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   prompt_id TEXT NOT NULL DEFAULT '',
   attempt INTEGER NOT NULL DEFAULT 1,
   queued_at REAL,
+  estimated_seconds INTEGER,
   mode TEXT NOT NULL,
   variant TEXT NOT NULL,
   spec TEXT NOT NULL,            -- {prompt, mode, assets: [{id, role}], params, batch?, action?}
@@ -129,7 +130,8 @@ class Store:
                     self.db.execute("ALTER TABLE %s ADD COLUMN project TEXT" % table)
                 self.db.execute("CREATE INDEX IF NOT EXISTS %s_project ON %s(project, created)" % (table, table))
             cols = {r[1] for r in self.db.execute("PRAGMA table_info(jobs)")}
-            for name, typ in (("prompt_id", "TEXT NOT NULL DEFAULT ''"), ("attempt", "INTEGER NOT NULL DEFAULT 1"), ("queued_at", "REAL")):
+            for name, typ in (("prompt_id", "TEXT NOT NULL DEFAULT ''"), ("attempt", "INTEGER NOT NULL DEFAULT 1"),
+                              ("queued_at", "REAL"), ("estimated_seconds", "INTEGER")):
                 if name not in cols:
                     self.db.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (name, typ))
             self.db.execute("UPDATE jobs SET prompt_id=id WHERE prompt_id=''")
@@ -256,16 +258,17 @@ class Store:
             return {}
         return dict(self._q("SELECT prompt_id, id FROM jobs WHERE prompt_id IN (%s)" % ",".join("?" * len(prompt_ids)), list(prompt_ids)))
 
-    def retry_job(self, jid, attempt, prompt_id, used):
+    def retry_job(self, jid, attempt, prompt_id, used, estimated_seconds=None):
         """Atomically claim one execution, keeping the original job and batch."""
         changed = self._x(
-            "UPDATE jobs SET prompt_id=?, attempt=attempt+1, queued_at=?, used=?, "
+            "UPDATE jobs SET prompt_id=?, attempt=attempt+1, queued_at=?, used=?, estimated_seconds=?, "
             "status='queued', stage='queued', step=NULL, steps=NULL, started=NULL, finished=NULL, error=NULL, outputs='[]' "
             "WHERE id=? AND attempt=? AND deleted=0 AND status IN (%s)" % ",".join("?" * len(RETRYABLE)),
-            (prompt_id, time.time(), json.dumps(used), jid, attempt, *RETRYABLE))
+            (prompt_id, time.time(), json.dumps(used), estimated_seconds, jid, attempt, *RETRYABLE))
         return self.job(jid) if changed else None
 
-    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None, after=None, q=None, ids=None):
+    def jobs(self, before=None, starred=None, limit=30, owner=None, project=None, after=None, q=None, ids=None,
+             *, modes=None, resolution=None, statuses=None):
         sql, args = self._job_select + " WHERE deleted=0 AND (relation IS NULL OR relation!='segment')", []
         sql = self._scope(sql, args, owner, project)
         if ids is not None:
@@ -284,6 +287,15 @@ class Store:
         if q:
             sql += " AND json_extract(spec, '$.prompt') LIKE ? ESCAPE '\\'"
             args.append(_like(q))
+        if modes:
+            sql += " AND mode IN (%s)" % ",".join("?" * len(modes))
+            args.extend(modes)
+        if resolution:
+            sql += " AND json_extract(used, '$.resolution')=?"
+            args.append(resolution)
+        if statuses:
+            sql += " AND status IN (%s)" % ",".join("?" * len(statuses))
+            args.extend(statuses)
         sql += " ORDER BY created DESC LIMIT ?"
         args.append(int(limit))
         return [_row(r) for r in self._q(sql, args)]

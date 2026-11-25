@@ -52,8 +52,9 @@ EXAMPLE_MIME = {
 STAGES = [
     ("sampling", ("SamplerCustomAdvanced", "KSampler", "KSamplerAdvanced", "SamplerCustom")),
     ("decoding", ("VAEDecode", "VAEDecodeAudio", "VAEDecodeTiled", "CreateVideo")),
-    ("encoding", ("CLIPTextEncode", "ImageScaleToTotalPixels", "GetVideoComponents")),
-    ("loading", ("UNETLoader", "CLIPLoader", "VAELoader", "DualCLIPLoader", "CheckpointLoaderSimple", "LoadImage", "LoadVideo", "LoadAudio")),
+    ("encoding", ("CLIPTextEncode", "ImageScaleToTotalPixels", "GetVideoComponents", "VAEEncode",
+                  "LoadImage", "LoadImageMask", "LoadVideo", "LoadAudio")),
+    ("loading", ("UNETLoader", "CLIPLoader", "VAELoader", "DualCLIPLoader", "CheckpointLoaderSimple")),
     ("saving", ("SaveVideo", "SaveImage", "SaveAudio", "SaveAnimatedWEBP")),
 ]
 
@@ -84,7 +85,7 @@ def stage_of(cls, stages=STAGES):
     for name, classes in stages:
         if cls in classes:
             return name
-    if "Sampler" in cls:
+    if "Sampler" in cls and cls != "KSamplerSelect":
         return "sampling"
     if "Decode" in cls:
         return "decoding"
@@ -163,7 +164,6 @@ class Studio:
         self.examples = {x["id"]: x for x in self.profile.get("examples") or []} if self.examples_dir else {}
         self.rewrite_modes = llm.modes(self.kind, self.profile.get("promptTemplate"), self.profile.get("prompts"))
         self.stages = with_profile_stages(self.profile)
-        self.samplers = set(self.stages[0][1])
         self.hooks = load_hooks()
         self.apis = {}
         for f in self.flows:
@@ -445,29 +445,31 @@ class Studio:
                 shutil.copyfile(p, dst)
         return name
 
-    def estimate(self, flow, items, params, variant, count=1):
+    def estimate(self, flow, items, params, variant, count=1, *, include_load=True):
         """Seconds for count such jobs queued together, from the app hooks when
         they cover this device, else None. hooks.load is added once: the
         models stay loaded between the jobs and are unloaded after them."""
-        if not self.hooks or not hasattr(self.hooks, "estimate"):
+        hooks = getattr(self, "hooks", None)
+        if not hasattr(hooks, "estimate"):
             return None
-        devices = getattr(self.hooks, "DEVICES", None)
+        devices = getattr(hooks, "DEVICES", None)
         if devices is not None and self.device not in devices:
             return None
-        p, _ = graph.resolve_params(flow, params, items, self.profile)
         try:
-            s = self.hooks.estimate(flow["mode"], variant, p.get("resolution") or "",
-                                    float(p.get("duration") or 5), p.get("aspect") or "",
-                                    items, p.get("prompt") or "")
+            p, _ = graph.resolve_params(flow, params, items, self.profile)
+            s = hooks.estimate(flow["mode"], variant, p.get("resolution") or "",
+                               float(p.get("duration") or 5), p.get("aspect") or "",
+                               items, p.get("prompt") or "")
             if s is None:
                 return None
             load = 0
-            if getattr(self, "unloads_idle", False) and hasattr(self.hooks, "load"):
-                load = self.hooks.load(flow["mode"], variant) or 0
+            if include_load and getattr(self, "unloads_idle", False) and hasattr(hooks, "load"):
+                load = hooks.load(flow["mode"], variant) or 0
+            seconds = round(float(load) + float(s) * count)
         except Exception:
             log.exception("studio: app_hooks.estimate failed")
             return None
-        return round(float(load) + float(s) * count)
+        return seconds if seconds > 0 else None
 
     # asset registration
 
@@ -578,6 +580,8 @@ class Studio:
                                              parent_id or body.get("parent_id"), relation or body.get("relation"), owner, project)
             self.queue_dirty = True
             return [job]
+        first_estimate = self.estimate(flow, items, params, variant)
+        later_estimate = self.estimate(flow, items, params, variant, include_load=False) if count > 1 else None
         for i in range(count):
             p = dict(params)
             if p.get("seed") not in (None, "") and count > 1:
@@ -587,6 +591,7 @@ class Studio:
             if before:
                 used["before"] = before
             job = self.store.add_job({"id": jid, "mode": flow["mode"], "variant": variant, "spec": spec, "used": used,
+                                      "estimated_seconds": later_estimate if i else first_estimate,
                                       "status": "queued", "stage": "queued", "parent_id": parent_id or body.get("parent_id"),
                                       "relation": relation or body.get("relation"), "owner": owner,
                                       "project": project["id"] if project else None})
@@ -800,25 +805,22 @@ class Studio:
         if not job or job["status"] not in ACTIVE:
             return
         jid = job["id"]
-        now = time.time()
         if job["stage"] == "cancelling" and event in ("executing", "progress"):
             return
         if event == "execution_start":
             self.queue_dirty = True
-            self.publish_job(self.store.update_job(jid, status="running", stage="loading", started=now))
+            self.publish_job(self.store.update_job(jid, status="running", stage="preparing", started=time.time()))
         elif event == "executing":
             node = data.get("node")
             if node is None:
                 return
             st = stage_of(self.classes.get(jid, {}).get(node, ""), self.stages)
-            if st and st != job["stage"]:
-                fields = {"stage": st}
-                if st == "sampling" and job["step"] is None:
-                    fields.update(step=0)
-                self.publish_job(self.store.update_job(jid, **fields))
+            if st and (st != job["stage"] or st == "sampling" and job["steps"] is not None):
+                self.publish_job(self.store.update_job(jid, stage=st, step=None, steps=None))
         elif event == "progress":
             cls = self.classes.get(jid, {}).get(data.get("node"), "")
-            if cls in self.samplers or job["stage"] == "sampling":
+            st = stage_of(cls, self.stages) if cls else job["stage"]
+            if st == "sampling":
                 self.store.update_job(jid, stage="sampling", step=data.get("value"), steps=data.get("max"))
                 target = self.store.job(job["parent_id"]) if job.get("relation") == "segment" else job
                 if target:
@@ -1180,15 +1182,23 @@ class Studio:
         pid = q.get("project") or None
         if pid and not projects.role(self.store.project(pid), user, admin):
             return self.err(404, "no_project", "No such project")
+        mode, resolution, status = q.get("mode"), q.get("resolution"), q.get("status")
+        modes = [mode, *(f["mode"] for f in self.flows if (f.get("route") or {}).get("of") == mode)] if mode else None
         jobs = self.store.jobs(q.get("before"), q.get("starred") == "1", min(100, int(q.get("limit", 30))), owner=user, project=pid,
-                               after=q.get("after"), q=q.get("q"))
-        ids = {a["id"] for j in jobs for a in j["spec"].get("assets", [])} | {o for j in jobs for o in j["outputs"] or []}
+                               after=q.get("after"), q=q.get("q"), modes=modes, resolution=resolution, statuses=(status,) if status else None)
+        active = []
+        extra = {}
+        if mode or resolution or status:
+            active = self.store.jobs(owner=user, project=pid, statuses=ACTIVE, limit=-1)
+            extra["active"] = [self.job_view(j) for j in active]
+        page_jobs = jobs + active
+        ids = {a["id"] for j in page_jobs for a in j["spec"].get("assets", [])} | {o for j in page_jobs for o in j["outputs"] or []}
         assets = {}
         for aid in ids:
             a = self.store.asset(aid)
             if a:
                 assets[aid] = a
-        return web.json_response({"jobs": [self.job_view(j) for j in jobs], "assets": assets, "queue": self.queue_snapshot(), "seq": self.bus.seq})
+        return web.json_response({"jobs": [self.job_view(j) for j in jobs], "assets": assets, "queue": self.queue_snapshot(), "seq": self.bus.seq, **extra})
 
     async def h_asset(self, request):
         a = self.asset_for(request, request.match_info["id"])
@@ -1326,7 +1336,7 @@ class Studio:
             except graph.JobError as e:
                 return web.json_response({"error": e.as_dict()}, status=400)
         spec = dict(job["spec"], mode=job["mode"])
-        params = dict(spec.get("params") or {}, variant=job["variant"])
+        params = dict(spec.get("params") or {}, variant=job["variant"], prompt=spec.get("prompt", ""))
         old_used = job.get("used") or {}
         if old_used.get("seed") is not None:
             params["seed"] = old_used["seed"]
@@ -1341,12 +1351,13 @@ class Studio:
             flow, items = self.plan(spec, job["owner"], admin)
             graph.check_output(self.profile, variant, graph.output_size(flow, items, params, self.profile), items)
             pid = str(uuid.uuid4())
-            prompt, used = self.assemble(flow, pid, items, dict(params, prompt=spec.get("prompt", "")), variant, job["owner"], self.project_of(job))
+            prompt, used = self.assemble(flow, pid, items, params, variant, job["owner"], self.project_of(job))
             if old_used.get("before"):
                 used["before"] = old_used["before"]
         except graph.JobError as e:
             return web.json_response({"error": e.as_dict()}, status=400)
-        retried = self.store.retry_job(job["id"], attempt, pid, used)
+        estimated_seconds = self.estimate(flow, items, params, variant)
+        retried = self.store.retry_job(job["id"], attempt, pid, used, estimated_seconds)
         if not retried:
             return web.json_response({"jobs": [self.store.job(job["id"])]})
         self.cancelling.discard(job["id"])
