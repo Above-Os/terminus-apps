@@ -4,6 +4,12 @@ metadata:
 
 spec:
   upgradeDescription: |
+    **1.0.1**
+
+    - CPU 请求和内存请求固定为 200m 和 2Gi，克隆出的应用更容易与其他应用一起调度。克隆时只需填写上限：CPU 1 到 20 核，内存 2Gi 到 84Gi。
+
+    **1.0.0**
+
     首个 Strata 引擎基座，使用 Strata v0.2.22（CUDA 13）和 Model Console（llm-init v1.7.27）。
 
     模型不属于这个 Chart。克隆时填写 MODEL_SOURCE、MODEL_NAME，以及内存和显存配额。Chart 从 MODEL_SOURCE 中的文件识别 setup.py 的家族和版本。llm-init 把文件下载到 Common。引擎把下载的全部文件链接到自己的可写目录，再按所选家族和版本运行官方 setup.py。
@@ -31,8 +37,8 @@ spec:
     - `ENGINE_ARGS`：额外参数，例如 `--context 131072 --kv int8 --parallel 1`。setup.py 声明过的参数交给 setup.py；其他参数（如 `--vram-experts-gb 12`、`--spec-k 4`）交给引擎，并覆盖 setup 写入的值。单独的 `--` 之后的参数一律交给引擎。`--max-context` 和 `--ctx` 等同于 `--context`。`--draft off|mtp|dflash2|dfly2|dspark` 用来选择草稿模型。不要填写 `--family`、`--model`、`--gguf-dir`、`--models-dir`、`--host`、`--port`、`--gpu`、`--vision`，这些由 Chart 管理。
     - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。
     - `STRATA_REQUIRED_GPU_MEMORY`：不超过 `23Gi`，可写成 `8Gi`、`8192` 或 `8192Mi`。换算成 MiB 后写入 `nvidia.com/gpumem`。
-    - `STRATA_MEMORY_REQUEST` 和 `STRATA_MEMORY_LIMIT`：容器内存，不超过 `84Gi`，请求值不能高于上限。上限要能放下模型、KV 缓存和运行开销。两项都在克隆时填写。
-    - `STRATA_CPU_REQUEST` 和 `STRATA_CPU_LIMIT`：引擎的 CPU，不超过 20 核，请求值不能高于上限。保存资源设置后会重新拉起引擎。
+    - `STRATA_MEMORY_LIMIT`：容器内存上限，`2Gi` 到 `84Gi`。内存请求固定为 `2Gi`。上限要能放下模型、KV 缓存和运行开销。
+    - `STRATA_CPU_LIMIT`：引擎的 CPU 上限，1 到 20 核。CPU 请求固定为 200m。保存资源设置后会重新拉起引擎。
 
     **示例**
     - Hy4-Flash SQ-96（`hy4-flash` / `SQ-96`）：`MODEL_SOURCE` 包含 `strata-engine/Hy4-Flash-Strata` 中的 `Hy4-Flash-SQ-96.strata` 和 `Hy4-Flash-Engram-Q8.strata`。
