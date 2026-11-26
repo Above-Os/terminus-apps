@@ -138,9 +138,8 @@ olares-cli market uninstall flowstudio --watch
 
 Only pass `--delete-data` when you intentionally want appData wiped (projects / userdata).
 **Ask before using it** — models live on the shared Common volume and must not be treated as
-disposable per-app cache. The chart pre-delete hook drains runtime engines, prepull
-Jobs/Pods, and this app's GPUBindings so the namespace can terminate; it never
-deletes model weights.
+disposable per-app cache. On uninstall, Olares removes the app namespace and releases
+the GPU bindings it manages for this instance.
 
 ## Upgrade
 
