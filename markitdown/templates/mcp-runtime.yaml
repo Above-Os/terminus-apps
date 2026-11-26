@@ -15,15 +15,15 @@ data:
     import time
     import zipfile
     from pathlib import Path
-    from urllib.parse import urljoin, urlparse, unquote, quote
+    from urllib.parse import quote, unquote, urljoin, urlsplit
 
     import certifi
     import requests
     import urllib3
     from markitdown import MarkItDown, StreamInfo
-    from markitdown._uri_utils import parse_data_uri, file_uri_to_path
+    from markitdown._uri_utils import file_uri_to_path, parse_data_uri
     from pdfminer.high_level import extract_pages
-    from pdfminer.layout import LTTextContainer
+    from pdfminer.layout import LAParams, LTChar, LTCurve, LTImage, LTTextLine
     from pdfminer.pdfdocument import PDFPasswordIncorrect
     from PIL import Image
 
@@ -53,6 +53,12 @@ data:
 
     def has_text(text):
         return any(c.isalnum() for c in text)
+
+
+    def _filename_from_url_path(url_path):
+        leaf = unquote((url_path or '').rsplit('/', 1)[-1])
+        leaf = leaf.split(';', 1)[0]
+        return Path(leaf).name
 
 
     def _is_public_ip(ip_obj):
@@ -97,7 +103,7 @@ data:
     def _fetch_http_resource(uri):
         current = uri
         for _ in range(MAX_REDIRECTS + 1):
-            parsed = urlparse(current)
+            parsed = urlsplit(current)
             if parsed.scheme not in ('http', 'https'):
                 raise ConversionError('Redirects are only permitted to http: or https: URLs.')
             if parsed.username or parsed.password:
@@ -168,8 +174,8 @@ data:
     def load_resource(uri):
         """Read once, preserving URL metadata and bounding OCR upload size."""
         uri = uri.strip()
-        parsed = urlparse(uri)
-        filename = Path(unquote(parsed.path)).name or 'document'
+        parsed = urlsplit(uri)
+        filename = _filename_from_url_path(parsed.path) or 'document'
         mime = mimetypes.guess_type(filename)[0]
         charset = None
         source_url = None
@@ -181,6 +187,8 @@ data:
             root = Path(os.getenv('MARKITDOWN_FILE_ROOT', '/workdir')).resolve()
             if not path.is_relative_to(root):
                 raise ConversionError('Local files must be inside the configured documents directory (/workdir).')
+            filename = path.name or filename
+            mime = mimetypes.guess_type(filename)[0]
             with path.open('rb') as f:
                 data = f.read(MAX_BYTES + 1)
         elif parsed.scheme == 'data':
@@ -192,7 +200,7 @@ data:
         elif parsed.scheme in ('http', 'https'):
             data, fetched_mime, source_url = _fetch_http_resource(uri)
             mime = fetched_mime or mime
-            filename = Path(unquote(urlparse(source_url).path)).name or filename
+            filename = _filename_from_url_path(urlsplit(source_url).path) or filename
         else:
             raise ConversionError('Supported URI schemes: file:, data:, http:, https:.')
         if len(data) > MAX_BYTES:
@@ -262,12 +270,81 @@ data:
                 self.session.close()
 
 
-    def _page_text(layout):
-        if isinstance(layout, LTTextContainer):
-            return layout.get_text()
-        if hasattr(layout, '__iter__'):
-            return ''.join(_page_text(item) for item in layout)
-        return ''
+    def _inspect_pdf_page(layout):
+        """Classify a PDF page as 'native', 'blank', 'ocr_no_text', or 'ocr_scanned_body'."""
+        x0, y0, x1, y1 = layout.bbox
+        width = max(float(x1 - x0), 1.0)
+        height = max(float(y1 - y0), 1.0)
+        bx0, bx1 = x0 + 0.05 * width, x1 - 0.05 * width
+        by0, by1 = y0 + 0.12 * height, y1 - 0.12 * height
+
+        text_chunks = []
+        total_alnum = 0
+        body_alnum = 0
+        images = []
+        curve_count = 0
+
+        def walk(node):
+            nonlocal total_alnum, body_alnum, curve_count
+            if isinstance(node, LTImage):
+                images.append(node.bbox)
+                return
+            if isinstance(node, LTCurve):
+                curve_count += 1
+            if isinstance(node, LTTextLine):
+                s = node.get_text()
+                text_chunks.append(s)
+                n = sum(1 for c in s if c.isalnum())
+                if n:
+                    total_alnum += n
+                    tx0, ty0, tx1, ty1 = node.bbox
+                    cx = 0.5 * (tx0 + tx1)
+                    cy = 0.5 * (ty0 + ty1)
+                    if bx0 <= cx <= bx1 and by0 <= cy <= by1:
+                        body_alnum += n
+                return
+            if isinstance(node, LTChar):
+                s = node.get_text()
+                text_chunks.append(s)
+                if s.isalnum():
+                    total_alnum += 1
+                    tx0, ty0, tx1, ty1 = node.bbox
+                    cx = 0.5 * (tx0 + tx1)
+                    cy = 0.5 * (ty0 + ty1)
+                    if bx0 <= cx <= bx1 and by0 <= cy <= by1:
+                        body_alnum += 1
+                return
+            if hasattr(node, '__iter__'):
+                for child in node:
+                    walk(child)
+
+        walk(layout)
+        text = ''.join(text_chunks).strip()
+
+        body_w = max(bx1 - bx0, 1.0)
+        body_h = max(by1 - by0, 1.0)
+        grid_n = 24
+        covered = 0
+        if images:
+            cell_w = body_w / grid_n
+            cell_h = body_h / grid_n
+            for gy in range(grid_n):
+                cy0 = by0 + gy * cell_h
+                cy1 = cy0 + cell_h
+                for gx in range(grid_n):
+                    cx0 = bx0 + gx * cell_w
+                    cx1 = cx0 + cell_w
+                    if any(ix0 < cx1 and ix1 > cx0 and iy0 < cy1 and iy1 > cy0 for ix0, iy0, ix1, iy1 in images):
+                        covered += 1
+        body_image_coverage = covered / float(grid_n * grid_n)
+
+        if total_alnum == 0:
+            if not images and curve_count <= 8:
+                return text, 'blank'
+            return text, 'ocr_no_text'
+        if body_image_coverage >= 0.25 and (body_alnum == 0 or (body_image_coverage >= 0.40 and body_alnum < 45)):
+            return text, 'ocr_scanned_body'
+        return text, 'native'
 
 
     def convert(uri, ocr_factory=RouterOCR):
@@ -276,9 +353,12 @@ data:
         pdf = data.lstrip().startswith(b'%PDF-') or info.extension == '.pdf' or info.mimetype == 'application/pdf'
         if pdf:
             pages = []
+            page_kinds = []
             try:
-                for layout in extract_pages(io.BytesIO(data)):
-                    pages.append(_page_text(layout).strip())
+                for layout in extract_pages(io.BytesIO(data), laparams=LAParams(all_texts=True)):
+                    page_text, page_kind = _inspect_pdf_page(layout)
+                    pages.append(page_text)
+                    page_kinds.append(page_kind)
                     if len(pages) > MAX_PDF_PAGES:
                         raise ConversionError('PDF exceeds the 100-page inspection limit. Split it into smaller documents.')
             except PDFPasswordIncorrect as exc:
@@ -289,25 +369,33 @@ data:
                 raise ConversionError('PDF could not be parsed. It may be encrypted or damaged; OCR was not attempted.') from exc
             if not pages:
                 raise ConversionError('PDF contains no readable pages.')
-            missing = [n for n, text in enumerate(pages, 1) if not has_text(text)]
+            missing = [n for n, kind in enumerate(page_kinds, 1) if kind not in ('native', 'blank')]
+            blank_pages = {n for n, kind in enumerate(page_kinds, 1) if kind == 'blank'}
+            has_native_page = any(kind == 'native' for kind in page_kinds)
             if not missing:
-                return converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
-            has_native = len(missing) < len(pages)
+                native_md = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
+                if not has_text(native_md):
+                    raise ConversionError('No text was detected on any page of the PDF.')
+                if blank_pages:
+                    blank_list = ', '.join(map(str, sorted(blank_pages)))
+                    return f'> Note: PDF page(s) {blank_list} contained no text or images.\n\n' + native_md
+                return native_md
             if len(missing) > MAX_OCR_PAGES:
                 raise ConversionError('More than 20 PDF pages need OCR. Split the PDF; no pages were silently omitted.')
             try:
                 ocr = ocr_factory()
                 result = ocr.convert(data, 'document.pdf', 'application/pdf', pages=missing)
             except ConversionError:
-                if not has_native:
+                if not has_native_page:
                     raise
                 native_md = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
                 if not has_text(native_md):
                     raise
                 skipped = ', '.join(map(str, missing))
                 return (
-                    f'> WARNING: PDF page(s) {skipped} contained no extractable text and Router OCR was unavailable. '
-                    'Native text from the remaining pages is shown below; image-only pages may omit visual text.\n\n'
+                    f'> WARNING: Router OCR was unavailable, so PDF page(s) {skipped} were NOT converted. '
+                    'Those pages are image-only or scanned (any page numbers or headers shown for them are not their body text). '
+                    'Only native text from the remaining pages is shown below; this result is incomplete.\n\n'
                     + native_md
                 )
             if not isinstance(result, dict):
@@ -320,23 +408,38 @@ data:
                     failed.append(number)
                 elif not has_text(text):
                     empty_ocr.add(number)
-                    pages[number - 1] = '*(No text detected on this page.)*'
+                    if not has_text(pages[number - 1]):
+                        pages[number - 1] = '*(No text detected on this page.)*'
                 else:
                     pages[number - 1] = text.strip()
             if failed:
                 raise ConversionError('OCR returned failed or invalid pages: ' + ', '.join(map(str, failed)) + '. Conversion is incomplete.')
-            if empty_ocr == set(missing) and has_native:
+            if empty_ocr == set(missing) and has_native_page and all(page_kinds[n - 1] == 'ocr_no_text' for n in missing):
                 native_md = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
                 if has_text(native_md):
-                    blank_list = ', '.join(map(str, sorted(empty_ocr)))
+                    notes = sorted(empty_ocr | blank_pages)
+                    blank_list = ', '.join(map(str, notes))
                     return f'> Note: No text was detected on PDF page(s) {blank_list} (including OCR inspection).\n\n' + native_md
-            if not any(has_text(p) for n, p in enumerate(pages, 1) if n not in empty_ocr):
+            for n in blank_pages:
+                pages[n - 1] = '*(Blank page.)*'
+            if not any(has_text(pages[n - 1]) for n in range(1, len(pages) + 1) if n not in empty_ocr and n not in blank_pages):
                 raise ConversionError('No text was detected on any page of the PDF.')
-            notice = OCR_NOTICE.format(model=ocr.model, reason='PDF pages without extractable text: ' + ', '.join(map(str, missing)))
+            reasons = []
+            no_text_pages = [n for n in missing if page_kinds[n - 1] == 'ocr_no_text']
+            scanned_body_pages = [n for n in missing if page_kinds[n - 1] == 'ocr_scanned_body']
+            if no_text_pages:
+                reasons.append('PDF pages without extractable text: ' + ', '.join(map(str, no_text_pages)))
+            if scanned_body_pages:
+                reasons.append('scanned PDF pages with only marginal/sparse text: ' + ', '.join(map(str, scanned_body_pages)))
+            notice = OCR_NOTICE.format(model=ocr.model, reason='; '.join(reasons))
+
             def _page_label(n):
+                if n in blank_pages:
+                    return 'blank page'
                 if n in empty_ocr:
-                    return 'OCR: no text detected'
+                    return 'OCR: no additional text detected' if page_kinds[n - 1] == 'ocr_scanned_body' else 'OCR: no text detected'
                 return 'OCR' if n in missing else 'native text'
+
             return notice + '\n\n'.join(f'## Page {n} ({_page_label(n)})\n\n{text}' for n, text in enumerate(pages, 1))
 
         is_svg = (
@@ -395,10 +498,11 @@ data:
     @mcp.tool()
     async def convert_to_markdown(uri: str) -> str:
         """Convert file:, data:, http: or https: content to Markdown. Images and PDF pages
-        without extractable text automatically use Router OCR. OCR results include a
-        completeness warning: omissions can remain undetected. Local files must be
-        under /workdir (mapped from Documents/MarkItDown in Olares Files). Public http/https
-        URLs only. Limits: 32 MiB input, 100 PDF pages, 20 OCR pages per call.
+        without extractable text (or scanned pages with only marginal page numbers/headers)
+        automatically use Router OCR. OCR results include a completeness warning: omissions
+        can remain undetected. Local files must be under /workdir (mapped from
+        Documents/MarkItDown in Olares Files). Public http/https URLs only. Limits: 32 MiB
+        input, 100 PDF pages, 20 OCR pages per call.
         """
         try:
             return await asyncio.to_thread(convert, uri)
