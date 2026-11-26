@@ -1,0 +1,40 @@
+# Official GHCR CUDA 13 image. templates/wrappers.yaml accepts both
+# /opt/strata/terminal and the older flattened /opt/strata layout.
+images:
+  strata: ghcr.io/niko1221/strata:0.2.22-cuda13
+  llmInit: docker.io/beclab/llm-init:v1.7.27-hf-progress.1
+
+# Per-workload replica counts (keys match Deployment metadata.name and
+# workloadReplicas in OlaresManifest).
+#   stratallmbasev3 — engine Deployment (== appid / Release.Name)
+#   llminit         — llm-init / entrance Deployment
+workloads:
+  llminit:
+    replicaCount: 1
+  stratallmbasev3:
+    replicaCount: 1
+
+# llm-init memory limit: room for an Xet download, counted in the app's limitedMemory.
+llmInit:
+  memoryLimit: 4Gi
+
+# Optional cap on engine CPU threads. Empty: the CPU limit minus two cores.
+strata:
+  # setup.py family and build. The chart reads them from the MODEL_SOURCE files of
+  # the official repositories; set them only for a source it does not know.
+  family: ""
+  model: ""
+  cpuThreads: ""
+  # Ceilings for the STRATA_* resource envs, the same as their regex in OlaresManifest.yaml.
+  max:
+    cpu: "20"
+    memory: 84Gi
+    gpuMemory: 23Gi
+  # Engine resources when the STRATA_* env values are unset (lint, or a template
+  # render without envs). A clone fills the envs in, so these are only a fallback.
+  defaults:
+    cpuRequest: 200m
+    memoryRequest: 2Gi
+    cpuLimit: "8"
+    memoryLimit: 35Gi
+    gpuMemory: "4096"

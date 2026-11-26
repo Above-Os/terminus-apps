@@ -1,0 +1,255 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: stratallmbasev3
+  icon: https://app.cdn.olares.com/appstore/strata/icon.png
+  description: "Generic Strata engine base. Pick a Strata build at install via env. llm-init and the engine share runtime state through Common."
+  appid: stratallmbasev3
+  title: Strata Engine Base
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+    - engine
+sharedEntrances:
+  - name: stratallmbasev3
+    host: sharedentrances-api
+    port: 0
+    title: Strata API
+    invisible: true
+    authLevel: internal
+    icon: https://app.cdn.olares.com/appstore/strata/icon.png
+entrances:
+  - name: strataclient
+    port: 8090
+    host: download-svc
+    title: Strata
+    icon: https://app.cdn.olares.com/appstore/strata/icon.png
+    openMethod: window
+    authLevel: internal
+  - name: strataui
+    port: 8080
+    # Keep the route available without blocking initialization on model loading.
+    skip: true
+    host: strata
+    title: Strata UI
+    icon: https://app.cdn.olares.com/appstore/strata/icon.png
+    openMethod: window
+    authLevel: internal
+#   stratallmbasev3 — engine Deployment (== appid / Release.Name)
+#   llminit         — llm-init / entrance Deployment
+workloadReplicas:
+  stratallmbasev3: 1
+  llminit: 1
+spec:
+  onlyAdmin: true
+  versionName: '0.2.22'
+  upgradeDescription: |
+    Initial Strata engine base on Strata v0.2.22 (CUDA 13) and Model Console (llm-init v1.7.27).
+
+    The model is not part of this chart. A clone sets MODEL_SOURCE, MODEL_NAME, and the memory and GPU quota. The chart reads the setup.py family and build from the files in MODEL_SOURCE. llm-init downloads the files into Common. The engine links every downloaded file into its own writable directory and runs the official setup.py for the selected family and build.
+
+    - Strata 0.2.22: a start that reads the model from a slow disk is no longer stopped after 15 minutes while the engine is still loading.
+    - Supports all three Strata engines in the official image: `strata-engine` (Qwen3.8-Flash-Next families and Qwen3.6), `strata-hy4` (Hy4-Flash), and `strata-inkling` (Inkling-2-Mini). setup.py picks the engine from the family.
+    - ENGINE_ARGS options that setup.py knows go to setup.py. Other options go to the engine and override setup's value.
+    - Weight files from the Hugging Face cache are not hashed again on every start.
+    - Editable settings are checked before install: MODEL_SOURCE must name the files of one official build, ENGINE_ARGS accepts only plain options and rejects the ones the chart manages, and the resource settings fit an Olares One (24 GiB GPU, 96 GiB RAM): CPU limit up to 20 cores, memory limit up to 84 GiB, GPU memory up to 23 GiB, and each request not above its limit.
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
+
+    **Supported engines**
+    The official image ships three engine programs. The family that `MODEL_SOURCE` names decides which one runs.
+    - `strata-engine`: `qwen`, `coder`, `swift`, `unsloth`, `gyro`, `nvfp4` (Qwen3.8-Flash-Next) and `qwen36` (Qwen3.6-35B-A3B).
+    - `strata-hy4`: `hy4-flash` (Tencent Hy4-Flash, builds `SQ-64`, `SQ-96`, `SQ-128`).
+    - `strata-inkling`: `inkling-2-mini` (builds `SQ-10`, `SQ-15`, `SQ-20`, and Unsloth GGUF builds such as `UD-Q4_K_XL`).
+
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo> --include <file>`. The files to download. Repeat the source, separated by commas, when a build has several files. Every listed file is handed to setup.py, including files from other repositories such as a vision projector. The chart reads the setup.py family and build from the model files of the official repositories, so list the files of one build only. For a mirror repository, set `strata.family` and `strata.model` in values.yaml. A pinned snapshot adds `--revision <sha>` on each segment.
+    - `MODEL_NAME`: the public model id and OpenAI alias, for example `hy4-flash-sq-96` or `qwen3.8-flash-next-ud-iq4_xs`.
+    - `MODEL_MODE`: `chat`.
+    - `MODEL_SUPPORTS`: Vision / Tools / Thinking / None. Vision turns the engine's image reader on. Hy4-Flash and Inkling-2-Mini then need their `*-Vision.strata` file in `MODEL_SOURCE`.
+    - `ENGINE_ARGS`: extra options, such as `--context 131072 --kv int8 --parallel 1`. Options that setup.py declares go to setup.py. Any other option, such as `--vram-experts-gb 12` or `--spec-k 4`, goes to the engine and overrides the value setup wrote. Options after a bare `--` always go to the engine. `--max-context` and `--ctx` mean `--context`. `--draft off|mtp|dflash2|dfly2|dspark` picks the drafter. Do not pass `--family`, `--model`, `--gguf-dir`, `--models-dir`, `--host`, `--port`, `--gpu`, or `--vision`; the chart owns those.
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
+    - `STRATA_REQUIRED_GPU_MEMORY`: up to `23Gi`, written as `8Gi`, `8192`, or `8192Mi`. Sets `nvidia.com/gpumem` in MiB.
+    - `STRATA_MEMORY_REQUEST` and `STRATA_MEMORY_LIMIT`: container memory, up to `84Gi`; the request cannot be above the limit. Size the limit for the model, its KV cache, and the runtime. Both are filled in when cloning.
+    - `STRATA_CPU_REQUEST` and `STRATA_CPU_LIMIT`: CPU for the engine, up to 20 cores; the request cannot be above the limit. Saving a resource setting relaunches the engine.
+
+    **Examples**
+    - Hy4-Flash SQ-96 (`hy4-flash` / `SQ-96`): `MODEL_SOURCE` with `Hy4-Flash-SQ-96.strata` and `Hy4-Flash-Engram-Q8.strata` from `strata-engine/Hy4-Flash-Strata`.
+    - Inkling-2-Mini SQ-20 (`inkling-2-mini` / `SQ-20`): `MODEL_SOURCE` with `Inkling-2-Mini-SQ-20.strata` from `strata-engine/Inkling-2-Mini-Strata`.
+    - Qwen3.8-Flash-Next UD-IQ4_XS-v31 (`unsloth` / `UD-IQ4_XS-v31`): `MODEL_SOURCE` with the four `UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-0000N-of-00004.gguf` shards from `unsloth/Qwen3.8-Flash-Next-GGUF`.
+    - Qwen3.8-Flash-Next NVFP4 (`nvfp4` / `NVFP4`): `MODEL_SOURCE` with the whole pack repository. The files keep the repository's folder layout.
+
+    **How It Works**
+    `llm-init` downloads the files named by `MODEL_SOURCE` into the shared Hugging Face cache and writes the ready mark. The Strata container waits for that mark, links the downloaded files into its own data directory, and runs `setup.py` for the family and build those files belong to. setup.py checks the files, prepares the tokenizer and packs, and writes the run config for the right engine. The two containers share run state through Common and can run on different nodes.
+
+    **Drafters**
+    - Qwen3.8-Flash-Next families: setup.py picks MTP or DFlash2. `--draft dflash2` fetches the DFlash2 pack instead of the ~5 GB MTP layer.
+    - Hy4-Flash: DFly2 is on by default. `--draft off` turns it off.
+    - Inkling-2-Mini: DSpark is on by default. `--draft off` turns it off.
+
+    **Stack**
+    - **Strata** (port 8080): runs the model. The Strata UI entrance opens this port and does not wait for the weights to finish loading.
+    - **llm-init** (port 8090): downloads the model, shows progress, and provides the OpenAI-compatible API, proxying to Strata.
+
+    **Accelerator**
+    NVIDIA CUDA only, using `ghcr.io/niko1221/strata:0.2.22-cuda13`. Set `STRATA_REQUIRED_GPU_MEMORY` to the VRAM quota.
+
+    **Model Storage**
+    Weight files live in `appCommon/huggingface`, mounted read-only in the engine at `/cache/hf/hub`. Each clone writes its setup output under `appCommon/huggingface/strata-data/<release>`. A new image keeps downloaded drafters and prepares the packs again.
+
+    **Resource Tips**
+    - Raise memory and GPU quota to the model before use. A large model will not start on the chart's small defaults.
+    - setup.py plans memory from this container's limits, and the engine's CPU thread pool follows the CPU limit.
+  developer: Niko1221
+  website: https://github.com/Niko1221/Strata
+  sourceCode: https://github.com/Niko1221/Strata
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  license:
+    - text: MIT
+      url: https://github.com/Niko1221/Strata/blob/main/LICENSE
+
+  accelerator:
+    # nvidia — discrete GPU; STRATA_REQUIRED_GPU_MEMORY -> nvidia.com/gpumem (bare MiB)
+    - mode: nvidia
+      limitedCpu: "-1"
+      requiredCpu: "-1"
+      requiredDisk: 50Mi
+      limitedDisk: 500Gi
+      limitedMemory: "-1"
+      requiredMemory: "-1"
+      requiredGPUMemory: "-1"
+      limitedGPUMemory: "-1"
+  supportArch:
+    - amd64
+  runAsUser: true
+permission:
+  appCache: true
+  appData: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  allowMultipleInstall: true
+  shared: true
+  templateOnly: true
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Example: hf://strata-engine/Hy4-Flash-Strata --include Hy4-Flash-SQ-96.strata,hf://strata-engine/Hy4-Flash-Strata --include Hy4-Flash-Engram-Q8.strata. One or more hf://<owner>/<repo> segments separated by commas, no spaces around the commas. Each segment may add --include <file or glob>, --exclude <glob>, and --revision <sha>. Every listed file, from every repository, is handed to setup.py."
+    regex: '^(?=.{0,8192}$)hf://[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:[ ]+--(?:include|exclude)[ ]+[A-Za-z0-9._*?/+\[\]-]+|[ ]+--revision[ ]+[A-Za-z0-9._/-]+)*(?:,hf://[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:[ ]+--(?:include|exclude)[ ]+[A-Za-z0-9._*?/+\[\]-]+|[ ]+--revision[ ]+[A-Za-z0-9._/-]+)*)*$'
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Example: hy4-flash-sq-96. Public model id and OpenAI alias: 1 to 128 lowercase letters, digits, dot, underscore, or hyphen, starting with a letter or digit."
+    regex: '^[a-z0-9][a-z0-9._-]{0,127}$'
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    default: chat
+    options:
+    - title: Chat
+      value: chat
+  - envName: MODEL_SUPPORTS
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: Vision
+      value: vision
+    - title: Tools
+      value: tools
+    - title: Thinking
+      value: thinking
+    - title: None
+      value: none
+    description: "Capabilities to publish on the model card. Vision also turns the engine image reader on. Pick None alone when the model has no extra capabilities."
+  - envName: ENGINE_ARGS
+    required: true
+    default: ""
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Example: --context 131072 --kv int8 --parallel 1 --vram-experts-gb 12. Up to 1024 characters of --option and value tokens separated by spaces; no quotes or shell characters. Options setup.py knows go to setup.py; other options go to the engine and override setup's value. Options after a bare -- always go to the engine. --draft off|mtp|dflash2|dfly2|dspark picks the drafter. Family, model, files, host, port, GPU, backend, and vision are managed by the chart and rejected here."
+    regex: '^(?=[ -~]{0,1024}$)(?!.*(?:^|[ ])--(?:family|model|native|engram|data-dir|models-dir|move-data|set-default-data-dir|gguf-dir|host|port|api-key|backend|vision|gpus?|prebuilt|build|setup|yes|no-start|check|update|inspect|browser|no-browser|skip-build|rollback-engine|cuda|serve|export-tokenizer|info)(?:[ =]|$))[ ]*(?:(?:--[a-z0-9][a-z0-9-]*(?:=-?[A-Za-z0-9._:,/+@%][A-Za-z0-9._:,/+@%-]*)?|--)(?:[ ]+(?:--[a-z0-9][a-z0-9-]*(?:=-?[A-Za-z0-9._:,/+@%][A-Za-z0-9._:,/+@%-]*)?|--|-?[A-Za-z0-9._:,/+@%][A-Za-z0-9._:,/+@%-]*))*)?[ ]*$'
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
+  - envName: STRATA_CPU_REQUEST
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "CPU request: 1 to 20 cores (for example 1), or 100m to 20000m, and not above STRATA_CPU_LIMIT."
+    regex: '^(?:[1-9]|1[0-9]|20|[1-9][0-9]{2,3}m|1[0-9]{4}m|20000m)$'
+  - envName: STRATA_MEMORY_REQUEST
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Container memory request, 1Gi to 84Gi or 512Mi to 86016Mi, and not above STRATA_MEMORY_LIMIT. Example: 56Gi. Set it to the model's working set."
+    regex: '^(?:(?:[1-9]|[1-7][0-9]|8[0-4])Gi|(?:51[2-9]|5[2-9][0-9]|[6-9][0-9]{2}|[1-9][0-9]{3}|[1-7][0-9]{4}|8[0-5][0-9]{3}|8600[0-9]|8601[0-6])Mi)$'
+  - envName: STRATA_CPU_LIMIT
+    required: true
+    type: int
+    editable: true
+    applyOnChange: true
+    description: "CPU limit for the Strata engine: a whole number of cores from 1 to 20 (for example 19), and not below STRATA_CPU_REQUEST. Saving this relaunches the engine. The thread pool follows this limit."
+    regex: '^(?:[1-9]|1[0-9]|20)$'
+  - envName: STRATA_MEMORY_LIMIT
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Container memory limit, 1Gi to 84Gi or 512Mi to 86016Mi, and not below STRATA_MEMORY_REQUEST. Include weights, KV cache, and runtime. Strata plans the model's RAM and GPU use from this limit at each start. Example: 80Gi."
+    regex: '^(?:(?:[1-9]|[1-7][0-9]|8[0-4])Gi|(?:51[2-9]|5[2-9][0-9]|[6-9][0-9]{2}|[1-9][0-9]{3}|[1-7][0-9]{4}|8[0-5][0-9]{3}|8600[0-9]|8601[0-6])Mi)$'
+  - envName: STRATA_REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "GPU memory quota: 1Gi to 23Gi, or 1024 to 23552 MiB written as 8192 or 8192Mi. Sets nvidia.com/gpumem in MiB."
+    regex: '^(?:(?:[1-9]|1[0-9]|2[0-3])Gi|(?:102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|1[0-9]{4}|2[0-2][0-9]{3}|23[0-4][0-9]{2}|235[0-4][0-9]|2355[0-2])(?:Mi)?)$'

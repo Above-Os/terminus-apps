@@ -1,0 +1,63 @@
+metadata:
+  description: "通用 Strata 引擎基座。安装时通过环境变量选择模型。llm-init 与推理引擎通过 Common 共享运行状态。"
+  title: Strata 引擎基座
+
+spec:
+  upgradeDescription: |
+    首个 Strata 引擎基座，使用 Strata v0.2.22（CUDA 13）和 Model Console（llm-init v1.7.27）。
+
+    模型不属于这个 Chart。克隆时填写 MODEL_SOURCE、MODEL_NAME，以及内存和显存配额。Chart 从 MODEL_SOURCE 中的文件识别 setup.py 的家族和版本。llm-init 把文件下载到 Common。引擎把下载的全部文件链接到自己的可写目录，再按所选家族和版本运行官方 setup.py。
+
+    - Strata 0.2.22：从慢速磁盘读取模型时，只要引擎仍在加载，启动就不会在 15 分钟后被中断。
+    - 支持官方镜像中的全部三个 Strata 引擎：`strata-engine`（Qwen3.8-Flash-Next 各家族与 Qwen3.6）、`strata-hy4`（Hy4-Flash）、`strata-inkling`（Inkling-2-Mini）。setup.py 按家族选择引擎。
+    - ENGINE_ARGS 中 setup.py 认识的参数交给 setup.py，其余参数交给引擎，并覆盖 setup 写入的值。
+    - Hugging Face 缓存中的权重文件不会在每次启动时重新计算哈希。
+    - 可编辑的设置会在安装前校验：MODEL_SOURCE 必须只包含一个官方版本的文件；ENGINE_ARGS 只接受普通选项，并拒绝由 chart 管理的选项；资源设置按 Olares One（24 GiB 显卡、96 GiB 内存）限定：CPU 上限不超过 20 核，内存上限不超过 84 GiB，显存不超过 23 GiB，各项请求值不能高于上限。
+  fullDescription: |
+    **重要提示**
+    此应用是一个模板，不能单独使用。请按下方环境变量接上具体模型后再使用。
+
+    **支持的引擎**
+    官方镜像带有三个引擎程序，由 `MODEL_SOURCE` 对应的模型家族决定运行哪一个。
+    - `strata-engine`：`qwen`、`coder`、`swift`、`unsloth`、`gyro`、`nvfp4`（Qwen3.8-Flash-Next）以及 `qwen36`（Qwen3.6-35B-A3B）。
+    - `strata-hy4`：`hy4-flash`（腾讯 Hy4-Flash，版本 `SQ-64`、`SQ-96`、`SQ-128`）。
+    - `strata-inkling`：`inkling-2-mini`（版本 `SQ-10`、`SQ-15`、`SQ-20`，以及 `UD-Q4_K_XL` 等 Unsloth GGUF 版本）。
+
+    **环境变量设置指南**
+    - `MODEL_SOURCE`：`hf://<仓库> --include <文件>`。要下载的文件。一个版本有多个文件时，用逗号分隔并重复来源。列出的每个文件都会交给 setup.py，包括来自其他仓库的文件（例如视觉投影器）。Chart 按官方仓库中的模型文件识别 setup.py 的家族和版本，所以只列一个版本的文件。使用镜像仓库时，在 values.yaml 中设置 `strata.family` 和 `strata.model`。固定快照时，每一段都加上 `--revision <sha>`。
+    - `MODEL_NAME`：对外的模型名，也是 OpenAI 别名，例如 `hy4-flash-sq-96` 或 `qwen3.8-flash-next-ud-iq4_xs`。
+    - `MODEL_MODE`：`chat`。
+    - `MODEL_SUPPORTS`：Vision / Tools / Thinking / None。选择 Vision 时，引擎会打开图像理解；Hy4-Flash 和 Inkling-2-Mini 此时需要在 `MODEL_SOURCE` 中包含对应的 `*-Vision.strata` 文件。
+    - `ENGINE_ARGS`：额外参数，例如 `--context 131072 --kv int8 --parallel 1`。setup.py 声明过的参数交给 setup.py；其他参数（如 `--vram-experts-gb 12`、`--spec-k 4`）交给引擎，并覆盖 setup 写入的值。单独的 `--` 之后的参数一律交给引擎。`--max-context` 和 `--ctx` 等同于 `--context`。`--draft off|mtp|dflash2|dfly2|dspark` 用来选择草稿模型。不要填写 `--family`、`--model`、`--gguf-dir`、`--models-dir`、`--host`、`--port`、`--gpu`、`--vision`，这些由 Chart 管理。
+    - `LOG_LEVEL`：`debug`、`info`、`warn` 或 `error`。
+    - `STRATA_REQUIRED_GPU_MEMORY`：不超过 `23Gi`，可写成 `8Gi`、`8192` 或 `8192Mi`。换算成 MiB 后写入 `nvidia.com/gpumem`。
+    - `STRATA_MEMORY_REQUEST` 和 `STRATA_MEMORY_LIMIT`：容器内存，不超过 `84Gi`，请求值不能高于上限。上限要能放下模型、KV 缓存和运行开销。两项都在克隆时填写。
+    - `STRATA_CPU_REQUEST` 和 `STRATA_CPU_LIMIT`：引擎的 CPU，不超过 20 核，请求值不能高于上限。保存资源设置后会重新拉起引擎。
+
+    **示例**
+    - Hy4-Flash SQ-96（`hy4-flash` / `SQ-96`）：`MODEL_SOURCE` 包含 `strata-engine/Hy4-Flash-Strata` 中的 `Hy4-Flash-SQ-96.strata` 和 `Hy4-Flash-Engram-Q8.strata`。
+    - Inkling-2-Mini SQ-20（`inkling-2-mini` / `SQ-20`）：`MODEL_SOURCE` 包含 `strata-engine/Inkling-2-Mini-Strata` 中的 `Inkling-2-Mini-SQ-20.strata`。
+    - Qwen3.8-Flash-Next UD-IQ4_XS-v31（`unsloth` / `UD-IQ4_XS-v31`）：`MODEL_SOURCE` 包含 `unsloth/Qwen3.8-Flash-Next-GGUF` 中的四个 `UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-0000N-of-00004.gguf` 分片。
+    - Qwen3.8-Flash-Next NVFP4（`nvfp4` / `NVFP4`）：`MODEL_SOURCE` 下载整个 pack 仓库，文件保持仓库原有的目录结构。
+
+    **工作方式**
+    `llm-init` 按 `MODEL_SOURCE` 把文件下载到共享的 Hugging Face 缓存，并写好就绪标记。Strata 容器等到标记后，把下载的文件链接到自己的数据目录，再按这些文件所属的家族和版本运行 `setup.py`。setup.py 校验文件，准备分词器和 pack，并为对应引擎写出运行配置。两个容器通过 Common 共享运行状态，可以跑在不同节点上。
+
+    **草稿模型**
+    - Qwen3.8-Flash-Next 各家族：setup.py 在 MTP 和 DFlash2 之间选择。`--draft dflash2` 会下载 DFlash2 pack，而不是约 5 GB 的 MTP 层。
+    - Hy4-Flash：默认开启 DFly2，`--draft off` 关闭。
+    - Inkling-2-Mini：默认开启 DSpark，`--draft off` 关闭。
+
+    **组件**
+    - **Strata**（端口 8080）：运行模型。Strata UI 入口打开这个端口，不等待权重加载完成。
+    - **llm-init**（端口 8090）：下载模型、显示进度，并提供兼容 OpenAI 的 API，转发到 Strata。
+
+    **加速器**
+    仅 NVIDIA CUDA，镜像为 `ghcr.io/niko1221/strata:0.2.22-cuda13`。用 `STRATA_REQUIRED_GPU_MEMORY` 设置显存配额。
+
+    **模型存放**
+    权重在 `appCommon/huggingface`，引擎里以只读方式挂到 `/cache/hf/hub`。每个克隆的 setup 输出写在 `appCommon/huggingface/strata-data/<release>`。更换镜像后，已下载的草稿模型会保留，pack 会重新准备。
+
+    **资源提示**
+    - 使用前按模型调高内存和显存。大型模型无法在 Chart 的默认小配额上启动。
+    - setup.py 按这个容器的限制规划内存，引擎的 CPU 线程池跟随 CPU 上限。

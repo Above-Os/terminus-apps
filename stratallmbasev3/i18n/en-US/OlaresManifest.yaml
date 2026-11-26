@@ -1,0 +1,63 @@
+metadata:
+  description: "Generic Strata engine base. Pick a Strata build at install via env. llm-init and the engine share runtime state through Common."
+  title: Strata Engine Base
+
+spec:
+  upgradeDescription: |
+    Initial Strata engine base on Strata v0.2.22 (CUDA 13) and Model Console (llm-init v1.7.27).
+
+    The model is not part of this chart. A clone sets MODEL_SOURCE, MODEL_NAME, and the memory and GPU quota. The chart reads the setup.py family and build from the files in MODEL_SOURCE. llm-init downloads the files into Common. The engine links every downloaded file into its own writable directory and runs the official setup.py for the selected family and build.
+
+    - Strata 0.2.22: a start that reads the model from a slow disk is no longer stopped after 15 minutes while the engine is still loading.
+    - Supports all three Strata engines in the official image: `strata-engine` (Qwen3.8-Flash-Next families and Qwen3.6), `strata-hy4` (Hy4-Flash), and `strata-inkling` (Inkling-2-Mini). setup.py picks the engine from the family.
+    - ENGINE_ARGS options that setup.py knows go to setup.py. Other options go to the engine and override setup's value.
+    - Weight files from the Hugging Face cache are not hashed again on every start.
+    - Editable settings are checked before install: MODEL_SOURCE must name the files of one official build, ENGINE_ARGS accepts only plain options and rejects the ones the chart manages, and the resource settings fit an Olares One (24 GiB GPU, 96 GiB RAM): CPU limit up to 20 cores, memory limit up to 84 GiB, GPU memory up to 23 GiB, and each request not above its limit.
+  fullDescription: |
+    **IMPORTANT NOTE**
+    This app is a template and cannot be used on its own. To use it, set the environment variables below to connect a specific model.
+
+    **Supported engines**
+    The official image ships three engine programs. The family that `MODEL_SOURCE` names decides which one runs.
+    - `strata-engine`: `qwen`, `coder`, `swift`, `unsloth`, `gyro`, `nvfp4` (Qwen3.8-Flash-Next) and `qwen36` (Qwen3.6-35B-A3B).
+    - `strata-hy4`: `hy4-flash` (Tencent Hy4-Flash, builds `SQ-64`, `SQ-96`, `SQ-128`).
+    - `strata-inkling`: `inkling-2-mini` (builds `SQ-10`, `SQ-15`, `SQ-20`, and Unsloth GGUF builds such as `UD-Q4_K_XL`).
+
+    **Environment Variables Setup Guide**
+    - `MODEL_SOURCE`: `hf://<repo> --include <file>`. The files to download. Repeat the source, separated by commas, when a build has several files. Every listed file is handed to setup.py, including files from other repositories such as a vision projector. The chart reads the setup.py family and build from the model files of the official repositories, so list the files of one build only. For a mirror repository, set `strata.family` and `strata.model` in values.yaml. A pinned snapshot adds `--revision <sha>` on each segment.
+    - `MODEL_NAME`: the public model id and OpenAI alias, for example `hy4-flash-sq-96` or `qwen3.8-flash-next-ud-iq4_xs`.
+    - `MODEL_MODE`: `chat`.
+    - `MODEL_SUPPORTS`: Vision / Tools / Thinking / None. Vision turns the engine's image reader on. Hy4-Flash and Inkling-2-Mini then need their `*-Vision.strata` file in `MODEL_SOURCE`.
+    - `ENGINE_ARGS`: extra options, such as `--context 131072 --kv int8 --parallel 1`. Options that setup.py declares go to setup.py. Any other option, such as `--vram-experts-gb 12` or `--spec-k 4`, goes to the engine and overrides the value setup wrote. Options after a bare `--` always go to the engine. `--max-context` and `--ctx` mean `--context`. `--draft off|mtp|dflash2|dfly2|dspark` picks the drafter. Do not pass `--family`, `--model`, `--gguf-dir`, `--models-dir`, `--host`, `--port`, `--gpu`, or `--vision`; the chart owns those.
+    - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
+    - `STRATA_REQUIRED_GPU_MEMORY`: up to `23Gi`, written as `8Gi`, `8192`, or `8192Mi`. Sets `nvidia.com/gpumem` in MiB.
+    - `STRATA_MEMORY_REQUEST` and `STRATA_MEMORY_LIMIT`: container memory, up to `84Gi`; the request cannot be above the limit. Size the limit for the model, its KV cache, and the runtime. Both are filled in when cloning.
+    - `STRATA_CPU_REQUEST` and `STRATA_CPU_LIMIT`: CPU for the engine, up to 20 cores; the request cannot be above the limit. Saving a resource setting relaunches the engine.
+
+    **Examples**
+    - Hy4-Flash SQ-96 (`hy4-flash` / `SQ-96`): `MODEL_SOURCE` with `Hy4-Flash-SQ-96.strata` and `Hy4-Flash-Engram-Q8.strata` from `strata-engine/Hy4-Flash-Strata`.
+    - Inkling-2-Mini SQ-20 (`inkling-2-mini` / `SQ-20`): `MODEL_SOURCE` with `Inkling-2-Mini-SQ-20.strata` from `strata-engine/Inkling-2-Mini-Strata`.
+    - Qwen3.8-Flash-Next UD-IQ4_XS-v31 (`unsloth` / `UD-IQ4_XS-v31`): `MODEL_SOURCE` with the four `UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-0000N-of-00004.gguf` shards from `unsloth/Qwen3.8-Flash-Next-GGUF`.
+    - Qwen3.8-Flash-Next NVFP4 (`nvfp4` / `NVFP4`): `MODEL_SOURCE` with the whole pack repository. The files keep the repository's folder layout.
+
+    **How It Works**
+    `llm-init` downloads the files named by `MODEL_SOURCE` into the shared Hugging Face cache and writes the ready mark. The Strata container waits for that mark, links the downloaded files into its own data directory, and runs `setup.py` for the family and build those files belong to. setup.py checks the files, prepares the tokenizer and packs, and writes the run config for the right engine. The two containers share run state through Common and can run on different nodes.
+
+    **Drafters**
+    - Qwen3.8-Flash-Next families: setup.py picks MTP or DFlash2. `--draft dflash2` fetches the DFlash2 pack instead of the ~5 GB MTP layer.
+    - Hy4-Flash: DFly2 is on by default. `--draft off` turns it off.
+    - Inkling-2-Mini: DSpark is on by default. `--draft off` turns it off.
+
+    **Stack**
+    - **Strata** (port 8080): runs the model. The Strata UI entrance opens this port and does not wait for the weights to finish loading.
+    - **llm-init** (port 8090): downloads the model, shows progress, and provides the OpenAI-compatible API, proxying to Strata.
+
+    **Accelerator**
+    NVIDIA CUDA only, using `ghcr.io/niko1221/strata:0.2.22-cuda13`. Set `STRATA_REQUIRED_GPU_MEMORY` to the VRAM quota.
+
+    **Model Storage**
+    Weight files live in `appCommon/huggingface`, mounted read-only in the engine at `/cache/hf/hub`. Each clone writes its setup output under `appCommon/huggingface/strata-data/<release>`. A new image keeps downloaded drafters and prepares the packs again.
+
+    **Resource Tips**
+    - Raise memory and GPU quota to the model before use. A large model will not start on the chart's small defaults.
+    - setup.py plans memory from this container's limits, and the engine's CPU thread pool follows the CPU limit.
