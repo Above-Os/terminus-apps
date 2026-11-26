@@ -301,7 +301,9 @@ data:
         total_alnum = 0
         body_alnum = 0
         images = []
+        vectors = []
         visible_curves = 0
+        page_area = width * height
 
         def walk(node):
             nonlocal total_alnum, body_alnum, visible_curves
@@ -310,6 +312,10 @@ data:
                 return
             if isinstance(node, LTCurve) and _is_visible_curve(node):
                 visible_curves += 1
+                vx0, vy0, vx1, vy1 = node.bbox
+                # Page backgrounds and frames are not content.
+                if (vx1 - vx0) * (vy1 - vy0) < 0.6 * page_area:
+                    vectors.append(node.bbox)
             if isinstance(node, LTTextLine):
                 s = node.get_text()
                 text_chunks.append(s)
@@ -343,25 +349,38 @@ data:
         body_w = max(bx1 - bx0, 1.0)
         body_h = max(by1 - by0, 1.0)
         grid_n = 24
-        covered = 0
-        if images:
+
+        def body_coverage(boxes):
+            if not boxes:
+                return 0.0
             cell_w = body_w / grid_n
             cell_h = body_h / grid_n
+            covered = 0
             for gy in range(grid_n):
                 cy0 = by0 + gy * cell_h
                 cy1 = cy0 + cell_h
                 for gx in range(grid_n):
                     cx0 = bx0 + gx * cell_w
                     cx1 = cx0 + cell_w
-                    if any(ix0 < cx1 and ix1 > cx0 and iy0 < cy1 and iy1 > cy0 for ix0, iy0, ix1, iy1 in images):
+                    if any(ix0 < cx1 and ix1 > cx0 and iy0 < cy1 and iy1 > cy0 for ix0, iy0, ix1, iy1 in boxes):
                         covered += 1
-        body_image_coverage = covered / float(grid_n * grid_n)
+            return covered / float(grid_n * grid_n)
+
+        body_image_coverage = body_coverage(images)
+        body_visual_coverage = body_coverage(images + vectors)
+        body_vectors = any(bx0 <= 0.5 * (vx0 + vx1) <= bx1 and by0 <= 0.5 * (vy0 + vy1) <= by1
+                           for vx0, vy0, vx1, vy1 in vectors)
 
         if total_alnum == 0:
             if not images and not visible_curves and not text:
                 return text, 'blank'
             return text, 'ocr_no_text'
         if body_image_coverage >= 0.25 and (body_alnum == 0 or (body_image_coverage >= 0.40 and body_alnum < 45)):
+            return text, 'ocr_scanned_body'
+        # Outlined (vector) body text: selectable text only in header/footer bands.
+        if body_alnum == 0 and body_vectors:
+            return text, 'ocr_scanned_body'
+        if body_visual_coverage >= 0.40 and body_alnum < 45:
             return text, 'ocr_scanned_body'
         return text, 'native'
 
@@ -413,7 +432,7 @@ data:
                 skipped = ', '.join(map(str, missing))
                 return (
                     f'> WARNING: Router OCR was unavailable, so PDF page(s) {skipped} were NOT converted. '
-                    'Those pages are image-only or scanned (any page numbers or headers shown for them are not their body text). '
+                    'Those pages are image-only, scanned, or vector-drawn (any page numbers or headers shown for them are not their body text). '
                     'Only native text from the remaining pages is shown below; this result is incomplete.\n\n'
                     + native_md
                 )
@@ -449,7 +468,7 @@ data:
             if no_text_pages:
                 reasons.append('PDF pages without extractable text: ' + ', '.join(map(str, no_text_pages)))
             if scanned_body_pages:
-                reasons.append('scanned PDF pages with only marginal/sparse text: ' + ', '.join(map(str, scanned_body_pages)))
+                reasons.append('scanned or vector-drawn PDF pages with only marginal/sparse text: ' + ', '.join(map(str, scanned_body_pages)))
             notice = OCR_NOTICE.format(model=ocr.model, reason='; '.join(reasons))
 
             def _page_label(n):
