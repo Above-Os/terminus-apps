@@ -285,6 +285,23 @@ subjects:
 """
 
 
+def configure_ssh_port(text: str) -> str:
+    # GitLab publishes the platform-assigned TCP port in SSH clone URLs.
+    port = '{{ get (default dict .Values.exposePorts) "ssh" | default 22 }}'
+    host = '{{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}'
+    components = ("webservice", "sidekiq", "toolbox")
+    deployment_sources = tuple(f"/{name}/templates/deployment.yaml" for name in components)
+    documents = text.split("\n---\n")
+    for i, doc in enumerate(documents):
+        doc = doc.replace("        ssh_port: 22\n", f"        ssh_host: {host}\n        ssh_port: {port}\n")
+        if doc.partition("\n")[0].endswith(deployment_sources):
+            # The generated checksums are static. Restart Rails when its SSH address changes.
+            annotations = f'        gitlab.com/ssh-host: {host}\n        gitlab.com/ssh-port: "{port}"\n'
+            doc = doc.replace("        checksum/config", annotations + "        checksum/config", 1)
+        documents[i] = doc
+    return "\n---\n".join(documents)
+
+
 def main() -> None:
     path_in = sys.argv[1]
     path_out = sys.argv[2]
@@ -389,6 +406,8 @@ def main() -> None:
     # Kubernetes 1.25+ / Olares: deprecated API versions removed from apiserver
     text = upgrade_k8s_api_versions(text)
     text = apply_namespace_ingress_class(text)
+
+    text = configure_ssh_port(text)
 
     with open(path_out, "w", encoding="utf-8") as f:
         f.write(text)
