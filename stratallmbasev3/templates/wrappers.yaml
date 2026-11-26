@@ -1,0 +1,697 @@
+# Scripts mounted at /llm-init/wrappers in the engine container.
+# Accepts both layouts:
+#   a) Older flattened image: /opt/strata/.venv/bin/python and /opt/strata/setup.py
+#   b) Official image: /opt/strata/terminal/python/bin/python3 and /opt/strata/terminal/setup.py
+# setup.py picks the engine program: strata-engine (Qwen3.8-Flash-Next families,
+# qwen36), strata-hy4 (hy4-flash) or strata-inkling (inkling-2-mini). The official
+# image ships all three under /opt/strata/components.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-init-wrappers
+  namespace: {{ .Release.Namespace }}
+data:
+  strata.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=strata
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    # Snapshot the shared helper locally; a cross-node update may briefly fail to open.
+    _common_copy=$(mktemp "${TMPDIR:-/tmp}/strata-common.XXXXXX")
+    _wc=0
+    while ! cp "$WRAPPER_COMMON" "$_common_copy" 2>/dev/null; do
+        if [ "$_wc" -ge "${WRAPPER_COMMON_WAIT:-3600}" ]; then
+            rm -f "$_common_copy"
+            printf '[wrapper] %s could not be read\n' "$WRAPPER_COMMON" >&2
+            exit 1
+        fi
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    # shellcheck source=common.sh
+    . "$_common_copy"
+    rm -f "$_common_copy"
+    unset _wc _common_copy
+
+    python_usable() {
+        [ -f "$1" ] || return 1
+        [ -x "$1" ] && return 0
+        "$1" -c 'pass' 2>/dev/null
+    }
+
+    resolve_python() {
+        if [ -n "${STRATA_PYTHON:-}" ] && python_usable "$STRATA_PYTHON"; then
+            printf '%s\n' "$STRATA_PYTHON"
+            return 0
+        fi
+        for cand in \
+            /opt/strata/.venv/bin/python \
+            /opt/strata/.venv/bin/python3 \
+            /opt/strata/terminal/python/bin/python3 \
+            /opt/strata/python/bin/python3 \
+            "$(command -v python3 2>/dev/null || true)"; do
+            if [ -n "$cand" ] && python_usable "$cand"; then
+                printf '%s\n' "$cand"
+                return 0
+            fi
+        done
+        printf '[wrapper] FATAL: no usable Python interpreter found under /opt/strata\n' >&2
+        return 1
+    }
+
+    resolve_root() {
+        if [ -n "${STRATA_ROOT:-}" ] && [ -f "$STRATA_ROOT/setup.py" ]; then
+            printf '%s\n' "$STRATA_ROOT"
+            return 0
+        fi
+        for cand in /opt/strata /opt/strata/terminal; do
+            if [ -f "$cand/setup.py" ] && [ -f "$cand/serve/server.py" ]; then
+                printf '%s\n' "$cand"
+                return 0
+            fi
+        done
+        printf '[wrapper] FATAL: neither /opt/strata nor /opt/strata/terminal contains setup.py + serve/server.py\n' >&2
+        return 1
+    }
+
+    wait_for_sentinel
+    wait_for_engine_args_handoff
+    MODEL_PATH=$(read_model_path)
+    STRATA_PYTHON=$(resolve_python)
+    STRATA_ROOT=$(resolve_root)
+    export MODEL_PATH STRATA_PYTHON STRATA_ROOT
+
+    run_strata() {
+        load_engine_args_from_handoff
+        export ENGINE_ARGS
+        exec "$STRATA_PYTHON" \
+            "${STRATA_LAUNCHER:-/llm-init/wrappers/prepare-strata.py}" "$@"
+    }
+
+    supervise_engine run_strata "$@"
+  prepare-strata.py: |
+    #!/usr/bin/env python3
+    """Link what llm-init downloaded into a writable folder, run the official
+    setup.py for STRATA_FAMILY / STRATA_MODEL, then exec serve/server.py.
+
+    setup.py chooses the engine program from the family: strata-engine for the
+    Qwen3.8-Flash-Next families and qwen36, strata-hy4 for hy4-flash and
+    strata-inkling for inkling-2-mini. ENGINE_ARGS options that setup.py declares
+    go to setup.py; every other option is an engine option and is written to the
+    run config's user_args, which serve applies over setup's arguments for all
+    three engines.
+    """
+    import ast
+    import fnmatch
+    import hashlib
+    import json
+    import os
+    from pathlib import Path
+    import re
+    import shlex
+    import shutil
+    import signal
+    import subprocess
+    import sys
+
+    HF_HUB = Path(os.environ.get('HF_HUB_CACHE', '/cache/hf/hub'))
+
+    # setup.py reads these families from <models-dir>/<owner>--<repo>/<path in the
+    # repository> (ready-made packs). Every other family reads one flat --gguf-dir.
+    REPO_LAYOUT_FAMILIES = {'nvfp4'}
+
+    # The chart owns download, networking, the selected build and the GPU.
+    MANAGED = {
+        '--family', '--model', '--native', '--engram', '--data-dir', '--models-dir',
+        '--move-data', '--set-default-data-dir', '--gguf-dir', '--host', '--port',
+        '--api-key', '--backend', '--vision', '--gpu', '--gpus', '--prebuilt', '--build',
+        '--setup', '--yes', '--no-start', '--check', '--update', '--inspect', '--browser',
+        '--no-browser', '--skip-build', '--rollback-engine', '--cuda', '--serve',
+        '--export-tokenizer', '--info',
+    }
+    CONTEXT_ALIASES = {'--max-context', '--ctx'}
+    DRAFT_ALIASES = {'--draft', '--drafting'}
+    SHA256_NAME = re.compile(r'[0-9a-f]{64}')
+    COMMIT = re.compile(r'[0-9a-f]{40}')
+
+
+    def resolve_strata_root(env=None):
+        env = os.environ if env is None else env
+        explicit = env.get('STRATA_ROOT', '').strip()
+        app_base = Path(env.get('STRATA_APP', '/opt/strata'))
+        candidates = []
+        if explicit:
+            p = Path(explicit)
+            candidates.extend([p, p / 'terminal'])
+        candidates.extend([app_base, app_base / 'terminal'])
+        seen = set()
+        for cand in candidates:
+            key = str(cand)
+            if key in seen:
+                continue
+            seen.add(key)
+            if (cand / 'setup.py').is_file() and (cand / 'serve' / 'server.py').is_file():
+                return cand
+        raise FileNotFoundError(
+            'Could not locate Strata setup.py and serve/server.py under '
+            + ', '.join(str(c) for c in candidates))
+
+
+    def official_layout(root):
+        return root.name == 'terminal'
+
+
+    def family_engine(family):
+        family = family.lower()
+        if family.startswith('hy4'):
+            return 'strata-hy4'
+        if family.startswith('inkling'):
+            return 'strata-inkling'
+        return 'strata-engine'
+
+
+    def config_engine(cfg):
+        exe = str(cfg.get('exe') or '').lower()
+        arch = str(cfg.get('arch') or '').lower()
+        if 'strata-hy4' in exe or arch.startswith('hy4'):
+            return 'strata-hy4'
+        if 'strata-inkling' in exe or arch.startswith('inkling'):
+            return 'strata-inkling'
+        return 'strata-engine'
+
+
+    def bridge_components_dir(app_base, data_root, env=None):
+        """A writable components dir linked at the image's read-only engine packages."""
+        env = os.environ if env is None else env
+        writable = Path(data_root) / 'components'
+        writable.mkdir(parents=True, exist_ok=True)
+        src_candidates = []
+        if env.get('STRATA_COMPONENTS_DIR'):
+            src_candidates.append(Path(env['STRATA_COMPONENTS_DIR']))
+        src_candidates.append(Path(app_base) / 'components')
+        for src in src_candidates:
+            try:
+                if not src.is_dir() or src.resolve() == writable.resolve():
+                    continue
+            except OSError:
+                continue
+            eng_src = src / 'engine'
+            eng_dst = writable / 'engine'
+            if eng_src.is_dir() and not eng_dst.exists():
+                eng_dst.symlink_to(eng_src, target_is_directory=True)
+            shapes_src = src / 'shapes'
+            if not shapes_src.is_dir():
+                continue
+            for shape_dir in sorted(shapes_src.iterdir()):
+                src_pkg_parent = shape_dir / 'engine'
+                if not src_pkg_parent.is_dir():
+                    continue
+                dst_pkg_parent = writable / 'shapes' / shape_dir.name / 'engine'
+                dst_pkg_parent.mkdir(parents=True, exist_ok=True)
+                for pkg in sorted(src_pkg_parent.iterdir()):
+                    link = dst_pkg_parent / pkg.name
+                    if pkg.is_dir() and not link.exists():
+                        link.symlink_to(pkg, target_is_directory=True)
+        return writable
+
+
+    def engine_build_identity(root, app_base):
+        """Build records of the Terminal, the main engine and every shape engine in the image."""
+        candidates = [Path(root) / 'engine' / 'BUILD.json', Path(root) / 'VERSION', Path(root) / 'COMMIT']
+        components = Path(app_base) / 'components'
+        for pattern in ('engine/*/BUILD.json', 'engine/*/engine-component.json', 'engine/BUILD.json',
+                        'shapes/*/engine/*/BUILD.json', 'shapes/*/engine/*/engine-component.json'):
+            candidates.extend(sorted(components.glob(pattern)))
+        parts = []
+        for cand in candidates:
+            try:
+                if cand.is_file():
+                    parts.append(cand.read_text(encoding='utf-8', errors='replace').strip())
+            except OSError:
+                continue
+        if not parts:
+            raise FileNotFoundError(f'No engine BUILD.json or engine-component.json under {root} or {components}')
+        return '|'.join(parts)
+
+
+    def setup_options(setup_py):
+        """Every option setup.py's parser declares, mapped to whether it takes a value."""
+        tree = ast.parse(Path(setup_py).read_text(encoding='utf-8'))
+        opts = {}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'add_argument'):
+                continue
+            names = [a.value for a in node.args
+                     if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.startswith('--')]
+            action = next((k.value for k in node.keywords if k.arg == 'action'), None)
+            toggle = isinstance(action, (ast.Attribute, ast.Name))
+            bare = toggle or (isinstance(action, ast.Constant) and action.value in (
+                'store_true', 'store_false', 'store_const', 'count', 'append_const', 'help', 'version'))
+            for name in names:
+                opts[name] = not bare
+                if toggle:
+                    opts['--no-' + name[2:]] = False
+        return opts
+
+
+    def split_engine_args(raw, setup_opts):
+        """(setup.py options, engine options, --draft value). Options after a bare `--` are engine options."""
+        tokens = shlex.split(raw or '')
+        setup_flags, engine_flags = [], []
+        draft = None
+        engine_only = False
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok == '--' and not engine_only:
+                engine_only = True
+                i += 1
+                continue
+            flag, eq, inline = tok.partition('=')
+            if not flag.startswith('--'):
+                raise ValueError(f'{tok}: ENGINE_ARGS expects options that start with --')
+            if flag in MANAGED:
+                raise ValueError(f'{tok}: managed by the Strata chart, not ENGINE_ARGS')
+            values = [inline] if eq else []
+            i += 1
+            while not eq and i < len(tokens) and not tokens[i].startswith('--'):
+                values.append(tokens[i])
+                i += 1
+            if engine_only:
+                engine_flags += [flag, *values]
+                continue
+            if flag in CONTEXT_ALIASES:
+                flag = '--context'
+            if flag in DRAFT_ALIASES:
+                if len(values) != 1:
+                    raise ValueError(f'{flag} takes one value, such as off, mtp, dflash2, dfly2 or dspark')
+                draft = values[0].lower()
+                continue
+            if flag in setup_opts:
+                if setup_opts[flag] and not values:
+                    raise ValueError(f'{flag} requires a value')
+                if not setup_opts[flag] and values:
+                    raise ValueError(f'{flag} takes no value (got {" ".join(values)})')
+                setup_flags += [flag, *values]
+            else:
+                engine_flags += [flag, *values]
+        return setup_flags, engine_flags, draft
+
+
+    def flag_value(args, flag):
+        for i in range(len(args) - 2, -1, -1):
+            if args[i] == flag:
+                return args[i + 1]
+        return None
+
+
+    def parse_model_source(raw):
+        """(repo, revision, include patterns) for each hf:// segment of MODEL_SOURCE."""
+        out = []
+        for segment in (raw or '').split(','):
+            tokens = shlex.split(segment.strip())
+            if not tokens or not tokens[0].startswith('hf://'):
+                continue
+            repo, revision, includes = tokens[0][len('hf://'):].strip('/'), None, []
+            k = 1
+            while k < len(tokens):
+                if tokens[k] in ('--revision', '--include') and k + 1 < len(tokens):
+                    if tokens[k] == '--revision':
+                        revision = tokens[k + 1]
+                    else:
+                        includes.append(tokens[k + 1])
+                    k += 2
+                else:
+                    k += 1
+            out.append((repo, revision, includes))
+        return out
+
+
+    def snapshot_dir(repo, revision):
+        base = HF_HUB / ('models--' + repo.replace('/', '--'))
+        ref = revision or 'main'
+        if not COMMIT.fullmatch(ref):
+            try:
+                ref = (base / 'refs' / ref).read_text(encoding='utf-8').strip()
+            except OSError:
+                return None
+        snap = base / 'snapshots' / ref
+        return snap if snap.is_dir() else None
+
+
+    def snapshot_files(snap, includes=()):
+        found = []
+        for path in sorted(snap.rglob('*')):
+            if path.is_dir() or not path.exists():
+                continue
+            rel = path.relative_to(snap).as_posix()
+            if includes and not any(fnmatch.fnmatch(rel, pat) for pat in includes):
+                continue
+            found.append((rel, path))
+        return found
+
+
+    def repo_of_snapshot(path):
+        """(owner--repo, snapshot dir) for a path inside the HF cache, else None."""
+        for parent in [Path(path), *Path(path).parents]:
+            if parent.parent.name == 'snapshots' and parent.parent.parent.name.startswith('models--'):
+                return parent.parent.parent.name[len('models--'):], parent
+        return None
+
+
+    def downloaded_files(model_path, model_source):
+        """(owner--repo, path in the repository, file) for everything MODEL_SOURCE downloaded.
+
+        The directory llm-init handed off is always included, so a source this
+        parser cannot resolve still leaves the main files in place.
+        """
+        files = {}
+        for repo, revision, includes in parse_model_source(model_source):
+            snap = snapshot_dir(repo, revision)
+            found = snapshot_files(snap, includes) if snap is not None else []
+            if not found:
+                print(f'[strata] MODEL_SOURCE hf://{repo}: no downloaded files found in {HF_HUB}', flush=True)
+            for rel, path in found:
+                files[(repo.replace('/', '--'), rel)] = path
+        handoff = Path(model_path)
+        folder = handoff.parent if handoff.is_file() else handoff
+        owner = repo_of_snapshot(folder)
+        if folder.is_dir():
+            for path in sorted(folder.iterdir()):
+                if path.is_dir() or not path.exists():
+                    continue
+                if owner is not None:
+                    repo, snap = owner
+                    files.setdefault((repo, path.relative_to(snap).as_posix()), path)
+                else:
+                    files.setdefault(('local', path.name), path)
+        if not files:
+            raise ValueError(f'No downloaded files under {folder}. MODEL_SOURCE must download the model files.')
+        return [(repo, rel, path) for (repo, rel), path in sorted(files.items())]
+
+
+    def plan_links(files, repo_layout):
+        """{destination relative to the run folder: file}. Flat weights/ for --gguf-dir, else models/<repo>/<path>."""
+        plan = {}
+        for repo, rel, path in files:
+            dest = f'models/{repo}/{rel}' if repo_layout else f'weights/{Path(rel).name}'
+            target = path.resolve()
+            if dest in plan and plan[dest].resolve() != target:
+                print(f'[strata] {Path(rel).name} is in more than one source; keeping {plan[dest]}', flush=True)
+                continue
+            plan[dest] = path
+        return plan
+
+
+    def link_files(plan, data):
+        for rel, src in plan.items():
+            target = src.resolve()
+            link = data / rel
+            mark = link.with_name(link.name + '.done')
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if not link.is_symlink() or link.resolve() != target:
+                if link.is_symlink() or link.exists():
+                    link.unlink()
+                mark.unlink(missing_ok=True)
+                link.symlink_to(target)
+            # setup.py never writes a finish mark beside --gguf-dir files and the
+            # image's own marks/ folder is read-only, so without this every start
+            # hashes the whole model again. An HF LFS blob is named by its SHA-256.
+            if SHA256_NAME.fullmatch(target.name) and not mark.exists():
+                mark.write_text(f'sha256 {target.name}\n', encoding='utf-8')
+
+
+    def drop_pool_workers(argv):
+        # setup.py writes a pool sized to the host. This container's CPU limit is
+        # smaller, and the engine sizes the pool to the cgroup when the flag is absent.
+        out = []
+        skip = False
+        for arg in argv:
+            if skip:
+                skip = False
+                continue
+            if arg == '--pool-workers':
+                skip = True
+                continue
+            if arg.startswith('--pool-workers='):
+                continue
+            out.append(arg)
+        return out
+
+
+    def cpu_threads(env=None):
+        """Compute threads for the container's CPU quota, keeping two cores for CUDA dispatch and HTTP; STRATA_CPU_THREADS caps it."""
+        env = os.environ if env is None else env
+        cores = None
+        try:
+            quota, period = Path('/sys/fs/cgroup/cpu.max').read_text(encoding='utf-8').split()
+            if quota != 'max' and int(quota) > 0 and int(period) > 0:
+                cores = max(1, int(quota) // int(period))
+        except (OSError, ValueError):
+            pass
+        if cores is None:
+            cores = os.cpu_count() or 1
+        threads = max(1, cores - 2) if cores >= 4 else cores
+        cap = (env.get('STRATA_CPU_THREADS') or '').strip()
+        if cap.isdigit() and int(cap) > 0:
+            threads = min(threads, int(cap))
+        return str(threads)
+
+
+    def apply_engine_env(cfg, engine, env=None):
+        """Engine environment carried in the run config; values setup.py already wrote win."""
+        threads = cpu_threads(env)
+        cfg_env = dict(cfg.get('env') or {})
+        cfg_env.setdefault('OMP_NUM_THREADS', threads)
+        if engine == 'strata-hy4':
+            cfg_env.setdefault('HY4_CPU_THREADS', threads)
+            # Collapse the CPU expert arena into 2 MiB pages; read cold experts past the page cache.
+            cfg_env.setdefault('STRATA_CPUEXP_COLLAPSE', '1')
+            cfg_env.setdefault('STRATA_CPUEXP_COLD_IO', 'direct')
+        cfg['env'] = cfg_env
+        return cfg_env
+
+
+    def publish_model_name(cfg):
+        public = os.environ.get('MODEL_NAME', '').strip()
+        native = str(cfg.get('model_name') or '').strip() or public
+        if not native:
+            raise ValueError('setup.py wrote no model_name and MODEL_NAME is empty')
+        cfg['model_name'] = native
+        if public and public != native:
+            cfg['aliases'] = [public]
+
+
+    def stamp_user_args(cfg, root, engine_flags):
+        """Record setup's args as written and the ENGINE_ARGS engine options as the person's own."""
+        sys.path.insert(0, str(root))
+        try:
+            from strata_control import user_args
+        except ImportError:
+            cfg['args_written'] = list(cfg.get('args') or [])
+            if engine_flags:
+                cfg['user_args'] = list(engine_flags)
+            return
+        user_args.stamp(cfg, list(engine_flags))
+
+
+    def fetch_dflash2(cfg, data, root):
+        """setup.py only fetches DFlash2 when it picks the drafter itself; an explicit --drafter dflash2 needs the pack here."""
+        sys.path.insert(0, str(root))
+        pack = None
+        try:
+            from strata_control import drafting, drafting_fetch
+            from serve.server import drafting_vram_mib
+            backend, archs = drafting.detect_hardware()
+            pack = drafting_fetch.ensure_for(
+                data, model_name=cfg.get('model_name'), backend=backend, archs=archs,
+                args=cfg.get('args') or [], vram_mib=drafting_vram_mib(cfg, backend, archs),
+                progress=lambda msg, _done, _total: print(f'[strata] {msg}', flush=True), throttle=True)
+        except Exception as exc:
+            print(f'[strata] DFlash2 drafter was not prepared ({exc})', flush=True)
+        if pack is None:
+            cfg['drafting'] = 'off'
+            print('[strata] DFlash2 drafter unavailable; this start runs without a drafter', flush=True)
+        else:
+            cfg['drafting'] = 'dflash2'
+            print(f'[strata] DFlash2 drafter ready: {pack}', flush=True)
+
+
+    def run_setup(command, cwd, env=None):
+        child = subprocess.Popen(command, cwd=cwd, env=env, start_new_session=True)
+
+        def stop(signum, _frame):
+            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait()
+            raise SystemExit(128 + signum)
+
+        old = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            if child.wait() != 0:
+                raise RuntimeError('Strata setup failed; refusing to start with stale configuration')
+        finally:
+            for sig, handler in old.items():
+                signal.signal(sig, handler)
+
+
+    def generated_config(folders):
+        found = []
+        for folder in folders:
+            found.extend(
+                p for p in folder.glob('strata-*.json')
+                if p.is_file() and not p.name.endswith('.shared-settings.json'))
+        found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return found[0] if found else None
+
+
+    def main():
+        family = os.environ.get('STRATA_FAMILY', '').strip()
+        model = os.environ.get('STRATA_MODEL', '').strip()
+        if not family or not model:
+            raise ValueError('STRATA_FAMILY and STRATA_MODEL are empty: MODEL_SOURCE names no official Strata build; set strata.family and strata.model in values.yaml')
+        root = resolve_strata_root()
+        app_base = Path(os.environ.get('STRATA_APP', '/opt/strata'))
+        engine = family_engine(family)
+        setup_opts = setup_options(root / 'setup.py')
+        setup_flags, engine_flags, draft = split_engine_args(os.environ.get('ENGINE_ARGS', ''), setup_opts)
+        if draft and draft != 'auto' and '--drafter' in setup_opts:
+            setup_flags += ['--drafter', draft]
+        if engine == 'strata-inkling' and flag_value(setup_flags, '--drafter') is None and draft is None:
+            # setup's default for Inkling is a speed probe that only `strata launch`
+            # runs; started through serve/server.py that default never drafts.
+            setup_flags += ['--drafter', 'dspark']
+        drafter = flag_value(setup_flags, '--drafter')
+
+        repo_layout = family.lower() in REPO_LAYOUT_FAMILIES
+        files = downloaded_files(os.environ['MODEL_PATH'], os.environ.get('MODEL_SOURCE', ''))
+        plan = plan_links(files, repo_layout)
+
+        data_base = Path(os.environ.get('STRATA_DATA', '/data'))
+        data_base.mkdir(parents=True, exist_ok=True)
+        components_dir = bridge_components_dir(app_base, data_base)
+        identity = json.dumps([family, model, sorted((rel, str(p.resolve())) for rel, p in plan.items())])
+        data = data_base / hashlib.sha256(identity.encode()).hexdigest()[:20]
+        install_dir = data / 'install'
+        install_dir.mkdir(parents=True, exist_ok=True)
+        link_files(plan, data)
+
+        # A different image keeps the downloads and drafters setup fetched but not
+        # the packs it derived from the weights with the previous tools.
+        build = hashlib.sha256(engine_build_identity(root, app_base).encode()).hexdigest()
+        build_mark = data / 'engine-build'
+        previous = build_mark.read_text(encoding='utf-8').strip() if build_mark.is_file() else None
+        if previous is not None and previous != build:
+            print('[strata] engine build changed; preparing the model again', flush=True)
+            shutil.rmtree(data / 'packs', ignore_errors=True)
+        build_mark.write_text(build + '\n', encoding='utf-8')
+
+        for old in install_dir.glob('strata-*.json'):
+            if not old.name.endswith('.shared-settings.json'):
+                old.unlink(missing_ok=True)
+
+        port = os.environ.get('STRATA_PORT', '8080').strip() or '8080'
+        vision = os.environ.get('STRATA_VISION', 'no').strip().lower()
+        if vision not in ('yes', 'no'):
+            raise ValueError('STRATA_VISION must be yes or no, got %r' % vision)
+
+        setup_env = dict(os.environ)
+        setup_env['STRATA_COMPONENTS_DIR'] = str(components_dir)
+        config_dirs = [install_dir]
+        if official_layout(root):
+            setup_env['STRATA_CONTROL_INSTALL'] = '1'
+            setup_env['STRATA_INSTALL_DIR'] = str(install_dir)
+        elif os.access(root, os.W_OK):
+            config_dirs.append(root)
+
+        files_flags = ['--models-dir', str(data / 'models')] if repo_layout else ['--gguf-dir', str(data / 'weights')]
+        command = [
+            sys.executable, str(root / 'setup.py'),
+            '--setup', '--yes', '--no-start', '--no-browser',
+            '--family', family, '--model', model, '--backend', 'cuda',
+            '--gpu', '0', '--vision', vision, '--data-dir', str(data),
+            *files_flags, '--host', '0.0.0.0', '--port', port,
+            *setup_flags,
+        ]
+        print(f'[strata] preparing {family} / {model} for {engine} ({len(plan)} files)', flush=True)
+        run_setup(command, root, setup_env)
+
+        cfg_file = generated_config(config_dirs)
+        if cfg_file is None:
+            raise FileNotFoundError('setup did not write strata-*.json under %s' % [str(p) for p in config_dirs])
+        cfg = json.loads(cfg_file.read_text(encoding='utf-8-sig'))
+        engine = config_engine(cfg)
+        cfg['args'] = drop_pool_workers(cfg.get('args') or [])
+        publish_model_name(cfg)
+        if engine == 'strata-hy4' and draft and draft != 'auto':
+            cfg['drafting'] = draft                    # setup writes Hy4's default drafter whatever --drafter says
+        elif engine == 'strata-engine' and drafter == 'dflash2':
+            fetch_dflash2(cfg, data, root)
+        stamp_user_args(cfg, root, engine_flags)
+        cfg_env = apply_engine_env(cfg, engine)
+        cfg['log'] = str(data / 'engine.log')
+        cfg['open_browser'] = False
+        cfg['allowed_hosts'] = ['*']
+        cfg.pop('api_key', None)                      # internal ClusterIP only; Olares authenticates the entrance.
+        target = data / 'server.json'
+        temporary = target.with_suffix('.tmp')
+        temporary.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+        temporary.replace(target)
+        print(f'[strata] engine {engine}: {cfg.get("exe")} drafting={cfg.get("drafting")}'
+              + f' threads={cfg_env["OMP_NUM_THREADS"]}'
+              + (f' user_args={engine_flags}' if engine_flags else ''), flush=True)
+        os.environ['STRATA_COMPONENTS_DIR'] = str(components_dir)
+        os.chdir(root)
+        os.execv(sys.executable, [
+            sys.executable, str(root / 'serve' / 'server.py'),
+            '--engine', 'strata', '--config', str(target),
+            '--host', '0.0.0.0', '--port', port,
+        ])
+
+
+    if __name__ == '__main__':
+        main()
+  strata-healthcheck.sh: |
+    #!/bin/sh
+    set -eu
+    for cand in \
+        "${STRATA_PYTHON:-}" \
+        /opt/strata/.venv/bin/python \
+        /opt/strata/.venv/bin/python3 \
+        /opt/strata/terminal/python/bin/python3 \
+        /opt/strata/python/bin/python3 \
+        "$(command -v python3 2>/dev/null || true)"; do
+        if [ -n "$cand" ] && [ -f "$cand" ]; then
+            exec "$cand" /llm-init/wrappers/strata-healthcheck.py
+        fi
+    done
+    exit 1
+  strata-healthcheck.py: |
+    #!/usr/bin/env python3
+    import json
+    import os
+    import sys
+    import urllib.request
+
+
+    def healthy(state):
+        return isinstance(state, dict) and state.get('status') == 'ok' and state.get('loaded') is True
+
+
+    def main():
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open('http://127.0.0.1:' + os.environ.get('STRATA_PORT', '8080') + '/health', timeout=3) as response:
+                return 0 if healthy(json.load(response)) else 1
+        except (OSError, ValueError):
+            return 1
+
+
+    if __name__ == '__main__':
+        sys.exit(main())
