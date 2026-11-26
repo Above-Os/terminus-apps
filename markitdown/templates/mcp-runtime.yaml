@@ -301,7 +301,6 @@ data:
             self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
             self.cw = max(x1 - x0, 1.0) / self.N
             self.ch = max(y1 - y0, 1.0) / self.N
-            self.step = 0.5 * min(self.cw, self.ch)
 
         def _cell(self, x, y):
             gx = min(self.N - 1, max(0, int((x - self.x0) / self.cw)))
@@ -337,12 +336,28 @@ data:
                     t1 = min(t1, r)
                 if t0 > t1:
                     return False
-            if len(cells) < self.N * self.N:
-                length = math.hypot(dx, dy) * (t1 - t0)
-                n = max(1, int(math.ceil(length / self.step)))
-                for i in range(n + 1):
-                    t = t0 + (t1 - t0) * i / n
-                    cells.add(self._cell(ax + t * dx, ay + t * dy))
+            if len(cells) == self.N * self.N:
+                return True
+            gx, gy = self._cell(ax + t0 * dx, ay + t0 * dy)
+            end_x, end_y = self._cell(ax + t1 * dx, ay + t1 * dy)
+            step_x = 1 if dx > 0 else -1
+            step_y = 1 if dy > 0 else -1
+            cells.add((gx, gy))
+            # Each crossing advances at least one cell toward the endpoint.
+            # Even on a very long page a segment visits at most 2*N-1 cells.
+            while (gx, gy) != (end_x, end_y):
+                cross_x = cross_y = math.inf
+                if gx != end_x:
+                    edge_x = self.x0 + (gx + (step_x > 0)) * self.cw
+                    cross_x = (edge_x - ax) / dx
+                if gy != end_y:
+                    edge_y = self.y0 + (gy + (step_y > 0)) * self.ch
+                    cross_y = (edge_y - ay) / dy
+                if cross_x <= cross_y:
+                    gx += step_x
+                if cross_y <= cross_x:
+                    gy += step_y
+                cells.add((gx, gy))
             return True
 
 
