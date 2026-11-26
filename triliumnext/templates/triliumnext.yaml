@@ -19,8 +19,8 @@ spec:
     spec:
       containers:
         - name: triliumnext
-          image: "docker.io/triliumnext/trilium:v0.106.1"
-          imagePullPolicy: IfNotPresent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - sh
             - -c
@@ -32,6 +32,9 @@ spec:
           env:
             - name: TRILIUM_DATA_DIR
               value: "/home/node/trilium-data"
+            {{- $oe := .Values.olaresEnv | default dict }}
+            - name: ALLOW_INTERNAL_TOKENLESS_MCP
+              value: {{ index $oe "ALLOW_INTERNAL_TOKENLESS_MCP" | default "true" | toString | quote }}
           resources:
             requests:
               cpu: 100m
@@ -46,6 +49,16 @@ spec:
             - name: mcp
               containerPort: 18081
               protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: 5
+            periodSeconds: 10
           volumeMounts:
             - name: mcp-runtime
               mountPath: /olares-mcp
@@ -60,7 +73,7 @@ spec:
         - name: triliumnext-data
           hostPath:
             type: DirectoryOrCreate
-            path: '{{ .Values.userspace.appData }}/triliumnext'
+            path: '{{ ((.Values.userspace).appData) | default "" }}/triliumnext'
 ---
 apiVersion: v1
 kind: Service

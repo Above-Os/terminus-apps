@@ -5,8 +5,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   bootstrap.cjs: |
-    // Upstream 0.106.1 has no unauthenticated MCP setting. Extend only its MCP
-    // access decision for a separate socket protected by Olares' internal entrance.
+    // Upstream 0.107.0 has no unauthenticated MCP setting. Extend only its MCP
+    // access decision for a separate socket protected by Olares' internal entrance,
+    // gated by both native mcpEnabled and ALLOW_INTERNAL_TOKENLESS_MCP.
     // No database, account, or ETAPI token is created or changed.
     const fs = require('node:fs');
     const path = require('node:path');
@@ -19,7 +20,7 @@ data:
     const file = path.join(root, files[0]);
     const source = fs.readFileSync(file, 'utf8');
     const original = /hasValidToken:([A-Za-z_$][\w$]*\.isValidAuthHeader\(([A-Za-z_$][\w$]*)\.headers\.authorization\))/g;
-    const patched = /hasValidToken:\(([A-Za-z_$][\w$]*)\.socket\.localPort===18081\|\|[A-Za-z_$][\w$]*\.isValidAuthHeader\(\1\.headers\.authorization\)\)/g;
+    const patched = /hasValidToken:\(\(process\.env\.ALLOW_INTERNAL_TOKENLESS_MCP!=="false"&&([A-Za-z_$][\w$]*)\.socket\.localPort===18081\)\|\|[A-Za-z_$][\w$]*\.isValidAuthHeader\(\1\.headers\.authorization\)\)/g;
     const found = [...source.matchAll(original)];
     const existing = [...source.matchAll(patched)];
     if (!source.includes('getOptionOrNull("mcpEnabled")')) {
@@ -32,7 +33,7 @@ data:
         throw new Error('Unsupported Trilium MCP access guard; leaving application code unchanged');
       }
       const match = found[0];
-      const replacement = `hasValidToken:(${match[2]}.socket.localPort===18081||${match[1]})`;
+      const replacement = `hasValidToken:((process.env.ALLOW_INTERNAL_TOKENLESS_MCP!=="false"&&${match[2]}.socket.localPort===18081)||${match[1]})`;
       const updated = source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length);
       const mode = fs.statSync(file).mode;
       const temp = file + '.olares-tmp';
@@ -52,18 +53,22 @@ data:
         const application = this;
         application.once('listening', () => {
           const internal = http.createServer((req, res) => {
-            let pathname;
+            let parsed;
             try {
-              pathname = new URL(req.url || '/', 'http://internal').pathname;
+              parsed = new URL(req.url || '/', 'http://internal');
             } catch {
               res.writeHead(400, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
               res.end('Bad request');
               return;
             }
-            if (pathname !== '/mcp' || !['GET', 'POST', 'DELETE'].includes(req.method)) {
+            const pathname = parsed.pathname;
+            if ((pathname !== '/mcp' && pathname !== '/mcp/') || !['GET', 'POST', 'DELETE'].includes(req.method)) {
               res.writeHead(404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
               res.end('Not found');
               return;
+            }
+            if (pathname === '/mcp/') {
+              req.url = '/mcp' + parsed.search;
             }
             // Forward the original request object: socket.localPort remains the
             // kernel-provided 18081, never a client header or forwarded address.
