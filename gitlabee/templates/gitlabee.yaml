@@ -1423,7 +1423,8 @@ data:
         hooks_path: /home/git/gitlab-shell/hooks/
         upload_pack: true
         receive_pack: true
-        ssh_port: 22
+        ssh_host: {{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}
+        ssh_port: {{ get (default dict .Values.exposePorts) "ssh" | default 22 }}
       workhorse:
       git:
         bin_path: /usr/bin/git
@@ -1769,7 +1770,8 @@ data:
         hooks_path: /home/git/gitlab-shell/hooks/
         upload_pack: true
         receive_pack: true
-        ssh_port: 22
+        ssh_host: {{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}
+        ssh_port: {{ get (default dict .Values.exposePorts) "ssh" | default 22 }}
         secret_file: /etc/gitlab/shell/.gitlab_shell_secret
       workhorse:
       git:
@@ -2164,7 +2166,8 @@ data:
         hooks_path: /home/git/gitlab-shell/hooks/
         upload_pack: true
         receive_pack: true
-        ssh_port: 22
+        ssh_host: {{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}
+        ssh_port: {{ get (default dict .Values.exposePorts) "ssh" | default 22 }}
         secret_file: /etc/gitlab/shell/.gitlab_shell_secret
       workhorse:
         secret_file: /etc/gitlab/gitlab-workhorse/secret
@@ -3577,9 +3580,7 @@ metadata:
   name: gitlabee-nginx-ingress-controller
   namespace: {{ .Release.Namespace }}
 spec:
-  type: LoadBalancer
-  
-  externalTrafficPolicy: Local
+  type: ClusterIP
   ipFamilyPolicy: PreferDualStack
   ports:
     - name: http
@@ -4658,6 +4659,8 @@ spec:
         
         queue-pod-name: all-in-1
       annotations:
+        gitlab.com/ssh-host: {{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}
+        gitlab.com/ssh-port: "{{ get (default dict .Values.exposePorts) "ssh" | default 22 }}"
         checksum/configmap: 798297e69a116542c6b1c5dccded51a574f1f1a664d43eae01311c22e035aae9
         cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
         gitlab.com/prometheus_scrape: "true"
@@ -4963,7 +4966,7 @@ spec:
               name: "gitlabee-registry-secret"
               items:
                 - key: registry-auth.key
-                  path: registry/gitlabee-registry.key
+                  path: registry/gitlab-registry.key
           - secret:
               name: "gitlabee-registry-notification"
               items:
@@ -5054,6 +5057,8 @@ spec:
         app.kubernetes.io/version: v18.10.1
         
       annotations:
+        gitlab.com/ssh-host: {{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}
+        gitlab.com/ssh-port: "{{ get (default dict .Values.exposePorts) "ssh" | default 22 }}"
         checksum/config: eefafcc7589f078ea07f63fee767b3be33196ca9bee6f9c74bfcebb837e91d22
         cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
     spec:
@@ -5313,7 +5318,7 @@ spec:
               name: "gitlabee-registry-secret"
               items:
                 - key: registry-auth.key
-                  path: registry/gitlabee-registry.key
+                  path: registry/gitlab-registry.key
           - secret:
               name: "gitlabee-registry-notification"
               items:
@@ -5407,6 +5412,8 @@ spec:
         
         
       annotations:
+        gitlab.com/ssh-host: {{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}
+        gitlab.com/ssh-port: "{{ get (default dict .Values.exposePorts) "ssh" | default 22 }}"
         checksum/config: 41e05dae4c44e90103ed5302dc28992bf6e789256d0055b91c886e2aae7e2c3b
         cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
         gitlab.com/prometheus_scrape: "true"
@@ -5834,7 +5841,7 @@ spec:
               name: "gitlabee-registry-secret"
               items:
                 - key: registry-auth.key
-                  path: registry/gitlabee-registry.key
+                  path: registry/gitlab-registry.key
           - secret:
               name: "gitlabee-registry-notification"
               items:
@@ -7160,6 +7167,9 @@ kind: Job
 metadata:
   name: gitlabee-migrations-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: hook-succeeded
   labels:
     app: migrations
     chart: migrations-9.10.1

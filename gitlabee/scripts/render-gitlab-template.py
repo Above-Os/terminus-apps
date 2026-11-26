@@ -209,6 +209,8 @@ def apply_gitlabee_resource_identity(text: str) -> str:
     for component in ("runner", "exporter", "shell", "workhorse"):
         text = text.replace(f"gitlabee-{component}", f"gitlab-{component}")
     text = text.replace("gitlab-workhorse-default", "gitlabee-gitlab-workhorse-default")
+    # Rails reads this projected key by its upstream filename.
+    text = text.replace("path: registry/gitlabee-registry.key", "path: registry/gitlab-registry.key")
     text = text.replace("gitlabee-issuer", "gitlab-issuer")
     text = text.replace("gitlabee-helm-chart", "gitlab-helm-chart")
     return text
@@ -329,6 +331,47 @@ subjects:
 """
 
 
+def configure_migration_job(text: str) -> str:
+    source = "# Source: gitlab/charts/gitlab/charts/migrations/templates/job.yaml"
+    documents = text.split("\n---\n")
+    for index, document in enumerate(documents):
+        if document.partition("\n")[0] != source or "\nkind: Job\n" not in document:
+            continue
+        # Olares scales the chart with Helm. Only wait for migrations when PostgreSQL is running.
+        guard = '{{- if gt (int (index .Values.workloads "gitlabee-webservice-default").replicaCount) 0 }}'
+        document = document.replace(source + "\n", source + "\n" + guard + "\n", 1)
+        document, count = re.subn(
+            r"  name: gitlabee-migrations-[^\n]+\n(  namespace: [^\n]+)",
+            r"  name: gitlabee-migrations-{{ .Release.Revision }}\n\1\n"
+            r"  annotations:\n    helm.sh/hook: post-install,post-upgrade\n"
+            r"    helm.sh/hook-delete-policy: hook-succeeded",
+            document,
+            count=1,
+        )
+        if count != 1:
+            raise ValueError("Missing GitLab EE migrations Job name")
+        documents[index] = document.rstrip() + "\n{{- end }}"
+        return "\n---\n".join(documents)
+    raise ValueError("Missing GitLab EE migrations Job")
+
+
+def configure_ssh_port(text: str) -> str:
+    # GitLab publishes the platform-assigned TCP port in SSH clone URLs.
+    port = '{{ get (default dict .Values.exposePorts) "ssh" | default 22 }}'
+    host = '{{ default $gitlabDomain .Values.olaresEnv.GITLAB_SSH_HOST | quote }}'
+    components = ("webservice", "sidekiq", "toolbox")
+    deployment_sources = tuple(f"/{name}/templates/deployment.yaml" for name in components)
+    documents = text.split("\n---\n")
+    for i, doc in enumerate(documents):
+        doc = doc.replace("        ssh_port: 22\n", f"        ssh_host: {host}\n        ssh_port: {port}\n")
+        if doc.partition("\n")[0].endswith(deployment_sources):
+            # The generated checksums are static. Restart Rails when its SSH address changes.
+            annotations = f'        gitlab.com/ssh-host: {host}\n        gitlab.com/ssh-port: "{port}"\n'
+            doc = doc.replace("        checksum/config", annotations + "        checksum/config", 1)
+        documents[i] = doc
+    return "\n---\n".join(documents)
+
+
 def main() -> None:
     path_in = sys.argv[1]
     path_out = sys.argv[2]
@@ -434,6 +477,9 @@ def main() -> None:
     text = upgrade_k8s_api_versions(text)
     text = apply_namespace_ingress_class(text)
     text = apply_gitlabee_resource_identity(text)
+
+    text = configure_migration_job(text)
+    text = configure_ssh_port(text)
 
     with open(path_out, "w", encoding="utf-8") as f:
         f.write(text)
