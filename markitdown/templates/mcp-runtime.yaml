@@ -270,6 +270,25 @@ data:
                 self.session.close()
 
 
+    def _is_white(color):
+        if color is None:
+            return False
+        values = color if isinstance(color, (list, tuple)) else (color,)
+        try:
+            values = [float(v) for v in values]
+        except (TypeError, ValueError):
+            return False
+        if len(values) == 4:
+            return all(v <= 0.02 for v in values)
+        return bool(values) and all(v >= 0.98 for v in values)
+
+
+    def _is_visible_curve(curve):
+        if getattr(curve, 'stroke', False):
+            return True
+        return bool(getattr(curve, 'fill', False)) and not _is_white(getattr(curve, 'non_stroking_color', None))
+
+
     def _inspect_pdf_page(layout):
         """Classify a PDF page as 'native', 'blank', 'ocr_no_text', or 'ocr_scanned_body'."""
         x0, y0, x1, y1 = layout.bbox
@@ -282,15 +301,15 @@ data:
         total_alnum = 0
         body_alnum = 0
         images = []
-        curve_count = 0
+        visible_curves = 0
 
         def walk(node):
-            nonlocal total_alnum, body_alnum, curve_count
+            nonlocal total_alnum, body_alnum, visible_curves
             if isinstance(node, LTImage):
                 images.append(node.bbox)
                 return
-            if isinstance(node, LTCurve):
-                curve_count += 1
+            if isinstance(node, LTCurve) and _is_visible_curve(node):
+                visible_curves += 1
             if isinstance(node, LTTextLine):
                 s = node.get_text()
                 text_chunks.append(s)
@@ -339,7 +358,7 @@ data:
         body_image_coverage = covered / float(grid_n * grid_n)
 
         if total_alnum == 0:
-            if not images and curve_count <= 8:
+            if not images and not visible_curves and not text:
                 return text, 'blank'
             return text, 'ocr_no_text'
         if body_image_coverage >= 0.25 and (body_alnum == 0 or (body_image_coverage >= 0.40 and body_alnum < 45)):
