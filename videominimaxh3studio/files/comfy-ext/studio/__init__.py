@@ -509,7 +509,7 @@ class Studio:
             "path": path, "mime": info["mime"], "bytes": os.path.getsize(path),
             "width": info["width"], "height": info["height"], "duration": info["duration"],
             "has_audio": info["has_audio"], "poster": poster, "job_id": job_id, "md5": md5, "owner": owner,
-            "fps": info.get("fps"),
+            "fps": info.get("fps"), "frame_count": info.get("frame_count"),
             "project": project["id"] if project else None,
         }
 
@@ -574,6 +574,7 @@ class Studio:
         size = graph.output_size(flow, items, params, self.profile)
         segs = self.segments_of(flow, items, params, variant, size)
         graph.check_output(self.profile, variant, size, None if segs else items)
+        await self.check_reference_memory(flow, items, params, variant)
         before = await self.enhance_source(flow, items, params, owner, project)
         if segs:
             job = await self.submit_segments(flow, items, params, variant, segs, spec, before,
@@ -1221,11 +1222,24 @@ class Studio:
             return web.json_response({"error": e.as_dict()}, status=400)
         return web.json_response({"jobs": jobs})
 
+    async def check_reference_memory(self, flow, items, params, variant, *, history=None):
+        assess = getattr(getattr(self, "hooks", None), "reference_memory", None)
+        if not assess or not any(it["role"] == "ref_video" for it in items):
+            return None
+        if history is None:
+            params, _ = graph.resolve_params(flow, params, items, self.profile)
+        mp = graph.tiers(self.profile)[params["resolution"]]
+        risk = await self.run(assess, self.store, variant, mp, params, items, history)
+        if history is None and risk["level"] == "blocked":
+            raise graph.JobError("insufficient_vram", "Insufficient GPU memory for these settings.", memoryRisk=risk)
+        return risk
+
     async def h_preflight(self, request):
         body = await self.body(request)
         params = dict(body.get("params") or {}, prompt=body.get("prompt", ""))
         try:
-            flow, items = self.plan(body, *self.viewer(request))
+            owner, admin = self.viewer(request)
+            flow, items = self.plan(body, owner, admin)
             variant = await self.job_variant(params)
             size = graph.output_size(flow, items, params, self.profile)
             output = {"width": size[0], "height": size[1], "scale": size[2]} if size else None
@@ -1235,16 +1249,17 @@ class Studio:
                 output["segments"] = len(segs)
         except graph.JobError as e:
             return web.json_response({"ok": False, "error": e.as_dict(), "disk": self.disk()})
-        est = self.estimate(flow, items, params, variant)
         resolved, sources = graph.resolve_params(flow, params, items, self.profile)
+        memory_risk = await self.check_reference_memory(flow, items, resolved, variant, history=(owner, body.get("project"), flow["mode"]))
+        est = self.estimate(flow, items, params, variant)
         count = max(1, min(MAX_COUNT, int(body.get("count") or 1)))
-        total = self.estimate(flow, items, params, variant, count) if est is not None else None
+        total = self.estimate(flow, items, params, variant, count) if est is not None and count > 1 else est
         warnings = []
         disk = self.disk()
         if disk and disk["low"]:
             warnings.append({"code": "disk_low"})
         return web.json_response({"ok": True, "mode": flow["mode"], "label": flow.get("label"), "variant": variant, "estimate": est,
-                                  "total": total, "warnings": warnings, "disk": disk, "output": output,
+                                  "total": total, "warnings": warnings, "memoryRisk": memory_risk, "disk": disk, "output": output,
                                   "params": {**{k: resolved[k] for k in ("aspect", "duration", "resolution") if k in resolved}, "sources": sources}})
 
     async def h_job_patch(self, request):
@@ -1350,6 +1365,7 @@ class Studio:
                 return web.json_response({"jobs": [job]})
             flow, items = self.plan(spec, job["owner"], admin)
             graph.check_output(self.profile, variant, graph.output_size(flow, items, params, self.profile), items)
+            await self.check_reference_memory(flow, items, params, variant)
             pid = str(uuid.uuid4())
             prompt, used = self.assemble(flow, pid, items, params, variant, job["owner"], self.project_of(job))
             if old_used.get("before"):
