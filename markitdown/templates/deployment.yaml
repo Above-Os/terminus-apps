@@ -34,12 +34,12 @@ spec:
               mountPath: /workdir
       containers:
         - name: markitdown
-          image: harveyff/markitdown-mcp:0.1.9-olares.6
+          image: harveyff/markitdown-mcp:0.1.9-olares.7@sha256:fd701fb4549ee35ef86f5aeec40ac975fde0746538860db9e6f8ddb0cb6964e6
           imagePullPolicy: IfNotPresent
           env:
             # Per-user Router entrance: Olares mesh authenticates this app.
             - name: ROUTER_BASE_URL
-              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
+              value: {{ printf "https://router.%s/v1" (((.Values.user).zone) | default "") | quote }}
             - name: ROUTER_OCR_MODEL
               value: default-ocr
             - name: OCR_TIMEOUT_SECONDS
@@ -63,13 +63,19 @@ spec:
             failureThreshold: 30
             periodSeconds: 5
           volumeMounts:
+            - name: mcp-runtime
+              mountPath: /opt/olares-mcp
+              readOnly: true
             - name: documents
               mountPath: /workdir
               readOnly: true
       volumes:
+        - name: mcp-runtime
+          configMap:
+            name: markitdown-mcp-runtime
         - name: documents
           hostPath:
-            path: '{{ .Values.userspace.userData }}/Documents/MarkItDown'
+            path: '{{ ((.Values.userspace).userData) | default "" }}/Documents/MarkItDown'
             type: DirectoryOrCreate
 ---
 apiVersion: v1
