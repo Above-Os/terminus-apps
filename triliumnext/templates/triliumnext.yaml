@@ -14,6 +14,8 @@ spec:
     type: Recreate
   template:
     metadata:
+      annotations:
+        checksum/mcp-runtime: {{ include (print $.Template.BasePath "/mcp-runtime.yaml") . | sha256sum }}
       labels:
         io.kompose.service: triliumnext
     spec:
@@ -33,8 +35,14 @@ spec:
             - name: TRILIUM_DATA_DIR
               value: "/home/node/trilium-data"
             {{- $oe := .Values.olaresEnv | default dict }}
+            {{- $allowTokenless := "false" }}
+            {{- if hasKey $oe "ALLOW_INTERNAL_TOKENLESS_MCP" }}
+            {{- if eq (index $oe "ALLOW_INTERNAL_TOKENLESS_MCP" | toString | trim | lower) "true" }}
+            {{- $allowTokenless = "true" }}
+            {{- end }}
+            {{- end }}
             - name: ALLOW_INTERNAL_TOKENLESS_MCP
-              value: {{ index $oe "ALLOW_INTERNAL_TOKENLESS_MCP" | default "true" | toString | quote }}
+              value: {{ $allowTokenless | quote }}
           resources:
             requests:
               cpu: 100m

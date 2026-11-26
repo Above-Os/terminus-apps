@@ -13,11 +13,11 @@ spec:
     - **版本控制与加密**：内置笔记版本历史管理，并支持对敏感笔记进行高强度加密。
 
     **MCP 集成**
-    在 TriliumNext **Options > AI/LLM** 中启用内置 MCP 服务后，前往 Olares **设置 > 应用 > TriliumNext > 入口** 复制 **TriliumNext MCP** 地址并在末尾补充 `/mcp`。默认（`ALLOW_INTERNAL_TOKENLESS_MCP=true`）允许 Olares 内部网络（含通过内部入口访问的局域网/VPN）以空请求头（`{}`）免 ETAPI Token 连接；若处于共享局域网环境，可在应用环境变量中将 `ALLOW_INTERNAL_TOKENLESS_MCP` 设为 `false`，强制内部入口同样校验 ETAPI Token。
+    在 TriliumNext **Options > AI/LLM** 中启用内置 MCP 服务后，前往 Olares **设置 > 应用 > TriliumNext > 入口** 复制 **TriliumNext MCP** 地址并在末尾补充 `/mcp`。默认（`ALLOW_INTERNAL_TOKENLESS_MCP=false`）在两个入口均要求提供 `Bearer <ETAPI_TOKEN>` 请求头，确保升级后完整保留原有令牌鉴权策略；若在受信任的 Olares 环境中使用，可在 Olares **设置 > 应用 > 环境变量** 中将 `ALLOW_INTERNAL_TOKENLESS_MCP` 设为 `true`，以允许通过内部 MCP 入口免令牌（空请求头 `{}`）连接（共享局域网或 VPN 环境请保持 `false`）。
   upgradeDescription: |
     - 升级 TriliumNext 至 0.107.0（包含 Node.js 24.22.2、CVE-2026-111497 修复与 ETAPI 安全加固）。
     - **不可逆数据库迁移（版本 240 升至 242）**：升级前请先备份数据卷，迁移完成后旧版本将无法打开该数据库。
     - **0.107.0 主要更新**：支持在笔记内嵌入/引用其他笔记并原位编辑，支持分栏与标签页布局；表格新增合并单元格、排序与批量增删行列；多级 `#sorted` 标签名现需带 `#`（如 `#sorted="#priority desc, #dueDate"`）；启用 TOTP 时与新设备同步需验证 TOTP。
-    - **受保护的内部 MCP 入口**：新增内部 `TriliumNext MCP` 入口（端口 18081）供 Lares 等 AI 助手连接。在 Options > AI/LLM 启用内置 MCP 后默认可免 Token 连接 `/mcp`；亦可将环境变量 `ALLOW_INTERNAL_TOKENLESS_MCP` 设为 `false` 以在局域网/VPN 内部访问时同样强制要求 ETAPI Token。主网页入口（端口 8080）完整保留原有身份验证。
+    - **受保护的内部 MCP 入口**：新增内部 `TriliumNext MCP` 入口（端口 18081）供 Lares 等 AI 助手连接。默认保持要求 ETAPI Token（`ALLOW_INTERNAL_TOKENLESS_MCP=false`），不在升级时自动放宽鉴权；如需通过内部入口免 Token 连接 `/mcp`，可在 Olares 应用环境变量中显式开启 `ALLOW_INTERNAL_TOKENLESS_MCP=true`。主网页入口（端口 8080）始终强制完整身份验证。
 
     发行说明：https://github.com/TriliumNext/Trilium/releases/tag/v0.107.0
