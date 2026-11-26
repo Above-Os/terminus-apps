@@ -29,8 +29,8 @@ def ffmpeg():
     return shutil.which("ffmpeg")
 
 
-def probe(path):
-    """{kind, mime, ext, width, height, duration, has_audio, fps} or MediaError."""
+def probe(path, *, count_reference_frames=False):
+    """{kind, mime, ext, width, height, duration, has_audio, fps, frame_count (video)} or MediaError."""
     try:
         with Image.open(path) as im:
             fmt = im.format
@@ -57,9 +57,13 @@ def probe(path):
                 rot = _rotation(v)
                 if rot in (90, 270):
                     w, h = h, w
+                frames = v.frames or None
+                if frames is None and count_reference_frames and dur:
+                    # Preflight has already checked the reference clip's duration limit.
+                    frames = sum(1 for _ in c.decode(v))
                 return {"kind": "video", "mime": mime, "ext": ".webm" if mime == "video/webm" else (".mov" if path.lower().endswith(".mov") else ".mp4"),
                         "width": w, "height": h, "duration": dur, "has_audio": a is not None,
-                        "fps": float(v.average_rate) if v.average_rate else None}
+                        "fps": float(v.average_rate) if v.average_rate else None, "frame_count": frames}
             if a is not None:
                 mime = AUDIO_MIME.get(fmt)
                 if not mime:
