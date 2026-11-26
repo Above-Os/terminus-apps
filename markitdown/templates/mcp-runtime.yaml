@@ -8,6 +8,7 @@ data:
     """Local-document conversion with bounded, explicit Router OCR fallback."""
     import io
     import ipaddress
+    import math
     import mimetypes
     import os
     import re
@@ -23,7 +24,7 @@ data:
     from markitdown import MarkItDown, StreamInfo
     from markitdown._uri_utils import file_uri_to_path, parse_data_uri
     from pdfminer.high_level import extract_pages
-    from pdfminer.layout import LAParams, LTChar, LTCurve, LTImage, LTTextLine
+    from pdfminer.layout import LAParams, LTChar, LTCurve, LTImage, LTLine, LTRect, LTTextLine
     from pdfminer.pdfdocument import PDFPasswordIncorrect
     from PIL import Image
 
@@ -283,10 +284,44 @@ data:
         return bool(values) and all(v >= 0.98 for v in values)
 
 
-    def _is_visible_curve(curve):
-        if getattr(curve, 'stroke', False):
-            return True
+    def _has_visible_fill(curve):
         return bool(getattr(curve, 'fill', False)) and not _is_white(getattr(curve, 'non_stroking_color', None))
+
+
+    def _is_visible_curve(curve):
+        return bool(getattr(curve, 'stroke', False)) or _has_visible_fill(curve)
+
+
+    def _vector_ink(curve, page_w, page_h):
+        """Boxes a visible path paints as page content; layout furniture paints none."""
+        # Form boxes, table borders, shaded panels and separator rules.
+        if isinstance(curve, LTRect):
+            return []
+        pts = list(curve.pts)
+        if isinstance(curve, LTLine):
+            (ax, ay), (bx, by) = pts[0], pts[-1]
+            if abs(ax - bx) < 0.5 or abs(ay - by) < 0.5:
+                return []
+        vx0, vy0, vx1, vy1 = curve.bbox
+        small = (vx1 - vx0) < 0.15 * page_w and (vy1 - vy0) < 0.08 * page_h
+        if _has_visible_fill(curve):
+            # Page backgrounds are not content.
+            return [curve.bbox] if (vx1 - vx0) * (vy1 - vy0) < 0.6 * page_w * page_h else []
+        path = getattr(curve, 'original_path', None) or []
+        closed = (bool(path) and path[-1][0] == 'h') or (
+            len(pts) > 2 and abs(pts[0][0] - pts[-1][0]) < 0.5 and abs(pts[0][1] - pts[-1][1]) < 0.5)
+        if closed:
+            # Small closed outlines are glyph-like; large ones are frames.
+            return [curve.bbox] if small else []
+        # Open strokes cover only their lines, not the area they span.
+        out = []
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            n = max(1, int(max(abs(bx - ax), abs(by - ay)) / 4.0))
+            for i in range(n + 1):
+                t = i / float(n)
+                x, y = ax + t * (bx - ax), ay + t * (by - ay)
+                out.append((x - 0.01, y - 0.01, x + 0.01, y + 0.01))
+        return out
 
 
     def _inspect_pdf_page(layout):
@@ -303,7 +338,6 @@ data:
         images = []
         vectors = []
         visible_curves = 0
-        page_area = width * height
 
         def walk(node):
             nonlocal total_alnum, body_alnum, visible_curves
@@ -312,10 +346,7 @@ data:
                 return
             if isinstance(node, LTCurve) and _is_visible_curve(node):
                 visible_curves += 1
-                vx0, vy0, vx1, vy1 = node.bbox
-                # Page backgrounds and frames are not content.
-                if (vx1 - vx0) * (vy1 - vy0) < 0.6 * page_area:
-                    vectors.append(node.bbox)
+                vectors.extend(_vector_ink(node, width, height))
             if isinstance(node, LTTextLine):
                 s = node.get_text()
                 text_chunks.append(s)
@@ -355,16 +386,18 @@ data:
                 return 0.0
             cell_w = body_w / grid_n
             cell_h = body_h / grid_n
-            covered = 0
-            for gy in range(grid_n):
-                cy0 = by0 + gy * cell_h
-                cy1 = cy0 + cell_h
-                for gx in range(grid_n):
-                    cx0 = bx0 + gx * cell_w
-                    cx1 = cx0 + cell_w
-                    if any(ix0 < cx1 and ix1 > cx0 and iy0 < cy1 and iy1 > cy0 for ix0, iy0, ix1, iy1 in boxes):
-                        covered += 1
-            return covered / float(grid_n * grid_n)
+            covered = set()
+            for ix0, iy0, ix1, iy1 in boxes:
+                if ix1 <= bx0 or ix0 >= bx1 or iy1 <= by0 or iy0 >= by1:
+                    continue
+                gx0 = max(0, int((ix0 - bx0) / cell_w))
+                gx1 = min(grid_n - 1, int(math.ceil((ix1 - bx0) / cell_w)) - 1)
+                gy0 = max(0, int((iy0 - by0) / cell_h))
+                gy1 = min(grid_n - 1, int(math.ceil((iy1 - by0) / cell_h)) - 1)
+                for gy in range(gy0, gy1 + 1):
+                    for gx in range(gx0, gx1 + 1):
+                        covered.add((gx, gy))
+            return len(covered) / float(grid_n * grid_n)
 
         body_image_coverage = body_coverage(images)
         body_visual_coverage = body_coverage(images + vectors)
