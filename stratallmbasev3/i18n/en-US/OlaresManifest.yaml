@@ -4,6 +4,12 @@ metadata:
 
 spec:
   upgradeDescription: |
+    **1.0.1**
+
+    - The CPU and memory requests are fixed at 200m and 2Gi, so a clone schedules beside other apps. When cloning, set only the limits: CPU 1 to 20 cores, memory 2Gi to 84Gi.
+
+    **1.0.0**
+
     Initial Strata engine base on Strata v0.2.22 (CUDA 13) and Model Console (llm-init v1.7.27).
 
     The model is not part of this chart. A clone sets MODEL_SOURCE, MODEL_NAME, and the memory and GPU quota. The chart reads the setup.py family and build from the files in MODEL_SOURCE. llm-init downloads the files into Common. The engine links every downloaded file into its own writable directory and runs the official setup.py for the selected family and build.
@@ -31,8 +37,8 @@ spec:
     - `ENGINE_ARGS`: extra options, such as `--context 131072 --kv int8 --parallel 1`. Options that setup.py declares go to setup.py. Any other option, such as `--vram-experts-gb 12` or `--spec-k 4`, goes to the engine and overrides the value setup wrote. Options after a bare `--` always go to the engine. `--max-context` and `--ctx` mean `--context`. `--draft off|mtp|dflash2|dfly2|dspark` picks the drafter. Do not pass `--family`, `--model`, `--gguf-dir`, `--models-dir`, `--host`, `--port`, `--gpu`, or `--vision`; the chart owns those.
     - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
     - `STRATA_REQUIRED_GPU_MEMORY`: up to `23Gi`, written as `8Gi`, `8192`, or `8192Mi`. Sets `nvidia.com/gpumem` in MiB.
-    - `STRATA_MEMORY_REQUEST` and `STRATA_MEMORY_LIMIT`: container memory, up to `84Gi`; the request cannot be above the limit. Size the limit for the model, its KV cache, and the runtime. Both are filled in when cloning.
-    - `STRATA_CPU_REQUEST` and `STRATA_CPU_LIMIT`: CPU for the engine, up to 20 cores; the request cannot be above the limit. Saving a resource setting relaunches the engine.
+    - `STRATA_MEMORY_LIMIT`: container memory, `2Gi` to `84Gi`. The memory request is fixed at `2Gi`. Size the limit for the model, its KV cache, and the runtime.
+    - `STRATA_CPU_LIMIT`: CPU for the engine, 1 to 20 cores. The CPU request is fixed at 200m. Saving a resource setting relaunches the engine.
 
     **Examples**
     - Hy4-Flash SQ-96 (`hy4-flash` / `SQ-96`): `MODEL_SOURCE` with `Hy4-Flash-SQ-96.strata` and `Hy4-Flash-Engram-Q8.strata` from `strata-engine/Hy4-Flash-Strata`.
@@ -53,7 +59,7 @@ spec:
     - **llm-init** (port 8090): downloads the model, shows progress, and provides the OpenAI-compatible API, proxying to Strata.
 
     **Accelerator**
-    NVIDIA CUDA only, using `ghcr.io/niko1221/strata:0.2.22-cuda13`. Set `STRATA_REQUIRED_GPU_MEMORY` to the VRAM quota.
+    NVIDIA CUDA only, using `docker.io/beclab/niko1221-strata:0.2.22-cuda13`. Set `STRATA_REQUIRED_GPU_MEMORY` to the VRAM quota.
 
     **Model Storage**
     Weight files live in `appCommon/huggingface`, mounted read-only in the engine at `/cache/hf/hub`. Each clone writes its setup output under `appCommon/huggingface/strata-data/<release>`. A new image keeps downloaded drafters and prepares the packs again.
