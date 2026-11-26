@@ -7,31 +7,32 @@ metadata:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
+  namespace: {{ .Release.Namespace }}
   name: rssubscribe-cluster-role
 rules:
   - apiGroups:
-      - '*'
+      - ''
     resources:
-      - statefulsets
-      - daemonsets
-      - namespaces
       - serviceaccounts/token
+    resourceNames:
+      - rssubscribe-cluster-account
     verbs:
-      - '*'
+      - create
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
+  namespace: {{ .Release.Namespace }}
   name: rssubscribe-cluster-binding
 subjects:
   - kind: ServiceAccount
     name: rssubscribe-cluster-account
     namespace: {{ .Release.Namespace }}
 roleRef:
-  kind: ClusterRole
+  kind: Role
   name: rssubscribe-cluster-role
   apiGroup: rbac.authorization.k8s.io
 
