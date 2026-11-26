@@ -292,36 +292,93 @@ data:
         return bool(getattr(curve, 'stroke', False)) or _has_visible_fill(curve)
 
 
-    def _vector_ink(curve, page_w, page_h):
-        """Boxes a visible path paints as page content; layout furniture paints none."""
+    class _BodyGrid:
+        """Fixed-size coverage grid over the page body; memory does not grow with path length."""
+
+        N = 24
+
+        def __init__(self, x0, y0, x1, y1):
+            self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
+            self.cw = max(x1 - x0, 1.0) / self.N
+            self.ch = max(y1 - y0, 1.0) / self.N
+            self.step = 0.5 * min(self.cw, self.ch)
+
+        def _cell(self, x, y):
+            gx = min(self.N - 1, max(0, int((x - self.x0) / self.cw)))
+            gy = min(self.N - 1, max(0, int((y - self.y0) / self.ch)))
+            return gx, gy
+
+        def mark_box(self, cells, box):
+            ix0, iy0, ix1, iy1 = box
+            if ix1 <= self.x0 or ix0 >= self.x1 or iy1 <= self.y0 or iy0 >= self.y1:
+                return
+            gx0 = max(0, int((ix0 - self.x0) / self.cw))
+            gx1 = min(self.N - 1, int(math.ceil((ix1 - self.x0) / self.cw)) - 1)
+            gy0 = max(0, int((iy0 - self.y0) / self.ch))
+            gy1 = min(self.N - 1, int(math.ceil((iy1 - self.y0) / self.ch)) - 1)
+            for gy in range(gy0, gy1 + 1):
+                for gx in range(gx0, gx1 + 1):
+                    cells.add((gx, gy))
+
+        def mark_segment(self, cells, a, b):
+            """Clip a segment to the body (Liang-Barsky) and mark the cells it crosses; True if it enters the body."""
+            (ax, ay), (bx, by) = a, b
+            dx, dy = bx - ax, by - ay
+            t0, t1 = 0.0, 1.0
+            for p, q in ((-dx, ax - self.x0), (dx, self.x1 - ax), (-dy, ay - self.y0), (dy, self.y1 - ay)):
+                if p == 0:
+                    if q < 0:
+                        return False
+                    continue
+                r = q / p
+                if p < 0:
+                    t0 = max(t0, r)
+                else:
+                    t1 = min(t1, r)
+                if t0 > t1:
+                    return False
+            if len(cells) < self.N * self.N:
+                length = math.hypot(dx, dy) * (t1 - t0)
+                n = max(1, int(math.ceil(length / self.step)))
+                for i in range(n + 1):
+                    t = t0 + (t1 - t0) * i / n
+                    cells.add(self._cell(ax + t * dx, ay + t * dy))
+            return True
+
+
+    def _mark_vector_ink(curve, page_w, page_h, grid, cells):
+        """Mark the body cells a visible path paints as content; True if it puts content in the body."""
         # Form boxes, table borders, shaded panels and separator rules.
         if isinstance(curve, LTRect):
-            return []
-        pts = list(curve.pts)
+            return False
+        pts = curve.pts
         if isinstance(curve, LTLine):
             (ax, ay), (bx, by) = pts[0], pts[-1]
             if abs(ax - bx) < 0.5 or abs(ay - by) < 0.5:
-                return []
+                return False
         vx0, vy0, vx1, vy1 = curve.bbox
+        in_body = grid.x0 <= 0.5 * (vx0 + vx1) <= grid.x1 and grid.y0 <= 0.5 * (vy0 + vy1) <= grid.y1
         small = (vx1 - vx0) < 0.15 * page_w and (vy1 - vy0) < 0.08 * page_h
         if _has_visible_fill(curve):
             # Page backgrounds are not content.
-            return [curve.bbox] if (vx1 - vx0) * (vy1 - vy0) < 0.6 * page_w * page_h else []
+            if (vx1 - vx0) * (vy1 - vy0) >= 0.6 * page_w * page_h:
+                return False
+            grid.mark_box(cells, curve.bbox)
+            return in_body
         path = getattr(curve, 'original_path', None) or []
         closed = (bool(path) and path[-1][0] == 'h') or (
             len(pts) > 2 and abs(pts[0][0] - pts[-1][0]) < 0.5 and abs(pts[0][1] - pts[-1][1]) < 0.5)
         if closed:
             # Small closed outlines are glyph-like; large ones are frames.
-            return [curve.bbox] if small else []
+            if not small:
+                return False
+            grid.mark_box(cells, curve.bbox)
+            return in_body
         # Open strokes cover only their lines, not the area they span.
-        out = []
-        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-            n = max(1, int(max(abs(bx - ax), abs(by - ay)) / 4.0))
-            for i in range(n + 1):
-                t = i / float(n)
-                x, y = ax + t * (bx - ax), ay + t * (by - ay)
-                out.append((x - 0.01, y - 0.01, x + 0.01, y + 0.01))
-        return out
+        entered = False
+        for i in range(len(pts) - 1):
+            entered = grid.mark_segment(cells, pts[i], pts[i + 1]) or entered
+        return entered
 
 
     def _inspect_pdf_page(layout):
@@ -335,18 +392,23 @@ data:
         text_chunks = []
         total_alnum = 0
         body_alnum = 0
-        images = []
-        vectors = []
+        grid = _BodyGrid(bx0, by0, bx1, by1)
+        image_cells = set()
+        vector_cells = set()
+        has_images = False
+        body_vectors = False
         visible_curves = 0
 
         def walk(node):
-            nonlocal total_alnum, body_alnum, visible_curves
+            nonlocal total_alnum, body_alnum, visible_curves, has_images, body_vectors
             if isinstance(node, LTImage):
-                images.append(node.bbox)
+                has_images = True
+                grid.mark_box(image_cells, node.bbox)
                 return
             if isinstance(node, LTCurve) and _is_visible_curve(node):
                 visible_curves += 1
-                vectors.extend(_vector_ink(node, width, height))
+                if _mark_vector_ink(node, width, height, grid, vector_cells):
+                    body_vectors = True
             if isinstance(node, LTTextLine):
                 s = node.get_text()
                 text_chunks.append(s)
@@ -377,35 +439,12 @@ data:
         walk(layout)
         text = ''.join(text_chunks).strip()
 
-        body_w = max(bx1 - bx0, 1.0)
-        body_h = max(by1 - by0, 1.0)
-        grid_n = 24
-
-        def body_coverage(boxes):
-            if not boxes:
-                return 0.0
-            cell_w = body_w / grid_n
-            cell_h = body_h / grid_n
-            covered = set()
-            for ix0, iy0, ix1, iy1 in boxes:
-                if ix1 <= bx0 or ix0 >= bx1 or iy1 <= by0 or iy0 >= by1:
-                    continue
-                gx0 = max(0, int((ix0 - bx0) / cell_w))
-                gx1 = min(grid_n - 1, int(math.ceil((ix1 - bx0) / cell_w)) - 1)
-                gy0 = max(0, int((iy0 - by0) / cell_h))
-                gy1 = min(grid_n - 1, int(math.ceil((iy1 - by0) / cell_h)) - 1)
-                for gy in range(gy0, gy1 + 1):
-                    for gx in range(gx0, gx1 + 1):
-                        covered.add((gx, gy))
-            return len(covered) / float(grid_n * grid_n)
-
-        body_image_coverage = body_coverage(images)
-        body_visual_coverage = body_coverage(images + vectors)
-        body_vectors = any(bx0 <= 0.5 * (vx0 + vx1) <= bx1 and by0 <= 0.5 * (vy0 + vy1) <= by1
-                           for vx0, vy0, vx1, vy1 in vectors)
+        cells = float(grid.N * grid.N)
+        body_image_coverage = len(image_cells) / cells
+        body_visual_coverage = len(image_cells | vector_cells) / cells
 
         if total_alnum == 0:
-            if not images and not visible_curves and not text:
+            if not has_images and not visible_curves and not text:
                 return text, 'blank'
             return text, 'ocr_no_text'
         if body_image_coverage >= 0.25 and (body_alnum == 0 or (body_image_coverage >= 0.40 and body_alnum < 45)):
