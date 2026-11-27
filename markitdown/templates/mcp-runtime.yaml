@@ -1,0 +1,750 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: markitdown-mcp-runtime
+  namespace: '{{ .Release.Namespace }}'
+data:
+  fallback.py: |
+    """Local-document conversion with bounded, explicit Router OCR fallback."""
+    import io
+    import ipaddress
+    import math
+    import mimetypes
+    import os
+    import re
+    import socket
+    import time
+    import zipfile
+    from pathlib import Path
+    from urllib.parse import quote, unquote, urljoin, urlsplit
+
+    import certifi
+    import requests
+    import urllib3
+    from markitdown import MarkItDown, StreamInfo
+    from markitdown._uri_utils import file_uri_to_path, parse_data_uri
+    from pdfminer.high_level import extract_pages
+    from pdfminer.layout import LAParams, LTChar, LTCurve, LTImage, LTLine, LTRect, LTTextLine
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
+    from PIL import Image
+
+
+    class ConversionError(Exception):
+        """An actionable error safe to expose through MCP."""
+
+
+    MAX_BYTES = 32 * 1024 * 1024
+    MAX_PDF_PAGES = 100
+    MAX_OCR_PAGES = 20
+    MAX_REDIRECTS = 5
+    BLOCKED_HOST_SUFFIXES = (
+        '.local',
+        '.internal',
+        '.cluster.local',
+        '.svc',
+        '.lan',
+        '.home.arpa',
+    )
+    OCR_NOTICE = (
+        '> Conversion: Router OCR fallback (model: {model}; reason: {reason}).\n'
+        '> WARNING: OCR can omit text, tables, or layout regions even when the job succeeds. '
+        'This result has NOT been verified as complete; check important numbers against the source.\n\n'
+    )
+
+
+    def has_text(text):
+        return any(c.isalnum() for c in text)
+
+
+    def _filename_from_url_path(url_path):
+        leaf = unquote((url_path or '').rsplit('/', 1)[-1])
+        leaf = leaf.split(';', 1)[0]
+        return Path(leaf).name
+
+
+    def _is_public_ip(ip_obj):
+        mapped = getattr(ip_obj, 'ipv4_mapped', None)
+        if mapped is not None:
+            ip_obj = mapped
+        return bool(ip_obj.is_global and not ip_obj.is_multicast)
+
+
+    def _validate_public_target(hostname, port):
+        if not hostname:
+            raise ConversionError('URL must include a valid hostname.')
+        lower = hostname.rstrip('.').lower()
+        if lower == 'localhost' or any(lower == s[1:] or lower.endswith(s) for s in BLOCKED_HOST_SUFFIXES):
+            raise ConversionError('Fetching local or internal network hosts is not permitted.')
+        try:
+            literal = ipaddress.ip_address(lower)
+        except ValueError:
+            literal = None
+        if literal is not None:
+            if not _is_public_ip(literal):
+                raise ConversionError('Fetching private, loopback, or reserved IP addresses is not permitted.')
+            return str(literal)
+        try:
+            infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise ConversionError('Could not resolve the resource hostname.') from exc
+        if not infos:
+            raise ConversionError('Could not resolve the resource hostname.')
+        addrs = []
+        for info in infos:
+            raw_ip = info[4][0].split('%', 1)[0]
+            ip_obj = ipaddress.ip_address(raw_ip)
+            if not _is_public_ip(ip_obj):
+                raise ConversionError('Fetching hosts that resolve to private or internal IP addresses is not permitted.')
+            addr_str = str(ip_obj)
+            if addr_str not in addrs:
+                addrs.append(addr_str)
+        return addrs[0]
+
+
+    def _fetch_http_resource(uri):
+        current = uri
+        for _ in range(MAX_REDIRECTS + 1):
+            parsed = urlsplit(current)
+            if parsed.scheme not in ('http', 'https'):
+                raise ConversionError('Redirects are only permitted to http: or https: URLs.')
+            if parsed.username or parsed.password:
+                raise ConversionError('Credentials in URLs are not permitted.')
+            try:
+                port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            except ValueError as exc:
+                raise ConversionError('URL contains an invalid port.') from exc
+            hostname = parsed.hostname
+            pinned_ip = _validate_public_target(hostname, port)
+            target_path = parsed.path or '/'
+            if parsed.query:
+                target_path += '?' + parsed.query
+            default_port = 443 if parsed.scheme == 'https' else 80
+            host_fmt = f'[{hostname}]' if ':' in hostname else hostname
+            host_header = host_fmt if port == default_port else f'{host_fmt}:{port}'
+            timeout = urllib3.Timeout(connect=10.0, read=30.0)
+            if parsed.scheme == 'https':
+                pool = urllib3.HTTPSConnectionPool(
+                    pinned_ip,
+                    port=port,
+                    assert_hostname=hostname,
+                    server_hostname=hostname,
+                    cert_reqs='CERT_REQUIRED',
+                    ca_certs=certifi.where(),
+                )
+            else:
+                pool = urllib3.HTTPConnectionPool(pinned_ip, port=port)
+            resp = None
+            try:
+                resp = pool.request(
+                    'GET',
+                    target_path,
+                    headers={'Host': host_header, 'User-Agent': 'MarkItDown-MCP/0.1.9'},
+                    preload_content=False,
+                    redirect=False,
+                    timeout=timeout,
+                    retries=False,
+                )
+                if resp.status in (301, 302, 303, 307, 308):
+                    location = resp.headers.get('Location')
+                    if not location:
+                        raise ConversionError(f'Fetching the resource failed with HTTP status {resp.status}.')
+                    current = urljoin(current, location)
+                    continue
+                if not 200 <= resp.status < 300:
+                    raise ConversionError(f'Fetching the resource failed with HTTP status {resp.status}.')
+                mime = (resp.headers.get('Content-Type') or '').split(';', 1)[0].strip() or None
+                chunks = []
+                size = 0
+                for chunk in resp.stream(65536):
+                    size += len(chunk)
+                    if size > MAX_BYTES:
+                        raise ConversionError('Resource exceeds the 32 MiB input limit.')
+                    chunks.append(chunk)
+                return b''.join(chunks), mime, current
+            except ConversionError:
+                raise
+            except urllib3.exceptions.HTTPError as exc:
+                raise ConversionError('Could not fetch the resource.') from exc
+            finally:
+                if resp is not None:
+                    resp.release_conn()
+                pool.close()
+        raise ConversionError('Too many HTTP redirects while fetching the resource.')
+
+
+    def load_resource(uri):
+        """Read once, preserving URL metadata and bounding OCR upload size."""
+        uri = uri.strip()
+        parsed = urlsplit(uri)
+        filename = _filename_from_url_path(parsed.path) or 'document'
+        mime = mimetypes.guess_type(filename)[0]
+        charset = None
+        source_url = None
+        if parsed.scheme == 'file':
+            host, name = file_uri_to_path(uri)
+            if host not in (None, '', 'localhost'):
+                raise ConversionError('File URI host must be empty or localhost.')
+            path = Path(name).resolve()
+            root = Path(os.getenv('MARKITDOWN_FILE_ROOT', '/workdir')).resolve()
+            if not path.is_relative_to(root):
+                raise ConversionError('Local files must be inside the configured documents directory (/workdir).')
+            filename = path.name or filename
+            mime = mimetypes.guess_type(filename)[0]
+            with path.open('rb') as f:
+                data = f.read(MAX_BYTES + 1)
+        elif parsed.scheme == 'data':
+            if len(uri) > MAX_BYTES * 4 + 1024:
+                raise ConversionError('Resource exceeds the 32 MiB input limit.')
+            mime, attributes, data = parse_data_uri(uri)
+            charset = attributes.get('charset')
+            filename = 'document' + (mimetypes.guess_extension(mime or '') or '')
+        elif parsed.scheme in ('http', 'https'):
+            data, fetched_mime, source_url = _fetch_http_resource(uri)
+            mime = fetched_mime or mime
+            filename = _filename_from_url_path(urlsplit(source_url).path) or filename
+        else:
+            raise ConversionError('Supported URI schemes: file:, data:, http:, https:.')
+        if len(data) > MAX_BYTES:
+            raise ConversionError('Resource exceeds the 32 MiB input limit.')
+        if not data:
+            raise ConversionError('The input file is empty.')
+        return data, StreamInfo(filename=filename, extension=Path(filename).suffix or None,
+                                mimetype=mime, charset=charset, url=source_url)
+
+
+    class RouterOCR:
+        def __init__(self):
+            self.base = os.getenv('ROUTER_BASE_URL', '').rstrip('/')
+            self.model = os.getenv('ROUTER_OCR_MODEL', 'default-ocr')
+            self.timeout = float(os.getenv('OCR_TIMEOUT_SECONDS', '180'))
+            self.session = requests.Session()
+            # In Olares the mesh supplies the app identity; no user key is embedded.
+
+        def _request(self, method, path, **kwargs):
+            try:
+                response = self.session.request(method, self.base + path,
+                                                timeout=(10, 30), allow_redirects=False, **kwargs)
+            except requests.RequestException as exc:
+                raise ConversionError('Router OCR is unreachable or timed out. Check Router and its OCR model.') from exc
+            if not 200 <= response.status_code < 300:
+                raise ConversionError(f'Router OCR returned HTTP {response.status_code}. Check OCR readiness and app access.')
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise ConversionError('Router returned a non-JSON OCR response.') from exc
+
+        def convert(self, data, filename, mime, pages=None):
+            if not self.base:
+                raise ConversionError('OCR is required, but ROUTER_BASE_URL is not configured.')
+            fields = {'model': self.model, 'format': 'text', 'pdf_strategy': 'vision'}
+            if pages:
+                fields['pages'] = ','.join(str(n) for n in pages)
+            deadline = time.monotonic() + self.timeout
+            task_id = None
+            try:
+                task = self._request('POST', '/ocr', data=fields,
+                                     files={'file': (filename, data, mime)})
+                task_id = task.get('id') or task.get('job_id')
+                if not task_id or not re.fullmatch(r'[A-Za-z0-9_-]+', task_id):
+                    raise ConversionError('Router returned no valid OCR task identifier.')
+                while task.get('status') not in ('succeeded', 'failed', 'cancelled', 'canceled'):
+                    if time.monotonic() >= deadline:
+                        raise ConversionError(f'OCR timed out after {self.timeout:g} seconds; conversion is incomplete.')
+                    time.sleep(0.5)
+                    task = self._request('GET', '/ocr/tasks/' + quote(task_id, safe=''), params={'model': self.model})
+                if task.get('status') != 'succeeded':
+                    raise ConversionError('The Router OCR task failed or was cancelled; no complete conversion is available.')
+                result = task.get('result')
+                if result is None:
+                    result = self._request('GET', '/ocr/tasks/' + quote(task_id, safe='') + '/result', params={'model': self.model})
+                if not isinstance(result, (str, dict)):
+                    raise ConversionError('Router OCR returned an unsupported result format.')
+                return result
+            except Exception:
+                if task_id:
+                    try:
+                        self.session.delete(self.base + '/ocr/tasks/' + quote(task_id, safe=''), params={'model': self.model}, timeout=5)
+                    except requests.RequestException:
+                        pass
+                raise
+            finally:
+                self.session.close()
+
+
+    def _is_white(color):
+        if color is None:
+            return False
+        values = color if isinstance(color, (list, tuple)) else (color,)
+        try:
+            values = [float(v) for v in values]
+        except (TypeError, ValueError):
+            return False
+        if len(values) == 4:
+            return all(v <= 0.02 for v in values)
+        return bool(values) and all(v >= 0.98 for v in values)
+
+
+    def _has_visible_fill(curve):
+        return bool(getattr(curve, 'fill', False)) and not _is_white(getattr(curve, 'non_stroking_color', None))
+
+
+    def _is_visible_curve(curve):
+        return bool(getattr(curve, 'stroke', False)) or _has_visible_fill(curve)
+
+
+    class _BodyGrid:
+        """Fixed-size coverage grid over the page body; memory does not grow with path length."""
+
+        N = 24
+
+        def __init__(self, x0, y0, x1, y1):
+            self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
+            self.cw = max(x1 - x0, 1.0) / self.N
+            self.ch = max(y1 - y0, 1.0) / self.N
+
+        def _cell(self, x, y):
+            gx = min(self.N - 1, max(0, int((x - self.x0) / self.cw)))
+            gy = min(self.N - 1, max(0, int((y - self.y0) / self.ch)))
+            return gx, gy
+
+        def mark_box(self, cells, box):
+            ix0, iy0, ix1, iy1 = box
+            if ix1 <= self.x0 or ix0 >= self.x1 or iy1 <= self.y0 or iy0 >= self.y1:
+                return
+            gx0 = max(0, int((ix0 - self.x0) / self.cw))
+            gx1 = min(self.N - 1, int(math.ceil((ix1 - self.x0) / self.cw)) - 1)
+            gy0 = max(0, int((iy0 - self.y0) / self.ch))
+            gy1 = min(self.N - 1, int(math.ceil((iy1 - self.y0) / self.ch)) - 1)
+            for gy in range(gy0, gy1 + 1):
+                for gx in range(gx0, gx1 + 1):
+                    cells.add((gx, gy))
+
+        def mark_segment(self, cells, a, b):
+            """Clip a segment to the body (Liang-Barsky) and mark the cells it crosses; True if it enters the body."""
+            (ax, ay), (bx, by) = a, b
+            dx, dy = bx - ax, by - ay
+            t0, t1 = 0.0, 1.0
+            for p, q in ((-dx, ax - self.x0), (dx, self.x1 - ax), (-dy, ay - self.y0), (dy, self.y1 - ay)):
+                if p == 0:
+                    if q < 0:
+                        return False
+                    continue
+                r = q / p
+                if p < 0:
+                    t0 = max(t0, r)
+                else:
+                    t1 = min(t1, r)
+                if t0 > t1:
+                    return False
+            if len(cells) == self.N * self.N:
+                return True
+            gx, gy = self._cell(ax + t0 * dx, ay + t0 * dy)
+            end_x, end_y = self._cell(ax + t1 * dx, ay + t1 * dy)
+            step_x = 1 if dx > 0 else -1
+            step_y = 1 if dy > 0 else -1
+            cells.add((gx, gy))
+            # Each crossing advances at least one cell toward the endpoint.
+            # Even on a very long page a segment visits at most 2*N-1 cells.
+            while (gx, gy) != (end_x, end_y):
+                cross_x = cross_y = math.inf
+                if gx != end_x:
+                    edge_x = self.x0 + (gx + (step_x > 0)) * self.cw
+                    cross_x = (edge_x - ax) / dx
+                if gy != end_y:
+                    edge_y = self.y0 + (gy + (step_y > 0)) * self.ch
+                    cross_y = (edge_y - ay) / dy
+                if cross_x <= cross_y:
+                    gx += step_x
+                if cross_y <= cross_x:
+                    gy += step_y
+                cells.add((gx, gy))
+            return True
+
+
+    def _mark_vector_ink(curve, page_w, page_h, grid, cells):
+        """Mark the body cells a visible path paints as content; True if it puts content in the body."""
+        # Form boxes, table borders, shaded panels and separator rules.
+        if isinstance(curve, LTRect):
+            return False
+        pts = curve.pts
+        if isinstance(curve, LTLine):
+            (ax, ay), (bx, by) = pts[0], pts[-1]
+            if abs(ax - bx) < 0.5 or abs(ay - by) < 0.5:
+                return False
+        vx0, vy0, vx1, vy1 = curve.bbox
+        in_body = grid.x0 <= 0.5 * (vx0 + vx1) <= grid.x1 and grid.y0 <= 0.5 * (vy0 + vy1) <= grid.y1
+        small = (vx1 - vx0) < 0.15 * page_w and (vy1 - vy0) < 0.08 * page_h
+        if _has_visible_fill(curve):
+            # Page backgrounds are not content.
+            if (vx1 - vx0) * (vy1 - vy0) >= 0.6 * page_w * page_h:
+                return False
+            grid.mark_box(cells, curve.bbox)
+            return in_body
+        path = getattr(curve, 'original_path', None) or []
+        closed = (bool(path) and path[-1][0] == 'h') or (
+            len(pts) > 2 and abs(pts[0][0] - pts[-1][0]) < 0.5 and abs(pts[0][1] - pts[-1][1]) < 0.5)
+        if closed:
+            # Small closed outlines are glyph-like; large ones are frames.
+            if not small:
+                return False
+            grid.mark_box(cells, curve.bbox)
+            return in_body
+        # Open strokes cover only their lines, not the area they span.
+        entered = False
+        for i in range(len(pts) - 1):
+            entered = grid.mark_segment(cells, pts[i], pts[i + 1]) or entered
+        return entered
+
+
+    def _inspect_pdf_page(layout):
+        """Classify a PDF page as 'native', 'blank', 'ocr_no_text', or 'ocr_scanned_body'."""
+        x0, y0, x1, y1 = layout.bbox
+        width = max(float(x1 - x0), 1.0)
+        height = max(float(y1 - y0), 1.0)
+        bx0, bx1 = x0 + 0.05 * width, x1 - 0.05 * width
+        by0, by1 = y0 + 0.12 * height, y1 - 0.12 * height
+
+        text_chunks = []
+        total_alnum = 0
+        body_alnum = 0
+        grid = _BodyGrid(bx0, by0, bx1, by1)
+        image_cells = set()
+        vector_cells = set()
+        has_images = False
+        body_vectors = False
+        visible_curves = 0
+
+        def walk(node):
+            nonlocal total_alnum, body_alnum, visible_curves, has_images, body_vectors
+            if isinstance(node, LTImage):
+                has_images = True
+                grid.mark_box(image_cells, node.bbox)
+                return
+            if isinstance(node, LTCurve) and _is_visible_curve(node):
+                visible_curves += 1
+                if _mark_vector_ink(node, width, height, grid, vector_cells):
+                    body_vectors = True
+            if isinstance(node, LTTextLine):
+                s = node.get_text()
+                text_chunks.append(s)
+                n = sum(1 for c in s if c.isalnum())
+                if n:
+                    total_alnum += n
+                    tx0, ty0, tx1, ty1 = node.bbox
+                    cx = 0.5 * (tx0 + tx1)
+                    cy = 0.5 * (ty0 + ty1)
+                    if bx0 <= cx <= bx1 and by0 <= cy <= by1:
+                        body_alnum += n
+                return
+            if isinstance(node, LTChar):
+                s = node.get_text()
+                text_chunks.append(s)
+                if s.isalnum():
+                    total_alnum += 1
+                    tx0, ty0, tx1, ty1 = node.bbox
+                    cx = 0.5 * (tx0 + tx1)
+                    cy = 0.5 * (ty0 + ty1)
+                    if bx0 <= cx <= bx1 and by0 <= cy <= by1:
+                        body_alnum += 1
+                return
+            if hasattr(node, '__iter__'):
+                for child in node:
+                    walk(child)
+
+        walk(layout)
+        text = ''.join(text_chunks).strip()
+
+        cells = float(grid.N * grid.N)
+        body_image_coverage = len(image_cells) / cells
+        body_visual_coverage = len(image_cells | vector_cells) / cells
+
+        if total_alnum == 0:
+            if not has_images and not visible_curves and not text:
+                return text, 'blank'
+            return text, 'ocr_no_text'
+        if body_image_coverage >= 0.25 and (body_alnum == 0 or (body_image_coverage >= 0.40 and body_alnum < 45)):
+            return text, 'ocr_scanned_body'
+        # Outlined (vector) body text: selectable text only in header/footer bands.
+        if body_alnum == 0 and body_vectors:
+            return text, 'ocr_scanned_body'
+        if body_visual_coverage >= 0.40 and body_alnum < 45:
+            return text, 'ocr_scanned_body'
+        return text, 'native'
+
+
+    def convert(uri, ocr_factory=RouterOCR):
+        data, info = load_resource(uri)
+        converter = MarkItDown(enable_plugins=False)
+        pdf = data.lstrip().startswith(b'%PDF-') or info.extension == '.pdf' or info.mimetype == 'application/pdf'
+        if pdf:
+            pages = []
+            page_kinds = []
+            try:
+                for layout in extract_pages(io.BytesIO(data), laparams=LAParams(all_texts=True)):
+                    page_text, page_kind = _inspect_pdf_page(layout)
+                    pages.append(page_text)
+                    page_kinds.append(page_kind)
+                    if len(pages) > MAX_PDF_PAGES:
+                        raise ConversionError('PDF exceeds the 100-page inspection limit. Split it into smaller documents.')
+            except PDFPasswordIncorrect as exc:
+                raise ConversionError('PDF is password-protected. Decrypt it before conversion; OCR was not attempted.') from exc
+            except ConversionError:
+                raise
+            except Exception as exc:
+                raise ConversionError('PDF could not be parsed. It may be encrypted or damaged; OCR was not attempted.') from exc
+            if not pages:
+                raise ConversionError('PDF contains no readable pages.')
+            missing = [n for n, kind in enumerate(page_kinds, 1) if kind not in ('native', 'blank')]
+            blank_pages = {n for n, kind in enumerate(page_kinds, 1) if kind == 'blank'}
+            has_native_page = any(kind == 'native' for kind in page_kinds)
+            if not missing:
+                native_md = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
+                if not has_text(native_md):
+                    raise ConversionError('No text was detected on any page of the PDF.')
+                if blank_pages:
+                    blank_list = ', '.join(map(str, sorted(blank_pages)))
+                    return f'> Note: PDF page(s) {blank_list} contained no text or images.\n\n' + native_md
+                return native_md
+            if len(missing) > MAX_OCR_PAGES:
+                raise ConversionError('More than 20 PDF pages need OCR. Split the PDF; no pages were silently omitted.')
+            try:
+                ocr = ocr_factory()
+                result = ocr.convert(data, 'document.pdf', 'application/pdf', pages=missing)
+            except ConversionError:
+                if not has_native_page:
+                    raise
+                native_md = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
+                if not has_text(native_md):
+                    raise
+                skipped = ', '.join(map(str, missing))
+                return (
+                    f'> WARNING: Router OCR was unavailable, so PDF page(s) {skipped} were NOT converted. '
+                    'Those pages are image-only, scanned, or vector-drawn (any page numbers or headers shown for them are not their body text). '
+                    'Only native text from the remaining pages is shown below; this result is incomplete.\n\n'
+                    + native_md
+                )
+            if not isinstance(result, dict):
+                raise ConversionError('OCR did not return page-numbered PDF results; conversion is incomplete.')
+            failed = []
+            empty_ocr = set()
+            for number in missing:
+                text = result.get(str(number))
+                if not isinstance(text, str) or text.lstrip().lower().startswith(('error:', '[error', 'ocr error')):
+                    failed.append(number)
+                elif not has_text(text):
+                    empty_ocr.add(number)
+                    if not has_text(pages[number - 1]):
+                        pages[number - 1] = '*(No text detected on this page.)*'
+                else:
+                    pages[number - 1] = text.strip()
+            if failed:
+                raise ConversionError('OCR returned failed or invalid pages: ' + ', '.join(map(str, failed)) + '. Conversion is incomplete.')
+            if empty_ocr == set(missing) and has_native_page and all(page_kinds[n - 1] == 'ocr_no_text' for n in missing):
+                native_md = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
+                if has_text(native_md):
+                    notes = sorted(empty_ocr | blank_pages)
+                    blank_list = ', '.join(map(str, notes))
+                    return f'> Note: No text was detected on PDF page(s) {blank_list} (including OCR inspection).\n\n' + native_md
+            for n in blank_pages:
+                pages[n - 1] = '*(Blank page.)*'
+            if not any(has_text(pages[n - 1]) for n in range(1, len(pages) + 1) if n not in empty_ocr and n not in blank_pages):
+                raise ConversionError('No text was detected on any page of the PDF.')
+            reasons = []
+            no_text_pages = [n for n in missing if page_kinds[n - 1] == 'ocr_no_text']
+            scanned_body_pages = [n for n in missing if page_kinds[n - 1] == 'ocr_scanned_body']
+            if no_text_pages:
+                reasons.append('PDF pages without extractable text: ' + ', '.join(map(str, no_text_pages)))
+            if scanned_body_pages:
+                reasons.append('scanned or vector-drawn PDF pages with only marginal/sparse text: ' + ', '.join(map(str, scanned_body_pages)))
+            notice = OCR_NOTICE.format(model=ocr.model, reason='; '.join(reasons))
+
+            def _page_label(n):
+                if n in blank_pages:
+                    return 'blank page'
+                if n in empty_ocr:
+                    return 'OCR: no additional text detected' if page_kinds[n - 1] == 'ocr_scanned_body' else 'OCR: no text detected'
+                return 'OCR' if n in missing else 'native text'
+
+            return notice + '\n\n'.join(f'## Page {n} ({_page_label(n)})\n\n{text}' for n, text in enumerate(pages, 1))
+
+        is_svg = (
+            (info.mimetype or '').lower() == 'image/svg+xml'
+            or (info.extension or '').lower() == '.svg'
+        )
+        is_image = bool(not is_svg and info.mimetype and info.mimetype.startswith('image/'))
+        if not is_svg:
+            try:
+                with Image.open(io.BytesIO(data)) as image:
+                    is_image = True
+                    mime = Image.MIME.get(image.format, info.mimetype or 'application/octet-stream')
+                    if getattr(image, 'n_frames', 1) > 1:
+                        raise ConversionError('Multi-frame images must be split into individual pages before OCR.')
+                    image.verify()
+            except ConversionError:
+                raise
+            except Exception as exc:
+                if is_image:
+                    raise ConversionError('Image is damaged or unsupported; OCR was not attempted.') from exc
+        if is_image:
+            ocr = ocr_factory()
+            result = ocr.convert(data, info.filename or 'image', mime)
+            if not isinstance(result, str) or not has_text(result):
+                raise ConversionError('OCR returned no text for the image. Conversion is incomplete.')
+            return OCR_NOTICE.format(model=ocr.model, reason='image requires visual text recognition') + result.strip()
+        if info.extension in ('.docx', '.xlsx', '.pptx') and not zipfile.is_zipfile(io.BytesIO(data)):
+            raise ConversionError('Office document is not a valid ZIP package. It may be damaged; raw bytes were not returned as a successful conversion.')
+        result = converter.convert_stream(io.BytesIO(data), stream_info=info).markdown
+        if not has_text(result):
+            raise ConversionError('No extractable text was found. Automatic OCR currently supports images and PDF pages only.')
+        return result
+  server.py: |
+    import asyncio
+    import contextlib
+    import logging
+    import os
+    import sys
+    from collections.abc import AsyncIterator
+
+    import requests
+    import uvicorn
+    from markitdown import FileConversionException, UnsupportedFormatException
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
+    from starlette.applications import Starlette
+
+    from fallback import ConversionError, convert
+
+    logger = logging.getLogger(__name__)
+
+    # Initialize the MCP server for MarkItDown
+    mcp = MCPServer("markitdown")
+
+
+    @mcp.tool()
+    async def convert_to_markdown(uri: str) -> str:
+        """Convert file:, data:, http: or https: content to Markdown. Images and PDF pages
+        without extractable text (or scanned pages with only marginal page numbers/headers)
+        automatically use Router OCR. OCR results include a completeness warning: omissions
+        can remain undetected. Local files must be under /workdir (mapped from
+        Documents/MarkItDown in Olares Files). Public http/https URLs only. Limits: 32 MiB
+        input, 100 PDF pages, 20 OCR pages per call.
+        """
+        try:
+            return await asyncio.to_thread(convert, uri)
+
+        except ConversionError as exc:
+            raise ToolError(str(exc)) from exc
+
+        # SDK 2.x only exposes ToolError messages.
+        except UnsupportedFormatException as exc:
+            raise ToolError(str(exc)) from exc
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            raise ToolError(
+                f"Fetching the resource failed with HTTP status {status}."
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise ToolError("Could not fetch the resource.") from exc
+        except FileConversionException as exc:
+            raise ToolError("File conversion failed.") from exc
+        except OSError as exc:
+            # str(exc) embeds the resolved path; errno's fixed strerror does not.
+            detail = (
+                os.strerror(exc.errno) if exc.errno else "the resource could not be read"
+            )
+            raise ToolError(f"Could not read the resource: {detail}.") from exc
+        except ValueError as exc:
+            # URI validation failures raised by convert_uri itself, which only
+            # restate the URI the client supplied.
+            raise ToolError(str(exc)) from exc
+
+
+    def check_plugins_enabled() -> bool:
+        return os.getenv("MARKITDOWN_ENABLE_PLUGINS", "false").strip().lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+
+    def create_starlette_app(
+        mcp_server: MCPServer, *, host: str = "127.0.0.1", debug: bool = False
+    ) -> Starlette:
+        sse_app = mcp_server.sse_app(host=host)
+        http_app = mcp_server.streamable_http_app(
+            json_response=True,
+            stateless_http=True,
+            host=host,
+        )
+
+        @contextlib.asynccontextmanager
+        async def lifespan(app: Starlette) -> AsyncIterator[None]:
+            """Run both sub-apps' lifespans (the Streamable HTTP session manager)."""
+            async with sse_app.router.lifespan_context(app):
+                async with http_app.router.lifespan_context(app):
+                    yield
+
+        return Starlette(
+            debug=debug,
+            routes=[*sse_app.routes, *http_app.routes],
+            lifespan=lifespan,
+        )
+
+
+    def main():
+        import argparse
+
+        parser = argparse.ArgumentParser(description="Run a MarkItDown MCP server")
+
+        parser.add_argument(
+            "--http",
+            action="store_true",
+            help="Run the server with Streamable HTTP and SSE transport rather than STDIO (default: False)",
+        )
+        parser.add_argument(
+            "--sse",
+            action="store_true",
+            help="(Deprecated) An alias for --http (default: False)",
+        )
+        parser.add_argument(
+            "--host", default=None, help="Host to bind to (default: 127.0.0.1)"
+        )
+        parser.add_argument(
+            "--port", type=int, default=None, help="Port to listen on (default: 3001)"
+        )
+        args = parser.parse_args()
+
+        use_http = args.http or args.sse
+
+        if not use_http and (args.host or args.port):
+            parser.error(
+                "Host and port arguments are only valid when using streamable HTTP or SSE transport (see: --http)."
+            )
+            sys.exit(1)
+
+        if use_http:
+            host = args.host if args.host else "127.0.0.1"
+            if args.host and args.host not in ("127.0.0.1", "localhost"):
+                print(
+                    "\n"
+                    "WARNING: The server is being bound to a non-localhost interface "
+                    f"({host}).\n"
+                    "This exposes the server to other machines on the network or Internet.\n"
+                    "The server has NO authentication and runs with your user's privileges.\n"
+                    "Any process or user that can reach this interface can read files and\n"
+                    "fetch network resources accessible to this user.\n"
+                    "Only proceed if you understand the security implications.\n",
+                    file=sys.stderr,
+                )
+            starlette_app = create_starlette_app(mcp, host=host, debug=False)
+            uvicorn.run(
+                starlette_app,
+                host=host,
+                port=args.port if args.port else 3001,
+            )
+        else:
+            mcp.run()
+
+
+    if __name__ == "__main__":
+        main()
