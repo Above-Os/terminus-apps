@@ -4,48 +4,39 @@ metadata:
   name: odysseus-runtime
   namespace: {{ .Release.Namespace | quote }}
 data:
-  prepare-runtime.py: |
-    """Make the pinned upstream's SQLAlchemy migration introspection portable.
-    
-    SQLite-only sqlite3 migrations already skip non-file DATABASE_URLs. The
-    SQLAlchemy migrations, however, issue SQLite PRAGMA statements unconditionally.
-    Use SQLAlchemy's dialect-aware inspector while retaining their tuple contract.
-    """
+  setup-router.py: |
+    import os
     from pathlib import Path
-    import re
+    from core.database import ModelEndpoint, SessionLocal
+    from src.settings import load_settings, save_settings
+
+    marker = Path("/app/data/.olares-router-initialized")
+    if not marker.exists():
+        endpoint_id = "olares-router-default"
+        with SessionLocal() as db:
+            existing = db.query(ModelEndpoint).first()
+            if existing is None:
+                db.add(ModelEndpoint(id=endpoint_id, name="Olares Router",
+                                     base_url=os.environ["OLARES_ROUTER_URL"],
+                                     pinned_models='["default-chat"]', endpoint_kind="proxy"))
+                db.commit()
+            if db.get(ModelEndpoint, endpoint_id) is not None:
+                settings = load_settings()
+                if not settings.get("default_endpoint_id"):
+                    settings.update(default_endpoint_id=endpoint_id, default_model="default-chat",
+                                    share_defaults_with_users=True)
+                    save_settings(settings)
+        marker.touch()
+  prepare-runtime.py: |
+    """Apply Olares-specific integrations to the pinned upstream runtime."""
+    from pathlib import Path
     import sys
-    
-    target = Path(sys.argv[1])
-    source = target.read_text(encoding='utf-8')
-    pattern = r'conn\.execute\(text\("PRAGMA table_info\(([a-z_]+)\)"\)\)'
-    patched, count = re.subn(pattern, r'_olares_table_info(conn, "\1")', source)
-    if count != 15:
-        raise RuntimeError(f"Pinned database migration source changed: expected 15 sites, got {count}")
-    helper = '''
-    
-    def _olares_table_info(connection, table_name):
-        """Return PRAGMA-shaped column tuples using portable introspection."""
-        schema = inspect(connection)
-        primary_keys = set(schema.get_pk_constraint(table_name).get("constrained_columns") or [])
-        return [
-            (index, column["name"], str(column["type"]),
-             int(not column["nullable"]), column.get("default"),
-             int(column["name"] in primary_keys))
-            for index, column in enumerate(schema.get_columns(table_name))
-        ]
-    '''
-    anchor = '\ndef init_db():'
-    if patched.count(anchor) != 1:
-        raise RuntimeError('Pinned database initialization entry changed')
-    patched = patched.replace(anchor, helper + anchor, 1)
-    compile(patched, str(target), 'exec')
-    target.write_text(patched, encoding='utf-8')
-    print(f"Prepared {count} portable database migration queries")
-    
+
+    root = Path(sys.argv[1])
+
     # Router publishes provider models separately from callable aliases. Preserve
     # an explicitly selected default-chat alias instead of replacing it with the
     # first provider model during the upstream skill-test preflight.
-    root = target.parent.parent
     skills = root / 'routes/skills_routes.py'
     skills_source = skills.read_text(encoding='utf-8')
     old = 'if _avail and model not in _avail:'
