@@ -12,45 +12,21 @@ data:
     [ -n "${OPENAI_API_KEY:-}" ] || unset OPENAI_API_KEY
     [ -n "${ANTHROPIC_API_KEY:-}" ] || unset ANTHROPIC_API_KEY
 
+    rm -f /tmp/olares-bootstrap-ready
     /opt/aionui-web/aionui-web start --remote --no-open &
     APP_PID=$!
-
-    cleanup() {
-      kill -TERM "$APP_PID" 2>/dev/null || true
-      wait "$APP_PID" 2>/dev/null || true
-    }
-    trap cleanup INT TERM
-
-    if [ -n "${AIONUI_ADMIN_PASSWORD:-}" ] || [ -n "${OLARES_ROUTER_BASE_URL:-}" ]; then
-      (
-        NODE_BIN="$(command -v node || true)"
-        i=0
-        while [ -z "$NODE_BIN" ] && [ "$i" -lt 90 ]; do
-          for cand in /data/runtime/node/node-*/bin/node; do
-            if [ -x "$cand" ]; then
-              NODE_BIN="$cand"
-              break
-            fi
-          done
-          if [ -n "$NODE_BIN" ]; then
-            break
-          fi
-          sleep 1
-          i=$((i + 1))
-        done
-
-        if [ -n "$NODE_BIN" ]; then
-          "$NODE_BIN" /olares/bootstrap.js || true
-        else
-          echo "[olares-init] warning: node runtime not found; skipped bootstrap" >&2
-        fi
-      ) &
-    fi
+    (
+      until node /olares/bootstrap.js; do
+        sleep 10
+      done
+      touch /tmp/olares-bootstrap-ready
+    ) &
+    INIT_PID=$!
+    trap 'kill -TERM "$INIT_PID" "$APP_PID" 2>/dev/null || true' INT TERM
 
     wait "$APP_PID"
   bootstrap.js: |
     const fs = require('fs');
-    const crypto = require('crypto');
 
     const pw = process.env.AIONUI_ADMIN_PASSWORD || '';
     const routerBaseUrl = (process.env.OLARES_ROUTER_BASE_URL || '').trim();
@@ -61,90 +37,54 @@ data:
     const pwStampFile = `${dataDir}/.olares-admin-password.sha256`;
     const routerStampFile = `${dataDir}/.olares-router-seeded`;
 
-    const desiredPwHash = pw ? crypto.createHash('sha256').update(pw).digest('hex') : '';
-    let currentPwHash = '';
-    try {
-      currentPwHash = fs.readFileSync(pwStampFile, 'utf8').trim();
-    } catch {}
+    function request(path, options = {}) {
+      return fetch(base + path, { ...options, signal: AbortSignal.timeout(5000) });
+    }
 
-    const needPwSync = Boolean(pw) && currentPwHash !== desiredPwHash;
-    const needRouterSeed = Boolean(routerBaseUrl) && Boolean(pw) && !fs.existsSync(routerStampFile);
-
-    if (!needPwSync && !needRouterSeed) {
-      console.log('[olares-init] admin password and Olares Router provider already synced');
-      process.exit(0);
+    function login() {
+      return request('/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: pw }),
+      });
     }
 
     (async () => {
-      let ready = false;
-      for (let attempt = 0; attempt < 90; attempt++) {
-        try {
-          const st = await fetch(`${base}/api/auth/status`);
-          if (st.ok) {
-            const body = await st.json();
-            if (body && body.needs_setup === false) {
-              ready = true;
-              break;
-            }
-          }
-        } catch {}
-        await new Promise((r) => setTimeout(r, 1000));
+      fs.rmSync(pwStampFile, { force: true });
+      if (!pw) throw new Error('ADMIN_PASSWORD is required');
+      const status = await request('/api/auth/status');
+      if (!status.ok || (await status.json()).needs_setup !== false) {
+        throw new Error('auth service is starting');
       }
 
-      if (!ready) {
-        console.error('[olares-init] timed out waiting for AionUi auth status');
-        process.exit(1);
-      }
-
-      if (needPwSync) {
-        const res = await fetch(`${base}/api/webui/change-password`, {
+      let lr = await login();
+      if (lr.status === 401) {
+        const res = await request('/api/webui/change-password', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ new_password: pw }),
         });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          console.error(`[olares-init] change-password failed: HTTP ${res.status} ${text}`);
-          process.exit(1);
-        }
-
-        fs.writeFileSync(pwStampFile, `${desiredPwHash}\n`, { mode: 0o600 });
-        console.log('[olares-init] admin password synced from Olares settings');
+        if (!res.ok) throw new Error('password sync returned HTTP ' + res.status);
+        lr = await login();
       }
+      if (!lr.ok) throw new Error('login returned HTTP ' + lr.status);
+      const { token } = await lr.json();
+      if (!token) throw new Error('login returned no token');
 
-      if (needRouterSeed) {
-        const lr = await fetch(`${base}/login`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ username: 'admin', password: pw }),
-        });
-
-        if (!lr.ok) {
-          console.error(`[olares-init] login for router seed failed: HTTP ${lr.status}`);
-          process.exit(1);
-        }
-
-        const lj = await lr.json();
-        const token = lj && lj.token;
-        if (!token) {
-          console.error('[olares-init] login succeeded but returned no token; skipped router seed');
-          process.exit(1);
-        }
-
+      if (routerBaseUrl && !fs.existsSync(routerStampFile)) {
         const headers = {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
         };
 
-        const listRes = await fetch(`${base}/api/providers`, { headers });
-        const listJson = listRes.ok ? await listRes.json() : { data: [] };
-        const existing = Array.isArray(listJson.data)
-          ? listJson.data.find((p) => p && (p.name === 'Olares Router' || p.base_url === routerBaseUrl))
-          : null;
+        const listRes = await request('/api/providers', { headers });
+        if (!listRes.ok) throw new Error('provider list returned HTTP ' + listRes.status);
+        const { data } = await listRes.json();
+        if (!Array.isArray(data)) throw new Error('invalid provider list');
+        const existing = data.some((p) => p && (p.name === 'Olares Router' || p.base_url === routerBaseUrl));
 
         if (!existing) {
-          const createRes = await fetch(`${base}/api/providers`, {
+          const createRes = await request('/api/providers', {
             method: 'POST',
             headers,
             body: JSON.stringify({
