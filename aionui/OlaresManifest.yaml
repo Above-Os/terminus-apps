@@ -1,0 +1,113 @@
+olaresManifest.version: '0.12.0'
+olaresManifest.type: app
+apiVersion: v3
+
+metadata:
+  name: aionui
+  appid: aionui
+  title: AionUi
+  description: Open-source 24/7 Cowork workspace for AI CLI agents and multi-model chat
+  icon: https://cdn.olares.com/images/2026/11/5acf894c3d03e46cb2cbb5485e28ade7.png
+  version: 0.0.5
+  categories:
+  - Productivity_v112
+  - Developer Tools
+  - agents
+  tags:
+  - workbench
+  - personal-assistant
+
+entrances:
+- name: aionui
+  host: aionui
+  port: 25808
+  title: AionUi
+  icon: https://cdn.olares.com/images/2026/11/5acf894c3d03e46cb2cbb5485e28ade7.png
+  openMethod: default
+  authLevel: private
+
+spec:
+  versionName: '2.2.2'
+  fullDescription: |
+    **AionUi** is a free, open-source 24/7 Cowork application that turns CLI AI agents and 30+ LLM providers into a unified, browser-accessible workspace.
+
+    **Key Features**
+    - **Multi-Agent Cowork**: Manage and collaborate with the built-in Aion agent and 20+ CLI agents alongside custom assistants and multi-agent teams.
+    - **Multi-Model Support**: Connect to 30+ cloud and local AI providers including OpenAI, Anthropic, Gemini, OpenRouter, Ollama, and custom OpenAI-compatible gateways.
+    - **Live File Preview & Editing**: View and edit Markdown, code, HTML, PDF, Word, Excel, PowerPoint, images, and diffs directly inside the side-by-side preview panel.
+    - **MCP & Custom Skills**: Configure Model Context Protocol (MCP) tools and reusable skills in one place across assistants.
+    - **Scheduled Tasks & Channels**: Run cron-scheduled agent automations and connect chat channels such as Telegram, Lark, DingTalk, and WeCom.
+    - **Olares Drive Workspace**: Mounts your Olares `Home` directory at `/workspace/Home` for seamless AI-assisted file workflows, with persistent app state stored in `appData`.
+
+    **Notes**
+    - Log in with username `admin` and the password you configured during installation.
+    - Updating `ADMIN_PASSWORD` in Olares app settings automatically syncs the WebUI admin password on restart.
+    - Pre-configured with an `Olares Router` provider using `default-chat` on first boot (automatically follows the default chat model configured in Olares Router; can be edited or supplemented with external API keys in Settings).
+    - Upstream AionCore uses embedded SQLite (no external database option); the deployment runs as a single replica with `Recreate` strategy on `appData`.
+  developer: iOfficeAI
+  website: https://www.aionui.com
+  sourceCode: https://github.com/iOfficeAI/AionUi
+  submitter: harveyff
+  locale:
+  - en-US
+  - zh-CN
+  - ja-JP
+  - ko-KR
+  license:
+  - text: Apache-2.0
+    url: https://github.com/iOfficeAI/AionUi/blob/main/LICENSE
+  featuredImage: https://cdn.olares.com/images/2026/11/a1c27a9319e67bb808bdf4c700b4e923.png
+  promoteImage:
+  - https://cdn.olares.com/images/2026/11/a1c27a9319e67bb808bdf4c700b4e923.png
+  - https://cdn.olares.com/images/2026/11/00bba637cc3a4802bc0ef0dde3e431f2.png
+  - https://cdn.olares.com/images/2026/11/29e73c5022ebe300cac0f2ea2e74a438.png
+  - https://cdn.olares.com/images/2026/11/f24a31ec1149f5a204e7ae60453aeb3c.png
+  runAsUser: true
+  requiredCpu: 200m
+  limitedCpu: 4
+  requiredMemory: 512Mi
+  limitedMemory: 4Gi
+  requiredDisk: 512Mi
+  limitedDisk: 10Gi
+  supportArch:
+  - amd64
+  - arm64
+
+permission:
+  appData: true
+  userData:
+  - Home
+
+options:
+  apiTimeout: 0
+  dependencies:
+  - name: olares
+    type: system
+    version: '>=1.12.7-0'
+  - name: router
+    type: application
+    version: '>=1.0.0'
+
+workloadReplicas:
+  aionui: 1
+
+envs:
+- envName: ADMIN_PASSWORD
+  required: true
+  type: password
+  editable: true
+  applyOnChange: true
+  regex: '^.{8,128}$'
+  description: "WebUI login password for the 'admin' account (8-128 characters, avoiding common weak passwords like 'password' or '12345678')."
+- envName: OPENAI_API_KEY
+  valueFrom:
+    envName: OLARES_USER_OPENAI_APIKEY
+  required: false
+  applyOnChange: true
+  description: "Optional OpenAI API key from Olares Settings -> Integration."
+- envName: ANTHROPIC_API_KEY
+  valueFrom:
+    envName: OLARES_USER_ANTHROPIC_APIKEY
+  required: false
+  applyOnChange: true
+  description: "Optional Anthropic API key from Olares Settings -> Integration."
