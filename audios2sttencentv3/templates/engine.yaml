@@ -1,0 +1,104 @@
+{{- $oe := .Values.olaresEnv | default dict -}}
+{{- $gpuType := .Values.gpu | default "nvidia" -}}
+{{- $modelName := $oe.MODEL_NAME | default "" -}}
+{{- $modelSource := $oe.MODEL_SOURCE | default "" -}}
+{{- $gpuRaw := $oe.REQUIRED_GPU_MEMORY | default "24000Mi" -}}
+{{- $gpuMiB := include "llmbase.gpuMiB" $gpuRaw -}}
+{{- $unified := eq $gpuType "nvidia-gb10" -}}
+{{- $memRequest := ternary "24Gi" ($oe.MEMORY_REQUEST | default "8Gi") $unified -}}
+{{- $memLimit := ternary "48Gi" ($oe.MEMORY_LIMIT | default "40Gi") $unified -}}
+{{- $engineArgs := trim ($oe.ENGINE_ARGS | default "") -}}
+{{- if eq $engineArgs "" -}}{{- $engineArgs = "--cache-dir /data/s2st --translation-model /data/s2st/assets/Tencent_GGUF/Hy-SimulMT-30B-A3B-Q4_K_M.gguf --translation-metadata /data/s2st/assets/Tencent_meta --speech-model /data/s2st/assets/MING --vad-model /data/s2st/assets/Tencent_VAD" -}}{{- end -}}
+{{- $cname := "audio-s2st-tencent" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ .Release.Name }}'
+  namespace: '{{ .Release.Namespace }}'
+  labels: {io.kompose.service: audio-engine}
+  annotations:
+    audio.bytetrade.io/model: {{ $modelName | quote }}
+    audio.bytetrade.io/supports: "supports_audio_s2s"
+    applications.app.bytetrade.io/gpu-inject: {{ $cname | quote }}
+spec:
+  replicas: {{ .Values.workloads.audios2sttencentv3.replicaCount }}
+  selector: {matchLabels: {io.kompose.service: audio-engine}}
+  strategy: {type: Recreate}
+  template:
+    metadata:
+      labels: {io.kompose.network/chrome-default: "true", io.kompose.service: audio-engine}
+    spec:
+      restartPolicy: Always
+      volumes:
+        - name: hf-cache
+          hostPath: {path: "{{ .Values.userspace.appCommon }}/huggingface", type: DirectoryOrCreate}
+        - name: data
+          hostPath: {path: "{{ .Values.userspace.appData }}/data", type: DirectoryOrCreate}
+        - name: run-state
+          hostPath: {path: "{{ printf "%s/llm-init-run/%s" .Values.userspace.appCommon .Release.Name }}", type: DirectoryOrCreate}
+        - name: wrappers
+          configMap: {name: audio-wrappers, defaultMode: 0555}
+      initContainers:
+        - name: init-data
+          image: docker.io/beclab/aboveos-busybox:1.37.0
+          command: ["sh", "-ec", "mkdir -p /data/s2st && chown 1000:1000 /data /data/s2st"]
+          securityContext: {runAsUser: 0}
+          volumeMounts: [{name: data, mountPath: /data}]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+      containers:
+        - name: {{ $cname }}
+          securityContext: {runAsUser: 1000, runAsGroup: 1000, runAsNonRoot: true}
+          image: {{ $oe.ENGINE_IMAGE | default "docker.io/beclab/audio-s2st-tencent:v1.0.0" | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/wrappers/s2st.sh"]
+          env:
+            - {name: ENGINE_KIND, value: audio}
+            - {name: MODEL_NAME, value: {{ $modelName | quote }}}
+            - {name: MODEL_SOURCE, value: {{ $modelSource | quote }}}
+            - {name: MODEL_SUPPORTS, value: "supports_audio_s2s"}
+            - {name: ENGINE_PORT, value: "8000"}
+            - {name: ENGINE_ARGS, value: {{ $engineArgs | quote }}}
+            - {name: LOG_LEVEL, value: {{ $oe.LOG_LEVEL | default "info" | quote }}}
+            - {name: WRAPPER_COMMON, value: /run/llm-init/wrappers/common.sh}
+            - {name: OLARES_GPU_MODE, value: {{ $gpuType | quote }}}
+            - {name: REQUIRED_GPU_MEMORY, value: {{ $gpuRaw | quote }}}
+            - {name: HF_HOME, value: /cache/hf}
+            - {name: HF_HUB_CACHE, value: /cache/hf/hub}
+            - {name: HUGGINGFACE_HUB_CACHE, value: /cache/hf/hub}
+            - {name: TZ, value: Etc/UTC}
+            - {name: PUID, value: "1000"}
+            - {name: PGID, value: "1000"}
+            - {name: GPU_CORE_UTILIZATION_POLICY, value: {{ $oe.GPU_CORE_UTILIZATION_POLICY | default "disable" | quote }}}
+          ports: [{name: http, containerPort: 8000}]
+          volumeMounts:
+            - {name: hf-cache, mountPath: /cache/hf/hub}
+            - {name: data, mountPath: /data}
+            - {name: run-state, mountPath: /run/llm-init, readOnly: true}
+            - {name: wrappers, mountPath: /wrappers, readOnly: true}
+          resources:
+            requests:
+              cpu: {{ $oe.CPU_REQUEST | default "2" | quote }}
+              memory: {{ $memRequest | quote }}
+{{- if not $unified }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+            limits:
+              cpu: {{ $oe.CPU_LIMIT | default "16" | quote }}
+              memory: {{ $memLimit | quote }}
+{{- if not $unified }}
+              nvidia.com/gpumem: {{ $gpuMiB }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-engine
+  namespace: '{{ .Release.Namespace }}'
+  labels: {io.kompose.service: audio-engine}
+spec:
+  selector: {io.kompose.service: audio-engine}
+  ports: [{name: http, port: 8000, targetPort: 8000}]
+  type: ClusterIP

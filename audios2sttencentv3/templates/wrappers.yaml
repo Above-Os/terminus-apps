@@ -1,0 +1,568 @@
+# Engine-container shell: source the helpers llm-init publishes, wait for the download sentinel, then run the baked wrapper under supervise_engine so Model Console can relaunch the engine without restarting the Pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio-wrappers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    io.kompose.service: audio-engine
+data:
+  s2st.sh: |
+    #!/bin/sh
+    set -eu
+
+    ENGINE=s2st
+    # Source the shared helpers llm-init publishes into RUN_DIR. That copy can arrive late - the two containers are separate Deployments with no ordering between them - so waiting here is the normal path.
+    WRAPPER_COMMON=${WRAPPER_COMMON:-"$(dirname "$0")/common.sh"}
+    # Shared storage can briefly report a file that cannot yet be opened.
+    _common_copy=$(mktemp "${TMPDIR:-/tmp}/llm-common.XXXXXX")
+    _wc=0
+    while ! cp "$WRAPPER_COMMON" "$_common_copy" 2>/dev/null; do
+        if [ "$_wc" -ge "${WRAPPER_COMMON_WAIT:-3600}" ]; then
+            rm -f "$_common_copy"
+            printf '[wrapper] %s could not be read\n' "$WRAPPER_COMMON" >&2
+            exit 1
+        fi
+        printf '[wrapper] waiting for %s (elapsed=%ss)\n' "$WRAPPER_COMMON" "$_wc"
+        sleep 5
+        _wc=$((_wc + 5))
+    done
+    . "$_common_copy"
+    rm -f "$_common_copy"
+    unset _wc _common_copy
+
+    wait_for_sentinel
+
+    export HF_HUB_OFFLINE=1
+    export PYTHONUNBUFFERED=1
+
+    /opt/venvs/frontend/bin/python /wrappers/prepare-assets.py --family tencent --lock /wrappers/asset-lock.json
+    /opt/venvs/frontend/bin/python /wrappers/prepare-warmup.py --recipe /wrappers/warmup-recipe.json
+
+    run_audio() {
+        log "starting engine offline (audio-python -m wrapper.app)"
+        exec audio-python -m wrapper.app "$@"
+    }
+
+    supervise_engine run_audio "$@"
+  prepare-assets.py: |
+    """Create checked private symlink views without changing the shared Common cache."""
+    import argparse
+    import hashlib
+    import json
+    from pathlib import Path
+    import time
+    
+    
+    def digest(path):
+        result = hashlib.sha256()
+        with path.open('rb') as reader:
+            for block in iter(lambda: reader.read(8 * 1024**2), b''):
+                result.update(block)
+        return result.hexdigest()
+    
+    
+    def prepare(lock, family, cache, output, overrides):
+        receipts = []
+        for name in lock['families'][family]:
+            role = lock['roles'][name]
+            snapshot = cache / ('models--' + role['repository'].replace('/', '--')) / 'snapshots' / role['revision']
+            destination = output / name
+            for relative, expected in role['files'].items():
+                source = overrides / expected['override'] if 'override' in expected else snapshot / relative
+                if not source.is_file() or source.stat().st_size != expected['bytes'] or digest(source) != expected['sha256']:
+                    raise RuntimeError('Common-cache asset differs from the tested profile: ' + name + '/' + relative)
+                target = destination / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.is_symlink():
+                    if target.resolve() != source.resolve():
+                        raise RuntimeError('Private model view points elsewhere: ' + str(target))
+                elif target.exists():
+                    raise RuntimeError('Refusing to replace a private non-symlink model asset')
+                else:
+                    target.symlink_to(source)
+                receipts.append({'role': name, 'file': relative, 'sha256': expected['sha256'],
+                                 'snapshot_revision': role['revision'], 'override': 'override' in expected})
+            actual = {str(p.relative_to(destination)) for p in destination.rglob('*') if p.is_file()}
+            if actual != set(role['files']):
+                raise RuntimeError('Private model view has an unexpected asset')
+        output.mkdir(parents=True, exist_ok=True)
+        (output / 'asset-receipt.json').write_text(json.dumps({'family': family, 'assets': receipts,
+            'Common_cache_modified': False, 'inference_parameters_modified': False}, indent=2) + '\n')
+        return receipts
+    
+    
+    if __name__ == '__main__':
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--family', choices=['tencent', 'youdao'], required=True)
+        parser.add_argument('--lock', type=Path, required=True)
+        parser.add_argument('--cache', type=Path, default=Path('/cache/hf/hub'))
+        parser.add_argument('--output', type=Path, default=Path('/data/s2st/assets'))
+        parser.add_argument('--overrides', type=Path, default=Path('/wrappers'))
+        args = parser.parse_args()
+        lock = json.loads(args.lock.read_text())
+        required = []
+        for name in lock['families'][args.family]:
+            role = lock['roles'][name]
+            snapshot = args.cache / ('models--' + role['repository'].replace('/', '--')) / 'snapshots' / role['revision']
+            for relative, expected in role['files'].items():
+                if 'override' in expected:
+                    if not (args.overrides / expected['override']).is_file():
+                        raise RuntimeError('Required sealed override is missing: ' + relative)
+                else:
+                    required.append(snapshot / relative)
+        started = time.monotonic()
+        while missing := [str(p) for p in required if not p.is_file()]:
+            if time.monotonic() - started > 1800:
+                raise TimeoutError('Required locked assets have not arrived: ' + repr(missing))
+            print(json.dumps({'state': 'waiting_for_required_locked_assets', 'missing_files': missing,
+                              'elapsed_seconds': round(time.monotonic() - started)}), flush=True)
+            time.sleep(5)
+        result = prepare(lock, args.family, args.cache, args.output, args.overrides)
+        print(json.dumps({'state': 'tested_assets_verified_private_views_ready', 'files': len(result)}))
+  asset-lock.json: |
+    {
+      "state": "immutable_public_locators_match_tested_asset_hashes",
+      "roles": {
+        "MING": {
+          "repository": "inclusionAI/Ming-3.0-tts-0.5B",
+          "revision": "ffd36ab5764c39c7e5565dfed66a3aeeced58ab9",
+          "files": {
+            "added_tokens.json": {
+              "bytes": 1785,
+              "sha256": "34394b1e16d7da2db16618bd43a0f970902ade0075480bcd812fe62d559ec319"
+            },
+            "config.json": {
+              "bytes": 4754,
+              "sha256": "2fb0767361b3cd3f41dc9392709fc23fe5b40a39f19d70a38d04acabe991822c"
+            },
+            "configuration.json": {
+              "bytes": 51,
+              "sha256": "6720b8448f6ad5b4631689a60857bdeb238053a37f6cc6a5936eb50c2a3b9296"
+            },
+            "merges.txt": {
+              "bytes": 1671853,
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+            },
+            "special_tokens_map.json": {
+              "bytes": 2726,
+              "sha256": "2c2ec51b9da5db654ac20de8310350d0c9c1a65918ae0181b80dacd2919b4fc3"
+            },
+            "tokenizer.json": {
+              "bytes": 11431389,
+              "sha256": "87d54ca3b44ea2f822ba39a0a45cb1b61644bd6606d9d3536dea75367bffb06d"
+            },
+            "tokenizer_config.json": {
+              "bytes": 16260,
+              "sha256": "12d6162c815edef24f8606e65b60d43fe0d92b0a4e150a0db8fa01c523aaf36a"
+            },
+            "vocab.json": {
+              "bytes": 2776833,
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+            },
+            "model.safetensors": {
+              "bytes": 2959055504,
+              "sha256": "45c4d78d8ad6b1d942e3da86ba035fece02de569f7b2ca7e9d121dfaf18d674c"
+            },
+            "campplus.onnx": {
+              "bytes": 28303423,
+              "sha256": "a6ac6a63997761ae2997373e2ee1c47040854b4b759ea41ec48e4e42df0f4d73"
+            }
+          }
+        },
+        "Tencent_meta": {
+          "repository": "tencent/Hy-SimulMT-30B-A3B",
+          "revision": "56c233df75bf09e386aa6282b01730b461afc83f",
+          "files": {
+            "config.json": {
+              "bytes": 1725,
+              "sha256": "6e41677304dea3a1f56df1f2132382bf31ba06ddde8e92c83227841076853c6f"
+            },
+            "generation_config.json": {
+              "bytes": 123,
+              "sha256": "05daa033d2a05732523a934d536bbebcd5b24dfd2783cd383c23b88a0d8af3a9"
+            },
+            "preprocessor_config.json": {
+              "bytes": 289,
+              "sha256": "baebc93d930815b42b4f8eb46f975bfe25ff47f15e8b9f4d2a93dbf82916f9dc"
+            },
+            "special_tokens_map.json": {
+              "bytes": 468,
+              "sha256": "687791a9ade35069d6ffdd61eb1863839baf1e5ce235d5d48ff61b40dcb72f1a"
+            },
+            "tokenizer.json": {
+              "bytes": 9527108,
+              "sha256": "ad96ef9f641b79bb63807bea87cecf1dd0534325b463dad44cccbb3d0c571db7"
+            },
+            "tokenizer_config.json": {
+              "bytes": 165617,
+              "sha256": "3b5adc69f617f4999e636a53f0024aaded19d0b1830d2c8b4ac43b7af044fd7f"
+            },
+            "chat_template.jinja": {
+              "bytes": 1681,
+              "sha256": "2e355b1abd212976edf1a79907d1c0070983536a7aeb29830638ebb5f8e0ff11",
+              "override": "chat_template.jinja",
+              "source": "src/engine/model-overrides/Tencent_meta/chat_template.jinja"
+            }
+          }
+        },
+        "T3PO_meta": {
+          "repository": "netease-youdao/Confucius4-T3PO",
+          "revision": "71dbf911ac83cc9b33ee2156e762d3675a37e409",
+          "files": {
+            "config.json": {
+              "bytes": 1787,
+              "sha256": "e1ba05e4e9a98b3931e62d9e4a885bc00c082203aebf4f4646bd1a8c99e77786"
+            },
+            "generation_config.json": {
+              "bytes": 243,
+              "sha256": "80b8ec6e7991b64763e4ff29b59a9cd2968b390d0736e0dc586585da04bad013"
+            },
+            "special_tokens_map.json": {
+              "bytes": 613,
+              "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd"
+            },
+            "tokenizer.json": {
+              "bytes": 11421896,
+              "sha256": "9c5ae00e602b8860cbd784ba82a8aa14e8feecec692e7076590d014d7b7fdafa"
+            },
+            "tokenizer_config.json": {
+              "bytes": 5362,
+              "sha256": "36353867830ff7e79fdce19840f53fccb5683fe2122cbe4fea5d5f792e898f97"
+            }
+          }
+        },
+        "R2T2_meta": {
+          "repository": "netease-youdao/Confucius4-R2T2",
+          "revision": "d07b4a593610c16074cfc941fba052a7a12eeda3",
+          "files": {
+            "added_tokens.json": {
+              "bytes": 1566,
+              "sha256": "de40784677cbd1843cabe5fbee078c7e042cd0b62155f0810af5a13842e5722a"
+            },
+            "chat_template.json": {
+              "bytes": 1161,
+              "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
+            },
+            "config.json": {
+              "bytes": 6195,
+              "sha256": "829b3b9cea085a46459353609774b08e4898924253ae6d623c2b4cd855386b23"
+            },
+            "generation_config.json": {
+              "bytes": 142,
+              "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
+            },
+            "merges.txt": {
+              "bytes": 1671853,
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+            },
+            "preprocessor_config.json": {
+              "bytes": 330,
+              "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
+            },
+            "special_tokens_map.json": {
+              "bytes": 1008,
+              "sha256": "7b376c510ccf9d88bb9bbee41dfc5052122e16e0dec1124a8d8983c59259a9f3"
+            },
+            "tokenizer.json": {
+              "bytes": 11429499,
+              "sha256": "0499602714160467f2d68b910651d6216020689f1e016be87a2d0019ee3baeab"
+            },
+            "tokenizer_config.json": {
+              "bytes": 12487,
+              "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
+            },
+            "vocab.json": {
+              "bytes": 2776833,
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+            },
+            "model.safetensors": {
+              "bytes": 4076191640,
+              "sha256": "cc4d5324d386c80f98a8a7b09fbcdcc813ad08a6503fe3a586ebb144ec4610dc"
+            }
+          }
+        },
+        "Tencent_GGUF": {
+          "repository": "tencent/Hy-SimulMT-30B-A3B-GGUF",
+          "revision": "8d4e9381419ac17d17e29359a297109afce02066",
+          "files": {
+            "Hy-SimulMT-30B-A3B-Q4_K_M.gguf": {
+              "bytes": 19746809728,
+              "sha256": "350344d24911ab93fdaee8f9b78e6c06041bff942dc7bc578d8c78d185e4f281"
+            }
+          }
+        },
+        "T3PO_GGUF": {
+          "repository": "netease-youdao/Confucius4-T3PO-GGUF",
+          "revision": "86d1098305f8acf2f025d6c4359640fb657ec491",
+          "files": {
+            "Confucius4-T3PO-Q5_K_M.gguf": {
+              "bytes": 10508871200,
+              "sha256": "019b162a8fdff3edb1e2469445043fc2ebb0de0fbda9ca6454bc86b5898fac35"
+            }
+          }
+        },
+        "VAD": {
+          "repository": "FireRedTeam/FireRedVAD",
+          "revision": "7990aaccc6b7aec1e527743bd30201f2c4a03b8c",
+          "files": {
+            "Stream-VAD/model.pth.tar": {
+              "bytes": 2283513,
+              "sha256": "ec88a8ae8ac5f004cdbd20c1eac4a9e9d12067c3d51ac5b141afa1f921fb59c9"
+            },
+            "Stream-VAD/cmvn.ark": {
+              "bytes": 1311,
+              "sha256": "c87f6f13edf0f0ec7535ddfc9cc3387d9268cb234b70182d566c5e2edf3ca473"
+            }
+          }
+        },
+        "Tencent_VAD": {
+          "repository": "FireRedTeam/FireRedVAD",
+          "revision": "7990aaccc6b7aec1e527743bd30201f2c4a03b8c",
+          "files": {
+            "Stream-VAD/model.pth.tar": {
+              "bytes": 2283513,
+              "sha256": "ec88a8ae8ac5f004cdbd20c1eac4a9e9d12067c3d51ac5b141afa1f921fb59c9"
+            },
+            "Stream-VAD/cmvn.ark": {
+              "bytes": 1311,
+              "sha256": "c87f6f13edf0f0ec7535ddfc9cc3387d9268cb234b70182d566c5e2edf3ca473"
+            },
+            "VAD/model.pth.tar": {
+              "bytes": 2368049,
+              "sha256": "63f4fb1b00a6b8607c118dd48efc18d5e40d67d99b7bf9aa7a8d61540cf23d71"
+            },
+            "VAD/cmvn.ark": {
+              "bytes": 1311,
+              "sha256": "c87f6f13edf0f0ec7535ddfc9cc3387d9268cb234b70182d566c5e2edf3ca473"
+            }
+          }
+        }
+      },
+      "families": {
+        "tencent": [
+          "Tencent_GGUF",
+          "Tencent_meta",
+          "MING",
+          "Tencent_VAD"
+        ],
+        "youdao": [
+          "T3PO_GGUF",
+          "T3PO_meta",
+          "R2T2_meta",
+          "VAD",
+          "MING"
+        ]
+      },
+      "mapping_only": "Private appData symlink views include only the tested subset; Common cache is never mutated. Tencent chat template uses the previously sealed text override.",
+      "large_binary_or_media_retained_locally": false,
+      "model_inference_started": false,
+      "observed_utc": "2026-11-26T17:27:02.456289+00:00"
+    }
+  runtime-pin-inventory.py: |
+    """Inspect resolved runtime metadata only; never import torch or load models."""
+    import argparse
+    import hashlib
+    import importlib.metadata as metadata
+    import importlib.util
+    import json
+    from pathlib import Path
+    import sys
+    
+    
+    def main():
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--root', type=Path, required=True)
+        parser.add_argument('--profile', choices=['frontend', 'youdao-asr', 'ming-frozen'], required=True)
+        parser.add_argument('--roots-json', required=True)
+        args = parser.parse_args()
+        if args.profile == 'ming-frozen':
+            sys.path[:0] = [str(args.root / 'envs/ming-overlay'), str(args.root / 'sources/Ming-frozen')]
+        from packaging.utils import canonicalize_name
+        from packaging.requirements import Requirement
+        packages = {}
+        distributions = {}
+        for distribution in metadata.distributions():
+            name = canonicalize_name(distribution.metadata['Name'])
+            if name in packages:
+                continue
+            distributions[name] = distribution
+            raw = distribution.read_text('METADATA') or ''
+            packages[name] = {'version': distribution.version, 'path': str(distribution._path),
+                              'requires_dist': distribution.requires or [],
+                              'metadata_sha256': hashlib.sha256(raw.encode()).hexdigest()}
+        origins = {}
+        for name in ['torch', 'torchaudio', 'transformers', 'tokenizers', 'numpy', 'soundfile',
+                     'soxr', 'pydantic', 'regex', 'diffusers', 'x_transformers', 'onnxruntime']:
+            spec = importlib.util.find_spec(name)
+            origins[name] = spec.origin if spec else None
+        pending = [('runtime-root', Requirement(value)) for value in json.loads(args.roots_json)]
+        visited = set()
+        closure = {}
+        missing = []
+        conflicts = []
+        while pending:
+            parent, requirement = pending.pop(0)
+            name = canonicalize_name(requirement.name)
+            distribution = distributions.get(name)
+            if not distribution:
+                missing.append({'parent': parent, 'requirement': str(requirement)})
+                continue
+            if distribution.version not in requirement.specifier:
+                conflicts.append({'parent': parent, 'requirement': str(requirement),
+                                  'installed': distribution.version})
+            closure[name] = distribution.version
+            key = (name, tuple(sorted(requirement.extras)))
+            if key in visited:
+                continue
+            visited.add(key)
+            for raw in distribution.requires or []:
+                child = Requirement(raw)
+                if child.marker and not any(child.marker.evaluate({'extra': value})
+                                            for value in ['', *requirement.extras]):
+                    continue
+                pending.append((name, child))
+        print(json.dumps({'profile': args.profile, 'python': sys.version.split()[0],
+                          'executable': sys.executable, 'packages': packages, 'origins': origins,
+                          'active_dependency_closure': closure, 'uninstalled_dependencies': missing,
+                          'requirement_conflicts': conflicts,
+                          'model_runtime_imported': False, 'model_inference_started': False}))
+    
+    
+    if __name__ == '__main__':
+        main()
+  collect-runtime-metadata.py: |
+    """Read small actual service configurations after a Chart timing cohort."""
+    import argparse
+    import hashlib
+    import json
+    from pathlib import Path
+    import re
+    
+    
+    def main():
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--family', choices=['tencent', 'youdao'], required=True)
+        parser.add_argument('--role', choices=['s2st', 's2t'], required=True)
+        args = parser.parse_args()
+        root = Path('/data/s2st/runs')
+        pattern = re.compile('service-' + args.family + r'-(\d+)$')
+        candidates = [(int(m[1]), path) for path in root.iterdir() if path.is_dir() and (m := pattern.fullmatch(path.name))]
+        if not candidates:
+            raise RuntimeError('No actual owned Chart service directory')
+        service = max(candidates)[1]
+        names = ['configuration.json', 'youdao-configuration.json', 'actual-ASR-capacity.json',
+                 'frontend-command.json', 'config.toml', 'app-runtime/resident-backend/configuration.json',
+                 'app-runtime/transport-receipt.json', 'ming-cache/device-audit.json']
+        files = {}
+        for name in names:
+            path = service / name
+            if not path.exists():
+                continue
+            raw = path.read_bytes()
+            if len(raw) > 1024 ** 2 or b'\0' in raw:
+                raise RuntimeError('Not a small textual service receipt')
+            files[name] = {'sha256': hashlib.sha256(raw).hexdigest(), 'raw_text': raw.decode('utf-8')}
+        command_file = 'app-runtime/resident-backend/configuration.json' if args.family == 'tencent' else 'youdao-configuration.json'
+        value = json.loads(files[command_file]['raw_text'])
+        server = value.get('command') if args.family == 'tencent' else value.get('commands', {}).get('mt')
+        if not server:
+            raise RuntimeError('Actual upstream model server command is missing')
+        if args.role == 's2st':
+            audit = json.loads(files['ming-cache/device-audit.json']['raw_text'])
+            if audit['speaker_providers'][0] != 'CUDAExecutionProvider' or audit['speaker_cpu_weighted_node_executions'] != 0 or audit['speaker_weighted_node_executions'] <= 0:
+                raise RuntimeError('Actual MING neural GPU placement is not proven')
+        print(json.dumps({'state': 'actual_Chart_runtime_metadata_retained', 'family': args.family,
+            'role': args.role, 'service_directory': str(service), 'server_args': server, 'files': files,
+            'scope': 'Selectedsmallactualconfigurationandauditfilesaftertiming; nomedia,weights,tracesormodelchanges.'}))
+    
+    
+    if __name__ == '__main__':
+        main()
+  prepare-warmup.py: |
+    """Prepare the exact excluded warm-up prefix from its pinned public source."""
+    import argparse
+    import hashlib
+    import json
+    from pathlib import Path
+    import tempfile
+    import urllib.request
+    import wave
+    
+    import numpy as np
+    
+    
+    def valid(path, recipe):
+        if not path.is_file():
+            return False
+        with wave.open(str(path), 'rb') as reader:
+            if (reader.getframerate(), reader.getnchannels(), reader.getsampwidth(), reader.getnframes()) != (16000, 1, 2, 160000):
+                return False
+            return hashlib.sha256(reader.readframes(160000)).hexdigest() == recipe['expected_PCM_SHA256']
+    
+    
+    def prepare(recipe, output):
+        output.mkdir(parents=True, exist_ok=True)
+        target = output / recipe['target_file']
+        if valid(target, recipe):
+            return 'verified_existing_prefix'
+        with tempfile.TemporaryDirectory(prefix='warmup-source-', dir=output) as directory:
+            raw = Path(directory) / 'public-original.wav'
+            digest = hashlib.sha256()
+            total = 0
+            with urllib.request.urlopen(recipe['source_url'], timeout=90) as response, raw.open('wb') as writer:
+                while block := response.read(1024 * 1024):
+                    total += len(block)
+                    if total > recipe['source_bytes']:
+                        raise RuntimeError('Public warm-up source exceeds its immutable size')
+                    digest.update(block)
+                    writer.write(block)
+            if total != recipe['source_bytes'] or digest.hexdigest() != recipe['source_sha256']:
+                raise RuntimeError('Public warm-up source hash differs')
+            with wave.open(str(raw), 'rb') as reader:
+                if (reader.getframerate(), reader.getnchannels(), reader.getsampwidth()) != (16000, 2, 2):
+                    raise RuntimeError('Pinned public source format differs')
+                stereo = np.frombuffer(reader.readframes(160000), dtype='<i2').reshape(-1, 2)
+            # Recovered from the actual frozen input, not a guessed ffmpeg mix:
+            # all160000 samples match both hosts' baseline prefixes exactly.
+            pcm = np.rint(stereo.astype(np.float32).mean(axis=1)).astype('<i2').tobytes()
+            if len(pcm) != 320000 or hashlib.sha256(pcm).hexdigest() != recipe['expected_PCM_SHA256']:
+                raise RuntimeError('Normalized warm-up samples differ from the frozen baseline')
+            temporary = Path(directory) / recipe['target_file']
+            with wave.open(str(temporary), 'wb') as writer:
+                writer.setnchannels(1)
+                writer.setsampwidth(2)
+                writer.setframerate(16000)
+                writer.writeframes(pcm)
+            temporary.replace(target)
+        return 'exact_frozen_prefix_prepared'
+    
+    
+    if __name__ == '__main__':
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--recipe', type=Path, required=True)
+        parser.add_argument('--output', type=Path, default=Path('/data/s2st/warmup-inputs'))
+        args = parser.parse_args()
+        print(json.dumps({'state': prepare(json.loads(args.recipe.read_text()), args.output), 'model_inference_started': False}))
+  warmup-recipe.json: |
+    {
+      "source_url": "https://raw.githubusercontent.com/byteresearchcla/RealSI/65f3eff276de441a8c3df00b41edb77e8a1ced91/data/zh2en/wav/zh2en-01-tech.wav",
+      "source_sha256": "869316c0de6b037e4819be5255944c403b175a38601adbe0223aa5969a8f7f31",
+      "source_bytes": 20656550,
+      "target_file": "zh2en-01-tech.wav",
+      "reference_seconds": 10,
+      "frames": 160000,
+      "sample_rate": 16000,
+      "channels": 1,
+      "sample_width_bytes": 2,
+      "expected_PCM_SHA256": "074cd19e0924ff3f652859c8418ddf31bf7e4ecf277f2d9c93a1fb00560e1da7",
+      "both_host_frozen_prefixes_equal": true,
+      "scope": "Only the unchanged excluded MING warm-up reads these160000samples. No model request or benchmark input is replaced.",
+      "input_code": "src/common/warm_frozen_ming.py",
+      "audio_retained_in_repository_or_Mac": false,
+      "observed_utc": "2026-11-26T18:17:38.188849+00:00",
+      "normalization": "First160000frames; PCM16stereo→float32 channel mean→round-to-nearest-even→PCM16mono. Exact160000sample match to both frozen inputs.",
+      "mapping_proof": "results/night_20261126/warmup-PCM-mapping.json"
+    }
+binaryData:
+  chat_template.jinja: eyMtIHNpbXVsc3QtbW0gb3BlbmFpIGNoYXQgYnJhbmNoIHYyICN9CnslLSBpZiBtZXNzYWdlcyBhbmQgbWVzc2FnZXNbMF1bJ2NvbnRlbnQnXSBpcyBub3Qgc3RyaW5nIC0lfQp7ey0gJzzvvZxoeV9iZWdpbuKWgW9m4paBc2VudGVuY2XvvZw+PO+9nHJlYXNvbmluZ19tb2Rl772cPnJlYXNvbmluZ19lZmZvcnQ6bm9fdGhpbmsnIC19fQp7JS0gZm9yIG1lc3NhZ2UgaW4gbWVzc2FnZXMgLSV9CnslLSBpZiBtZXNzYWdlWydyb2xlJ10gPT0gJ3VzZXInIC0lfQp7ey0gJzzvvZxoeV9Vc2Vy772cPicgLX19CnslLSBmb3IgcGFydCBpbiBtZXNzYWdlWydjb250ZW50J10gLSV9CnslLSBpZiBwYXJ0Wyd0eXBlJ10gPT0gJ3RleHQnIC0lfXt7LSBwYXJ0Wyd0ZXh0J10gLX19CnslLSBlbGlmIHBhcnRbJ3R5cGUnXSBpbiBbJ2F1ZGlvJywgJ2lucHV0X2F1ZGlvJ10gLSV9e3stICc8772caHlfcGxhY2XiloFob2xkZXLiloFub+KWgTbvvZw+PO+9nGh5X3BsYWNl4paBaG9sZGVy4paBbm/iloE1772cPjzvvZxoeV9wbGFjZeKWgWhvbGRlcuKWgW5v4paBOO+9nD4nIC19fQp7JS0gZW5kaWYgLSV9CnslLSBlbmRmb3IgLSV9CnslLSBlbGlmIG1lc3NhZ2VbJ3JvbGUnXSA9PSAnYXNzaXN0YW50JyAtJX0Ke3stICc8772caHlfQXNzaXN0YW50772cPjx0aGluaz48L3RoaW5rPicgLX19CnslLSBpZiBtZXNzYWdlWydjb250ZW50J10gaXMgc3RyaW5nIC0lfQp7ey0gbWVzc2FnZVsnY29udGVudCddIC19fQp7JS0gZWxzZSAtJX0KeyUtIGZvciBwYXJ0IGluIG1lc3NhZ2VbJ2NvbnRlbnQnXSAtJX0KeyUtIGlmIHBhcnRbJ3R5cGUnXSA9PSAndGV4dCcgLSV9e3stIHBhcnRbJ3RleHQnXSAtfX17JS0gZW5kaWYgLSV9CnslLSBlbmRmb3IgLSV9CnslLSBlbmRpZiAtJX0Ke3stICc8772caHlfRU9U772cPicgLX19CnslLSBlbmRpZiAtJX0KeyUtIGVuZGZvciAtJX0KeyUtIGlmIGFkZF9nZW5lcmF0aW9uX3Byb21wdCAtJX17ey0gJzzvvZxoeV9Bc3Npc3RhbnTvvZw+PHRoaW5rPjwvdGhpbms+JyAtfX0KeyUtIGlmIHNpbXVsc3Rfb3V0cHV0X21vZGV8ZGVmYXVsdCgndHJhbnNsYXRpb24nKSA9PSAnYmlsaW5ndWFsJyAtJX0Ke3stICc8772caHlfcGxhY2XiloFob2xkZXLiloFub+KWgTc5MO+9nD4nIC19fQp7JS0gZW5kaWYgLSV9eyUtIGVuZGlmIC0lfQp7JS0gZWxzZSAtJX0Ke3stICc8772caHlfYmVnaW7iloFvZuKWgXNlbnRlbmNl772cPjzvvZxyZWFzb25pbmdfbW9kZe+9nD5yZWFzb25pbmdfZWZmb3J0Om5vX3RoaW5rJyAtfX0KeyUtIGZvciBtZXNzYWdlIGluIG1lc3NhZ2VzIC0lfQp7JS0gaWYgbWVzc2FnZVsncm9sZSddID09ICd1c2VyJyAtJX17ey0gJzzvvZxoeV9Vc2Vy772cPicgLX19CnslLSBlbGlmIG1lc3NhZ2VbJ3JvbGUnXSA9PSAnYXNzaXN0YW50JyAtJX17ey0gJzzvvZxoeV9Bc3Npc3RhbnTvvZw+PHRoaW5rPjwvdGhpbms+JyAtfX0KeyUtIGVuZGlmIC0lfQp7ey0gbWVzc2FnZVsnY29udGVudCddIC19fQp7JS0gaWYgbWVzc2FnZVsncm9sZSddID09ICdhc3Npc3RhbnQnIC0lfXt7LSAnPO+9nGh5X0VPVO+9nD4nIC19fXslLSBlbmRpZiAtJX0KeyUtIGVuZGZvciAtJX0KeyUtIGlmIGFkZF9nZW5lcmF0aW9uX3Byb21wdCAtJX17ey0gJzzvvZxoeV9Bc3Npc3RhbnTvvZw+PHRoaW5rPjwvdGhpbms+JyAtfX17JS0gZW5kaWYgLSV9Cgp7JS0gZW5kaWYgLSV9Cg==
