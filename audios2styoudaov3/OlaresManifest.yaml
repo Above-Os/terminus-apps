@@ -1,0 +1,189 @@
+olaresManifest.version: 0.12.0
+olaresManifest.type: app
+apiVersion: v3
+metadata:
+  name: audios2styoudaov3
+  icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+  description: Streaming Chinese-English speech translation with one CUDA engine.
+  appid: audios2styoudaov3
+  title: Confucius4 + MING
+  version: 1.0.0
+  categories:
+  - AI
+  - models
+  tags:
+  - speech-translation
+  - audio
+sharedEntrances:
+- name: audios2styoudaov3api
+  host: sharedentrances-api
+  port: 0
+  title: Confucius4 + MING API
+  invisible: true
+  authLevel: internal
+  icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+entrances:
+- name: audios2styoudaov3
+  port: 8090
+  host: download-svc
+  title: Confucius4 + MING
+  icon: https://app.cdn.olares.com/appstore/audioengines/soulx/icon.png
+  openMethod: window
+  authLevel: internal
+workloadReplicas:
+  audios2styoudaov3: 1
+  llminit: 1
+spec:
+  upgradeDescription: Initial release of Chinese-English speech translation.
+  onlyAdmin: true
+  versionName: R2T2 + T3PO Q5_K_M + MING 0.5B
+  fullDescription: "Chinese-English speech translation combines R2T2 speech recognition, T3PO Q5_K_M translation and MING 0.5B speech generation. Accepts complete WAV files or live 16 kHz PCM and returns translated text and 24 kHz speech. Supports both directions, incremental output and asynchronous tasks. One active session at a time. Neural inference runs on a compatible NVIDIA GPU; reference audio conditions the generated voice."
+  developer: NetEase Youdao / inclusionAI
+  website: https://github.com/netease-youdao/Confucius4-T3PO
+  sourceCode: https://github.com/netease-youdao/Confucius4-T3PO
+  submitter: Olares
+  locale:
+  - en-US
+  - zh-CN
+  doc: https://github.com/netease-youdao/Confucius4-T3PO
+  license:
+  - text: Apache-2.0 (T3PO)
+    url: https://github.com/netease-youdao/Confucius4-T3PO/blob/main/LICENSE
+  - text: MIT (MING)
+    url: https://github.com/inclusionAI/Ming-3.0-tts/blob/main/LICENSE
+  accelerator:
+  - mode: nvidia
+    limitedCpu: '17'
+    requiredCpu: 2200m
+    requiredDisk: 50Mi
+    limitedDisk: 100Gi
+    limitedMemory: 44Gi
+    requiredMemory: 8448Mi
+    requiredGPUMemory: 24000Mi
+    limitedGPUMemory: 24000Mi
+  - mode: nvidia-gb10
+    limitedCpu: '17'
+    requiredCpu: 2200m
+    requiredDisk: 50Mi
+    limitedDisk: 100Gi
+    limitedMemory: 52Gi
+    requiredMemory: 24832Mi
+  supportArch:
+  - amd64
+  - arm64
+  runAsUser: true
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+  - name: olares
+    version: '>=1.12.7-0'
+    type: system
+envs:
+- envName: MODEL_SOURCE
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: "hf://netease-youdao/Confucius4-T3PO-GGUF --revision 86d1098305f8acf2f025d6c4359640fb657ec491 --include Confucius4-T3PO-Q5_K_M.gguf,hf://netease-youdao/Confucius4-T3PO --revision 71dbf911ac83cc9b33ee2156e762d3675a37e409 --include config.json --include generation_config.json --include special_tokens_map.json --include tokenizer.json --include tokenizer_config.json,hf://netease-youdao/Confucius4-R2T2 --revision d07b4a593610c16074cfc941fba052a7a12eeda3 --include added_tokens.json --include chat_template.json --include config.json --include generation_config.json --include merges.txt --include preprocessor_config.json --include special_tokens_map.json --include tokenizer.json --include tokenizer_config.json --include vocab.json --include model.safetensors,hf://FireRedTeam/FireRedVAD --revision 7990aaccc6b7aec1e527743bd30201f2c4a03b8c --include Stream-VAD/model.pth.tar --include Stream-VAD/cmvn.ark,hf://inclusionAI/Ming-3.0-tts-0.5B --revision ffd36ab5764c39c7e5565dfed66a3aeeced58ab9 --include added_tokens.json --include config.json --include configuration.json --include merges.txt --include special_tokens_map.json --include tokenizer.json --include tokenizer_config.json --include vocab.json --include model.safetensors --include campplus.onnx"
+  regex: ^hf://
+- envName: MODEL_NAME
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: netease-youdao/Confucius4-MING-Q5_K_M
+- envName: MODEL_MODE
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: audio
+  options:
+  - title: Audio
+    value: audio
+  description: Speech translation.
+- envName: MODEL_SUPPORTS
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: audio_s2s
+  options:
+  - title: Speech-to-speech translation
+    value: audio_s2s
+  description: Live PCM and complete WAV translation with text and speech output.
+- envName: REQUIRED_GPU_MEMORY
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: 24000Mi
+- envName: CPU_REQUEST
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: '2'
+- envName: MEMORY_REQUEST
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: 8Gi
+- envName: CPU_LIMIT
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: '16'
+- envName: MEMORY_LIMIT
+  required: true
+  type: string
+  editable: false
+  applyOnChange: false
+  default: 40Gi
+- envName: LOG_LEVEL
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: info
+  options:
+  - title: Debug
+    value: debug
+  - title: Info
+    value: info
+  - title: Warn
+    value: warn
+  - title: Error
+    value: error
+- envName: ENGINE_IMAGE
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  description: MINE CUDA image override; Intel is not enabled.
+- envName: ENGINE_ARGS
+  required: false
+  type: string
+  editable: true
+  applyOnChange: true
+  default: "--cache-dir /data/s2st --translation-model /data/s2st/assets/T3PO_GGUF/Confucius4-T3PO-Q5_K_M.gguf --translation-metadata /data/s2st/assets/T3PO_meta --speech-model /data/s2st/assets/MING --recognition-model /data/s2st/assets/R2T2_meta --vad-model /data/s2st/assets/VAD/Stream-VAD"
+  description: Engine flags. Filling this replaces the complete default string.
+- envName: HF_ENDPOINT
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+- envName: HF_TOKEN
+  required: false
+  applyOnChange: true
+  valueFrom:
+    envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
