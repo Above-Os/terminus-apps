@@ -6,13 +6,18 @@ metadata:
 data:
   setup-router.py: |
     import os
+    import sys
+    import traceback
     from pathlib import Path
-    from core.database import ModelEndpoint, SessionLocal
-    from src.settings import load_settings, save_settings
 
     marker = Path("/app/data/.olares-router-initialized")
-    if not marker.exists():
-        endpoint_id = "olares-router-default"
+    endpoint_id = "olares-router-default"
+
+
+    def configure():
+        from core.database import ModelEndpoint, SessionLocal
+        from src.settings import load_settings, save_settings
+
         with SessionLocal() as db:
             existing = db.query(ModelEndpoint).first()
             if existing is None:
@@ -26,7 +31,17 @@ data:
                     settings.update(default_endpoint_id=endpoint_id, default_model="default-chat",
                                     share_defaults_with_users=True)
                     save_settings(settings)
-        marker.touch()
+
+
+    if not marker.exists():
+        # Router setup is a convenience: a failure must not keep the app from
+        # starting. Without the marker, the next start retries.
+        try:
+            configure()
+            marker.touch()
+        except Exception:
+            print("Olares Router auto-setup failed; configure a model endpoint in Settings.", file=sys.stderr)
+            traceback.print_exc()
   prepare-runtime.py: |
     """Apply Olares-specific integrations to the pinned upstream runtime."""
     from pathlib import Path
