@@ -1,0 +1,176 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aionui-scripts
+  namespace: "{{ .Release.Namespace }}"
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    set -eu
+
+    # Unset empty optional API keys so downstream SDKs do not see empty strings.
+    [ -n "${OPENAI_API_KEY:-}" ] || unset OPENAI_API_KEY
+    [ -n "${ANTHROPIC_API_KEY:-}" ] || unset ANTHROPIC_API_KEY
+
+    /opt/aionui-web/aionui-web start --remote --no-open &
+    APP_PID=$!
+
+    cleanup() {
+      kill -TERM "$APP_PID" 2>/dev/null || true
+      wait "$APP_PID" 2>/dev/null || true
+    }
+    trap cleanup INT TERM
+
+    if [ -n "${AIONUI_ADMIN_PASSWORD:-}" ] || [ -n "${OLARES_ROUTER_BASE_URL:-}" ]; then
+      (
+        NODE_BIN="$(command -v node || true)"
+        i=0
+        while [ -z "$NODE_BIN" ] && [ "$i" -lt 90 ]; do
+          for cand in /data/runtime/node/node-*/bin/node; do
+            if [ -x "$cand" ]; then
+              NODE_BIN="$cand"
+              break
+            fi
+          done
+          if [ -n "$NODE_BIN" ]; then
+            break
+          fi
+          sleep 1
+          i=$((i + 1))
+        done
+
+        if [ -n "$NODE_BIN" ]; then
+          "$NODE_BIN" /olares/bootstrap.js || true
+        else
+          echo "[olares-init] warning: node runtime not found; skipped bootstrap" >&2
+        fi
+      ) &
+    fi
+
+    wait "$APP_PID"
+  bootstrap.js: |
+    const fs = require('fs');
+    const crypto = require('crypto');
+
+    const pw = process.env.AIONUI_ADMIN_PASSWORD || '';
+    const routerBaseUrl = (process.env.OLARES_ROUTER_BASE_URL || '').trim();
+    const dataDir = process.env.AIONUI_DATA_DIR || '/data';
+    const port = process.env.AIONUI_PORT || '25808';
+    const base = `http://127.0.0.1:${port}`;
+
+    const pwStampFile = `${dataDir}/.olares-admin-password.sha256`;
+    const routerStampFile = `${dataDir}/.olares-router-seeded`;
+
+    const desiredPwHash = pw ? crypto.createHash('sha256').update(pw).digest('hex') : '';
+    let currentPwHash = '';
+    try {
+      currentPwHash = fs.readFileSync(pwStampFile, 'utf8').trim();
+    } catch {}
+
+    const needPwSync = Boolean(pw) && currentPwHash !== desiredPwHash;
+    const needRouterSeed = Boolean(routerBaseUrl) && Boolean(pw) && !fs.existsSync(routerStampFile);
+
+    if (!needPwSync && !needRouterSeed) {
+      console.log('[olares-init] admin password and Olares Router provider already synced');
+      process.exit(0);
+    }
+
+    (async () => {
+      let ready = false;
+      for (let attempt = 0; attempt < 90; attempt++) {
+        try {
+          const st = await fetch(`${base}/api/auth/status`);
+          if (st.ok) {
+            const body = await st.json();
+            if (body && body.needs_setup === false) {
+              ready = true;
+              break;
+            }
+          }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (!ready) {
+        console.error('[olares-init] timed out waiting for AionUi auth status');
+        process.exit(1);
+      }
+
+      if (needPwSync) {
+        const res = await fetch(`${base}/api/webui/change-password`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ new_password: pw }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          console.error(`[olares-init] change-password failed: HTTP ${res.status} ${text}`);
+          process.exit(1);
+        }
+
+        fs.writeFileSync(pwStampFile, `${desiredPwHash}\n`, { mode: 0o600 });
+        console.log('[olares-init] admin password synced from Olares settings');
+      }
+
+      if (needRouterSeed) {
+        const lr = await fetch(`${base}/login`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: 'admin', password: pw }),
+        });
+
+        if (!lr.ok) {
+          console.error(`[olares-init] login for router seed failed: HTTP ${lr.status}`);
+          process.exit(1);
+        }
+
+        const lj = await lr.json();
+        const token = lj && lj.token;
+        if (!token) {
+          console.error('[olares-init] login succeeded but returned no token; skipped router seed');
+          process.exit(1);
+        }
+
+        const headers = {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        };
+
+        const listRes = await fetch(`${base}/api/providers`, { headers });
+        const listJson = listRes.ok ? await listRes.json() : { data: [] };
+        const existing = Array.isArray(listJson.data)
+          ? listJson.data.find((p) => p && (p.name === 'Olares Router' || p.base_url === routerBaseUrl))
+          : null;
+
+        if (!existing) {
+          const createRes = await fetch(`${base}/api/providers`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              platform: 'custom',
+              name: 'Olares Router',
+              base_url: routerBaseUrl,
+              api_key: 'olares',
+              models: ['default-chat'],
+              enabled: true,
+            }),
+          });
+
+          if (!createRes.ok) {
+            const text = await createRes.text().catch(() => '');
+            console.error(`[olares-init] failed to seed Olares Router provider: HTTP ${createRes.status} ${text}`);
+            process.exit(1);
+          }
+
+          console.log(`[olares-init] seeded default Olares Router provider (${routerBaseUrl}, model=default-chat)`);
+        } else {
+          console.log('[olares-init] Olares Router provider already present; skipped seed');
+        }
+
+        fs.writeFileSync(routerStampFile, `${routerBaseUrl}\n`, { mode: 0o600 });
+      }
+    })().catch((err) => {
+      console.error('[olares-init] bootstrap error:', err);
+      process.exit(1);
+    });

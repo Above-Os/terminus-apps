@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aionui
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: aionui
+spec:
+  replicas: {{ .Values.workloads.aionui.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: aionui
+  template:
+    metadata:
+      labels:
+        app: aionui
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      initContainers:
+      - name: init-permissions
+        image: beclab/aboveos-busybox:1.37.0
+        securityContext:
+          runAsUser: 0
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          for d in /data /data/logs /data/workspace; do
+            mkdir -p "$d" && chown 1000:1000 "$d"
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        volumeMounts:
+        - name: app-data
+          mountPath: /data
+      containers:
+      - name: aionui
+        image: docker.io/harveyff/aionui:2.2.2-olares.1
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - /olares/entrypoint.sh
+        ports:
+        - name: http
+          containerPort: 25808
+          protocol: TCP
+        env:
+        - name: HOME
+          value: /data
+        - name: AIONUI_HOST
+          value: 0.0.0.0
+        - name: AIONUI_PORT
+          value: "25808"
+        - name: AIONUI_ALLOW_REMOTE
+          value: "1"
+        - name: AIONUI_OPEN_BROWSER
+          value: "0"
+        - name: AIONUI_DATA_DIR
+          value: /data
+        - name: AIONUI_LOG_DIR
+          value: /data/logs
+        - name: OLARES_ROUTER_BASE_URL
+          value: 'https://router.{{ .Values.user.zone }}/v1'
+        - name: AIONUI_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-app
+              key: ADMIN_PASSWORD
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-app
+              key: OPENAI_API_KEY
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-app
+              key: ANTHROPIC_API_KEY
+        startupProbe:
+          httpGet:
+            path: /api/auth/status
+            port: 25808
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 24
+        readinessProbe:
+          httpGet:
+            path: /api/auth/status
+            port: 25808
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /api/auth/status
+            port: 25808
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 4
+            memory: 4Gi
+        volumeMounts:
+        - name: app-data
+          mountPath: /data
+        - name: user-home
+          mountPath: /workspace/Home
+        - name: olares-scripts
+          mountPath: /olares
+          readOnly: true
+      restartPolicy: Always
+      volumes:
+      - name: app-data
+        hostPath:
+          path: "{{ .Values.userspace.appData }}"
+          type: DirectoryOrCreate
+      - name: user-home
+        hostPath:
+          path: "{{ .Values.userspace.userData }}"
+          type: DirectoryOrCreate
+      - name: olares-scripts
+        configMap:
+          name: aionui-scripts
+          defaultMode: 0755
