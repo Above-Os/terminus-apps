@@ -21,31 +21,9 @@ spec:
       labels:
         app: halo
     spec:
-      initContainers:
-        - name: init-permissions
-          image: docker.io/beclab/aboveos-busybox:1.37.0
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - |
-              set -e
-              base=/app/data/.halo2
-              for d in "$base" "$base/plugins" "$base/themes" "$base/attachments" "$base/logs" "$base/backups" "$base/indices"; do
-                mkdir -p "$d"
-                chown 1000:1000 "$d"
-              done
-              for d in plugins themes attachments logs backups indices; do
-                find "$base/$d" -maxdepth 1 ! -user 1000 -exec chown 1000:1000 {} + 2>/dev/null || true
-              done
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: halo-vol
-              mountPath: /app/data/.halo2
       containers:
         - name: halo
-          image: "docker.io/halohub/halo:2.27.2"
+          image: "docker.io/halohub/halo:2.27.3"
           env:
             - name: TZ
               value: "Etc/UTC"
