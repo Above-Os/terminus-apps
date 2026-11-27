@@ -4,48 +4,55 @@ metadata:
   name: odysseus-runtime
   namespace: {{ .Release.Namespace | quote }}
 data:
-  prepare-runtime.py: |
-    """Make the pinned upstream's SQLAlchemy migration introspection portable.
-    
-    SQLite-only sqlite3 migrations already skip non-file DATABASE_URLs. The
-    SQLAlchemy migrations, however, issue SQLite PRAGMA statements unconditionally.
-    Use SQLAlchemy's dialect-aware inspector while retaining their tuple contract.
-    """
-    from pathlib import Path
-    import re
+  setup-router.py: |
+    import os
     import sys
-    
-    target = Path(sys.argv[1])
-    source = target.read_text(encoding='utf-8')
-    pattern = r'conn\.execute\(text\("PRAGMA table_info\(([a-z_]+)\)"\)\)'
-    patched, count = re.subn(pattern, r'_olares_table_info(conn, "\1")', source)
-    if count != 15:
-        raise RuntimeError(f"Pinned database migration source changed: expected 15 sites, got {count}")
-    helper = '''
-    
-    def _olares_table_info(connection, table_name):
-        """Return PRAGMA-shaped column tuples using portable introspection."""
-        schema = inspect(connection)
-        primary_keys = set(schema.get_pk_constraint(table_name).get("constrained_columns") or [])
-        return [
-            (index, column["name"], str(column["type"]),
-             int(not column["nullable"]), column.get("default"),
-             int(column["name"] in primary_keys))
-            for index, column in enumerate(schema.get_columns(table_name))
-        ]
-    '''
-    anchor = '\ndef init_db():'
-    if patched.count(anchor) != 1:
-        raise RuntimeError('Pinned database initialization entry changed')
-    patched = patched.replace(anchor, helper + anchor, 1)
-    compile(patched, str(target), 'exec')
-    target.write_text(patched, encoding='utf-8')
-    print(f"Prepared {count} portable database migration queries")
-    
+    import traceback
+    from pathlib import Path
+
+    marker = Path("/app/data/.olares-router-initialized")
+    endpoint_id = "olares-router-default"
+
+
+    def configure():
+        from core.database import ModelEndpoint, SessionLocal
+        from src.settings import load_settings, save_settings
+
+        with SessionLocal() as db:
+            # A user's private endpoint must not withhold the shared default from everyone else.
+            existing = db.query(ModelEndpoint).filter(ModelEndpoint.owner.is_(None)).first()
+            if existing is None:
+                db.add(ModelEndpoint(id=endpoint_id, name="Olares Router",
+                                     base_url=os.environ["OLARES_ROUTER_URL"],
+                                     pinned_models='["default-chat"]', endpoint_kind="proxy"))
+                db.commit()
+            if db.get(ModelEndpoint, endpoint_id) is not None:
+                settings = load_settings()
+                if not settings.get("default_endpoint_id"):
+                    settings.update(default_endpoint_id=endpoint_id, default_model="default-chat",
+                                    share_defaults_with_users=True)
+                    save_settings(settings)
+
+
+    if not marker.exists():
+        # Router setup is a convenience: a failure must not keep the app from
+        # starting. Without the marker, the next start retries.
+        try:
+            configure()
+            marker.touch()
+        except Exception:
+            print("Olares Router auto-setup failed; configure a model endpoint in Settings.", file=sys.stderr)
+            traceback.print_exc()
+  prepare-runtime.py: |
+    """Apply Olares-specific integrations to the pinned upstream runtime."""
+    from pathlib import Path
+    import sys
+
+    root = Path(sys.argv[1])
+
     # Router publishes provider models separately from callable aliases. Preserve
     # an explicitly selected default-chat alias instead of replacing it with the
     # first provider model during the upstream skill-test preflight.
-    root = target.parent.parent
     skills = root / 'routes/skills_routes.py'
     skills_source = skills.read_text(encoding='utf-8')
     old = 'if _avail and model not in _avail:'
@@ -178,9 +185,11 @@ data:
     # Scope this provider extension to the Olares Router callable alias only.
     patch_file('routes/gallery/gallery_routes.py',
                '                # Reasoning models (o1/o3/o4/gpt-5) reject an explicit temperature.',
-               '''                from urllib.parse import urlparse
+               '''                import os
+                    from urllib.parse import urlparse
                     router_host = (urlparse(chat_url).hostname or "").lower()
-                    if model_name == "default-chat" and router_host.startswith("router.") and router_host.endswith(".olares.com"):
+                    olares_router = (urlparse(os.environ.get("OLARES_ROUTER_URL", "")).hostname or "").lower()
+                    if model_name == "default-chat" and router_host and router_host == olares_router:
                         payload["chat_template_kwargs"] = {"enable_thinking": False}
                         payload[_tok_key] = 512
                     # Reasoning models (o1/o3/o4/gpt-5) reject an explicit temperature.''')
@@ -258,9 +267,11 @@ data:
     # thinking setting for this platform route too, without changing other hosts.
     patch_file('src/llm_core.py',
                '    if not is_local_endpoint(url):\n        return\n    if not (_supports_thinking(model) or _is_odysseus_qwen_tool_router_model(model)):\n        return\n',
-               '''    from urllib.parse import urlparse
+               '''    import os
+        from urllib.parse import urlparse
         host = (urlparse(url).hostname or "").lower()
-        router_alias = model == "default-chat" and host.startswith("router.") and host.endswith(".olares.com")
+        olares_router = (urlparse(os.environ.get("OLARES_ROUTER_URL", "")).hostname or "").lower()
+        router_alias = model == "default-chat" and bool(host) and host == olares_router
         if not router_alias and not is_local_endpoint(url):
             return
         if not router_alias and not (_supports_thinking(model) or _is_odysseus_qwen_tool_router_model(model)):

@@ -39,12 +39,13 @@ spec:
         # Copy only image-owned application code into a writable ephemeral tree.
         # This avoids upstream's root entrypoint and recursive ownership repair.
         - name: prepare-runtime
-          image: beclab/odysseus-dev-odysseus:1.0.3
+          image: beclab/odysseus-dev-odysseus:sha256-5117c5e07e5976095ce213e601277ff372e0387a67de34c5fd59a3de723e6113-amd64
           command: [sh, -ec]
           args:
             - |
               cp -R /app/. /runtime/
-              python /runtime-config/prepare-runtime.py /runtime/core/database.py
+              cp /runtime-config/setup-router.py /runtime/setup-router.py
+              python /runtime-config/prepare-runtime.py /runtime
               cp /etc/passwd /runtime/.olares-passwd
               cp /etc/group /runtime/.olares-group
               if ! getent passwd 1000 >/dev/null; then
@@ -61,13 +62,25 @@ spec:
             - {name: runtime-config, mountPath: /runtime-config, readOnly: true}
       containers:
         - name: odysseus
-          image: beclab/odysseus-dev-odysseus:1.0.3
+          image: beclab/odysseus-dev-odysseus:sha256-5117c5e07e5976095ce213e601277ff372e0387a67de34c5fd59a3de723e6113-amd64
           workingDir: /app
           command: [sh, -ec]
           args:
             - |
               export PATH="/app/.local/bin:$PATH"
+              # A generated password lives with the app data, not the Secret, so a
+              # reinstall that keeps the data still shows the password that works.
+              if [ -z "${ODYSSEUS_ADMIN_PASSWORD:-}" ] && [ ! -e /app/data/auth.json ]; then
+                pw=/app/data/admin-password.txt
+                if [ ! -s "$pw" ]; then
+                  python -c 'import secrets; print(secrets.token_urlsafe(24))' > "$pw.tmp"
+                  mv "$pw.tmp" "$pw"
+                fi
+                ODYSSEUS_ADMIN_PASSWORD="$(cat "$pw")"
+                export ODYSSEUS_ADMIN_PASSWORD
+              fi
               python -c 'import setup; setup.create_dirs(); setup.init_database(); result = setup.create_default_admin(); assert result in ("exists", "created"), result'
+              python /app/setup-router.py
               exec uvicorn app:app --host 0.0.0.0 --port 7000 --proxy-headers --forwarded-allow-ips '*'
           envFrom:
             - secretRef: {name: odysseus-config}
@@ -88,6 +101,8 @@ spec:
             - {name: FASTEMBED_CACHE_PATH, value: /app/.cache/fastembed}
             - {name: VLLM_USE_FLASHINFER_SAMPLER, value: '0'}
             - {name: ANONYMIZED_TELEMETRY, value: 'false'}
+            - name: OLARES_ROUTER_URL
+              value: {{ printf "https://router.%s/v1" .Values.user.zone | quote }}
             - name: ALLOWED_ORIGINS
               value: {{ printf "https://%s" .Values.domain.odysseus | quote }}
             - name: OAUTH_REDIRECT_BASE_URL
@@ -123,7 +138,7 @@ spec:
             - {name: cache, mountPath: /app/.cache}
         # Optional parsers never participate in the application's startup gate.
         - name: document-dependencies
-          image: beclab/odysseus-dev-odysseus:1.0.3
+          image: beclab/odysseus-dev-odysseus:sha256-5117c5e07e5976095ce213e601277ff372e0387a67de34c5fd59a3de723e6113-amd64
           command: [python, /document-config/install.py]
           env:
             - {name: HOME, value: /tmp}
