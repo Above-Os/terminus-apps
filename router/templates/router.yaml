@@ -1,3 +1,9 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: router-media
+  namespace: "{{ .Release.Namespace }}"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,9 +27,10 @@ spec:
       annotations:
         config.linkerd.io/skip-outbound-ports: "4222"
     spec:
+      serviceAccountName: router-media
       containers:
         - name: router-frontend
-          image: docker.io/beclab/router-frontend:v2.7.70
+          image: docker.io/beclab/router-frontend@sha256:6fecc35c4d82769c91a70e241268e3e782112cf23187a0fb5e7076a6b659c921
           resources:
             requests:
               cpu: 500m
@@ -64,7 +71,7 @@ spec:
           ports:
             - containerPort: 80
         - name: router-backend
-          image: docker.io/beclab/router:v2.7.71-rag-agent.2
+          image: docker.io/beclab/router@sha256:7af97f22dee5130d74447133bee27938d26ef1b1110a1f79ae4e4ba1adddd3f7
           imagePullPolicy: IfNotPresent
           env:
             - name: PGID
@@ -75,6 +82,8 @@ spec:
               value: Etc/UTC
             - name: LLM_GATEWAY_CONFIG
               value: "/configs/config.yaml"
+            - name: LLM_GATEWAY_PROVIDER_STUDIO_MEDIA_TOKEN_DIR
+              value: /var/run/secrets/olares-media
             - name: LLM_GATEWAY_CRYPTO_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
@@ -100,7 +109,19 @@ spec:
             - name: init-config
               mountPath: /configs/config.yaml
               subPath: config.yaml
+            - name: studio-media-identity
+              mountPath: /var/run/secrets/olares-media
+              readOnly: true
       volumes:
+        - name: studio-media-identity
+          projected:
+            sources:
+              {{- range list "imageminimaxh3image" "imageqwenimage21studio" "videominimaxh3studio" "videofasth3studio" }}
+              - serviceAccountToken:
+                  audience: "olares:model-console:media:{{ . }}"
+                  expirationSeconds: 600
+                  path: {{ . }}
+              {{- end }}
         - name: init-config
           configMap:
             name: config

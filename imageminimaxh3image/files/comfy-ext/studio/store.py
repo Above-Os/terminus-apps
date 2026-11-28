@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS assets (
   created REAL NOT NULL,
   md5 TEXT,                      -- of the file as uploaded, before any conversion
   fps REAL,
+  frame_count INTEGER,
   owner TEXT NOT NULL DEFAULT '' -- the Olares user (X-Bfl-User)
 );
 CREATE INDEX IF NOT EXISTS assets_created ON assets(created);
@@ -119,6 +120,8 @@ class Store:
                 self.db.execute("ALTER TABLE assets ADD COLUMN md5 TEXT")
             if "fps" not in cols:
                 self.db.execute("ALTER TABLE assets ADD COLUMN fps REAL")
+            if "frame_count" not in cols:
+                self.db.execute("ALTER TABLE assets ADD COLUMN frame_count INTEGER")
             self.db.execute("CREATE INDEX IF NOT EXISTS assets_md5 ON assets(md5)")
             for table in ("assets", "jobs"):
                 if "owner" not in {r[1] for r in self.db.execute("PRAGMA table_info(%s)" % table)}:
@@ -234,6 +237,17 @@ class Store:
         return False
 
     # jobs
+
+    def previous_oom(self, owner, project, mode, variant, params, items):
+        """Only compare this owner's runs in the current space and effective output settings."""
+        matches = self._q("""SELECT json_extract(spec, '$.assets') AS refs FROM jobs
+            WHERE status='failed' AND json_extract(error, '$.code')='oom'
+            AND owner=? AND project IS ? AND mode=? AND variant=?
+            AND json_extract(used, '$.resolution')=? AND json_extract(used, '$.duration')=?
+            AND json_extract(used, '$.aspect')=? AND json_extract(spec, '$.prompt')=?""",
+            (owner, project, mode, variant, params["resolution"], params["duration"], params["aspect"], params.get("prompt", "")))
+        refs = [(it["id"], it["role"]) for it in items]
+        return any([(a["id"], a["role"]) for a in json.loads(row["refs"] or "[]")] == refs for row in matches)
 
     def add_job(self, j):
         j = {"created": time.time(), **j}
