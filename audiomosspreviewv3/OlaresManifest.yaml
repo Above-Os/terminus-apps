@@ -1,0 +1,211 @@
+olaresManifest.version: "0.12.0"
+olaresManifest.type: app
+apiVersion: 'v3'
+metadata:
+  name: audiomosspreviewv3
+  icon: https://cdn.olares.com/images/2026/11/bb13486a3d77a90b644538da11d5b473.png
+  description: A fast English speech recognition model for live voice
+  appid: audiomosspreviewv3
+  title: MOSS-Transcribe-Preview 2B
+  version: '1.0.0'
+  categories:
+    - AI
+    - models
+  tags:
+  - speech-to-text
+  - audio
+# Internal shared API stub: in-cluster callers use http://sharedentrances-api.<ns>:80 + /v1.
+sharedEntrances:
+  - name: audiomosspreviewv3api
+    host: sharedentrances-api
+    port: 0
+    title: MOSS-Transcribe-Preview 2B API
+    invisible: true
+    authLevel: internal
+    icon: https://cdn.olares.com/images/2026/11/bb13486a3d77a90b644538da11d5b473.png
+# Entrance -> llm-init (download-svc:8090): dashboard on "/", engine /v1/* reverse-proxied; authLevel internal.
+entrances:
+  - name: audiomosspreviewv3
+    port: 8090
+    host: download-svc
+    title: MOSS-Transcribe-Preview 2B
+    icon: https://cdn.olares.com/images/2026/11/bb13486a3d77a90b644538da11d5b473.png
+    openMethod: window
+    authLevel: internal
+workloadReplicas:
+  audiomosspreviewv3: 1
+  llminit: 1
+spec:
+  upgradeDescription: |
+    v1.0.0: First release, Intel Arc only.
+  onlyAdmin: true
+  versionName: 'OpenMOSS-Team/MOSS-Transcribe-preview-2B'
+  fullDescription: |
+    MOSS-Transcribe-preview-2B turns English speech into text fast enough for live conversation: a pause in a voice chat gets its words back in about a tenth of a second.
+
+    **Key features**
+    - Transcribe English speech, from short voice commands to clips of several minutes.
+    - Stream live audio over a WebSocket and get the words so far at every pause.
+    - Make transcription available to compatible Olares applications.
+
+    Requires an Intel Arc discrete GPU with `7Gi` of GPU memory. English only.
+
+  developer: OpenMOSS
+  website: https://github.com/OpenMOSS
+  sourceCode: https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-preview-2B
+  submitter: Olares
+  locale:
+    - en-US
+    - zh-CN
+  doc: https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-preview-2B
+  license:
+    - text: Apache-2.0
+      url: https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-preview-2B
+
+  accelerator:
+    # Sum rule: accelerator >= engine + llm-init (200m/256Mi req, 1/4Gi lim). Intel Arc only; HAMi
+    # enforces the GPU memory. Measured peak 6.7 GiB with two 30 s clips in flight.
+    - mode: intel-gpu
+      limitedCpu: "7"
+      requiredCpu: "700m"
+      requiredDisk: 50Mi
+      limitedDisk: 50Gi
+      limitedMemory: "20Gi"
+      requiredMemory: "5376Mi"
+      requiredGPUMemory: "7Gi"
+      limitedGPUMemory: "7Gi"
+
+  supportArch:
+    - amd64
+permission:
+  appData: true
+  appCache: true
+  appCommon: true
+options:
+  apiTimeout: 0
+  LLMGatewaySupported: true
+  shared: true
+  templateOnly: false
+  dependencies:
+    - name: olares
+      version: '>=1.12.7-0'
+      type: system
+envs:
+  - envName: MODEL_SOURCE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "hf://OpenMOSS-Team/MOSS-Transcribe-preview-2B"
+    description: "HuggingFace source llm-init downloads into the shared cache."
+    regex: "^hf://"
+  - envName: MODEL_NAME
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "OpenMOSS-Team/MOSS-Transcribe-preview-2B"
+    description: "Model id advertised to clients; must match the engine /v1/models id."
+  - envName: MODEL_MODE
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "audio"
+    options:
+    - title: Audio
+      value: audio
+  - envName: MODEL_SUPPORTS
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "stt,stt_stream"
+    multiSelect: true
+    splitter: ","
+    options:
+    - title: STT (offline transcription)
+      value: stt
+    - title: STT Stream (streaming ASR, WebSocket)
+      value: stt_stream
+    description: "Capabilities this app exposes."
+  - envName: REQUIRED_GPU_MEMORY
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "7Gi"
+    description: "GPU memory required for this model."
+  - envName: CPU_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "500m"
+  - envName: MEMORY_REQUEST
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "5Gi"
+  - envName: CPU_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "6"
+  - envName: MEMORY_LIMIT
+    required: true
+    type: string
+    editable: false
+    applyOnChange: false
+    default: "16Gi"
+  - envName: LOG_LEVEL
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: "info"
+    options:
+    - title: Debug
+      value: debug
+    - title: Info
+      value: info
+    - title: Warn
+      value: warn
+    - title: Error
+      value: error
+  - envName: ENGINE_IMAGE
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    description: "Engine image override. Left empty, the engine runs
+      docker.io/beclab/audio-moss-preview-sgl-xpu:v1.1.51."
+  - envName: ENGINE_ARGS
+    required: false
+    type: string
+    editable: true
+    applyOnChange: true
+    default: ""
+    description: "Engine flags. --max-audio-seconds (default 600) refuses longer uploads; uploads
+      are read 30 s at a time. --max-total-tokens (2048) and --max-running-requests (2) size the
+      KV cache for two 30 s pieces at once; --no-ngram turns off speculative decoding. Flags the
+      wrapper does not know go to the SGLang server."
+  - envName: ENGINE_MAX_CONCURRENCY
+    required: false
+    type: int
+    editable: true
+    applyOnChange: true
+    default: "2"
+    description: "How many transcriptions and live streams Router may send this engine at once."
+  - envName: HF_ENDPOINT
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_SERVICE
+  - envName: HF_TOKEN
+    required: false
+    applyOnChange: true
+    valueFrom:
+      envName: OLARES_SYSTEM_HUGGINGFACE_TOKEN
