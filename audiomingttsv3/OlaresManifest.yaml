@@ -7,7 +7,7 @@ metadata:
   description: "A 0.5B text-to-speech model with built-in voices, cloning, and description-based voices"
   appid: audiomingttsv3
   title: Ming TTS 0.5B
-  version: '1.0.5'
+  version: '1.0.6'
   categories:
     - AI
     - models
@@ -38,6 +38,8 @@ workloadReplicas:
   llminit: 1
 spec:
   upgradeDescription: |
+    v1.0.6: Intel Arc (intel-gpu) now reserves 16Gi of GPU memory instead of 4Gi. With GPU memory slicing, 4Gi ran out while the model was loading. An existing Intel Arc install keeps its old reservation after upgrading; uninstall and reinstall to apply the new one. Downloaded model files are kept.
+
     v1.0.3: Store runtime state in Common for cross-node operation. Prefer existing Common configuration; otherwise migrate local legacy Cache or initialize in Common. Retry shared helper reads during engine startup.
   onlyAdmin: true
   versionName: 'inclusionAI/Ming-3.0-tts-0.5B'
@@ -96,7 +98,8 @@ spec:
       limitedDisk: 50Gi
       limitedMemory: "36Gi"
       requiredMemory: "6400Mi"
-    # Intel Arc: request 2Gi, limit 16Gi + llm-init 256Mi/4Gi. GPU field stays 4Gi.
+    # Intel Arc: request 2Gi, limit 16Gi + llm-init 256Mi/4Gi.
+    # HAMi caps the slice hard. Ming runs fp32 on OpenVINO and holds about 11Gi after a non-stream sentence.
     - mode: intel-gpu
       limitedCpu: "5"
       requiredCpu: "700m"
@@ -104,8 +107,8 @@ spec:
       limitedDisk: 50Gi
       limitedMemory: "20Gi"
       requiredMemory: "2304Mi"
-      requiredGPUMemory: "4Gi"
-      limitedGPUMemory: "4Gi"
+      requiredGPUMemory: "16Gi"
+      limitedGPUMemory: "16Gi"
 
   supportArch:
     - amd64
@@ -171,7 +174,7 @@ envs:
     editable: false
     applyOnChange: false
     default: "4Gi"
-    description: "GPU memory required on NVIDIA and Intel Arc. The Intel iGPU mode does not use this field. `0` is not supported."
+    description: "GPU memory quota on NVIDIA. On Intel the value only turns the GPU on; the Intel Arc slice is the 16Gi in the accelerator entry, and the Intel iGPU mode has no slice. `0` is not supported."
   - envName: CPU_REQUEST
     required: true
     type: string
